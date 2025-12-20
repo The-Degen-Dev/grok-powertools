@@ -214,7 +214,7 @@ if (window.location.hostname === 'imagine-public.x.ai') {
                     || window;
 
                 scroller.scrollBy(0, window.innerHeight);
-                await this.sleep(2000);
+                await this.sleep(1000); // Reduced from 2000
                 retries++;
             }
 
@@ -337,8 +337,8 @@ if (window.location.hostname === 'imagine-public.x.ai') {
     }
 
     const Config = {
-        actionWait: 6000,
-        navWait: 3000
+        actionWait: 2000, // Reduced from 6000
+        navWait: 1000     // Reduced from 3000
     };
 
     // ----------------------------------------------------
