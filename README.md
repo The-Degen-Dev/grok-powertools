@@ -1,5 +1,7 @@
 # Grok PowerTools Extension
 
+> **Note:** This project will eventually migrate to GitLab at `gitlab.com:greymakerxyz-group/grok-powertools.git`.
+
 A powerful Chrome Extension for automating media downloads and management on Grok (grok.com). This tool enhances the `grok.com/imagine` experience by enabling bulk downloads, deterministic file naming, and automated retry mechanisms for video generation.
 
 ## Features
