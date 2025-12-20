@@ -98,7 +98,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
-chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
     // Only affect downloads if we are scraping? Or always for Grok domain?
     if (!isScraping && !item.url.includes('imagine-public')) return; // passive check
 
@@ -129,7 +129,12 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
 
     // Add extension back if item.filename has it
     const originalExt = item.filename.split('.').pop();
-    const finalName = `GrokVault/${dateStr}_Auto/${filename}.${originalExt}`;
+
+    // Fetch custom path
+    const stored = await chrome.storage.local.get(['downloadPath']);
+    const rootFolder = stored.downloadPath || 'GrokVault';
+
+    const finalName = `${rootFolder}/${dateStr}_Auto/${filename}.${originalExt}`;
 
     suggest({
         filename: finalName,

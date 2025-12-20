@@ -8,9 +8,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Video Control Elements
     const autoRetryCheckbox = document.getElementById('autoRetryCheckbox');
     const maxRetriesInput = document.getElementById('maxRetriesInput');
+    const downloadPathInput = document.getElementById('downloadPathInput');
 
     // Load saved state
-    chrome.storage.local.get(['isScraping', 'activityLogs', 'autoRetryEnabled', 'retryMaxCount'], (result) => {
+    chrome.storage.local.get(['isScraping', 'activityLogs', 'autoRetryEnabled', 'retryMaxCount', 'downloadPath'], (result) => {
         if (result.isScraping) {
             setRunningState(true);
         }
@@ -18,9 +19,10 @@ document.addEventListener('DOMContentLoaded', () => {
             renderLogs(result.activityLogs);
         }
 
-        // Load Video Settings
+        // Load Settings
         autoRetryCheckbox.checked = result.autoRetryEnabled || false;
         maxRetriesInput.value = result.retryMaxCount || 3;
+        downloadPathInput.value = result.downloadPath || 'GrokVault';
     });
 
     startBtn.addEventListener('click', () => {
@@ -50,6 +52,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const count = parseInt(maxRetriesInput.value, 10) || 3;
         chrome.storage.local.set({ retryMaxCount: count });
         addLog(`Max Retries set to ${count}`);
+    });
+
+    downloadPathInput.addEventListener('change', () => {
+        const path = downloadPathInput.value.trim() || 'GrokVault';
+        chrome.storage.local.set({ downloadPath: path });
+        addLog(`Download Path set to: ${path}`);
     });
 
     // Listen for updates from background/content

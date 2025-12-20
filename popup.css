@@ -261,6 +261,23 @@ input:checked+.slider:before {
     border-color: var(--primary);
 }
 
+/* Text Input */
+.text-input-wrapper input {
+    width: 100px;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    text-align: left;
+}
+
+.text-input-wrapper input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
 /* Logs Console */
 .log-list {
     list-style: none;
