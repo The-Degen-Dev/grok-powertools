@@ -111,22 +111,24 @@ if (window.location.hostname === 'imagine-public.x.ai') {
             window.scrollBy(0, -10);
             await this.sleep(Config.navWait);
 
-            // 0. Auto-Navigate to Favorites if at start
-            // 0. Auto-Navigate to Favorites ONLY if just starting and empty
-            // We use 'firstRun' logic implicitly: if mode is IDLE and processedIds is small
-            if (this.state.mode === 'IDLE' && this.processedIds.size === 0) {
+            // 0. Auto-Navigate to Favorites Logic
+            // Guard: If we drifted to main feed (/imagine without /favorites) while running, force back.
+            const isMainFeed = window.location.href.match(/\/imagine\/?$/);
+            const shouldBeInFavorites = this.state.isRunning && isMainFeed && this.processedIds.size > 0;
+
+            if ((this.state.mode === 'IDLE' && this.processedIds.size === 0) || shouldBeInFavorites) {
                 const favButton = document.querySelector('img[alt="219e8040-acaa-435e-ba7f-14702e307a32"]')
                     || document.querySelector('img.border-white.rounded-xl')
                     || Array.from(document.querySelectorAll('a, button, [role="button"]')).find(el => {
                         const label = (el.ariaLabel || el.textContent || "").toLowerCase();
-                        return label.includes('favorite') || label.includes('gallery') || label.includes('saved');
+                        return (label.includes('favorite') || label.includes('gallery') || label.includes('saved')) && !label.includes('tweet');
                     });
 
                 if (favButton) {
-                    if (favButton.classList.contains('border-white') && favButton.classList.contains('border-2')) {
+                    if (favButton.classList.contains('border-white') && favButton.classList.contains('border-2') && !shouldBeInFavorites) {
                         console.log('Favorites seems selected already.');
                     } else {
-                        console.log('Navigating to Favorites...');
+                        console.log('Navigating to Favorites (Auto or Drift Correction)...');
                         this.log('Navigating to Favorites...');
                         favButton.click();
                         await this.sleep(3000);
@@ -337,8 +339,8 @@ if (window.location.hostname === 'imagine-public.x.ai') {
     }
 
     const Config = {
-        actionWait: 2000, // Reduced from 6000
-        navWait: 1000     // Reduced from 3000
+        actionWait: 2000,
+        navWait: 2000     // Increased to 2000 (1s was too fast causing drift)
     };
 
     // ----------------------------------------------------
