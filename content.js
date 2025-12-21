@@ -105,6 +105,34 @@ if (window.location.hostname === 'imagine-public.x.ai') {
         async determineModeAndExecute() {
             if (!this.state.isRunning) return;
 
+            // --- USER IDENTIFICATION LOGIC ---
+            // Extract User ID for multi-account support
+            try {
+                const pfpImg = document.querySelector('img[alt="pfp"]');
+                if (pfpImg && pfpImg.src) {
+                    // src format assumption: https://assets.grok.com/users/UUID/profile-picture.webp
+                    // simple split by 'users/' and then '/'
+                    const parts = pfpImg.src.split('users/');
+                    if (parts.length > 1) {
+                        const subParts = parts[1].split('/');
+                        const userId = subParts[0];
+                        if (userId && userId.length > 5) {
+                            // console.log('Identified User ID:', userId);
+                            // Only save if different to avoid excess writes
+                            chrome.storage.local.get(['activeGrokUserId'], (res) => {
+                                if (res.activeGrokUserId !== userId) {
+                                    console.log('Switching Account Context to:', userId);
+                                    chrome.storage.local.set({ activeGrokUserId: userId });
+                                }
+                            });
+                        }
+                    }
+                }
+            } catch (e) {
+                // Silently fail if structure changes, fallback to default folder in background
+            }
+            // ---------------------------------
+
             await this.sleep(1000);
             window.scrollBy(0, 10);
             await this.sleep(500);

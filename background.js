@@ -130,11 +130,13 @@ chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
     // Add extension back if item.filename has it
     const originalExt = item.filename.split('.').pop();
 
-    // Fetch custom path
-    const stored = await chrome.storage.local.get(['downloadPath']);
+    // Fetch custom path & User Context
+    const stored = await chrome.storage.local.get(['downloadPath', 'activeGrokUserId']);
     const rootFolder = stored.downloadPath || 'GrokVault';
+    const userId = stored.activeGrokUserId || 'Shared_Account';
 
-    const finalName = `${rootFolder}/${dateStr}_Auto/${filename}.${originalExt}`;
+    // Construct Path: Root / UserID / Date / Filename
+    const finalName = `${rootFolder}/${userId}/${dateStr}_Auto/${filename}.${originalExt}`;
 
     suggest({
         filename: finalName,
