@@ -141,8 +141,11 @@ if (window.location.hostname === 'imagine-public.x.ai') {
 
             // 0. Auto-Navigate to Favorites Logic
             // Guard: If we drifted to main feed (/imagine without /favorites) while running, force back.
+            // Regex matches exactly ending in /imagine or /imagine/
             const isMainFeed = window.location.href.match(/\/imagine\/?$/);
-            const shouldBeInFavorites = this.state.isRunning && isMainFeed && this.processedIds.size > 0;
+
+            // STRICT GUARD: If running and on main feed, ALWAYS try to go to favorites
+            const shouldBeInFavorites = this.state.isRunning && isMainFeed;
 
             if ((this.state.mode === 'IDLE' && this.processedIds.size === 0) || shouldBeInFavorites) {
                 const favButton = document.querySelector('img[alt="219e8040-acaa-435e-ba7f-14702e307a32"]')
@@ -153,14 +156,18 @@ if (window.location.hostname === 'imagine-public.x.ai') {
                     });
 
                 if (favButton) {
+                    // Logic check: only click if it doesn't look active, OR if we are explicitly correcting drift
                     if (favButton.classList.contains('border-white') && favButton.classList.contains('border-2') && !shouldBeInFavorites) {
                         console.log('Favorites seems selected already.');
                     } else {
                         console.log('Navigating to Favorites (Auto or Drift Correction)...');
-                        this.log('Navigating to Favorites...');
+                        this.log('Restoring Favorites context...');
                         favButton.click();
                         await this.sleep(3000);
+                        return; // Return to allow page reload/update
                     }
+                } else if (shouldBeInFavorites) {
+                    this.log('Drifted to Main Feed but cannot find Favorites button!', 'error');
                 }
             }
 
@@ -179,6 +186,12 @@ if (window.location.hostname === 'imagine-public.x.ai') {
 
         async executeListView() {
             if (!this.state.isRunning) return;
+
+            // Safety Check: Do not scan if we are on the main feed
+            if (window.location.href.match(/\/imagine\/?$/)) {
+                console.log('On Main Feed. Deferring to Drift Guard.');
+                return;
+            }
             // Broader selector to catch images even if alt text changes
             const cardSelector = 'img[alt="Generated image"], [role="listitem"] img';
             let retries = 0;
