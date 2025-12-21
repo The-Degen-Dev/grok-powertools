@@ -1,0 +1,22 @@
+# OS Files
+.DS_Store
+Thumbs.db
+*.swp
+
+# Node / dependencies (if added later)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Logs
+*.log
+npm-debug.log*
+
+# Extension Artifacts
+*.crx
+*.pem
+
+# IDEs
+.vscode/
+.idea/
+.gemini/
