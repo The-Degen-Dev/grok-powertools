@@ -2,8 +2,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Note:** This project lives at `gitlab.com:greymakerxyz-group/grok-powertools.git`.
-
 A powerful Chrome Extension for automating media downloads and management on Grok (grok.com). This tool enhances the `grok.com/imagine` experience by enabling bulk downloads, deterministic file naming, and automated retry mechanisms for video generation.
 
 ## Features
