@@ -179,17 +179,29 @@ if (window.location.hostname === 'imagine-public.x.ai') {
 
         async executeListView() {
             if (!this.state.isRunning) return;
-            const cardSelector = 'img[alt="Generated image"]';
+            // Broader selector to catch images even if alt text changes
+            const cardSelector = 'img[alt="Generated image"], [role="listitem"] img';
             let retries = 0;
+            const MAX_RETRIES = 50;
 
             await this.sleep(1000);
 
-            while (this.state.isRunning && retries < 20) {
+            while (this.state.isRunning && retries < MAX_RETRIES) {
                 const items = Array.from(document.querySelectorAll(cardSelector));
-                console.log(`Scanning ${items.length} items for new content...`);
+                const uniqueItems = items.filter((img, index, self) =>
+                    // Filter out duplicate references (if multiple selectors match same element)
+                    index === self.findIndex((t) => t === img) && img.naturalWidth > 50 // Skip tiny icons
+                );
+
+                console.log(`Scanning ${uniqueItems.length} items for new content...`);
+
+                // Log scan status to popup every 5 retries to show life
+                if (retries % 5 === 0) {
+                    this.log(`Scanning... (${uniqueItems.length} items visible)`);
+                }
 
                 // 1. Map to objects with visual coordinates (Fix for Masonry Layout)
-                let visualItems = items.map(img => {
+                let visualItems = uniqueItems.map(img => {
                     const container = img.closest('[role="listitem"]');
                     let top = 999999;
                     let left = 999999;
@@ -228,7 +240,7 @@ if (window.location.hostname === 'imagine-public.x.ai') {
 
                     if (cleanId && !this.processedIds.has(cleanId)) {
                         targetItem = itemObj.element;
-                        console.log(`Found unprocessed item at visual index ${i} (Top: ${itemObj.top}, Left: ${itemObj.left})`);
+                        this.log(`Found new item: ...${cleanId.slice(-6)}`, 'success');
 
                         // Pass this ID to the processItem function
                         await this.processItem(targetItem, cleanId);
@@ -244,12 +256,12 @@ if (window.location.hostname === 'imagine-public.x.ai') {
                     || window;
 
                 scroller.scrollBy(0, window.innerHeight);
-                await this.sleep(1000); // Reduced from 2000
+                await this.sleep(1000);
                 retries++;
             }
 
-            if (retries >= 50) {
-                this.log('End of list reached or stuck (Max Retries).', 'warning');
+            if (retries >= MAX_RETRIES) {
+                this.log('Stopped: No new items found after scrolling.', 'warning');
                 this.stop();
             }
         }
