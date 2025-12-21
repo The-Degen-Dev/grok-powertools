@@ -100,6 +100,7 @@ if (window.location.hostname === 'imagine-public.x.ai') {
             await chrome.storage.local.set({ scraperState: 'idle' });
             this.log('Scraping stopped.');
             this.state.isRunning = false;
+            // Also stop background processing logic if exposed, but state flag is primary guard
         }
 
         async determineModeAndExecute() {
@@ -270,10 +271,12 @@ if (window.location.hostname === 'imagine-public.x.ai') {
 
                 scroller.scrollBy(0, window.innerHeight);
                 await this.sleep(1000);
+                if (!this.state.isRunning) return; // Strict Stop Check
                 retries++;
             }
 
             if (retries >= MAX_RETRIES) {
+                if (!this.state.isRunning) return; // Strict Stop Check
                 this.log('Stopped: No new items found after scrolling.', 'warning');
                 this.stop();
             }
@@ -328,6 +331,7 @@ if (window.location.hostname === 'imagine-public.x.ai') {
                     || document.querySelector('.lucide-download')
                     || document.querySelector('[role="button"][aria-label="Download"]');
                 if (!downloadBtn) await this.sleep(500);
+                if (!this.state.isRunning) return; // Strict Exit
             }
 
             if (downloadBtn) {
