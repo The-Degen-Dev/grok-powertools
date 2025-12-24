@@ -34,6 +34,9 @@
       "js": [
         "content.js"
       ],
+      "css": [
+        "overlay.css"
+      ],
       "run_at": "document_idle"
     }
   ]
