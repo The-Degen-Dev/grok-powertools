@@ -1,0 +1,26 @@
+{
+  "name": "chrome-extension-powertools",
+  "version": "1.0.0",
+  "description": "[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)",
+  "main": "background.js",
+  "scripts": {
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "jest",
+    "test:e2e": "playwright test tests/e2e",
+    "lint": "eslint . --ext .js",
+    "format": "prettier --write ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
+    "playwright": "^1.57.0",
+    "prettier": "^3.7.4"
+  }
+}

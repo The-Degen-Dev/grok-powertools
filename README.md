@@ -1,64 +1,48 @@
-# Grok PowerTools Extension
+# Grok Power Tools (Chrome Extension)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)
 
-A powerful Chrome Extension for automating media downloads and management on Grok (grok.com). This tool enhances the `grok.com/imagine` experience by enabling bulk downloads, deterministic file naming, and automated retry mechanisms for video generation.
+Supercharge your Grok experience with a premium floating dashboard for automated video generation, prompt management, and bulk downloading.
 
 ## Features
 
-*   **Bulk Media Scraping**: Automates the traversal of your Grok favorites gallery to download images and videos.
-*   **Smart Traversal**: Uses a visual sorting algorithm (Masonry-aware) to download items in a logical order (Top-Left -> Bottom-Right), preventing skips.
-*   **Deterministic Naming**: Generates filenames based on the unique UUID of the media item (extracted from URL), ensuring that re-downloading the same library doesn't create duplicates (e.g., `UUID.png` instead of `image (1).png`).
-*   **Robust Deduplication**: Tracks processed item IDs in `chrome.storage.local` to skip already downloaded items, even across browser restarts.
-*   **Video Auto-Retry**: Automatically detects "Content Moderated" errors during video generation and clicks retry (up to a configurable limit).
-*   **Persistent Logging**: Keeps a detailed activity log in the extension popup that survives page reloads.
-
-## File Breakdown
-
-### `manifest.json`
-The configuration file for the Chrome Extension. It defines:
-*   **Permissions**: `storage`, `activeTab`, `scripting`, `downloads`.
-*   **Host Permissions**: Access to `grok.com`, `x.com`, and `imagine-public.x.ai` (for raw image downloads).
-*   **Content Scripts**: Specifies that `content.js` should run on Grok domains.
-*   **Background Worker**: Registers `background.js` as the service worker.
-
-### `content.js`
-The core logic script injected into the web page. It operates in two modes:
-1.  **Main Scraper Mode (`grok.com`)**:
-    *   **State Machine**: Manages states (`IDLE`, `LIST`, `DETAIL`) to navigate the gallery.
-    *   **Visual Sorter**: Scrapes all visible images/videos, sorts them by screen position, and finds the next unprocessed item.
-    *   **VideoRetryManager**: A dedicated observer class that watches for "Content Moderated" errors and auto-clicks the "Make video" button.
-2.  **Raw Image Mode (`imagine-public.x.ai`)**:
-    *   Detects when a raw image tab is opened, triggers a download via message passing, and closes the tab.
-
-### `background.js`
-The service worker that handles background tasks:
-*   **Determining Filenames**: Intercepts downloads to apply the `GrokVault/YYYY-MM-DD_Auto/UUID.ext` naming convention.
-*   **Message Passing**: Acts as a bridge between `content.js` and `popup.js` for logging.
-*   **Tab Management**: Handles `CLOSE_TAB` requests from the content script.
-
-### `popup.html` & `popup.js`
-The user interface for the extension:
-*   **Controls**: Start/Stop buttons for the scraper.
-*   **Video Tools**: Settings for "Auto-Retry Moderation" (Enable/Disable, Max Retries).
-*   **Activity Log**: A scrollable list of actions taken by the scraper (saved to storage).
+-   **Floating Power Panel**: A sleek, draggable glassmorphism dashboard overlay on Grok.
+-   **Auto-Retry System**: Automatically handles "Content Moderated" errors and retries generation until successful.
+-   **Video Goals**: Set a target (e.g., "Make 10 videos") and let the extension automate the process sequentially.
+-   **Prompt Manager**: Save your favorite prompts, import/export them as JSON, and inject them with a single click.
+-   **Smart Scraper**: Bulk download media from your feed or favorites with smart scrolling and duplicate detection.
+-   **Raw Image Mode**: Specialized handler for `imagine-public.x.ai` to download raw assets.
 
 ## Installation
 
-1.  Clone this repository.
-2.  Open Chrome and go to `chrome://extensions`.
-3.  Enable **Developer mode** (top right).
+1.  Clone or download this repository.
+2.  Open Chrome and go to `chrome://extensions/`.
+3.  Enable **Developer mode** in the top-right corner.
 4.  Click **Load unpacked**.
-5.  Select the directory containing this repo.
-6.  Go to `grok.com/imagine/favorites` and open the extension to start using it!
-## Contributing
+5.  Select the `chrome-extension-powertools` directory.
+6.  Navigate to [grok.com/imagine](https://grok.com/imagine) to see the overlay!
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+## Usage
+
+### The Overlay
+The floating panel appears in the bottom-right corner. You can drag it by the header or minimize it by clicking the `_` icon.
+
+### Auto-Retry & Goals
+1.  Open the **Auto-Retry & Goals** section.
+2.  Toggle **Auto-Retry Moderated** to automatically retry when Grok blocks a prompt.
+3.  Set **Max Retries** and **Cooldown** (seconds to wait between actions).
+4.  **Video Goal**: Enter a number and click "Start Video Goal" to automate continuous generation.
+
+### Prompt Management
+1.  Type a prompt in Grok's input box.
+2.  Click the **+ (Plus)** icon in the overlay to save it.
+3.  Click any saved tag to insert it back into the input.
+4.  Use the **Import/Export** icons to backup your prompts.
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on setting up the development environment, running tests, and contributing code.
 
 ## License
 
-Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
-
-## Disclaimer
-
-**Use at your own risk.** This extension is a personal automation tool and is not affiliated with, endorsed by, or connected to xAI or Grok. Automated scraping may violate Terms of Service. The developers assume no liability for account suspensions or data loss.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

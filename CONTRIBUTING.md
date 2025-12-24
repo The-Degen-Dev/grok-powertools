@@ -1,32 +1,66 @@
-# Contributing to Grok PowerTools
+# Contributing to Grok Power Tools
 
-Thank you for your interest in contributing! We welcome help maintaining and improving this tool.
+Thank you for your interest in contributing! We welcome bug reports, feature requests, and pull requests.
 
-## How to Contribute
+## Development Setup
 
-1.  **Fork the Repository**: Create your own copy of the code on GitLab/GitHub.
-2.  **Clone it**: `git clone git@gitlab.com:your-username/grok-powertools.git`
-3.  **Create a Branch**: `git checkout -b feature/my-new-feature`
-4.  **Make Changes**: Write your code.
-5.  **Test Locally**: Load the extension as an "Unpacked Extension" in Chrome/Brave and verify everything works.
-6.  **Commit**: `git commit -m "Add cool feature"`
-7.  **Push**: `git push origin feature/my-new-feature`
-8.  **Submit a Merge Request**: Open a PR/MR against the `main` branch.
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/your-username/grok-power-tools.git
+    cd grok-power-tools
+    ```
 
-## Guidelines
+2.  **Install dependencies**:
+    ```bash
+    npm install
+    ```
+    This will install development tools including Jest (unit tests), Playwright (E2E tests), ESLint, and Prettier.
 
-*   **Respect the "Skunkworks" Spirit**: Keep it simple, functional, and "power-user" focused.
-*   **Privacy First**: Do not add tracking or analytics.
-*   **No Breaking Changes**: Try to maintain backward compatibility with existing `GrokVault` structures.
-*   **Clean Code**: Run a quick lint/format before submitting.
+3.  **Load the extension**:
+    -   Open Chrome and navigate to `chrome://extensions/`.
+    -   Enable "Developer mode" (toggle in top right).
+    -   Click "Load unpacked" and select the repository folder.
 
-## Reporting Issues
+## Testing
 
-If you find a bug (e.g., Grok changed their CSS selectors), please open an Issue with:
-*   Browser Version
-*   Description of the error
-*   Screenshots if possible
+We use a combination of Unit Tests (Jest) and End-to-End Tests (Playwright).
 
-## Disclaimer
+-   **Run all tests**:
+    ```bash
+    npm test
+    ```
 
-This tool is not affiliated with xAI or Grok. Use reasonably and responsibly.
+-   **Run Unit Tests only**:
+    ```bash
+    npm run test:unit
+    ```
+
+-   **Run E2E Tests only**:
+    ```bash
+    npm run test:e2e
+    ```
+
+## Code Style
+
+We enforce code style using ESLint and Prettier.
+
+-   **Lint code**:
+    ```bash
+    npm run lint
+    ```
+-   **Format code**:
+    ```bash
+    npm run format
+    ```
+
+## Pull Request Process
+
+1.  Fork the repo and create your branch (`git checkout -b feature/amazing-feature`).
+2.  Commit your changes (`git commit -m 'Add some amazing feature'`).
+3.  Ensure all tests pass (`npm test`).
+4.  Push to the branch (`git push origin feature/amazing-feature`).
+5.  Open a Pull Request.
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for more information.

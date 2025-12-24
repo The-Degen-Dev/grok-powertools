@@ -20,3 +20,8 @@ npm-debug.log*
 .vscode/
 .idea/
 .gemini/
+
+# Temporary
+temp_ref/
+test-results/
+playwright-report/
