@@ -1035,16 +1035,14 @@ class GrokScraper {
 }
 
 if (typeof module === 'undefined') {
-    if (window.location.hostname !== 'imagine-public.x.ai') {
-        const settings = new SettingsManager();
-        const history = new PromptHistoryManager(settings);
-        const scraper = new GrokScraper();
-        // Pass history to VideoRetryManager
-        const retry = new VideoRetryManager(null, settings, history);
-        const overlay = new GrokOverlay(scraper, retry, settings, history);
-        retry.overlay = overlay;
-        scraper.setOverlay(overlay);
-    }
+    // Always initialize the Overlay and Managers on supported sites (defined in manifest)
+    const settings = new SettingsManager();
+    const history = new PromptHistoryManager(settings);
+    const scraper = new GrokScraper();
+    const retry = new VideoRetryManager(null, settings, history);
+    const overlay = new GrokOverlay(scraper, retry, settings, history);
+    retry.overlay = overlay;
+    scraper.setOverlay(overlay);
 } else {
     module.exports = { SettingsManager, GrokOverlay, VideoRetryManager, GrokScraper, PromptHistoryManager };
 }
