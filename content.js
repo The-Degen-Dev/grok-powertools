@@ -146,20 +146,45 @@ class PromptHistoryManager {
         if (stored.promptHistory) { this.history = stored.promptHistory; this.notify(); }
     }
     setupCapture() {
+        // Video Button
         document.addEventListener('click', (e) => {
             const btn = e.target.closest('button[aria-label="Make video"]');
-            if (btn) this.captureCurrentPrompt();
+            if (btn) this.captureCurrentPrompt('video');
+
+            // Image Submit Button
+            const submitBtn = e.target.closest('button[aria-label="Submit"]');
+            if (submitBtn) this.captureCurrentPrompt('image');
+        });
+
+        // Enter Key in Textarea
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                const ta = e.target.closest('textarea');
+                if (ta) this.captureCurrentPrompt('image');
+            }
         });
     }
-    captureCurrentPrompt() {
+
+    captureCurrentPrompt(type = 'image') {
         const ta = document.querySelector('textarea');
-        if (ta && ta.value && ta.value.trim().length > 0) this.add(ta.value.trim());
+        if (ta && ta.value && ta.value.trim().length > 0) {
+            // Delay slightly to ensure value is captured before clear, 
+            // but usually we want it immediately.
+            this.add(ta.value.trim(), type);
+        }
     }
-    add(text) {
-        if (this.history.length > 0 && this.history[0].text === text) {
+
+    add(text, type = 'image') {
+        // De-duplicate if same text AND type
+        if (this.history.length > 0 && this.history[0].text === text && this.history[0].type === type) {
             this.history[0].timestamp = Date.now();
         } else {
-            this.history.unshift({ id: Date.now().toString(), text: text, timestamp: Date.now() });
+            this.history.unshift({
+                id: Date.now().toString(),
+                text: text,
+                type: type,
+                timestamp: Date.now()
+            });
         }
         const limit = this.settingsManager.get('historyLimit') || 50;
         if (this.history.length > limit) this.history = this.history.slice(0, limit);
@@ -614,22 +639,35 @@ class GrokOverlay {
             const item = document.createElement('div');
             item.className = 'gpt-history-item';
             item.onclick = () => this.injectPrompt(h.text);
-            const timeStr = new Date(h.timestamp).toLocaleString();
-            item.innerHTML = `<div class="gpt-history-text">${h.text}</div><div class="gpt-history-meta"><span>${timeStr}</span></div>`;
+
+            const timeStr = new Date(h.timestamp).toLocaleTimeString();
+            const typeIcon = h.type === 'video' ? '🎥' : '🖼️';
+            const typeClass = h.type === 'video' ? 'video' : 'image';
+
+            item.innerHTML = `
+                <div class="gpt-history-text">${h.text}</div>
+                <div class="gpt-history-meta">
+                    <span class="gpt-history-type ${typeClass}">${typeIcon}</span>
+                    <span>${timeStr}</span>
+                </div>
+            `;
             list.appendChild(item);
         });
     }
     async saveCurrentPrompt() {
         const ta = document.querySelector('textarea');
-        if (ta && ta.value) {
-            const name = prompt('Name:');
+        if (ta && ta.value && ta.value.trim().length > 0) {
+            const name = prompt('Name for this prompt partial:');
             if (name) {
                 const s = await chrome.storage.local.get(['savedPrompts']);
                 const p = s.savedPrompts || [];
                 p.push({ name, text: ta.value });
                 await chrome.storage.local.set({ savedPrompts: p });
                 this.renderSavedList(p);
+                this.toast.show('Prompt Saved', 'success');
             }
+        } else {
+            this.toast.show('Input is empty!', 'error');
         }
     }
     injectPrompt(text) {
