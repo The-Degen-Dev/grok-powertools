@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Grok Media Downloader",
-  "version": "1.0",
+  "version": "0.2.0",
   "description": "Automate downloading media from Grok timeline.",
   "permissions": [
     "storage",

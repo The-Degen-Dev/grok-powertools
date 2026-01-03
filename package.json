@@ -1,6 +1,6 @@
 {
   "name": "chrome-extension-powertools",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)",
   "main": "background.js",
   "scripts": {

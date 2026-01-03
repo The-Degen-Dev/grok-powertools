@@ -1,60 +1,37 @@
-# Grok Power Tools v0.2 Release
+# Grok Power Tools v0.2.0 Release
 
-We are excited to introduce **Grok Power Tools v0.2**, a major upgrade to your Grok experience! 🚀
+We are excited to introduce **Grok Power Tools v0.2.0**, a major upgrade to your Grok experience! 🚀
 
-## Prerequisites
+## What's New in v0.2.0
 
--   Google Chrome or Chromium-based browser (Edge, Brave, etc.)
--   The `dist` or source folder containing the built extension
+### 📝 Enhanced Prompt History
+Never lose a prompt again.
+-   **Smart Context Scraping**: Captures image and video prompts intelligently, even when the input box is empty (e.g., clicking "Make video" on a card).
+-   **Visual Cues**: History items now show icons (🖼️ vs 🎥) so you know exactly what type of generation it was.
+-   **Robust Capturing**: Improved "Capture Phase" logic ensures prompts are saved before the app clears them.
 
-## Installation Steps
-
-### 1. Open Chrome Extensions Page
-Navigate to your browser's extensions page:
--   **Chrome**: `chrome://extensions/`
--   **Edge**: `edge://extensions/`
--   **Brave**: `brave://extensions/`
-
-Or click the puzzle icon (🧩) in your browser toolbar → "Manage Extensions".
-
-### 2. Enable Developer Mode
-Toggle the **"Developer mode"** switch in the top-right corner of the extensions page.
-
-### 3. Load the Extension
-1.  Click the **"Load unpacked"** button.
-2.  Navigate to and select the folder containing this extension.
-3.  Click "Select Folder".
-
-### 4. Verify Installation
--   The extension should now appear in your extensions list with the name **"Grok Media Downloader"** (Power Tools).
-
-### 5. Start Using
-1.  Navigate to [grok.com/imagine](https://grok.com/imagine).
-2.  The **Power Tools Overlay** will appear in the bottom-right corner.
-3.  **Auto-Retry** is ready to go!
-
-## New Features Overview
+### 🎥 Accuracy Improvements
+-   **Video Goals Fixed**: The "Videos Generated" counter now rigorously verifies that generation *actually started* before counting, eliminating false positives from rate limits or failures.
+-   **Partial Prompts Fixed**: "Add Prompt Partial" now correctly injects text into the chat box in a way that React recognizes.
 
 ### 🔁 Robust Auto-Retry
 Automatically detects "Content Moderated" blocks and retries generation for you.
 -   **Configurable**: Set Max Retries and Cooldown timer.
 -   **Status**: See exactly how many retries have been used.
 
-### 🎥 Video Goals
-Want to generate 10 variations of a video?
--   Set **# of Videos** to 10.
--   Click **Start Video Goal**.
--   Sit back and watch it work!
-
-### 📝 Prompt Partials
-Build complex prompts faster.
--   **Save Current Prompt**: Save your genius ideas.
--   **Add Prompt Partial**: Insert saved snippets directly at your cursor position.
-
 ### 🛠️ Developer Mode
 For the power users:
 -   Open **Settings** (Gear Icon).
 -   Enable **Developer Mode** to see a real-time system log panel.
 
+## Installation Steps
+
+### 1. Update/Load Extension
+1.  Navigate to `chrome://extensions/`.
+2.  Enable **"Developer mode"**.
+3.  Click **"Load unpacked"** (or "Update" if already loaded).
+4.  Select the extension folder.
+5.  **Refresh your Grok tab!**
+
 ---
-*Read the latest features on GitHub.*
+*Open Source Power Tools for Grok.*
