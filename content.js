@@ -154,14 +154,14 @@ class PromptHistoryManager {
             const btn = e.target.closest('button[aria-label="Make video"]');
             if (btn) {
                 console.log('GPT: Make Video clicked');
-                this.captureCurrentPrompt('video');
+                this.captureCurrentPrompt('video', btn);
             }
 
             // Image Submit Button
             const submitBtn = e.target.closest('button[aria-label="Submit"]');
             if (submitBtn) {
                 console.log('GPT: Submit clicked');
-                this.captureCurrentPrompt('image');
+                this.captureCurrentPrompt('image', submitBtn);
             }
         }, true); // <--- Capture Phase
 
@@ -170,19 +170,48 @@ class PromptHistoryManager {
             if (e.key === 'Enter' && !e.shiftKey) {
                 const ta = e.target.closest('textarea');
                 if (ta) {
-                    console.log('GPT: Enter pressed', ta.value.substring(0, 10));
-                    this.captureCurrentPrompt('image');
+                    console.log('GPT: Enter pressed with len', ta.value.length);
+                    this.captureCurrentPrompt('image', ta);
                 }
             }
         }, true); // <--- Capture Phase
     }
 
-    captureCurrentPrompt(type = 'image') {
+    captureCurrentPrompt(type = 'image', triggerEl = null) {
+        let text = '';
         const ta = document.querySelector('textarea');
+
+        // 1. Try Main Textarea first
         if (ta && ta.value && ta.value.trim().length > 0) {
-            // Delay slightly to ensure value is captured before clear, 
-            // but usually we want it immediately.
-            this.add(ta.value.trim(), type);
+            text = ta.value.trim();
+        }
+
+        // 2. If 'video' and text is empty, try to find context from trigger element (Card)
+        if (!text && type === 'video' && triggerEl) {
+            // Heuristic: The button is usually in a card. Find parent container.
+            // Look for closest article or div.group or just parents.
+            let container = triggerEl.closest('article');
+            if (!container) container = triggerEl.closest('div.group');
+            if (!container) container = triggerEl.parentElement?.parentElement;
+
+            if (container) {
+                // Try Image Alt
+                const img = container.querySelector('img');
+                if (img && img.alt) {
+                    text = img.alt.trim();
+                    console.log('GPT: Found prompt from Image Alt:', text.substring(0, 20));
+                } else {
+                    // Try Paragraph text (for text-only cards?)
+                    const p = container.querySelector('p');
+                    if (p) text = p.innerText.trim();
+                }
+            }
+        }
+
+        if (text && text.length > 0) {
+            this.add(text, type);
+        } else {
+            console.log(`GPT: Failed to capture ${type} prompt. Text empty.`);
         }
     }
 
@@ -686,11 +715,18 @@ class GrokOverlay {
         const ta = document.querySelector('textarea');
         if (ta) {
             ta.focus();
-            if (ta.setRangeText) {
-                ta.setRangeText(text);
-                ta.selectionStart = ta.selectionEnd = ta.selectionEnd + text.length;
-            } else ta.value += text;
-            ta.dispatchEvent(new Event('input', { bubbles: true }));
+
+            // React 16+ State Hack:
+            // Simply setting .value = text doesn't trigger the internal React state update.
+            // We must call the native setter on the prototype.
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLTextAreaElement.prototype,
+                "value"
+            ).set;
+            nativeInputValueSetter.call(ta, text);
+
+            const ev = new Event('input', { bubbles: true });
+            ta.dispatchEvent(ev);
         }
     }
 }
