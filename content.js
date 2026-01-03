@@ -146,23 +146,35 @@ class PromptHistoryManager {
         if (stored.promptHistory) { this.history = stored.promptHistory; this.notify(); }
     }
     setupCapture() {
-        // Video Button
-        document.addEventListener('click', (e) => {
+        // Use Capture Phase ({capture: true}) to intercept events BEFORE the app handles/clears them.
+
+        // Clicks (Video or Submit)
+        window.addEventListener('click', (e) => {
+            // Video Button
             const btn = e.target.closest('button[aria-label="Make video"]');
-            if (btn) this.captureCurrentPrompt('video');
+            if (btn) {
+                console.log('GPT: Make Video clicked');
+                this.captureCurrentPrompt('video');
+            }
 
             // Image Submit Button
             const submitBtn = e.target.closest('button[aria-label="Submit"]');
-            if (submitBtn) this.captureCurrentPrompt('image');
-        });
+            if (submitBtn) {
+                console.log('GPT: Submit clicked');
+                this.captureCurrentPrompt('image');
+            }
+        }, true); // <--- Capture Phase
 
         // Enter Key in Textarea
-        document.addEventListener('keydown', (e) => {
+        window.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 const ta = e.target.closest('textarea');
-                if (ta) this.captureCurrentPrompt('image');
+                if (ta) {
+                    console.log('GPT: Enter pressed', ta.value.substring(0, 10));
+                    this.captureCurrentPrompt('image');
+                }
             }
-        });
+        }, true); // <--- Capture Phase
     }
 
     captureCurrentPrompt(type = 'image') {
