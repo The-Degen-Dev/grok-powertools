@@ -735,14 +735,20 @@ class VideoRetryManager {
     constructor(overlay, settingsManager, historyManager) {
         this.overlay = overlay;
         this.settingsManager = settingsManager;
-        this.historyManager = historyManager; // New dependency
+        this.historyManager = historyManager;
         this.MODERATION_TEXT = 'Content Moderated. Try a different idea.';
         this.BUTTON_SELECTOR = 'button[aria-label="Make video"]';
+        this.PROGRESS_SELECTOR = 'button[aria-label="Video Options"]'; // The element that appears on success
         this.currentRetry = 0;
         this.lastClickTime = 0;
         this.goalRunning = false;
         this.goalTotal = 0;
         this.goalCount = 0;
+
+        // State for managing async verify step
+        this.isVerifying = false;
+        this.verifyStartTime = 0;
+
         this.settingsManager.subscribe(() => this.updateConfig());
         this.updateConfig();
         this.startObserver();
@@ -752,6 +758,7 @@ class VideoRetryManager {
         this.goalRunning = true;
         this.goalTotal = count;
         this.goalCount = 0;
+        this.currentRetry = 0; // Reset retries on start
         this.overlay.setStatus('Goal Started', 'info');
         this.updateCounters();
         this.clickMakeVideo();
@@ -769,62 +776,99 @@ class VideoRetryManager {
         const s = this.settingsManager.settings;
         if (!s.autoRetryEnabled && !this.goalRunning) return;
         if (typeof document === 'undefined') return;
-        // Check for moderation text anywhere in body
-        // Note: Grok sometimes shows this in a toast or modal.
+
+        // If we are waiting for verification (did the video start?)
+        if (this.isVerifying) {
+            this.verifyGenerationStart();
+            return;
+        }
+
+        // Global moderation check
         if (s.autoRetryEnabled && document.body.textContent.includes(this.MODERATION_TEXT)) {
             this.attemptRetry();
+            return;
         }
+
         if (this.goalRunning) {
-            const btn = document.querySelector(this.BUTTON_SELECTOR);
-            if (btn && !btn.disabled && (Date.now() - this.lastClickTime > s.retryCooldown)) {
-                if (this.goalCount < this.goalTotal) {
-                    this.goalCount++;
-                    this.updateCounters();
-                    this.clickMakeVideo();
-                } else {
-                    this.goalRunning = false;
-                    this.overlay.setStatus('Goal Complete', 'success');
-                }
+            // Check if goal met
+            if (this.goalCount >= this.goalTotal) {
+                this.goalRunning = false;
+                this.overlay.setStatus('Goal Complete', 'success');
+                return;
+            }
+
+            // Ready to click?
+            const navBtn = document.querySelector(this.BUTTON_SELECTOR);
+            // Ensure we aren't clicking too fast and button is available
+            if (navBtn && !navBtn.disabled && (Date.now() - this.lastClickTime > s.retryCooldown)) {
+                this.clickMakeVideo();
+                // Don't increment yet! Wait for verification.
             }
         }
     }
+
+    verifyGenerationStart() {
+        // Check for the "Percentage" button or "Video Options"
+        const progressBtn = document.querySelector(this.PROGRESS_SELECTOR);
+        const hasStarted = !!progressBtn;
+
+        if (hasStarted) {
+            // SUCCESS
+            this.isVerifying = false;
+            this.goalCount++;
+            this.currentRetry = 0; // Reset retries on success
+            this.updateCounters();
+            this.overlay.setStatus('Generation Started', 'success');
+            console.log('VideoRetryManager: Generation detected!');
+        } else {
+            // TIMEOUT Check
+            if (Date.now() - this.verifyStartTime > 5000) { // 5s timeout to detect start
+                this.isVerifying = false;
+                console.log('VideoRetryManager: Verification Timed Out. Retrying...');
+                this.attemptRetry();
+            }
+        }
+    }
+
     attemptRetry() {
         const s = this.settingsManager.settings;
         if (Date.now() - this.lastClickTime < s.retryCooldown) return;
+
         if (this.currentRetry >= s.maxRetries) {
             this.overlay.setStatus('Max Retries Hit', 'error');
+            this.goalRunning = false; // Stop if max retries hit
             return;
         }
+
         this.currentRetry++;
         this.updateCounters();
-        this.overlay.setStatus(`Retrying...`, 'warning');
+        this.overlay.setStatus(`Retrying... (${this.currentRetry})`, 'warning');
         this.clickMakeVideo();
     }
+
     clickMakeVideo() {
         const btn = document.querySelector(this.BUTTON_SELECTOR);
         if (btn) {
-            // FIX: Ensure prompt is present
+            // FIX: Ensure prompt is present (same logic as before)
             const ta = document.querySelector('textarea');
             if (ta && (!ta.value || ta.value.trim() === '')) {
-                // Try to get last used prompt
                 if (this.historyManager && this.historyManager.history.length > 0) {
                     const lastPrompt = this.historyManager.history[0].text;
                     if (lastPrompt) {
-                        // Inject it
                         ta.focus();
-                        if (ta.setRangeText) {
-                            ta.setRangeText(lastPrompt);
-                        } else {
-                            ta.value = lastPrompt;
-                        }
+                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                        nativeInputValueSetter.call(ta, lastPrompt);
                         ta.dispatchEvent(new Event('input', { bubbles: true }));
-                        console.log('VideoRetryManager: Re-injected prompt:', lastPrompt.substring(0, 20) + '...');
+                        console.log('VideoRetryManager: Re-injected prompt');
                     }
                 }
             }
 
             this.lastClickTime = Date.now();
+            this.isVerifying = true; // Start Verification Phase
+            this.verifyStartTime = Date.now();
             btn.click();
+            console.log('VideoRetryManager: Clicked Make Video. Verifying...');
         }
     }
 }
