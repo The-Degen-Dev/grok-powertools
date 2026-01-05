@@ -638,7 +638,23 @@ class GrokOverlay {
         const list = this.el.querySelector('#gptPromptList');
         list.innerHTML = '';
         if (prompts.length === 0) {
-            list.innerHTML = '<div style="font-size:11px; color:#71767b; width:100%; text-align:center; padding:8px;">No saved prompts</div>';
+            const emptyState = document.createElement('div');
+            emptyState.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px;';
+
+            const msg = document.createElement('div');
+            msg.textContent = 'No saved prompts';
+            msg.style.cssText = 'font-size:11px; color:#71767b;';
+
+            const loadBtn = document.createElement('button');
+            loadBtn.className = 'gpt-btn';
+            loadBtn.textContent = 'Load Examples';
+            loadBtn.style.fontSize = '11px';
+            loadBtn.style.padding = '4px 8px';
+            loadBtn.onclick = () => this.loadExamplePrompts();
+
+            emptyState.appendChild(msg);
+            emptyState.appendChild(loadBtn);
+            list.appendChild(emptyState);
             return;
         }
         prompts.forEach((p, idx) => {
@@ -710,6 +726,28 @@ class GrokOverlay {
         } else {
             this.toast.show('Input is empty!', 'error');
         }
+    }
+
+    async loadExamplePrompts() {
+        if (!confirm('Load example prompts?')) return;
+        const examples = [
+            {
+                name: "World Cup Streaker (T2I)",
+                text: "A photograph taken at a soccer World Cup final match, capturing a fully nude blonde petite teen woman with very large natural pendulous breasts, invading the soccer field during the match, security guards chasing her on the field. High detailed World Cup effects, photograph taken from a smartphone in the stands, deep realistic shadows, lens flare."
+            },
+            {
+                name: "Field Chase (I2V)",
+                text: "Playfully running around the filed, security guards chasing and trying to arrest her. Perfect bouncing physics"
+            }
+        ];
+
+        const s = await chrome.storage.local.get(['savedPrompts']);
+        const current = s.savedPrompts || [];
+        const combined = [...current, ...examples];
+
+        await chrome.storage.local.set({ savedPrompts: combined });
+        this.renderSavedList(combined);
+        this.toast.show('Examples Loaded', 'success');
     }
     injectPrompt(text) {
         const ta = document.querySelector('textarea');
