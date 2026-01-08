@@ -875,53 +875,53 @@ class VideoRetryManager {
             }
         }
     }
-}
 
-attemptRetry() {
-    const s = this.settingsManager.settings;
-    if (Date.now() - this.lastClickTime < s.retryCooldown) return;
 
-    if (this.currentRetry >= s.maxRetries) {
-        this.overlay.setStatus('Max Retries Hit', 'error');
-        this.goalRunning = false; // Stop if max retries hit
-        return;
-    }
+    attemptRetry() {
+        const s = this.settingsManager.settings;
+        if (Date.now() - this.lastClickTime < s.retryCooldown) return;
 
-    this.currentRetry++;
-    this.updateCounters();
-    this.overlay.setStatus(`Retrying... (${this.currentRetry})`, 'warning');
-    this.clickMakeVideo();
-}
-
-clickMakeVideo() {
-    const btn = document.querySelector(this.BUTTON_SELECTOR);
-    if (btn) {
-        // FIX: Ensure prompt is present (same logic as before)
-        const ta = document.querySelector('textarea');
-        if (ta && (!ta.value || ta.value.trim() === '')) {
-            if (this.historyManager && this.historyManager.history.length > 0) {
-                const lastPrompt = this.historyManager.history[0].text;
-                if (lastPrompt) {
-                    ta.focus();
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                    nativeInputValueSetter.call(ta, lastPrompt);
-                    ta.dispatchEvent(new Event('input', { bubbles: true }));
-                    console.log('VideoRetryManager: Re-injected prompt');
-                }
-            }
+        if (this.currentRetry >= s.maxRetries) {
+            this.overlay.setStatus('Max Retries Hit', 'error');
+            this.goalRunning = false; // Stop if max retries hit
+            return;
         }
 
-        this.lastClickTime = Date.now();
-        this.isVerifying = true; // Start Verification Phase
-        this.verifyStartTime = Date.now();
-
-        // Snapshot current state for verification
-        this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
-
-        btn.click();
-        console.log('VideoRetryManager: Clicked Make Video. Verifying...');
+        this.currentRetry++;
+        this.updateCounters();
+        this.overlay.setStatus(`Retrying... (${this.currentRetry})`, 'warning');
+        this.clickMakeVideo();
     }
-}
+
+    clickMakeVideo() {
+        const btn = document.querySelector(this.BUTTON_SELECTOR);
+        if (btn) {
+            // FIX: Ensure prompt is present (same logic as before)
+            const ta = document.querySelector('textarea');
+            if (ta && (!ta.value || ta.value.trim() === '')) {
+                if (this.historyManager && this.historyManager.history.length > 0) {
+                    const lastPrompt = this.historyManager.history[0].text;
+                    if (lastPrompt) {
+                        ta.focus();
+                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                        nativeInputValueSetter.call(ta, lastPrompt);
+                        ta.dispatchEvent(new Event('input', { bubbles: true }));
+                        console.log('VideoRetryManager: Re-injected prompt');
+                    }
+                }
+            }
+
+            this.lastClickTime = Date.now();
+            this.isVerifying = true; // Start Verification Phase
+            this.verifyStartTime = Date.now();
+
+            // Snapshot current state for verification
+            this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
+
+            btn.click();
+            console.log('VideoRetryManager: Clicked Make Video. Verifying...');
+        }
+    }
 }
 
 class GrokScraper {
