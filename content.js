@@ -851,7 +851,7 @@ class VideoRetryManager {
 
     verifyGenerationStart() {
         // We know success happened if the Number of "Video Options" buttons increased
-        // OR if we see a "percentage" indicator that implies processing.
+        // or if the number of percentage indicators increased (e.g. from 0 to 1, or 1 to 2)
 
         const currentButtons = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
         // Also check specifically for the percentage text class the user provided
@@ -859,8 +859,8 @@ class VideoRetryManager {
         const formattingz = "div.text-white.text-xs.tabular-nums.font-semibold";
         const progressIndicators = document.querySelectorAll(formattingz).length;
 
-        // If we have more buttons than before, OR we see progress text (and we assume 0 progress text before start)
-        const hasStarted = (currentButtons > this.preClickButtonCount) || (progressIndicators > 0);
+        // Verify INCREASE against baseline, not just presence > 0
+        const hasStarted = (currentButtons > this.preClickButtonCount) || (progressIndicators > this.preClickIndicatorCount);
 
         if (hasStarted) {
             // SUCCESS
@@ -880,7 +880,6 @@ class VideoRetryManager {
             }
         }
     }
-
 
     attemptRetry() {
         const s = this.settingsManager.settings;
@@ -922,6 +921,8 @@ class VideoRetryManager {
 
             // Snapshot current state for verification
             this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
+            const formattingz = "div.text-white.text-xs.tabular-nums.font-semibold";
+            this.preClickIndicatorCount = document.querySelectorAll(formattingz).length || 0;
 
             btn.click();
             console.log('VideoRetryManager: Clicked Make Video. Verifying...');
