@@ -127,8 +127,32 @@ class SettingsManager {
     notify() { this.listeners.forEach(cb => cb(this.settings)); }
     export() { return JSON.stringify(this.settings, null, 2); }
     import(json) {
-        try { const parsed = JSON.parse(json); this.setAll(parsed); return true; }
-        catch { return false; }
+        try {
+            const parsed = JSON.parse(json);
+            // 1. Settings
+            if (parsed.gptGlobalSettings || parsed.maxRetries) {
+                // Handle both wrapped and flat formats
+                const settingsUpdates = parsed.gptGlobalSettings || parsed;
+                // Filter out non-settings keys if flat
+                const cleanSettings = {};
+                Object.keys(SettingsDefaults).forEach(k => {
+                    if (settingsUpdates[k] !== undefined) cleanSettings[k] = settingsUpdates[k];
+                });
+                this.setAll(cleanSettings);
+            }
+
+            // 2. Processed IDs (History)
+            if (parsed.processedIds && Array.isArray(parsed.processedIds)) {
+                chrome.storage.local.get(['processedIds'], (res) => {
+                    const existing = new Set(res.processedIds || []);
+                    parsed.processedIds.forEach(id => existing.add(id));
+                    chrome.storage.local.set({ processedIds: Array.from(existing) });
+                    console.log(`Imported ${parsed.processedIds.length} IDs. Total: ${existing.size}`);
+                });
+            }
+            return true;
+        }
+        catch (e) { console.error(e); return false; }
     }
     reset() { this.settings = { ...SettingsDefaults }; this.save(); this.notify(); }
 }
@@ -798,6 +822,13 @@ class VideoRetryManager {
         this.goalTotal = count;
         this.goalCount = 0;
         this.currentRetry = 0; // Reset retries on start
+
+        // Snapshot the number of completed videos (Video Options buttons) ALREADY present.
+        // This is our baseline. Any NEW buttons means a NEW success.
+        const existing = document.querySelectorAll('button[aria-label="Video Options"]').length;
+        this.baseCompletedCount = existing;
+        console.log(`VideoRetryManager: Goal Started. Target: ${count}. Base Completed: ${this.baseCompletedCount}`);
+
         this.overlay.setStatus('Goal Started', 'info');
         this.updateCounters();
         this.clickMakeVideo();
@@ -816,82 +847,77 @@ class VideoRetryManager {
         if (!s.autoRetryEnabled && !this.goalRunning) return;
         if (typeof document === 'undefined') return;
 
-        // If we are waiting for verification (did the video start?)
-        if (this.isVerifying) {
-            this.verifyGenerationStart();
+        // --- STATE DETECTION ---
+        // 1. "Make video" button PRESENT = IDLE / READY TO CLICK
+        // 2. "Make video" button ABSENT = GENERATING (Showing progress % or spinner)
+
+        const makeVideoBtn = document.querySelector(this.BUTTON_SELECTOR);
+        const isGenerating = !makeVideoBtn;
+
+        if (isGenerating) {
+            // If we are generating, just wait.
+            // Update status if needed, but mostly passive.
+            if (this.goalRunning) this.overlay.setStatus('Generating...', 'info');
             return;
         }
 
-        // Global moderation check
-        // Debounce: If we *just* succeeded (last 5s), ignore potentially stale moderation text.
-        const recentlySucceeded = (Date.now() - this.lastSuccessTime) < 5000;
-
-        if (!recentlySucceeded && s.autoRetryEnabled && document.body.textContent.includes(this.MODERATION_TEXT)) {
-            // FIX: If we failed, our previous "success" count was invalid. Decrement it.
-            if (this.goalRunning && this.goalCount > 0) {
-                console.log('VideoRetryManager: Moderation detected. Correcting goal count.');
-                this.goalCount--;
-            }
-            this.attemptRetry();
-            return;
-        }
+        // If we are HERE, the button IS present. We are either:
+        // A) Just starting
+        // B) Just finished a Success
+        // C) Just finished a Failure (Silent fail)
 
         if (this.goalRunning) {
-            // Check if goal met
-            if (this.goalCount >= this.goalTotal) {
-                console.log('VideoRetryManager: Goal Reached. Stopping.');
-                this.goalRunning = false;
-                this.overlay.setStatus('Goal Complete', 'success');
-                return;
+            // Check Success via Count of "Video Options"
+            // We expect: base + goalCount + 1 (for the one we just tried to do)
+            const currentCompleted = document.querySelectorAll('button[aria-label="Video Options"]').length;
+            const expectedCompleted = this.baseCompletedCount + this.goalCount + 1;
+
+            // Wait... relying on 'expected' might be tricky if user deletes stuff.
+            // Let's rely on change since 'lastClickTime'? No, that's flaky.
+            // Let's rely on: Did count INCREASE since we started this specific attempt?
+            // To do that, we need to track 'countBeforeClick'.
+
+            // SIMPLIFIED LOGIC:
+            // If we are in 'verifying' mode (meaning we clicked recently), and now button is back:
+            if (this.isVerifying) {
+                // Button returned! Result?
+                if (currentCompleted > this.preClickButtonCount) {
+                    // SUCCESS!
+                    console.log('VideoRetryManager: SUCCESS detected (Option buttons increased).');
+                    this.goalCount++;
+                    this.currentRetry = 0; // Reset retries for the NEXT video
+                    this.updateCounters();
+                    this.overlay.setStatus('Success! Next...', 'success');
+
+                    if (this.goalCount >= this.goalTotal) {
+                        console.log('VideoRetryManager: Goal Reached.');
+                        this.goalRunning = false;
+                        this.overlay.setStatus('Goal Complete', 'success');
+                        this.isVerifying = false;
+                        return;
+                    }
+
+                    // Proceed to next immediately? Or wait a tick?
+                    this.isVerifying = false;
+                    // Fall through to click logic below
+                } else {
+                    // FAILURE (Silent)
+                    console.log('VideoRetryManager: FAILURE detected (Button returned, no new video).');
+                    this.isVerifying = false;
+                    this.attemptRetry();
+                    return;
+                }
             }
 
-            // Ready to click?
-            const navBtn = document.querySelector(this.BUTTON_SELECTOR);
-            // Ensure we aren't clicking too fast and button is available
-            if (navBtn && !navBtn.disabled && (Date.now() - this.lastClickTime > s.retryCooldown)) {
+            // --- CLICK LOGIC ---
+            // Ready to click next/retry?
+            if (makeVideoBtn && !makeVideoBtn.disabled && (Date.now() - this.lastClickTime > s.retryCooldown)) {
                 this.clickMakeVideo();
-                // Don't increment yet! Wait for verification.
             }
         }
     }
 
-    verifyGenerationStart() {
-        // We know success happened if the Number of "Video Options" buttons increased
-        // or if the number of percentage indicators increased (e.g. from 0 to 1, or 1 to 2)
 
-        const currentButtons = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
-        // Also check specifically for the percentage text class the user provided
-        // <div class="text-white text-xs tabular-nums font-semibold">63%</div>
-        const formattingz = "div.text-white.text-xs.tabular-nums.font-semibold";
-        const progressIndicators = document.querySelectorAll(formattingz).length;
-
-        // Verify INCREASE against baseline, not just presence > 0
-        const hasStarted = (currentButtons > this.preClickButtonCount) || (progressIndicators > this.preClickIndicatorCount);
-
-        if (hasStarted) {
-            // SUCCESS
-            this.isVerifying = false;
-            this.goalCount++;
-            this.lastSuccessTime = Date.now(); // Mark success
-            this.updateCounters();
-
-            // Only reset retries if we are confident? 
-            // Standard behavior: Reset on success to allow fresh retries for the NEW video.
-            // If the user wants to see total retries, we need a separate counter.
-            // For now, we keep standard behavior but ensure goalCount is correct.
-            this.currentRetry = 0;
-
-            this.overlay.setStatus('Generation Started', 'success');
-            console.log('VideoRetryManager: Generation detected! (Count increased)');
-        } else {
-            // TIMEOUT Check
-            if (Date.now() - this.verifyStartTime > 5000) {
-                this.isVerifying = false;
-                console.log('VideoRetryManager: Verification Timed Out. Retrying...');
-                this.attemptRetry();
-            }
-        }
-    }
 
     attemptRetry() {
         const s = this.settingsManager.settings;
@@ -904,6 +930,9 @@ class VideoRetryManager {
         }
 
         this.currentRetry++;
+        console.log(`VideoRetryManager: Retrying... Attempt ${this.currentRetry}`);
+
+        // IMPORTANT: We do NOT increment verify/goal counts here. We just click again.
         this.updateCounters();
         this.overlay.setStatus(`Retrying... (${this.currentRetry})`, 'warning');
         this.clickMakeVideo();
@@ -928,19 +957,17 @@ class VideoRetryManager {
             }
 
             this.lastClickTime = Date.now();
-            this.isVerifying = true; // Start Verification Phase
-            this.verifyStartTime = Date.now();
+            this.isVerifying = true; // Flag that we expect something to happen
 
-            // Snapshot current state for verification
-            this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
-            const formattingz = "div.text-white.text-xs.tabular-nums.font-semibold";
-            this.preClickIndicatorCount = document.querySelectorAll(formattingz).length || 0;
+            // Record state BEFORE click
+            this.preClickButtonCount = document.querySelectorAll('button[aria-label="Video Options"]').length;
 
             btn.click();
-            console.log('VideoRetryManager: Clicked Make Video. Verifying...');
+            console.log('VideoRetryManager: Clicked Make Video.');
         }
     }
 }
+
 
 class GrokScraper {
     constructor() {
@@ -1173,23 +1200,48 @@ class GrokScraper {
         }
 
         // MULTI-VIDEO SUPPORT
-        // Check for thumbnail strip: div containing buttons with 'Thumbnail' alt or similar structure
-        // Selector provided: button > img[alt="Thumbnail X"]
-        const thumbnails = Array.from(document.querySelectorAll('button img[alt^="Thumbnail"]'))
+        // Strategies:
+        // 1. Find container with thumbnails.
+        // 2. Iterate each button inside.
+        // 3. Click, Wait, Download.
+
+        // Container seems to be the one with 'overflow-y-auto' inside the article relative area
+        // Or we can just find all buttons with img alt="Thumbnail X"
+
+        const thumbnailButtons = Array.from(document.querySelectorAll('button img[alt^="Thumbnail"]'))
             .map(img => img.closest('button'))
             .filter(btn => btn);
 
-        if (thumbnails.length > 1) {
-            console.log(`Multi-Video Detected: ${thumbnails.length} versions.`);
-            for (let i = 0; i < thumbnails.length; i++) {
-                const btn = thumbnails[i];
-                this.log(`Processing Version ${i + 1}/${thumbnails.length}...`);
+        if (thumbnailButtons.length > 0) {
+            console.log(`Multi-Video Detected: ${thumbnailButtons.length} versions.`);
+
+            // Try to find the scrollable container to ensure all match?
+            // User provided: class="... overflow-y-auto ..."
+            // Let's try to find it from the first button
+            const scrollContainer = thumbnailButtons[0].closest('.overflow-y-auto');
+
+            for (let i = 0; i < thumbnailButtons.length; i++) {
+                const btn = thumbnailButtons[i];
+
+                // Scroll into view if needed
+                if (scrollContainer) {
+                    btn.scrollIntoView({ behavior: 'instant', block: 'center' });
+                    await this.sleep(200);
+                }
+
+                this.log(`Processing Version ${i + 1}/${thumbnailButtons.length}...`);
                 btn.click();
-                await this.sleep(1000); // Wait for switch
+
+                // Active state check: The active button usually has a ring or opacity change
+                // We just wait a bit to be safe.
+                await this.sleep(1500);
+
                 await this.performDownload();
             }
         } else {
-            // Single Item
+            // Fallback: No thumbnails found? Maybe it's a single video without thumbnails?
+            // Or maybe our selector missed. Check if there's just a generated video/image.
+            console.log('No thumbnails found. Assuming single item.');
             await this.performDownload();
         }
 
