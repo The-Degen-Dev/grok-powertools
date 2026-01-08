@@ -827,6 +827,11 @@ class VideoRetryManager {
         const recentlySucceeded = (Date.now() - this.lastSuccessTime) < 5000;
 
         if (!recentlySucceeded && s.autoRetryEnabled && document.body.textContent.includes(this.MODERATION_TEXT)) {
+            // FIX: If we failed, our previous "success" count was invalid. Decrement it.
+            if (this.goalRunning && this.goalCount > 0) {
+                console.log('VideoRetryManager: Moderation detected. Correcting goal count.');
+                this.goalCount--;
+            }
             this.attemptRetry();
             return;
         }
@@ -867,9 +872,15 @@ class VideoRetryManager {
             // SUCCESS
             this.isVerifying = false;
             this.goalCount++;
-            this.currentRetry = 0; // Reset retries on success
             this.lastSuccessTime = Date.now(); // Mark success
             this.updateCounters();
+
+            // Only reset retries if we are confident? 
+            // Standard behavior: Reset on success to allow fresh retries for the NEW video.
+            // If the user wants to see total retries, we need a separate counter.
+            // For now, we keep standard behavior but ensure goalCount is correct.
+            this.currentRetry = 0;
+
             this.overlay.setStatus('Generation Started', 'success');
             console.log('VideoRetryManager: Generation detected! (Count increased)');
         } else {
@@ -1161,32 +1172,25 @@ class GrokScraper {
             await chrome.storage.local.set({ processedIds: Array.from(this.processedIds) });
         }
 
-        // Click Download
-        let downloadBtn = null;
-        const start = Date.now();
-        while (!downloadBtn && Date.now() - start < 5000) {
-            if (!this.state.isRunning) return;
-            downloadBtn = document.querySelector('button[aria-label="Download"]')
-                || document.querySelector('.lucide-download')
-                || document.querySelector('[role="button"][aria-label="Download"]');
-            if (!downloadBtn) await this.sleep(500);
-            if (!this.state.isRunning) return;
-        }
+        // MULTI-VIDEO SUPPORT
+        // Check for thumbnail strip: div containing buttons with 'Thumbnail' alt or similar structure
+        // Selector provided: button > img[alt="Thumbnail X"]
+        const thumbnails = Array.from(document.querySelectorAll('button img[alt^="Thumbnail"]'))
+            .map(img => img.closest('button'))
+            .filter(btn => btn);
 
-        if (downloadBtn) {
-            this.log(`Downloading...`, 'success');
-            let targetToClick = downloadBtn;
-            if (['svg', 'path', 'line'].includes(downloadBtn.tagName.toLowerCase())) {
-                const parentBtn = downloadBtn.closest('button');
-                if (parentBtn) targetToClick = parentBtn;
+        if (thumbnails.length > 1) {
+            console.log(`Multi-Video Detected: ${thumbnails.length} versions.`);
+            for (let i = 0; i < thumbnails.length; i++) {
+                const btn = thumbnails[i];
+                this.log(`Processing Version ${i + 1}/${thumbnails.length}...`);
+                btn.click();
+                await this.sleep(1000); // Wait for switch
+                await this.performDownload();
             }
-            // Robust Click
-            ['mousedown', 'click', 'mouseup'].forEach(evt => {
-                targetToClick.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-            });
-            await this.sleep(this.Config.actionWait);
         } else {
-            this.log('Download button missing.', 'error');
+            // Single Item
+            await this.performDownload();
         }
 
         if (!this.state.isRunning) return;
@@ -1200,6 +1204,36 @@ class GrokScraper {
         } else {
             console.error('Back button not found!');
             this.stop();
+        }
+    }
+
+    async performDownload() {
+        if (!this.state.isRunning) return;
+
+        // Click Download
+        let downloadBtn = null;
+        const start = Date.now();
+        while (!downloadBtn && Date.now() - start < 5000) {
+            if (!this.state.isRunning) return;
+            downloadBtn = document.querySelector('button[aria-label="Download"]')
+                || document.querySelector('.lucide-download')
+                || document.querySelector('[role="button"][aria-label="Download"]');
+            if (!downloadBtn) await this.sleep(500);
+        }
+
+        if (downloadBtn) {
+            this.log(`Downloading...`, 'success');
+            let targetToClick = downloadBtn;
+            if (['svg', 'path', 'line'].includes(downloadBtn.tagName.toLowerCase())) {
+                const parentBtn = downloadBtn.closest('button');
+                if (parentBtn) targetToClick = parentBtn;
+            }
+            ['mousedown', 'click', 'mouseup'].forEach(evt => {
+                targetToClick.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+            });
+            await this.sleep(this.Config.actionWait);
+        } else {
+            this.log('Download button missing.', 'error');
         }
     }
 
