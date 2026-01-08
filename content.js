@@ -786,6 +786,7 @@ class VideoRetryManager {
         // State for managing async verify step
         this.isVerifying = false;
         this.verifyStartTime = 0;
+        this.lastSuccessTime = 0; // Debounce for success
 
         this.settingsManager.subscribe(() => this.updateConfig());
         this.updateConfig();
@@ -822,7 +823,10 @@ class VideoRetryManager {
         }
 
         // Global moderation check
-        if (s.autoRetryEnabled && document.body.textContent.includes(this.MODERATION_TEXT)) {
+        // Debounce: If we *just* succeeded (last 5s), ignore potentially stale moderation text.
+        const recentlySucceeded = (Date.now() - this.lastSuccessTime) < 5000;
+
+        if (!recentlySucceeded && s.autoRetryEnabled && document.body.textContent.includes(this.MODERATION_TEXT)) {
             this.attemptRetry();
             return;
         }
@@ -863,6 +867,7 @@ class VideoRetryManager {
             this.isVerifying = false;
             this.goalCount++;
             this.currentRetry = 0; // Reset retries on success
+            this.lastSuccessTime = Date.now(); // Mark success
             this.updateCounters();
             this.overlay.setStatus('Generation Started', 'success');
             console.log('VideoRetryManager: Generation detected! (Count increased)');
