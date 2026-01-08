@@ -834,6 +834,7 @@ class VideoRetryManager {
         if (this.goalRunning) {
             // Check if goal met
             if (this.goalCount >= this.goalTotal) {
+                console.log('VideoRetryManager: Goal Reached. Stopping.');
                 this.goalRunning = false;
                 this.overlay.setStatus('Goal Complete', 'success');
                 return;
