@@ -18,7 +18,21 @@ test.describe('Grok Power Tools E2E', () => {
                     onMessage: { addListener: () => { } }
                 },
                 storage: {
+                    onChanged: {
+                        addListener: () => { },
+                        removeListener: () => { }
+                    },
                     local: {
+                        get: (keys, cb) => {
+                            if (cb) cb({});
+                            return Promise.resolve({});
+                        },
+                        set: (data, cb) => {
+                            if (cb) cb();
+                            return Promise.resolve();
+                        }
+                    },
+                    sync: {
                         get: (keys, cb) => {
                             if (cb) cb({});
                             return Promise.resolve({});

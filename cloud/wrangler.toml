@@ -1,0 +1,13 @@
+name = "grok-r2-backup-worker"
+main = "src/index.ts"
+compatibility_date = "2026-02-20"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+KEY_PREFIX = "grok-powertools/v1"
+R2_ACCOUNT_ID = ""
+R2_BUCKET_NAME = ""
+
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "CHANGE_ME_BUCKET_NAME"

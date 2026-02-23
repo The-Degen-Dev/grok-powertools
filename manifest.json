@@ -7,13 +7,16 @@
     "storage",
     "activeTab",
     "scripting",
-    "downloads"
+    "downloads",
+    "alarms"
   ],
   "host_permissions": [
     "*://*.x.com/*",
     "*://*.grok.x.ai/*",
     "*://grok.com/*",
-    "*://*.grok.com/*"
+    "*://*.grok.com/*",
+    "https://*.workers.dev/*",
+    "https://*.r2.cloudflarestorage.com/*"
   ],
   "background": {
     "service_worker": "background.js"

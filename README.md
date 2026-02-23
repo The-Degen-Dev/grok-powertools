@@ -12,6 +12,7 @@ Supercharge your Grok experience with a premium floating dashboard for automated
 -   **Prompt Manager**: Save your favorite prompts, import/export them as JSON, and inject them with a single click.
 -   **Smart Scraper**: Bulk download media from your feed or favorites with smart scrolling and duplicate detection.
 -   **Raw Image Mode**: Specialized handler for `imagine-public.x.ai` to download raw assets.
+-   **Optional Cloud Backup (R2)**: Dual-write local downloads to your own Cloudflare R2 bucket via a BYO Worker.
 
 ## Installation
 
@@ -38,6 +39,14 @@ The floating panel appears in the bottom-right corner. You can drag it by the he
 2.  Click the **+ (Plus)** icon in the overlay to save it.
 3.  Click any saved tag to insert it back into the input.
 4.  Use the **Import/Export** icons to backup your prompts.
+
+### Cloud Backup (Optional)
+1.  Open the extension popup.
+2.  Set **Backup Mode** to **Dual-write (Local + R2)**.
+3.  Enter your `https://<worker>.workers.dev` URL and API key.
+4.  Click **Test Connection** and then run sync/backfill as needed.
+
+Full setup guide: [docs/CLOUD_R2_SETUP.md](docs/CLOUD_R2_SETUP.md)
 
 ## Development
 

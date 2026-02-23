@@ -78,6 +78,65 @@
             </div>
         </div>
 
+        <!-- Cloud Backup Settings -->
+        <div class="card settings-card">
+            <div class="card-header">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25" />
+                    <line x1="8" y1="16" x2="8.01" y2="16" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                    <line x1="16" y1="16" x2="16.01" y2="16" />
+                </svg>
+                <h3>Cloud Backup (R2)</h3>
+            </div>
+            <div class="setting-row cloud-field-row">
+                <label for="cloudModeSelect">Backup Mode</label>
+                <div class="select-input-wrapper cloud-input-wide">
+                    <select id="cloudModeSelect">
+                        <option value="local_only">Local only</option>
+                        <option value="dual_write">Dual-write (Local + R2)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="setting-row cloud-field-row">
+                <label for="cloudWorkerUrlInput">Worker URL</label>
+                <div class="text-input-wrapper cloud-input-wide">
+                    <input type="text" id="cloudWorkerUrlInput" placeholder="https://your-worker.workers.dev">
+                </div>
+            </div>
+            <div class="setting-row cloud-field-row">
+                <label for="cloudApiKeyInput">API Key</label>
+                <div class="text-input-wrapper cloud-input-wide">
+                    <input type="password" id="cloudApiKeyInput" placeholder="x-gpt-api-key value">
+                </div>
+            </div>
+            <div class="setting-row cloud-field-row">
+                <label for="cloudKeyPrefixInput">Key Prefix</label>
+                <div class="text-input-wrapper cloud-input-wide">
+                    <input type="text" id="cloudKeyPrefixInput" value="grok-powertools/v1">
+                </div>
+            </div>
+            <div class="cloud-status-box" id="cloudStatusBox">
+                <div class="cloud-status-row">
+                    <span>Mode</span>
+                    <span id="cloudModeBadge" class="status-pill neutral">Local Only</span>
+                </div>
+                <div class="cloud-status-row">
+                    <span>Unsynced</span>
+                    <span id="cloudUnsyncedCount">0</span>
+                </div>
+                <div class="cloud-status-row">
+                    <span>Last Error</span>
+                    <span id="cloudLastError">None</span>
+                </div>
+            </div>
+            <div class="cloud-actions-grid">
+                <button id="cloudTestBtn" class="btn btn-secondary">Test Connection</button>
+                <button id="cloudRetryBtn" class="btn btn-secondary">Retry Unsynced</button>
+                <button id="cloudBackfillBtn" class="btn btn-secondary">Run Backfill</button>
+            </div>
+        </div>
+
         <!-- Logs Console -->
         <div class="card logs-card">
             <div class="card-header">

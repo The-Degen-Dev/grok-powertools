@@ -4,6 +4,7 @@
 const SettingsDefaults = {
     maxRetries: 3,
     videoGoal: 10,
+    galleryBatchLimit: 10,
     autoRetryEnabled: true,
     retryCooldown: 8000,
     generationDelay: 8000,
@@ -69,13 +70,15 @@ class LogViewer {
             const rect = this.el.getBoundingClientRect();
             initialLeft = rect.left; initialTop = rect.top;
         });
-        document.addEventListener('mousemove', (e) => {
+        this._onMouseMove = (e) => {
             if (!isDragging) return;
             this.el.style.left = `${initialLeft + (e.clientX - startX)}px`;
             this.el.style.top = `${initialTop + (e.clientY - startY)}px`;
             this.el.style.bottom = 'auto';
-        });
-        document.addEventListener('mouseup', () => isDragging = false);
+        };
+        this._onMouseUp = () => isDragging = false;
+        document.addEventListener('mousemove', this._onMouseMove);
+        document.addEventListener('mouseup', this._onMouseUp);
 
         this.el.querySelector('#gptLogsMinBtn').addEventListener('click', () => {
             this.isMinimized = !this.isMinimized;
@@ -97,7 +100,11 @@ class LogViewer {
         container.insertBefore(row, container.firstChild);
         if (container.children.length > 100) container.removeChild(container.lastChild);
     }
-    destroy() { if (this.el) { this.el.remove(); this.el = null; } }
+    destroy() {
+        if (this._onMouseMove) document.removeEventListener('mousemove', this._onMouseMove);
+        if (this._onMouseUp) document.removeEventListener('mouseup', this._onMouseUp);
+        if (this.el) { this.el.remove(); this.el = null; }
+    }
 }
 
 class SettingsManager {
@@ -166,8 +173,12 @@ class PromptHistoryManager {
         this.setupCapture();
     }
     async init() {
-        const stored = await chrome.storage.local.get(['promptHistory']);
-        if (stored.promptHistory) { this.history = stored.promptHistory; this.notify(); }
+        try {
+            const stored = await chrome.storage.local.get(['promptHistory']);
+            if (stored.promptHistory) { this.history = stored.promptHistory; this.notify(); }
+        } catch (e) {
+            console.warn('GPT: Extension context invalidated, cannot load history.');
+        }
     }
     setupCapture() {
         // Use Capture Phase ({capture: true}) to intercept events BEFORE the app handles/clears them.
@@ -203,11 +214,14 @@ class PromptHistoryManager {
 
     captureCurrentPrompt(type = 'image', triggerEl = null) {
         let text = '';
-        const ta = document.querySelector('textarea');
+        const ta = document.querySelector('textarea[aria-required="true"]');
+        const ce = document.querySelector('[contenteditable="true"]');
 
-        // 1. Try Main Textarea first
+        // 1. Try Main Textarea first, then contenteditable
         if (ta && ta.value && ta.value.trim().length > 0) {
             text = ta.value.trim();
+        } else if (ce && ce.textContent && ce.textContent.trim().length > 0) {
+            text = ce.textContent.trim();
         }
 
         // 2. If 'video' and text is empty, try to find context from trigger element (Card)
@@ -255,7 +269,14 @@ class PromptHistoryManager {
         if (this.history.length > limit) this.history = this.history.slice(0, limit);
         this.save();
     }
-    save() { chrome.storage.local.set({ promptHistory: this.history }); this.notify(); }
+    save() {
+        try {
+            chrome.storage.local.set({ promptHistory: this.history });
+        } catch (e) {
+            console.warn('GPT: Extension context invalidated, cannot save history.');
+        }
+        this.notify();
+    }
     clear() { this.history = []; this.save(); }
     subscribe(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
     notify() { this.listeners.forEach(cb => cb(this.history)); }
@@ -298,7 +319,15 @@ class GrokOverlay {
 
     onSettingsChange(settings) {
         const retryToggle = this.el.querySelector('#gptRetryToggle');
+        const goalInput = this.el.querySelector('#gptVideoGoal');
+        const galleryLimitInput = this.el.querySelector('#gptGalleryLimit');
         if (retryToggle) retryToggle.checked = settings.autoRetryEnabled;
+        if (goalInput && !this.retryManager.goalRunning && !this.retryManager.batchRunning) {
+            goalInput.value = settings.videoGoal || 1;
+        }
+        if (galleryLimitInput && !this.retryManager.batchRunning) {
+            galleryLimitInput.value = settings.galleryBatchLimit || settings.videoGoal || 1;
+        }
         if (settings.devMode && !this.logViewer) this.setDevMode(true);
         else if (!settings.devMode && this.logViewer) this.setDevMode(false);
     }
@@ -352,15 +381,32 @@ class GrokOverlay {
                             <span id="gptRetryCounter" class="gpt-badge gpt-badge-neutral" style="font-size:10px">0/0</span>
                         </div>
                          <div class="gpt-row" style="margin-top:4px; font-size:11px; color:#71767b">
-                            <span>Videos Generated</span>
+                            <span id="gptProgressLabel">Videos Generated</span>
                             <span id="gptVideoCounter" class="gpt-badge gpt-badge-neutral" style="font-size:10px">0/0</span>
                         </div>
                         <div class="gpt-row" style="margin-top:8px">
                              <span># of Videos</span>
                              <input type="number" id="gptVideoGoal" class="gpt-input" value="1" min="1" max="50">
                         </div>
+                        <div class="gpt-row" style="margin-top:8px" id="gptGalleryLimitRow">
+                             <span>Gallery Limit</span>
+                             <input type="number" id="gptGalleryLimit" class="gpt-input" value="10" min="1" max="200">
+                        </div>
                          <div class="gpt-row" style="margin-top:12px">
                             <button id="gptStartGoalBtn" class="gpt-btn gpt-btn-primary">Start Video Goal</button>
+                        </div>
+                        <div class="gpt-row" style="margin-top:8px">
+                            <button id="gptQuickBatchBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; background:#1d9bf0; font-size:11px;">Quick Batch</button>
+                            <button id="gptPromptedBatchBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; margin-left:4px; background:#7c3aed; font-size:11px;">Prompted Batch</button>
+                            <button id="gptBatchStopBtn" class="gpt-btn" style="flex:1; background:#f4212e; display:none; font-size:11px;">Stop Batch</button>
+                        </div>
+                        <div id="gptBatchPromptRow" style="margin-top:6px; display:none;">
+                            <select id="gptBatchPromptSelect" class="gpt-input" style="font-size:11px; padding:4px;">
+                                <option value="">-- Select prompt for batch --</option>
+                            </select>
+                        </div>
+                        <div class="gpt-row" style="margin-top:4px; font-size:10px; color:#71767b; display:none;" id="gptBatchStatus">
+                            Batch Mode: Active
                         </div>
                     </div>
 
@@ -560,9 +606,46 @@ class GrokOverlay {
 
         this.el.querySelector('#gptRetryToggle').addEventListener('change', (e) => this.settingsManager.set('autoRetryEnabled', e.target.checked));
         this.el.querySelector('#gptVideoGoal').addEventListener('change', (e) => this.settingsManager.set('videoGoal', parseInt(e.target.value)));
+        this.el.querySelector('#gptGalleryLimit').addEventListener('change', (e) => {
+            const limit = Math.max(1, parseInt(e.target.value, 10) || 1);
+            e.target.value = limit;
+            this.settingsManager.set('galleryBatchLimit', limit);
+        });
         this.el.querySelector('#gptStartGoalBtn').addEventListener('click', () => {
             const count = parseInt(this.el.querySelector('#gptVideoGoal').value, 10);
             this.retryManager.startGoal(count);
+        });
+        this.el.querySelector('#gptQuickBatchBtn').addEventListener('click', async () => {
+            await this.retryManager.startBatch('quick');
+        });
+        this.el.querySelector('#gptPromptedBatchBtn').addEventListener('click', async () => {
+            const select = this.el.querySelector('#gptBatchPromptSelect');
+            let prompt = select ? select.value : '';
+            // Fallback: use Grok's visible prompt input (textarea on detail view, contenteditable on gallery)
+            if (!prompt) {
+                const ta = document.querySelector('textarea[aria-required="true"]');
+                const ce = document.querySelector('[contenteditable="true"]');
+                if (ta && ta.value && ta.value.trim().length > 0) {
+                    prompt = ta.value.trim();
+                } else if (ce && ce.textContent && ce.textContent.trim().length > 0) {
+                    prompt = ce.textContent.trim();
+                }
+            }
+            if (!prompt) {
+                this.toast.show('Enter a prompt in the text box or select one from the dropdown', 'error');
+                return;
+            }
+            const videoGoal = Math.max(1, parseInt(this.el.querySelector('#gptVideoGoal').value, 10) || 1);
+            const galleryLimit = Math.max(1, parseInt(this.el.querySelector('#gptGalleryLimit').value, 10) || videoGoal);
+            await this.retryManager.startBatch('prompted', prompt, { videoGoal, galleryLimit });
+        });
+        this.el.querySelector('#gptBatchStopBtn').addEventListener('click', () => {
+            this.retryManager.stopBatch();
+        });
+        // Show/hide prompt selector when Prompted Batch is relevant
+        this.el.querySelector('#gptPromptedBatchBtn').addEventListener('mouseenter', () => {
+            this.populateBatchPromptSelect();
+            this.el.querySelector('#gptBatchPromptRow').style.display = 'block';
         });
         this.el.querySelector('#gptAddPromptBtn').addEventListener('click', () => this.saveCurrentPrompt());
 
@@ -631,7 +714,9 @@ class GrokOverlay {
         this.el.querySelector('#setDevMode').checked = s.devMode;
 
         const mainGoal = this.el.querySelector('#gptVideoGoal');
+        const galleryLimit = this.el.querySelector('#gptGalleryLimit');
         if (mainGoal && !this.retryManager.goalRunning) mainGoal.value = s.videoGoal;
+        if (galleryLimit && !this.retryManager.batchRunning) galleryLimit.value = s.galleryBatchLimit || s.videoGoal || 1;
     }
 
     minimize(isMin) {
@@ -656,9 +741,11 @@ class GrokOverlay {
 
     async loadSavedPrompts() {
         const stored = await chrome.storage.local.get(['savedPrompts']);
-        this.renderSavedList(stored.savedPrompts || []);
+        this.savedPrompts = stored.savedPrompts || [];
+        this.renderSavedList(this.savedPrompts);
     }
     renderSavedList(prompts) {
+        this.savedPrompts = prompts;
         const list = this.el.querySelector('#gptPromptList');
         list.innerHTML = '';
         if (prompts.length === 0) {
@@ -736,13 +823,15 @@ class GrokOverlay {
         });
     }
     async saveCurrentPrompt() {
-        const ta = document.querySelector('textarea');
-        if (ta && ta.value && ta.value.trim().length > 0) {
+        const ta = document.querySelector('textarea[aria-required="true"]');
+        const ce = document.querySelector('[contenteditable="true"]');
+        const text = (ta && ta.value && ta.value.trim()) || (ce && ce.textContent && ce.textContent.trim()) || '';
+        if (text.length > 0) {
             const name = prompt('Name for this prompt partial:');
             if (name) {
                 const s = await chrome.storage.local.get(['savedPrompts']);
                 const p = s.savedPrompts || [];
-                p.push({ name, text: ta.value });
+                p.push({ name, text });
                 await chrome.storage.local.set({ savedPrompts: p });
                 this.renderSavedList(p);
                 this.toast.show('Prompt Saved', 'success');
@@ -773,22 +862,60 @@ class GrokOverlay {
         this.renderSavedList(combined);
         this.toast.show('Examples Loaded', 'success');
     }
+    populateBatchPromptSelect() {
+        const select = this.el.querySelector('#gptBatchPromptSelect');
+        if (!select) return;
+        const current = select.value;
+        // Clear existing options safely
+        while (select.firstChild) select.removeChild(select.firstChild);
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '-- Select prompt for batch --';
+        select.appendChild(defaultOpt);
+        // Add saved prompts
+        const saved = this.savedPrompts || [];
+        saved.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.text;
+            opt.textContent = p.name || p.text.substring(0, 40);
+            select.appendChild(opt);
+        });
+        // Add recent history
+        const history = this.historyManager ? this.historyManager.history.slice(0, 10) : [];
+        if (history.length > 0 && saved.length > 0) {
+            const divider = document.createElement('option');
+            divider.disabled = true;
+            divider.textContent = '\u2500\u2500 Recent History \u2500\u2500';
+            select.appendChild(divider);
+        }
+        history.forEach(h => {
+            const opt = document.createElement('option');
+            opt.value = h.text;
+            opt.textContent = h.text.substring(0, 40) + (h.text.length > 40 ? '...' : '');
+            select.appendChild(opt);
+        });
+        if (current) select.value = current;
+    }
+
     injectPrompt(text) {
-        const ta = document.querySelector('textarea');
+        const ta = document.querySelector('textarea[aria-required="true"]');
         if (ta) {
             ta.focus();
-
             // React 16+ State Hack:
-            // Simply setting .value = text doesn't trigger the internal React state update.
-            // We must call the native setter on the prototype.
             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
                 window.HTMLTextAreaElement.prototype,
                 "value"
             ).set;
             nativeInputValueSetter.call(ta, text);
-
-            const ev = new Event('input', { bubbles: true });
-            ta.dispatchEvent(ev);
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+            // Fallback: contenteditable div (used on favorites gallery)
+            const ce = document.querySelector('[contenteditable="true"]');
+            if (ce) {
+                ce.focus();
+                ce.textContent = text;
+                ce.dispatchEvent(new Event('input', { bubbles: true }));
+            }
         }
     }
 }
@@ -798,157 +925,721 @@ class VideoRetryManager {
         this.overlay = overlay;
         this.settingsManager = settingsManager;
         this.historyManager = historyManager;
-        this.MODERATION_TEXT = 'Content Moderated. Try a different idea.';
         this.BUTTON_SELECTOR = 'button[aria-label="Make video"]';
-        this.PROGRESS_SELECTOR = 'button[aria-label="Video Options"]'; // The element that appears on success
+        this.PROGRESS_SELECTOR = 'button[aria-label="Video Options"]';
+        this.CARD_SELECTOR = '[class*="media-post-masonry-card"]';
         this.currentRetry = 0;
         this.lastClickTime = 0;
         this.goalRunning = false;
+        this.batchRunning = false;
         this.goalTotal = 0;
         this.goalCount = 0;
+
+        // Scoped targeting: the card container we're operating on
+        this.targetContext = null;
 
         // State for managing async verify step
         this.isVerifying = false;
         this.verifyStartTime = 0;
-        this.lastSuccessTime = 0; // Debounce for success
+        this.lastSuccessTime = 0;
+        this.preClickButtonCount = 0;
+
+        // Interval management
+        this.intervalId = null;
+
+        // Batch state
+        this.batchQueue = [];
+        this.batchIndex = 0;
+        this.batchAborted = false;
+        this.batchMode = null;       // 'quick' or 'prompted'
+        this.batchPrompt = null;     // Prompt text for prompted mode
+        this.scrollAttempts = 0;
+        this.batchContext = null;    // 'gallery' or 'detail'
 
         this.settingsManager.subscribe(() => this.updateConfig());
         this.updateConfig();
         this.startObserver();
     }
+
     updateConfig() { }
+
+    // --- Fix 1: Safe overlay access ---
+    safeStatus(msg, type) {
+        if (this.overlay && this.overlay.setStatus) this.overlay.setStatus(msg, type);
+    }
+
+    // --- Fix 2: Find the card container closest to viewport center ---
+    findTargetContext() {
+        const buttons = document.querySelectorAll(this.BUTTON_SELECTOR);
+        if (buttons.length === 0) return null;
+        if (buttons.length === 1) return buttons[0].closest(this.CARD_SELECTOR) || buttons[0].parentElement;
+
+        const viewportCenterY = window.innerHeight / 2;
+        let bestBtn = null;
+        let bestDist = Infinity;
+        for (const btn of buttons) {
+            const rect = btn.getBoundingClientRect();
+            const dist = Math.abs(rect.top + rect.height / 2 - viewportCenterY);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestBtn = btn;
+            }
+        }
+        return bestBtn.closest(this.CARD_SELECTOR) || bestBtn.parentElement;
+    }
+
+    // Scoped query helper: search within targetContext if available, else document
+    _queryRoot() {
+        return (this.targetContext && this.targetContext.isConnected) ? this.targetContext : document;
+    }
+
+    detectBatchContext() {
+        if (/\/imagine\/post\//.test(window.location.pathname)) {
+            return 'detail';
+        }
+
+        const galleryCard = document.querySelector(this.CARD_SELECTOR)
+            || document.querySelector('[data-testid*="media-post"]');
+        if (galleryCard) return 'gallery';
+
+        const backControl = document.querySelector('[aria-label="Back"]') || document.querySelector('.lucide-arrow-left');
+        if (backControl) return 'detail';
+
+        const makeVideoButtons = document.querySelectorAll(this.BUTTON_SELECTOR);
+        if (makeVideoButtons.length > 1) return 'gallery';
+        if (makeVideoButtons.length === 1) return 'detail';
+
+        return 'detail';
+    }
+
+    injectPromptText(text) {
+        if (!text) return false;
+
+        const ta = document.querySelector('textarea[aria-required="true"]');
+        if (ta) {
+            ta.focus();
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            setter.call(ta, text);
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+
+        const ce = document.querySelector('[contenteditable="true"]');
+        if (ce) {
+            ce.focus();
+            ce.textContent = text;
+            ce.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+
+        return false;
+    }
+
+    // --- Goal Mode ---
     startGoal(count) {
         this.goalRunning = true;
+        this.batchRunning = false;
+        this.batchContext = 'detail';
         this.goalTotal = count;
         this.goalCount = 0;
-        this.currentRetry = 0; // Reset retries on start
+        this.currentRetry = 0;
 
-        // Snapshot the number of completed videos (Video Options buttons) ALREADY present.
-        // This is our baseline. Any NEW buttons means a NEW success.
-        const existing = document.querySelectorAll('button[aria-label="Video Options"]').length;
-        this.baseCompletedCount = existing;
-        console.log(`VideoRetryManager: Goal Started. Target: ${count}. Base Completed: ${this.baseCompletedCount}`);
+        // Scope to the card the user is looking at
+        this.targetContext = this.findTargetContext();
 
-        this.overlay.setStatus('Goal Started', 'info');
+        const root = this._queryRoot();
+        this.baseCompletedCount = root.querySelectorAll(this.PROGRESS_SELECTOR).length;
+        console.log(`VideoRetryManager: Goal Started. Target: ${count}. Scoped: ${!!this.targetContext}`);
+
+        this.safeStatus('Goal Started', 'info');
         this.updateCounters();
         this.clickMakeVideo();
     }
-    startObserver() { setInterval(() => this.checkAndAct(), 1000); }
+
+    // --- Batch Mode (Quick + Prompted) ---
+    async startBatch(mode = 'quick', prompt = null, options = {}) {
+        const normalizedMode = mode === 'prompted' ? 'prompted' : 'quick';
+
+        if (normalizedMode === 'prompted') {
+            const detectedContext = this.detectBatchContext();
+            if (detectedContext === 'detail') {
+                const videoGoal = Math.max(1, parseInt(options.videoGoal, 10) || this.settingsManager.get('videoGoal') || 1);
+                await this.startPromptedBatchFromDetail(prompt, videoGoal);
+            } else {
+                const galleryLimit = Math.max(1, parseInt(options.galleryLimit, 10) || this.settingsManager.get('galleryBatchLimit') || 1);
+                await this.startPromptedBatchFromGallery(prompt, galleryLimit);
+            }
+            return;
+        }
+
+        this.batchRunning = true;
+        this.goalRunning = false;
+        this.batchAborted = false;
+        this.batchIndex = 0;
+        this.batchMode = 'quick';
+        this.batchContext = 'gallery';
+        this.batchPrompt = null;
+        this.scrollAttempts = 0;
+        this.goalCount = 0;
+        this.currentRetry = 0;
+
+        this.safeStatus('Batch (quick): Scanning gallery...', 'info');
+
+        this.batchQueue = this.buildBatchQueue();
+        this.goalTotal = this.batchQueue.length;
+
+        if (this.batchQueue.length === 0) {
+            this.safeStatus('No items to process', 'warning');
+            this.batchRunning = false;
+            this.updateCounters();
+            this.updateBatchButtons(false);
+            return;
+        }
+
+        console.log(`Batch (quick): Found ${this.batchQueue.length} items to process.`);
+        this.updateCounters();
+        this.updateBatchButtons(true);
+        await this.processBatchNext();
+    }
+
+    async startPromptedBatchFromGallery(prompt, galleryLimit) {
+        this.batchRunning = true;
+        this.goalRunning = false;
+        this.batchAborted = false;
+        this.batchIndex = 0;
+        this.batchMode = 'prompted';
+        this.batchContext = 'gallery';
+        this.batchPrompt = prompt;
+        this.scrollAttempts = 0;
+        this.goalCount = 0;
+        this.goalTotal = Math.max(1, galleryLimit);
+        this.currentRetry = 0;
+
+        this.batchQueue = this.buildBatchQueue();
+        if (this.batchQueue.length === 0) {
+            this.safeStatus('Prompted Batch [gallery]: No images found', 'warning');
+            this.batchRunning = false;
+            this.updateCounters();
+            return;
+        }
+
+        console.log(`Prompted Batch [gallery]: Starting with ${this.batchQueue.length} images (limit ${this.goalTotal}).`);
+        this.safeStatus(`Prompted Batch [gallery]: Starting 0/${this.goalTotal}`, 'info');
+        this.updateCounters();
+        this.updateBatchButtons(true);
+
+        while (this.batchRunning && !this.batchAborted && this.goalCount < this.goalTotal) {
+            if (this.batchIndex >= this.batchQueue.length) {
+                const foundMore = await this.scrollForMore();
+                if (!foundMore) break;
+            }
+
+            const item = this.batchQueue[this.batchIndex];
+            if (!item || !item.button || !item.button.isConnected) {
+                this.batchIndex++;
+                continue;
+            }
+
+            if (item.container.querySelector(this.PROGRESS_SELECTOR)) {
+                this.batchIndex++;
+                continue;
+            }
+
+            this.safeStatus(`Prompted Batch [gallery]: ${this.goalCount + 1}/${this.goalTotal}`, 'info');
+            await this.processBatchItemPrompted(item);
+        }
+
+        const hitLimit = this.goalCount >= this.goalTotal;
+        const wasAborted = this.batchAborted;
+        this.batchRunning = false;
+        this.batchAborted = false;
+        this.updateBatchButtons(false);
+        this.updateCounters();
+        if (hitLimit) {
+            this.safeStatus(`Prompted Batch [gallery]: Complete (${this.goalCount}/${this.goalTotal})`, 'success');
+        } else if (wasAborted) {
+            this.safeStatus(`Prompted Batch [gallery]: Stopped (${this.goalCount}/${this.goalTotal})`, 'neutral');
+        } else {
+            this.safeStatus(`Prompted Batch [gallery]: Queue exhausted (${this.goalCount}/${this.goalTotal})`, 'neutral');
+        }
+    }
+
+    async startPromptedBatchFromDetail(prompt, videoGoal) {
+        this.batchRunning = true;
+        this.goalRunning = false;
+        this.batchAborted = false;
+        this.batchIndex = 0;
+        this.batchMode = 'prompted';
+        this.batchContext = 'detail';
+        this.batchPrompt = prompt;
+        this.scrollAttempts = 0;
+        this.goalCount = 0;
+        this.goalTotal = Math.max(1, videoGoal);
+        this.currentRetry = 0;
+        this.targetContext = this.findTargetContext();
+
+        if (prompt && this.historyManager && typeof this.historyManager.add === 'function') {
+            this.historyManager.add(prompt, 'video');
+        }
+
+        this.safeStatus(`Prompted Batch [detail]: Starting 0/${this.goalTotal}`, 'info');
+        this.updateCounters();
+        this.updateBatchButtons(true);
+
+        while (this.batchRunning && !this.batchAborted && this.goalCount < this.goalTotal) {
+            if (this.batchPrompt) {
+                this.injectPromptText(this.batchPrompt);
+                await this.sleep(300);
+            }
+
+            const makeBtn = document.querySelector(this.BUTTON_SELECTOR);
+            if (!makeBtn) {
+                this.safeStatus('Prompted Batch [detail]: Make video button not found', 'warning');
+                break;
+            }
+
+            this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
+            this.lastClickTime = Date.now();
+            makeBtn.click();
+            console.log(`Prompted Batch [detail]: Clicked Make Video (${this.goalCount + 1}/${this.goalTotal}).`);
+
+            const result = await this.awaitBatchItemCompletion(document, {
+                allowRetry: true,
+                labelPrefix: 'Prompted Batch [detail]'
+            });
+
+            if (result === 'success') {
+                this.goalCount++;
+                this.currentRetry = 0;
+                this.updateCounters();
+                this.safeStatus(`Prompted Batch [detail]: Progress ${this.goalCount}/${this.goalTotal}`, 'success');
+                continue;
+            }
+
+            if (result === 'aborted') break;
+
+            this.safeStatus('Prompted Batch [detail]: Stopped after failed attempt', 'warning');
+            break;
+        }
+
+        const hitGoal = this.goalCount >= this.goalTotal;
+        const wasAborted = this.batchAborted;
+        this.batchRunning = false;
+        this.batchAborted = false;
+        this.updateBatchButtons(false);
+        this.updateCounters();
+        if (hitGoal) {
+            this.safeStatus(`Prompted Batch [detail]: Complete (${this.goalCount}/${this.goalTotal})`, 'success');
+        } else if (wasAborted) {
+            this.safeStatus(`Prompted Batch [detail]: Stopped (${this.goalCount}/${this.goalTotal})`, 'neutral');
+        } else {
+            this.safeStatus(`Prompted Batch [detail]: Stopped (${this.goalCount}/${this.goalTotal})`, 'neutral');
+        }
+    }
+
+    stopBatch() {
+        this.batchRunning = false;
+        this.batchAborted = true;
+        this.goalRunning = false;
+        this.isVerifying = false;
+        this.targetContext = null;
+        this.batchContext = null;
+        this.safeStatus('Batch Stopped', 'neutral');
+        this.updateCounters();
+        this.updateBatchButtons(false);
+    }
+
+    buildBatchQueue() {
+        const buttons = Array.from(document.querySelectorAll(this.BUTTON_SELECTOR));
+        const items = buttons.map(btn => {
+            const container = btn.closest(this.CARD_SELECTOR) || btn.parentElement;
+            const rect = container.getBoundingClientRect();
+            return { button: btn, container, top: rect.top + window.scrollY, left: rect.left + window.scrollX };
+        });
+        // Sort visually: top-to-bottom, left-to-right (20px row tolerance)
+        items.sort((a, b) => {
+            if (Math.abs(a.top - b.top) > 20) return a.top - b.top;
+            return a.left - b.left;
+        });
+        // Filter out items that already have a completed video
+        return items.filter(item => !item.container.querySelector(this.PROGRESS_SELECTOR));
+    }
+
+    async processBatchNext() {
+        if (!this.batchRunning || this.batchAborted) return;
+
+        // If queue exhausted, try auto-scrolling for more
+        if (this.batchIndex >= this.batchQueue.length) {
+            const foundMore = await this.scrollForMore();
+            if (!foundMore) {
+                this.safeStatus(`Batch Complete! ${this.goalCount} videos`, 'success');
+                this.batchRunning = false;
+                this.updateBatchButtons(false);
+                return;
+            }
+            // Continue with the newly found items
+        }
+
+        const item = this.batchQueue[this.batchIndex];
+
+        // Skip if button detached from DOM
+        if (!item.button.isConnected) {
+            console.log(`Batch: Item ${this.batchIndex} detached, skipping.`);
+            this.batchIndex++;
+            return this.processBatchNext();
+        }
+
+        // Skip if already has video
+        if (item.container.querySelector(this.PROGRESS_SELECTOR)) {
+            console.log(`Batch: Item ${this.batchIndex} already has video, skipping.`);
+            this.batchIndex++;
+            this.goalCount++;
+            this.updateCounters();
+            return this.processBatchNext();
+        }
+
+        this.safeStatus(`Batch: ${this.batchIndex + 1}/${this.batchQueue.length} (${this.batchMode})`, 'info');
+
+        if (this.batchMode === 'quick') {
+            await this.processBatchItemQuick(item);
+        } else {
+            await this.processBatchItemPrompted(item);
+        }
+    }
+
+    // Mode A: Quick batch — fire-and-forget, click all "Make video" buttons rapidly
+    async processBatchItemQuick(item) {
+        item.button.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await this.sleep(500);
+
+        item.button.click();
+        this.goalCount++;
+        this.updateCounters();
+        console.log(`Batch Quick: Fired item ${this.batchIndex + 1}.`);
+        this.safeStatus(`Batch: Fired ${this.batchIndex + 1}/${this.batchQueue.length}`, 'info');
+
+        this.batchIndex++;
+        await this.sleep(1500); // Brief pause between clicks
+        if (this.batchRunning && !this.batchAborted) await this.processBatchNext();
+    }
+
+    // Mode B: Prompted batch — click into image, inject prompt, make video, go back
+    async processBatchItemPrompted(item) {
+        // Click the image (not the button) to enter detail view
+        const img = item.container.querySelector('img');
+        if (!img) {
+            console.log(`Prompted Batch [gallery]: No image found for item ${this.batchIndex + 1}, skipping.`);
+            this.batchIndex++;
+            return;
+        }
+
+        img.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await this.sleep(500);
+        img.click();
+        await this.sleep(2000); // Wait for detail view to load
+
+        // Inject the prompt
+        if (this.batchPrompt) {
+            const injected = this.injectPromptText(this.batchPrompt);
+            if (injected) {
+                console.log('Prompted Batch [gallery]: Injected prompt.');
+                await this.sleep(500);
+            }
+        }
+
+        // Find and click "Make video" in the detail view
+        const makeBtn = document.querySelector(this.BUTTON_SELECTOR);
+        if (!makeBtn) {
+            console.log('Prompted Batch [gallery]: No Make video button in detail view.');
+        } else {
+            this.lastClickTime = Date.now();
+            makeBtn.click();
+            console.log(`Prompted Batch [gallery]: Clicked Make Video for item ${this.batchIndex + 1}.`);
+            await this.sleep(1200); // safety wait before navigating back
+        }
+
+        const didGoBack = await this.batchGoBack();
+        if (!didGoBack) {
+            console.log(`Prompted Batch [gallery]: Back navigation failed for item ${this.batchIndex + 1}, skipping.`);
+        }
+
+        this.goalCount++;
+        this.batchIndex++;
+        this.targetContext = null;
+        this.currentRetry = 0;
+        this.updateCounters();
+        await this.sleep(1500);
+    }
+
+    async batchGoBack() {
+        const previousUrl = window.location.href;
+        const backBtn = document.querySelector('[aria-label="Back"]') || document.querySelector('.lucide-arrow-left');
+        if (backBtn) {
+            const clickTarget = backBtn.closest('button') || backBtn.closest('a') || backBtn;
+            clickTarget.click();
+            await this.sleep(2000);
+            if (this.detectBatchContext() === 'gallery' || window.location.href !== previousUrl) {
+                return true;
+            }
+        }
+
+        if (window.history.length > 1) {
+            window.history.back();
+            await this.sleep(2200);
+            if (this.detectBatchContext() === 'gallery' || window.location.href !== previousUrl) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    async awaitBatchItemCompletion(searchRoot, options = {}) {
+        const TIMEOUT = 120000;
+        const POLL_INTERVAL = 1500;
+        const startTime = Date.now();
+        const s = this.settingsManager.settings;
+        const allowRetry = options.allowRetry !== false;
+        const labelPrefix = options.labelPrefix || 'Batch';
+
+        while (this.batchRunning && !this.batchAborted) {
+            await this.sleep(POLL_INTERVAL);
+            if (!this.batchRunning) return 'aborted';
+
+            const elapsed = Date.now() - startTime;
+
+            // Check if "Make video" button reappeared (generation done)
+            const btnBack = searchRoot.querySelector(this.BUTTON_SELECTOR);
+            if (!btnBack) {
+                this.safeStatus(`${labelPrefix}: Generating...`, 'info');
+                if (elapsed > TIMEOUT) {
+                    console.log(`${labelPrefix}: Timed out on item.`);
+                    this.safeStatus(`${labelPrefix}: Timed out`, 'warning');
+                    return 'failed';
+                }
+                continue;
+            }
+
+            // Button is back — did it succeed?
+            const currentCompleted = searchRoot.querySelectorAll(this.PROGRESS_SELECTOR).length;
+            if (currentCompleted > this.preClickButtonCount) {
+                return 'success';
+            } else {
+                if (!allowRetry) {
+                    return 'failed';
+                }
+
+                // Failure — retry
+                if (this.currentRetry >= s.maxRetries) {
+                    console.log(`${labelPrefix}: Max retries on item.`);
+                    this.safeStatus(`${labelPrefix}: Max retries hit`, 'warning');
+                    return 'failed';
+                }
+
+                this.currentRetry++;
+                this.safeStatus(`${labelPrefix}: Retry ${this.currentRetry}/${s.maxRetries}`, 'warning');
+                this.preClickButtonCount = currentCompleted;
+                this.updateCounters();
+
+                await this.sleep(s.retryCooldown);
+                if (!this.batchRunning) return 'aborted';
+
+                const retryBtn = searchRoot.querySelector(this.BUTTON_SELECTOR);
+                if (retryBtn) {
+                    this.lastClickTime = Date.now();
+                    retryBtn.click();
+                }
+            }
+        }
+
+        return this.batchAborted ? 'aborted' : 'failed';
+    }
+
+    async scrollForMore() {
+        if (this.scrollAttempts >= 3) return false;
+        this.scrollAttempts++;
+
+        // Scroll to bottom of last queued item (absolute position, never backward)
+        const lastItem = this.batchQueue[this.batchQueue.length - 1];
+        if (lastItem && lastItem.container.isConnected) {
+            const rect = lastItem.container.getBoundingClientRect();
+            window.scrollTo(0, rect.bottom + window.scrollY);
+        } else {
+            window.scrollTo(0, document.body.scrollHeight);
+        }
+        await this.sleep(2500); // Wait for lazy load
+
+        const newQueue = this.buildBatchQueue();
+        // Only add genuinely new items (not already in queue)
+        const existingContainers = new Set(this.batchQueue.map(i => i.container));
+        const newItems = newQueue.filter(i => !existingContainers.has(i.container));
+
+        if (newItems.length > 0) {
+            this.batchQueue.push(...newItems);
+            if (!(this.batchMode === 'prompted' && this.batchContext === 'gallery')) {
+                this.goalTotal = this.batchQueue.length;
+            }
+            this.scrollAttempts = 0; // Reset on success
+            this.updateCounters();
+            console.log(`Batch: Scrolled and found ${newItems.length} new items.`);
+            return true;
+        }
+
+        console.log(`Batch: Scroll attempt ${this.scrollAttempts}/3 found no new items.`);
+        return false;
+    }
+
+    updateBatchButtons(running) {
+        if (!this.overlay || !this.overlay.el) return;
+        const quickBtn = this.overlay.el.querySelector('#gptQuickBatchBtn');
+        const promptedBtn = this.overlay.el.querySelector('#gptPromptedBatchBtn');
+        const stopBtn = this.overlay.el.querySelector('#gptBatchStopBtn');
+        const batchStatus = this.overlay.el.querySelector('#gptBatchStatus');
+        const promptRow = this.overlay.el.querySelector('#gptBatchPromptRow');
+        const galleryLimitRow = this.overlay.el.querySelector('#gptGalleryLimitRow');
+
+        if (quickBtn) quickBtn.style.display = running ? 'none' : '';
+        if (promptedBtn) promptedBtn.style.display = running ? 'none' : '';
+        if (stopBtn) stopBtn.style.display = running ? '' : 'none';
+        if (batchStatus) batchStatus.style.display = running ? 'block' : 'none';
+        if (promptRow) promptRow.style.display = running ? 'none' : '';
+        if (galleryLimitRow) galleryLimitRow.style.display = running ? 'none' : '';
+        if (batchStatus) {
+            const ctx = this.batchContext ? ` [${this.batchContext}]` : '';
+            batchStatus.textContent = running ? `Batch Mode${ctx}: Active` : 'Batch Mode: Active';
+        }
+    }
+
+    // --- Observer (1s polling for Goal mode only) ---
+    startObserver() {
+        if (this.intervalId) clearInterval(this.intervalId);
+        this.intervalId = setInterval(() => this.checkAndAct(), 1000);
+    }
+
+    stopObserver() {
+        if (this.intervalId) { clearInterval(this.intervalId); this.intervalId = null; }
+    }
+
     updateCounters() {
         if (!this.overlay || !this.overlay.el) return;
         const retryB = this.overlay.el.querySelector('#gptRetryCounter');
         const vidB = this.overlay.el.querySelector('#gptVideoCounter');
+        const progressLabel = this.overlay.el.querySelector('#gptProgressLabel');
         const s = this.settingsManager.settings;
+        const isGalleryPrompted = this.batchRunning && this.batchMode === 'prompted' && this.batchContext === 'gallery';
+        if (progressLabel) {
+            progressLabel.textContent = isGalleryPrompted ? 'Images Processed' : 'Videos Generated';
+        }
         if (retryB) retryB.textContent = `${this.currentRetry}/${s.maxRetries}`;
         if (vidB) vidB.textContent = `${this.goalCount}/${this.goalTotal}`;
     }
+
     checkAndAct() {
-        const s = this.settingsManager.settings;
-        if (!s.autoRetryEnabled && !this.goalRunning) return;
+        // Batch mode uses its own async loop
+        if (this.batchRunning) return;
+        // Only act during active goals
+        if (!this.goalRunning) return;
         if (typeof document === 'undefined') return;
 
-        // --- STATE DETECTION ---
-        // 1. "Make video" button PRESENT = IDLE / READY TO CLICK
-        // 2. "Make video" button ABSENT = GENERATING (Showing progress % or spinner)
-
-        const makeVideoBtn = document.querySelector(this.BUTTON_SELECTOR);
-        const isGenerating = !makeVideoBtn;
-
-        if (isGenerating) {
-            // If we are generating, just wait.
-            // Update status if needed, but mostly passive.
-            if (this.goalRunning) this.overlay.setStatus('Generating...', 'info');
+        // Context-loss detection: if target was detached, stop
+        if (this.targetContext && !this.targetContext.isConnected) {
+            console.log('VideoRetryManager: Target context detached. Stopping.');
+            this.goalRunning = false;
+            this.isVerifying = false;
+            this.targetContext = null;
+            this.safeStatus('Stopped (context lost)', 'warning');
             return;
         }
 
-        // If we are HERE, the button IS present. We are either:
-        // A) Just starting
-        // B) Just finished a Success
-        // C) Just finished a Failure (Silent fail)
+        const root = this._queryRoot();
+        const makeVideoBtn = root.querySelector(this.BUTTON_SELECTOR);
+        const isGenerating = !makeVideoBtn;
 
-        if (this.goalRunning) {
-            // Check Success via Count of "Video Options"
-            // We expect: base + goalCount + 1 (for the one we just tried to do)
-            const currentCompleted = document.querySelectorAll('button[aria-label="Video Options"]').length;
-            const expectedCompleted = this.baseCompletedCount + this.goalCount + 1;
+        if (isGenerating) {
+            this.safeStatus('Generating...', 'info');
+            // Verify timeout: 2 minutes
+            if (this.isVerifying && (Date.now() - this.verifyStartTime > 120000)) {
+                console.log('VideoRetryManager: Verification timed out.');
+                this.isVerifying = false;
+                this.safeStatus('Generation timed out', 'error');
+            }
+            return;
+        }
 
-            // Wait... relying on 'expected' might be tricky if user deletes stuff.
-            // Let's rely on change since 'lastClickTime'? No, that's flaky.
-            // Let's rely on: Did count INCREASE since we started this specific attempt?
-            // To do that, we need to track 'countBeforeClick'.
+        if (this.isVerifying) {
+            const currentCompleted = root.querySelectorAll(this.PROGRESS_SELECTOR).length;
 
-            // SIMPLIFIED LOGIC:
-            // If we are in 'verifying' mode (meaning we clicked recently), and now button is back:
-            if (this.isVerifying) {
-                // Button returned! Result?
-                if (currentCompleted > this.preClickButtonCount) {
-                    // SUCCESS!
-                    console.log('VideoRetryManager: SUCCESS detected (Option buttons increased).');
-                    this.goalCount++;
-                    this.currentRetry = 0; // Reset retries for the NEXT video
-                    this.updateCounters();
-                    this.overlay.setStatus('Success! Next...', 'success');
+            if (currentCompleted > this.preClickButtonCount) {
+                console.log('VideoRetryManager: SUCCESS detected.');
+                this.goalCount++;
+                this.currentRetry = 0;
+                this.updateCounters();
+                this.safeStatus('Success! Next...', 'success');
 
-                    if (this.goalCount >= this.goalTotal) {
-                        console.log('VideoRetryManager: Goal Reached.');
-                        this.goalRunning = false;
-                        this.overlay.setStatus('Goal Complete', 'success');
-                        this.isVerifying = false;
-                        return;
-                    }
-
-                    // Proceed to next immediately? Or wait a tick?
+                if (this.goalCount >= this.goalTotal) {
+                    console.log('VideoRetryManager: Goal Reached.');
+                    this.goalRunning = false;
+                    this.safeStatus('Goal Complete', 'success');
                     this.isVerifying = false;
-                    // Fall through to click logic below
-                } else {
-                    // FAILURE (Silent)
-                    console.log('VideoRetryManager: FAILURE detected (Button returned, no new video).');
-                    this.isVerifying = false;
-                    this.attemptRetry();
+                    this.targetContext = null;
                     return;
                 }
-            }
 
-            // --- CLICK LOGIC ---
-            // Ready to click next/retry?
-            if (makeVideoBtn && !makeVideoBtn.disabled && (Date.now() - this.lastClickTime > s.retryCooldown)) {
-                this.clickMakeVideo();
+                this.isVerifying = false;
+                // Fall through to click logic
+            } else {
+                console.log('VideoRetryManager: FAILURE detected.');
+                this.isVerifying = false;
+                this.attemptRetry();
+                return;
             }
         }
+
+        // Click logic: ready to click next?
+        const s = this.settingsManager.settings;
+        if (makeVideoBtn && !makeVideoBtn.disabled && (Date.now() - this.lastClickTime > s.retryCooldown)) {
+            this.clickMakeVideo();
+        }
     }
-
-
 
     attemptRetry() {
         const s = this.settingsManager.settings;
         if (Date.now() - this.lastClickTime < s.retryCooldown) return;
 
+        // Check if auto-retry is enabled
+        if (!s.autoRetryEnabled) {
+            this.safeStatus('Failed (auto-retry off)', 'error');
+            this.goalRunning = false;
+            this.targetContext = null;
+            return;
+        }
+
         if (this.currentRetry >= s.maxRetries) {
-            this.overlay.setStatus('Max Retries Hit', 'error');
-            this.goalRunning = false; // Stop if max retries hit
+            this.safeStatus('Max Retries Hit', 'error');
+            this.goalRunning = false;
+            this.targetContext = null;
             return;
         }
 
         this.currentRetry++;
         console.log(`VideoRetryManager: Retrying... Attempt ${this.currentRetry}`);
-
-        // IMPORTANT: We do NOT increment verify/goal counts here. We just click again.
         this.updateCounters();
-        this.overlay.setStatus(`Retrying... (${this.currentRetry})`, 'warning');
+        this.safeStatus(`Retrying... (${this.currentRetry})`, 'warning');
         this.clickMakeVideo();
     }
 
     clickMakeVideo() {
-        const btn = document.querySelector(this.BUTTON_SELECTOR);
+        const root = this._queryRoot();
+        const btn = root.querySelector(this.BUTTON_SELECTOR);
         if (btn) {
-            // FIX: Ensure prompt is present (same logic as before)
-            const ta = document.querySelector('textarea');
+            // Ensure prompt is present
+            const ta = document.querySelector('textarea[aria-required="true"]');
             if (ta && (!ta.value || ta.value.trim() === '')) {
                 if (this.historyManager && this.historyManager.history.length > 0) {
                     const lastPrompt = this.historyManager.history[0].text;
                     if (lastPrompt) {
                         ta.focus();
-                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
                         nativeInputValueSetter.call(ta, lastPrompt);
                         ta.dispatchEvent(new Event('input', { bubbles: true }));
                         console.log('VideoRetryManager: Re-injected prompt');
@@ -957,15 +1648,18 @@ class VideoRetryManager {
             }
 
             this.lastClickTime = Date.now();
-            this.isVerifying = true; // Flag that we expect something to happen
+            this.isVerifying = true;
+            this.verifyStartTime = Date.now();
 
-            // Record state BEFORE click
-            this.preClickButtonCount = document.querySelectorAll('button[aria-label="Video Options"]').length;
+            // Record state BEFORE click (scoped)
+            this.preClickButtonCount = root.querySelectorAll(this.PROGRESS_SELECTOR).length;
 
             btn.click();
             console.log('VideoRetryManager: Clicked Make Video.');
         }
     }
+
+    sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 }
 
 
@@ -1172,7 +1866,7 @@ class GrokScraper {
     }
 
     async processItem(targetItem, cleanId) {
-        targetItem.style.border = "4px solid blue";
+        targetItem.style.outline = "2px solid rgba(29,155,240,0.5)";
         this.log(`Opening item...`);
         if (cleanId) await chrome.storage.local.set({ currentItemId: cleanId });
         targetItem.click();
