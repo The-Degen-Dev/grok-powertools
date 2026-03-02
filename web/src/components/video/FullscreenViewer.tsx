@@ -39,7 +39,6 @@ export default function FullscreenViewer({
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const currentItem = items[currentIndex];
-  if (!currentItem) return null;
 
   const goTo = useCallback(
     (index: number) => {
@@ -136,19 +135,21 @@ export default function FullscreenViewer({
   }
 
   function handleCopyPrompt() {
-    if (currentItem.promptText) {
+    if (currentItem?.promptText) {
       navigator.clipboard.writeText(currentItem.promptText);
     }
   }
 
   function handleDownload() {
-    if (currentItem.videoUrl) {
+    if (currentItem?.videoUrl) {
       const a = document.createElement("a");
       a.href = currentItem.videoUrl;
       a.download = `${currentItem.grokPostId}.mp4`;
       a.click();
     }
   }
+
+  if (!currentItem) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">

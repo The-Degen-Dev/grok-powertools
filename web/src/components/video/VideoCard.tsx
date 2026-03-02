@@ -12,7 +12,9 @@ import {
   GripVertical,
   Copy,
   X,
+  Scissors,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type { VideoItem } from "@/lib/types";
 
 interface VideoCardProps {
@@ -42,6 +44,7 @@ export default function VideoCard({
   onExpand,
   dragHandleProps,
 }: VideoCardProps) {
+  const router = useRouter();
   const [showInfo, setShowInfo] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -205,6 +208,13 @@ export default function VideoCard({
             label="Fullscreen"
             onClick={() => onExpand?.(item)}
           />
+          {item.videoUrl && (
+            <ActionButton
+              icon={Scissors}
+              label="Edit clip"
+              onClick={() => router.push(`/edit?video=${encodeURIComponent(item.videoUrl)}`)}
+            />
+          )}
           <ActionButton
             icon={Info}
             label="Prompt info"
