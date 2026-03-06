@@ -13,6 +13,7 @@
   "host_permissions": [
     "*://*.x.com/*",
     "*://*.grok.x.ai/*",
+    "*://imagine-public.x.ai/*",
     "*://grok.com/*",
     "*://*.grok.com/*",
     "https://*.workers.dev/*",

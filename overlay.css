@@ -296,8 +296,46 @@ input:checked+.gpt-slider:before {
 /* Prompt List */
 .gpt-prompt-list {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 6px;
+}
+
+.gpt-saved-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.gpt-saved-type-tabs {
+    display: flex;
+    gap: 8px;
+}
+
+.gpt-tab-sm {
+    flex: 1;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: #e7e9ea;
+}
+
+.gpt-tab-sm.active {
+    background: rgba(29, 155, 240, 0.2);
+    border-color: rgba(29, 155, 240, 0.5);
+}
+
+.gpt-saved-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.gpt-saved-main {
+    flex: 1;
+    justify-content: flex-start;
+    min-width: 0;
 }
 
 .gpt-prompt-tag {
@@ -312,11 +350,44 @@ input:checked+.gpt-slider:before {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .gpt-prompt-tag:hover {
     background: rgba(255, 255, 255, 0.15);
     border-color: rgba(255, 255, 255, 0.2);
+}
+
+.gpt-prompt-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.gpt-prompt-action {
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    color: #e7e9ea;
+    font-size: 10px;
+    border-radius: 4px;
+    padding: 3px 6px;
+    cursor: pointer;
+}
+
+.gpt-prompt-action:hover {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.gpt-prompt-action.danger {
+    color: #f4212e;
+    border-color: rgba(244, 33, 46, 0.5);
+}
+
+.gpt-prompt-action.danger:hover {
+    background: rgba(244, 33, 46, 0.2);
 }
 
 .gpt-prompt-delete {

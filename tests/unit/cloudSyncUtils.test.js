@@ -1,17 +1,34 @@
 const CloudSyncUtils = require('../../cloudSyncUtils.js');
 
 describe('cloudSyncUtils', () => {
-    test('validates workers.dev URLs', () => {
+    test('validates workers.dev URLs with one or more subdomain labels', () => {
+        expect(CloudSyncUtils.validateWorkersDevUrl('https://grok-r2-backup-worker.greymakerxyz-grok.workers.dev')).toBe(true);
         expect(CloudSyncUtils.validateWorkersDevUrl('https://example-worker.workers.dev')).toBe(true);
         expect(CloudSyncUtils.validateWorkersDevUrl('https://api.example.com')).toBe(false);
+        expect(CloudSyncUtils.validateWorkersDevUrl('https://workers.dev')).toBe(false);
         expect(CloudSyncUtils.validateWorkersDevUrl('http://not-secure.workers.dev')).toBe(false);
+    });
+
+    test('normalizes worker URLs to canonical origin', () => {
+        expect(
+            CloudSyncUtils.validateWorkersDevUrl(
+                'https://grok-r2-backup-worker.greymakerxyz-grok.workers.dev/health'
+            )
+        ).toBe(true);
+
+        const normalized = CloudSyncUtils.normalizeWorkerUrl(
+            'https://grok-r2-backup-worker.greymakerxyz-grok.workers.dev/health?ping=1#anchor'
+        );
+
+        expect(normalized).toBe('https://grok-r2-backup-worker.greymakerxyz-grok.workers.dev');
+        expect(CloudSyncUtils.validateWorkersDevUrl(normalized)).toBe(true);
     });
 
     test('normalizes cloud config defaults and explicit mode', () => {
         const normalized = CloudSyncUtils.normalizeCloudConfig({
             enabled: true,
             mode: 'local_only',
-            workerUrl: 'https://example-worker.workers.dev/',
+            workerUrl: 'https://example-worker.workers.dev/health',
             apiKey: '  token123  ',
             keyPrefix: '/custom/prefix/'
         });
@@ -33,6 +50,18 @@ describe('cloudSyncUtils', () => {
         expect(normalized.enabled).toBe(true);
     });
 
+    test('supports cloud_only mode normalization and local download toggle', () => {
+        const normalized = CloudSyncUtils.normalizeCloudConfig({
+            mode: 'cloud_only',
+            enabled: false
+        });
+
+        expect(normalized.mode).toBe('cloud_only');
+        expect(normalized.enabled).toBe(true);
+        expect(CloudSyncUtils.isCloudEnabled(normalized)).toBe(true);
+        expect(CloudSyncUtils.isLocalDownloadEnabled(normalized)).toBe(false);
+    });
+
     test('returns capped retry delay schedule', () => {
         expect(CloudSyncUtils.getRetryDelayMinutes(1)).toBe(1);
         expect(CloudSyncUtils.getRetryDelayMinutes(2)).toBe(5);
@@ -48,6 +77,41 @@ describe('cloudSyncUtils', () => {
         });
 
         expect(objectKey).toBe('grok-powertools/v1/users/user-123/media/2026-02-20_Auto/my-file.mp4');
+    });
+
+    test('UPLOAD_STAGES has expected stage identifiers', () => {
+        expect(CloudSyncUtils.UPLOAD_STAGES).toEqual({
+            mediaFetch: 'media-fetch',
+            presign: 'presign',
+            r2Put: 'r2-put',
+            healthCheck: 'health-check',
+            testUpload: 'test-upload'
+        });
+    });
+
+    test('isValidMediaSourceUrl accepts valid imagine-public.x.ai URLs', () => {
+        expect(CloudSyncUtils.isValidMediaSourceUrl('https://imagine-public.x.ai/images/abc.png')).toBe(true);
+        expect(CloudSyncUtils.isValidMediaSourceUrl('https://imagine-public.x.ai/videos/def.mp4')).toBe(true);
+    });
+
+    test('isValidMediaSourceUrl rejects HTTP, unknown domains, null/empty', () => {
+        expect(CloudSyncUtils.isValidMediaSourceUrl('http://imagine-public.x.ai/images/abc.png')).toBe(false);
+        expect(CloudSyncUtils.isValidMediaSourceUrl('https://example.com/image.png')).toBe(false);
+        expect(CloudSyncUtils.isValidMediaSourceUrl('https://grok.com/imagine')).toBe(false);
+        expect(CloudSyncUtils.isValidMediaSourceUrl(null)).toBe(false);
+        expect(CloudSyncUtils.isValidMediaSourceUrl('')).toBe(false);
+        expect(CloudSyncUtils.isValidMediaSourceUrl(undefined)).toBe(false);
+    });
+
+    test('buildTestUploadObjectKey returns correct users/_system/ path', () => {
+        const key = CloudSyncUtils.buildTestUploadObjectKey('grok-powertools/v1');
+        expect(key).toBe('grok-powertools/v1/users/_system/upload-test.txt');
+    });
+
+    test('buildTestUploadObjectKey sanitizes prefix', () => {
+        expect(CloudSyncUtils.buildTestUploadObjectKey('/leading/slashes/')).toBe('leading/slashes/users/_system/upload-test.txt');
+        expect(CloudSyncUtils.buildTestUploadObjectKey('')).toBe('grok-powertools/v1/users/_system/upload-test.txt');
+        expect(CloudSyncUtils.buildTestUploadObjectKey(null)).toBe('grok-powertools/v1/users/_system/upload-test.txt');
     });
 
     test('builds metadata object keys for latest snapshots and backfill manifests', () => {

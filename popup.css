@@ -378,6 +378,37 @@ input:checked + .slider:before {
     white-space: nowrap;
 }
 
+.cloud-test-text-success {
+    color: var(--success);
+    font-weight: 600;
+}
+
+.cloud-test-text-running {
+    color: var(--warning);
+    font-weight: 600;
+}
+
+.cloud-test-text-error {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.cloud-message-text {
+    max-width: 170px;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cloud-message-text.success {
+    color: var(--success);
+}
+
+.cloud-message-text.error {
+    color: var(--danger);
+}
+
 .cloud-actions-grid {
     margin-top: 10px;
     display: grid;

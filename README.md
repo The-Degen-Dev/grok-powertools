@@ -42,8 +42,8 @@ The floating panel appears in the bottom-right corner. You can drag it by the he
 
 ### Cloud Backup (Optional)
 1.  Open the extension popup.
-2.  Set **Backup Mode** to **Dual-write (Local + R2)**.
-3.  Enter your `https://<worker>.workers.dev` URL and API key.
+2.  Set **Backup Mode** to **Cloud only (R2)** or **Dual-write (Local + R2)**.
+3.  Enter your `https://<worker>.<subdomain>.workers.dev` URL and API key.
 4.  Click **Test Connection** and then run sync/backfill as needed.
 
 Full setup guide: [docs/CLOUD_R2_SETUP.md](docs/CLOUD_R2_SETUP.md)

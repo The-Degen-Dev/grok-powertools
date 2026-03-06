@@ -15,7 +15,7 @@
                 <div class="logo-icon"></div>
                 <h1>Grok Vault</h1>
             </div>
-            <div class="pill-badge">v1.2</div>
+            <div class="pill-badge">v0.2.0</div>
         </header>
 
         <!-- Main Status Card -->
@@ -94,6 +94,7 @@
                 <div class="select-input-wrapper cloud-input-wide">
                     <select id="cloudModeSelect">
                         <option value="local_only">Local only</option>
+                        <option value="cloud_only">Cloud only (R2)</option>
                         <option value="dual_write">Dual-write (Local + R2)</option>
                     </select>
                 </div>
@@ -126,14 +127,36 @@
                     <span id="cloudUnsyncedCount">0</span>
                 </div>
                 <div class="cloud-status-row">
+                    <span>Last Test</span>
+                    <span id="cloudLastTest">Never</span>
+                </div>
+                <div class="cloud-status-row">
+                    <span>Last Test Msg</span>
+                    <span id="cloudLastTestMessage">None</span>
+                </div>
+                <div class="cloud-status-row">
                     <span>Last Error</span>
                     <span id="cloudLastError">None</span>
                 </div>
             </div>
             <div class="cloud-actions-grid">
-                <button id="cloudTestBtn" class="btn btn-secondary">Test Connection</button>
+                <button id="cloudTestBtn" class="btn btn-secondary">Test Upload Pipeline</button>
                 <button id="cloudRetryBtn" class="btn btn-secondary">Retry Unsynced</button>
-                <button id="cloudBackfillBtn" class="btn btn-secondary">Run Backfill</button>
+                <button id="cloudBackfillBtn" class="btn btn-secondary" title="Uploads metadata only (prompts, history, processed IDs). Media files are not backfilled.">Run Backfill</button>
+                <button id="cloudClearBtn" class="btn btn-secondary">Clear Cloud Status</button>
+                <button id="cloudMediaBackupBtn" class="btn btn-primary"
+                    title="Scrapes ALL favorites and uploads every media file to R2. Navigate to Grok Favorites first.">Full Media Backup</button>
+            </div>
+            <div id="r2BackupProgress" class="cloud-status-box" style="display: none;">
+                <div class="cloud-status-row">
+                    <span>Backup</span>
+                    <span id="r2BackupStatus">Idle</span>
+                </div>
+                <div class="cloud-status-row">
+                    <span>Progress</span>
+                    <span id="r2BackupDetails">0 uploaded / 0 errors</span>
+                </div>
+                <button id="r2BackupStopBtn" class="btn btn-danger" style="display: none; margin-top: 6px;">Stop Backup</button>
             </div>
         </div>
 
@@ -151,6 +174,7 @@
             </ul>
         </div>
     </div>
+    <script src="cloudSyncUtils.js"></script>
     <script src="popup.js"></script>
 </body>
 

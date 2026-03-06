@@ -2,9 +2,21 @@
     const RETRY_SCHEDULE_MINUTES = [1, 5, 15, 60, 180, 720];
     const MAX_RETRY_ATTEMPTS = 6;
     const DEFAULT_KEY_PREFIX = 'grok-powertools/v1';
+    const WORKERS_DEV_SUFFIX = '.workers.dev';
+    const WORKERS_DEV_LABEL_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+    const CLOUD_MODES = {
+        localOnly: 'local_only',
+        cloudOnly: 'cloud_only',
+        dualWrite: 'dual_write'
+    };
+    const VALID_CLOUD_MODES = new Set([
+        CLOUD_MODES.localOnly,
+        CLOUD_MODES.cloudOnly,
+        CLOUD_MODES.dualWrite
+    ]);
     const DEFAULT_CLOUD_CONFIG = {
         enabled: false,
-        mode: 'local_only',
+        mode: CLOUD_MODES.localOnly,
         workerUrl: '',
         apiKey: '',
         keyPrefix: DEFAULT_KEY_PREFIX
@@ -30,7 +42,15 @@
 
     function normalizeWorkerUrl(workerUrl) {
         if (typeof workerUrl !== 'string') return '';
-        return workerUrl.trim().replace(/\/+$/, '');
+        const trimmed = workerUrl.trim();
+        if (!trimmed) return '';
+
+        try {
+            const parsed = new URL(trimmed);
+            return parsed.origin;
+        } catch (e) {
+            return trimmed.replace(/\/+$/, '');
+        }
     }
 
     function validateWorkersDevUrl(workerUrl) {
@@ -45,18 +65,26 @@
         }
 
         if (parsed.protocol !== 'https:') return false;
-        return /^[a-z0-9-]+\.workers\.dev$/i.test(parsed.hostname);
+        const hostname = parsed.hostname.toLowerCase();
+        if (hostname === 'workers.dev') return false;
+        if (!hostname.endsWith(WORKERS_DEV_SUFFIX)) return false;
+
+        const prefix = hostname.slice(0, -WORKERS_DEV_SUFFIX.length);
+        if (!prefix) return false;
+
+        const labels = prefix.split('.');
+        return labels.length > 0 && labels.every((label) => WORKERS_DEV_LABEL_REGEX.test(label));
     }
 
     function normalizeCloudConfig(config) {
         const merged = { ...DEFAULT_CLOUD_CONFIG, ...(config || {}) };
         const hasExplicitMode = !!(config && typeof config === 'object' && Object.prototype.hasOwnProperty.call(config, 'mode'));
         const explicitMode = hasExplicitMode
-            ? (merged.mode === 'dual_write' ? 'dual_write' : 'local_only')
+            ? (VALID_CLOUD_MODES.has(merged.mode) ? merged.mode : CLOUD_MODES.localOnly)
             : null;
         const legacyEnabled = !!(config && typeof config === 'object' && config.enabled);
-        const normalizedMode = explicitMode || (legacyEnabled ? 'dual_write' : 'local_only');
-        const enabled = normalizedMode === 'dual_write';
+        const normalizedMode = explicitMode || (legacyEnabled ? CLOUD_MODES.dualWrite : CLOUD_MODES.localOnly);
+        const enabled = normalizedMode !== CLOUD_MODES.localOnly;
         return {
             enabled,
             mode: normalizedMode,
@@ -137,7 +165,38 @@
 
     function isCloudEnabled(config) {
         const normalized = normalizeCloudConfig(config);
-        return normalized.enabled && normalized.mode === 'dual_write';
+        return normalized.enabled && normalized.mode !== CLOUD_MODES.localOnly;
+    }
+
+    function isLocalDownloadEnabled(config) {
+        const normalized = normalizeCloudConfig(config);
+        return normalized.mode !== CLOUD_MODES.cloudOnly;
+    }
+
+    const UPLOAD_STAGES = {
+        mediaFetch: 'media-fetch',
+        presign: 'presign',
+        r2Put: 'r2-put',
+        healthCheck: 'health-check',
+        testUpload: 'test-upload'
+    };
+
+    const KNOWN_MEDIA_HOSTS = ['imagine-public.x.ai'];
+
+    function isValidMediaSourceUrl(url) {
+        if (typeof url !== 'string' || !url) return false;
+        try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== 'https:') return false;
+            return KNOWN_MEDIA_HOSTS.includes(parsed.hostname.toLowerCase());
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function buildTestUploadObjectKey(keyPrefix) {
+        const prefix = sanitizeKeyPrefix(keyPrefix);
+        return `${prefix}/users/_system/upload-test.txt`;
     }
 
     function sanitizeUserId(userId) {
@@ -170,6 +229,11 @@
         DEFAULT_CLOUD_CONFIG,
         STORAGE_KEYS,
         METADATA_KIND_TO_FILENAME,
+        CLOUD_MODES,
+        UPLOAD_STAGES,
+        KNOWN_MEDIA_HOSTS,
+        isValidMediaSourceUrl,
+        buildTestUploadObjectKey,
         sanitizeKeyPrefix,
         normalizeWorkerUrl,
         validateWorkersDevUrl,
@@ -179,7 +243,8 @@
         buildMetadataObjectKey,
         getRetryDelayMinutes,
         detectContentTypeFromUrl,
-        isCloudEnabled
+        isCloudEnabled,
+        isLocalDownloadEnabled
     };
 
     if (typeof module !== 'undefined' && module.exports) {

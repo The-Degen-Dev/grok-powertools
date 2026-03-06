@@ -12,6 +12,130 @@ const SettingsDefaults = {
     devMode: false
 };
 
+const SAVED_PROMPT_TYPES = {
+    partial: 'partial',
+    full: 'full'
+};
+const SAVED_PROMPT_DELIMITER = ', ';
+
+function sanitizeSavedPromptText(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function sanitizeSavedPromptName(value, fallbackText = '') {
+    const trimmed = String(value || '').trim();
+    if (trimmed) return trimmed.slice(0, 80);
+    const fallback = sanitizeSavedPromptText(fallbackText);
+    return fallback ? fallback.slice(0, 40) : 'Untitled Prompt';
+}
+
+function normalizeSavedPromptType(value) {
+    return value === SAVED_PROMPT_TYPES.partial ? SAVED_PROMPT_TYPES.partial : SAVED_PROMPT_TYPES.full;
+}
+
+function legacySavedPromptId(now, index) {
+    return `saved_${now}_${index}`;
+}
+
+function createSavedPromptId() {
+    return `saved_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function normalizeSavedPrompts(raw, options = {}) {
+    const now = Number.isFinite(options.now) ? options.now : Date.now();
+    const input = Array.isArray(raw) ? raw : [];
+    const normalized = [];
+
+    input.forEach((entry, index) => {
+        const source = (entry && typeof entry === 'object')
+            ? entry
+            : { text: typeof entry === 'string' ? entry : '' };
+
+        const text = sanitizeSavedPromptText(source.text);
+        if (!text) return;
+
+        const type = normalizeSavedPromptType(source.type);
+        const createdAt = Number.isFinite(source.createdAt) && source.createdAt > 0 ? source.createdAt : now;
+        const updatedAt = Number.isFinite(source.updatedAt) && source.updatedAt > 0 ? source.updatedAt : createdAt;
+        const id = typeof source.id === 'string' && source.id.trim() ? source.id.trim() : legacySavedPromptId(now, index);
+        const name = sanitizeSavedPromptName(source.name, text);
+
+        normalized.push({
+            id,
+            name,
+            text,
+            type,
+            createdAt,
+            updatedAt
+        });
+    });
+
+    return normalized;
+}
+
+function filterSavedPrompts(prompts, type = SAVED_PROMPT_TYPES.partial, search = '') {
+    const targetType = normalizeSavedPromptType(type);
+    const query = String(search || '').trim().toLowerCase();
+    const list = Array.isArray(prompts) ? prompts : [];
+
+    return list.filter((item) => {
+        if (normalizeSavedPromptType(item.type) !== targetType) return false;
+        if (!query) return true;
+        const haystack = `${item.name || ''} ${item.text || ''}`.toLowerCase();
+        return haystack.includes(query);
+    });
+}
+
+function promptContainsToken(currentText, tokenText) {
+    const current = sanitizeSavedPromptText(currentText);
+    const token = sanitizeSavedPromptText(tokenText);
+    if (!current || !token) return false;
+    const tokenLc = token.toLowerCase();
+    return current
+        .split(',')
+        .map((part) => sanitizeSavedPromptText(part).toLowerCase())
+        .filter(Boolean)
+        .includes(tokenLc);
+}
+
+function mergePromptTextForAppend(currentText, snippetText, delimiter = SAVED_PROMPT_DELIMITER) {
+    const current = sanitizeSavedPromptText(currentText);
+    const snippet = sanitizeSavedPromptText(snippetText);
+    if (!snippet) return current;
+    if (!current) return snippet;
+    if (promptContainsToken(current, snippet)) return current;
+
+    const base = current.replace(/[,\s]+$/, '');
+    return `${base}${delimiter}${snippet}`;
+}
+
+function appendSnippetAtCursor(currentText, snippetText, start, end, delimiter = SAVED_PROMPT_DELIMITER) {
+    const text = String(currentText || '');
+    const snippet = sanitizeSavedPromptText(snippetText);
+    const safeStart = Number.isFinite(start) ? Math.max(0, Math.min(text.length, Math.floor(start))) : text.length;
+    const safeEnd = Number.isFinite(end)
+        ? Math.max(safeStart, Math.min(text.length, Math.floor(end)))
+        : safeStart;
+
+    if (!snippet) {
+        return { text, caret: safeStart };
+    }
+
+    if (promptContainsToken(text, snippet)) {
+        return { text, caret: safeStart };
+    }
+
+    const before = text.slice(0, safeStart).replace(/\s+$/, '');
+    const after = text.slice(safeEnd).replace(/^\s+/, '');
+    const needsLeftDelimiter = before.length > 0 && !/[,\n]$/.test(before);
+    const needsRightDelimiter = after.length > 0 && !/^[,\n]/.test(after);
+    const inserted = `${needsLeftDelimiter ? delimiter : ''}${snippet}${needsRightDelimiter ? delimiter : ''}`;
+    const nextText = `${before}${inserted}${after}`;
+    const caret = (before + (needsLeftDelimiter ? delimiter : '') + snippet).length;
+
+    return { text: nextText, caret };
+}
+
 // --- UTILS ---
 class ToastManager {
     constructor() {
@@ -169,6 +293,7 @@ class PromptHistoryManager {
         this.settingsManager = settingsManager;
         this.history = [];
         this.listeners = new Set();
+        this.lastContextWarningAt = 0;
         this.init();
         this.setupCapture();
     }
@@ -177,7 +302,7 @@ class PromptHistoryManager {
             const stored = await chrome.storage.local.get(['promptHistory']);
             if (stored.promptHistory) { this.history = stored.promptHistory; this.notify(); }
         } catch (e) {
-            console.warn('GPT: Extension context invalidated, cannot load history.');
+            this.warnContextInvalid('load history');
         }
     }
     setupCapture() {
@@ -273,9 +398,15 @@ class PromptHistoryManager {
         try {
             chrome.storage.local.set({ promptHistory: this.history });
         } catch (e) {
-            console.warn('GPT: Extension context invalidated, cannot save history.');
+            this.warnContextInvalid('save history');
         }
         this.notify();
+    }
+    warnContextInvalid(operation) {
+        const now = Date.now();
+        if (now - this.lastContextWarningAt < 30000) return;
+        this.lastContextWarningAt = now;
+        console.warn(`GPT: Extension context refreshed; skipped ${operation}. This is expected right after extension reloads.`);
     }
     clear() { this.history = []; this.save(); }
     subscribe(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
@@ -294,6 +425,9 @@ class GrokOverlay {
         this.logViewer = null;
         this.toast = new ToastManager();
         this.state = { minimized: false, width: 380, height: null };
+        this.savedPrompts = [];
+        this.savedPromptType = SAVED_PROMPT_TYPES.partial;
+        this.savedPromptSearch = '';
 
         if (typeof document !== 'undefined') {
             this.render();
@@ -400,11 +534,6 @@ class GrokOverlay {
                             <button id="gptPromptedBatchBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; margin-left:4px; background:#7c3aed; font-size:11px;">Prompted Batch</button>
                             <button id="gptBatchStopBtn" class="gpt-btn" style="flex:1; background:#f4212e; display:none; font-size:11px;">Stop Batch</button>
                         </div>
-                        <div id="gptBatchPromptRow" style="margin-top:6px; display:none;">
-                            <select id="gptBatchPromptSelect" class="gpt-input" style="font-size:11px; padding:4px;">
-                                <option value="">-- Select prompt for batch --</option>
-                            </select>
-                        </div>
                         <div class="gpt-row" style="margin-top:4px; font-size:10px; color:#71767b; display:none;" id="gptBatchStatus">
                             Batch Mode: Active
                         </div>
@@ -425,6 +554,13 @@ class GrokOverlay {
                         </div>
 
                         <div id="view-saved" style="display:none;">
+                            <div class="gpt-saved-toolbar">
+                                <div class="gpt-saved-type-tabs">
+                                    <button id="gptSavedTypePartial" class="gpt-tab gpt-tab-sm active">Partials</button>
+                                    <button id="gptSavedTypeFull" class="gpt-tab gpt-tab-sm">Full Prompts</button>
+                                </div>
+                                <input type="text" id="gptSavedSearch" class="gpt-history-search" placeholder="Search saved...">
+                            </div>
                             <div class="gpt-prompt-list" id="gptPromptList">
                                  <div style="font-size:11px; color:#71767b; width:100%; text-align:center; padding:8px;">No saved prompts</div>
                             </div>
@@ -585,12 +721,34 @@ class GrokOverlay {
         tabSaved.addEventListener('click', () => {
             tabSaved.classList.add('active'); tabHistory.classList.remove('active');
             viewSaved.style.display = 'block'; viewHistory.style.display = 'none';
+            this.renderSavedList();
         });
 
         const searchInput = this.el.querySelector('#gptHistorySearch');
         searchInput.addEventListener('input', (e) => {
             this.renderHistoryList(this.historyManager.history, e.target.value);
         });
+        const savedSearchInput = this.el.querySelector('#gptSavedSearch');
+        if (savedSearchInput) {
+            savedSearchInput.addEventListener('input', (e) => {
+                this.savedPromptSearch = e.target.value || '';
+                this.renderSavedList();
+            });
+        }
+        const savedPartialTab = this.el.querySelector('#gptSavedTypePartial');
+        const savedFullTab = this.el.querySelector('#gptSavedTypeFull');
+        if (savedPartialTab) {
+            savedPartialTab.addEventListener('click', () => {
+                this.savedPromptType = SAVED_PROMPT_TYPES.partial;
+                this.renderSavedList();
+            });
+        }
+        if (savedFullTab) {
+            savedFullTab.addEventListener('click', () => {
+                this.savedPromptType = SAVED_PROMPT_TYPES.full;
+                this.renderSavedList();
+            });
+        }
         this.el.querySelector('#gptClearHistoryBtn').addEventListener('click', () => {
             if (confirm('Clear all prompt history?')) this.historyManager.clear();
         });
@@ -619,20 +777,9 @@ class GrokOverlay {
             await this.retryManager.startBatch('quick');
         });
         this.el.querySelector('#gptPromptedBatchBtn').addEventListener('click', async () => {
-            const select = this.el.querySelector('#gptBatchPromptSelect');
-            let prompt = select ? select.value : '';
-            // Fallback: use Grok's visible prompt input (textarea on detail view, contenteditable on gallery)
+            const prompt = this.readCurrentPromptInput();
             if (!prompt) {
-                const ta = document.querySelector('textarea[aria-required="true"]');
-                const ce = document.querySelector('[contenteditable="true"]');
-                if (ta && ta.value && ta.value.trim().length > 0) {
-                    prompt = ta.value.trim();
-                } else if (ce && ce.textContent && ce.textContent.trim().length > 0) {
-                    prompt = ce.textContent.trim();
-                }
-            }
-            if (!prompt) {
-                this.toast.show('Enter a prompt in the text box or select one from the dropdown', 'error');
+                this.toast.show('Enter a prompt in the input bar before starting Prompted Batch', 'error');
                 return;
             }
             const videoGoal = Math.max(1, parseInt(this.el.querySelector('#gptVideoGoal').value, 10) || 1);
@@ -642,12 +789,7 @@ class GrokOverlay {
         this.el.querySelector('#gptBatchStopBtn').addEventListener('click', () => {
             this.retryManager.stopBatch();
         });
-        // Show/hide prompt selector when Prompted Batch is relevant
-        this.el.querySelector('#gptPromptedBatchBtn').addEventListener('mouseenter', () => {
-            this.populateBatchPromptSelect();
-            this.el.querySelector('#gptBatchPromptRow').style.display = 'block';
-        });
-        this.el.querySelector('#gptAddPromptBtn').addEventListener('click', () => this.saveCurrentPrompt());
+        this.el.querySelector('#gptAddPromptBtn').addEventListener('click', () => this.saveCurrentPrompt(this.savedPromptType));
 
         const bindInput = (id, key, type = 'int') => {
             this.el.querySelector('#' + id).addEventListener('change', (e) => {
@@ -741,19 +883,47 @@ class GrokOverlay {
 
     async loadSavedPrompts() {
         const stored = await chrome.storage.local.get(['savedPrompts']);
-        this.savedPrompts = stored.savedPrompts || [];
-        this.renderSavedList(this.savedPrompts);
+        const original = Array.isArray(stored.savedPrompts) ? stored.savedPrompts : [];
+        const normalized = normalizeSavedPrompts(original);
+        const migrated = JSON.stringify(original) !== JSON.stringify(normalized);
+
+        this.savedPrompts = normalized;
+        if (migrated) {
+            await chrome.storage.local.set({ savedPrompts: normalized });
+        }
+        this.renderSavedList();
     }
-    renderSavedList(prompts) {
-        this.savedPrompts = prompts;
+
+    renderSavedList(prompts = this.savedPrompts) {
+        this.savedPrompts = normalizeSavedPrompts(prompts);
         const list = this.el.querySelector('#gptPromptList');
+        const searchInput = this.el.querySelector('#gptSavedSearch');
+        const addBtn = this.el.querySelector('#gptAddPromptBtn');
+        const partialTab = this.el.querySelector('#gptSavedTypePartial');
+        const fullTab = this.el.querySelector('#gptSavedTypeFull');
+        if (!list) return;
+
+        if (searchInput && searchInput.value !== this.savedPromptSearch) {
+            searchInput.value = this.savedPromptSearch;
+        }
+        if (addBtn) {
+            addBtn.textContent = this.savedPromptType === SAVED_PROMPT_TYPES.partial
+                ? '+ Add Prompt Partial'
+                : '+ Save Full Prompt';
+        }
+        if (partialTab) partialTab.classList.toggle('active', this.savedPromptType === SAVED_PROMPT_TYPES.partial);
+        if (fullTab) fullTab.classList.toggle('active', this.savedPromptType === SAVED_PROMPT_TYPES.full);
+
+        const filtered = filterSavedPrompts(this.savedPrompts, this.savedPromptType, this.savedPromptSearch);
         list.innerHTML = '';
-        if (prompts.length === 0) {
+        if (filtered.length === 0) {
             const emptyState = document.createElement('div');
             emptyState.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px;';
 
             const msg = document.createElement('div');
-            msg.textContent = 'No saved prompts';
+            msg.textContent = this.savedPromptType === SAVED_PROMPT_TYPES.partial
+                ? 'No saved partials'
+                : 'No saved full prompts';
             msg.style.cssText = 'font-size:11px; color:#71767b;';
 
             const loadBtn = document.createElement('button');
@@ -768,28 +938,44 @@ class GrokOverlay {
             list.appendChild(emptyState);
             return;
         }
-        prompts.forEach((p, idx) => {
-            const tag = document.createElement('div');
-            tag.className = 'gpt-prompt-tag';
-            tag.textContent = p.name || p.text.substring(0, 15);
-            tag.title = p.text;
-            tag.onclick = (e) => {
-                if (e.target.classList.contains('gpt-prompt-delete')) return;
-                this.injectPrompt(p.text);
+
+        filtered.forEach((item) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'gpt-saved-item';
+
+            const main = document.createElement('button');
+            main.className = 'gpt-prompt-tag gpt-saved-main';
+            main.textContent = item.name || item.text.substring(0, 24);
+            main.title = item.text;
+            main.onclick = () => this.injectPrompt(item.text, 'append');
+
+            const actions = document.createElement('div');
+            actions.className = 'gpt-prompt-actions';
+
+            const edit = document.createElement('button');
+            edit.className = 'gpt-prompt-action';
+            edit.textContent = 'Edit';
+            edit.onclick = (e) => {
+                e.stopPropagation();
+                this.editSavedPrompt(item.id);
             };
-            const del = document.createElement('div');
-            del.className = 'gpt-prompt-delete';
-            del.textContent = 'x';
+
+            const del = document.createElement('button');
+            del.className = 'gpt-prompt-action danger';
+            del.textContent = 'Delete';
             del.onclick = (e) => {
                 e.stopPropagation();
-                prompts.splice(idx, 1);
-                chrome.storage.local.set({ savedPrompts: prompts });
-                this.renderSavedList(prompts);
+                this.deleteSavedPrompt(item.id);
             };
-            tag.appendChild(del);
-            list.appendChild(tag);
+
+            actions.appendChild(edit);
+            actions.appendChild(del);
+            wrapper.appendChild(main);
+            wrapper.appendChild(actions);
+            list.appendChild(wrapper);
         });
     }
+
     renderHistoryList(history, search = '') {
         const list = this.el.querySelector('#gptHistoryList');
         if (!list) return;
@@ -806,7 +992,7 @@ class GrokOverlay {
         filtered.forEach(h => {
             const item = document.createElement('div');
             item.className = 'gpt-history-item';
-            item.onclick = () => this.injectPrompt(h.text);
+            item.onclick = () => this.injectPrompt(h.text, 'replace');
 
             const timeStr = new Date(h.timestamp).toLocaleTimeString();
             const typeIcon = h.type === 'video' ? '🎥' : '🖼️';
@@ -822,82 +1008,122 @@ class GrokOverlay {
             list.appendChild(item);
         });
     }
-    async saveCurrentPrompt() {
-        const ta = document.querySelector('textarea[aria-required="true"]');
-        const ce = document.querySelector('[contenteditable="true"]');
-        const text = (ta && ta.value && ta.value.trim()) || (ce && ce.textContent && ce.textContent.trim()) || '';
-        if (text.length > 0) {
-            const name = prompt('Name for this prompt partial:');
-            if (name) {
-                const s = await chrome.storage.local.get(['savedPrompts']);
-                const p = s.savedPrompts || [];
-                p.push({ name, text });
-                await chrome.storage.local.set({ savedPrompts: p });
-                this.renderSavedList(p);
-                this.toast.show('Prompt Saved', 'success');
-            }
-        } else {
+
+    async persistSavedPrompts(nextPrompts) {
+        const normalized = normalizeSavedPrompts(nextPrompts);
+        this.savedPrompts = normalized;
+        await chrome.storage.local.set({ savedPrompts: normalized });
+        this.renderSavedList();
+    }
+
+    async saveCurrentPrompt(type = SAVED_PROMPT_TYPES.partial) {
+        const text = sanitizeSavedPromptText(this.readCurrentPromptInput());
+        if (!text) {
             this.toast.show('Input is empty!', 'error');
+            return;
         }
+
+        const normalizedType = normalizeSavedPromptType(type);
+        const defaultName = sanitizeSavedPromptName('', text);
+        const label = normalizedType === SAVED_PROMPT_TYPES.partial ? 'prompt partial' : 'full prompt';
+        const nameInput = prompt(`Name for this ${label}:`, defaultName);
+        if (nameInput === null) return;
+
+        const now = Date.now();
+        const item = {
+            id: createSavedPromptId(),
+            name: sanitizeSavedPromptName(nameInput, text),
+            text,
+            type: normalizedType,
+            createdAt: now,
+            updatedAt: now
+        };
+
+        await this.persistSavedPrompts([...this.savedPrompts, item]);
+        this.toast.show(normalizedType === SAVED_PROMPT_TYPES.partial ? 'Partial Saved' : 'Prompt Saved', 'success');
+    }
+
+    async editSavedPrompt(itemId) {
+        const index = this.savedPrompts.findIndex((item) => item.id === itemId);
+        if (index === -1) return;
+
+        const current = this.savedPrompts[index];
+        const nextName = prompt('Edit saved prompt name:', current.name);
+        if (nextName === null) return;
+        const nextTextRaw = prompt('Edit saved prompt text:', current.text);
+        if (nextTextRaw === null) return;
+        const nextText = sanitizeSavedPromptText(nextTextRaw);
+        if (!nextText) {
+            this.toast.show('Prompt text cannot be empty', 'error');
+            return;
+        }
+
+        const nextTypeRaw = prompt('Type ("partial" or "full"):', current.type);
+        if (nextTypeRaw === null) return;
+
+        const nextType = normalizeSavedPromptType(String(nextTypeRaw || '').trim().toLowerCase());
+        const updated = {
+            ...current,
+            name: sanitizeSavedPromptName(nextName, nextText),
+            text: nextText,
+            type: nextType,
+            updatedAt: Date.now()
+        };
+
+        const next = [...this.savedPrompts];
+        next[index] = updated;
+        await this.persistSavedPrompts(next);
+        this.toast.show('Saved prompt updated', 'success');
+    }
+
+    async deleteSavedPrompt(itemId) {
+        const target = this.savedPrompts.find((item) => item.id === itemId);
+        if (!target) return;
+        if (!confirm(`Delete "${target.name}"?`)) return;
+
+        const next = this.savedPrompts.filter((item) => item.id !== itemId);
+        await this.persistSavedPrompts(next);
+        this.toast.show('Saved prompt deleted', 'success');
     }
 
     async loadExamplePrompts() {
         if (!confirm('Load example prompts?')) return;
+        const now = Date.now();
         const examples = [
             {
-                name: "World Cup Streaker (T2I)",
-                text: "A photograph taken at a soccer World Cup final match, capturing a fully nude blonde petite teen woman with very large natural pendulous breasts, invading the soccer field during the match, security guards chasing her on the field. High detailed World Cup effects, photograph taken from a smartphone in the stands, deep realistic shadows, lens flare."
+                id: createSavedPromptId(),
+                name: 'Cinematic Camera Style',
+                text: 'cinematic lighting, dramatic shadows, 35mm lens look',
+                type: SAVED_PROMPT_TYPES.partial,
+                createdAt: now,
+                updatedAt: now
             },
             {
-                name: "Field Chase (I2V)",
-                text: "Playfully running around the filed, security guards chasing and trying to arrest her. Perfect bouncing physics"
+                id: createSavedPromptId(),
+                name: 'Loopable Motion Prompt',
+                text: 'smooth dolly-in movement, subtle subject motion, seamless loop ending',
+                type: SAVED_PROMPT_TYPES.full,
+                createdAt: now,
+                updatedAt: now
             }
         ];
-
-        const s = await chrome.storage.local.get(['savedPrompts']);
-        const current = s.savedPrompts || [];
-        const combined = [...current, ...examples];
-
-        await chrome.storage.local.set({ savedPrompts: combined });
-        this.renderSavedList(combined);
+        await this.persistSavedPrompts([...this.savedPrompts, ...examples]);
         this.toast.show('Examples Loaded', 'success');
     }
-    populateBatchPromptSelect() {
-        const select = this.el.querySelector('#gptBatchPromptSelect');
-        if (!select) return;
-        const current = select.value;
-        // Clear existing options safely
-        while (select.firstChild) select.removeChild(select.firstChild);
-        const defaultOpt = document.createElement('option');
-        defaultOpt.value = '';
-        defaultOpt.textContent = '-- Select prompt for batch --';
-        select.appendChild(defaultOpt);
-        // Add saved prompts
-        const saved = this.savedPrompts || [];
-        saved.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.text;
-            opt.textContent = p.name || p.text.substring(0, 40);
-            select.appendChild(opt);
-        });
-        // Add recent history
-        const history = this.historyManager ? this.historyManager.history.slice(0, 10) : [];
-        if (history.length > 0 && saved.length > 0) {
-            const divider = document.createElement('option');
-            divider.disabled = true;
-            divider.textContent = '\u2500\u2500 Recent History \u2500\u2500';
-            select.appendChild(divider);
-        }
-        history.forEach(h => {
-            const opt = document.createElement('option');
-            opt.value = h.text;
-            opt.textContent = h.text.substring(0, 40) + (h.text.length > 40 ? '...' : '');
-            select.appendChild(opt);
-        });
-        if (current) select.value = current;
+
+    readCurrentPromptInput() {
+        const ta = document.querySelector('textarea[aria-required="true"]');
+        if (ta && ta.value && ta.value.trim()) return ta.value.trim();
+        const ce = document.querySelector('[contenteditable="true"]');
+        if (ce && ce.textContent && ce.textContent.trim()) return ce.textContent.trim();
+        return '';
     }
 
-    injectPrompt(text) {
+    injectPrompt(text, mode = 'replace') {
+        if (mode === 'append') {
+            return this.appendPromptText(text);
+        }
+
         const ta = document.querySelector('textarea[aria-required="true"]');
         if (ta) {
             ta.focus();
@@ -916,6 +1142,96 @@ class GrokOverlay {
                 ce.textContent = text;
                 ce.dispatchEvent(new Event('input', { bubbles: true }));
             }
+        }
+    }
+
+    appendPromptText(text) {
+        const snippet = sanitizeSavedPromptText(text);
+        if (!snippet) return false;
+
+        const ta = document.querySelector('textarea[aria-required="true"]');
+        if (ta) {
+            ta.focus();
+            const start = Number.isFinite(ta.selectionStart) ? ta.selectionStart : ta.value.length;
+            const end = Number.isFinite(ta.selectionEnd) ? ta.selectionEnd : start;
+            const next = appendSnippetAtCursor(ta.value, snippet, start, end, SAVED_PROMPT_DELIMITER);
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            setter.call(ta, next.text);
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            ta.setSelectionRange(next.caret, next.caret);
+            return true;
+        }
+
+        const ce = document.querySelector('[contenteditable="true"]');
+        if (ce) {
+            ce.focus();
+            const offsets = this.getContentEditableSelectionOffsets(ce);
+            const start = offsets ? offsets.start : (ce.textContent || '').length;
+            const end = offsets ? offsets.end : start;
+            const next = appendSnippetAtCursor(ce.textContent || '', snippet, start, end, SAVED_PROMPT_DELIMITER);
+            ce.textContent = next.text;
+            this.setContentEditableCaret(ce, next.caret);
+            ce.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+
+        return false;
+    }
+
+    getContentEditableSelectionOffsets(element) {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return null;
+        const range = selection.getRangeAt(0);
+        if (!element.contains(range.startContainer) || !element.contains(range.endContainer)) {
+            return null;
+        }
+
+        const startRange = range.cloneRange();
+        startRange.selectNodeContents(element);
+        startRange.setEnd(range.startContainer, range.startOffset);
+
+        const endRange = range.cloneRange();
+        endRange.selectNodeContents(element);
+        endRange.setEnd(range.endContainer, range.endOffset);
+
+        return {
+            start: startRange.toString().length,
+            end: endRange.toString().length
+        };
+    }
+
+    setContentEditableCaret(element, offset) {
+        const targetOffset = Math.max(0, Number.isFinite(offset) ? Math.floor(offset) : 0);
+        const range = document.createRange();
+        const selection = window.getSelection();
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+
+        let remaining = targetOffset;
+        let node = walker.nextNode();
+        if (!node) {
+            node = document.createTextNode('');
+            element.appendChild(node);
+        }
+
+        while (node) {
+            const length = node.textContent.length;
+            if (remaining <= length) {
+                range.setStart(node, remaining);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                return;
+            }
+            remaining -= length;
+            const next = walker.nextNode();
+            if (!next) {
+                range.setStart(node, length);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                return;
+            }
+            node = next;
         }
     }
 }
@@ -1495,14 +1811,12 @@ class VideoRetryManager {
         const promptedBtn = this.overlay.el.querySelector('#gptPromptedBatchBtn');
         const stopBtn = this.overlay.el.querySelector('#gptBatchStopBtn');
         const batchStatus = this.overlay.el.querySelector('#gptBatchStatus');
-        const promptRow = this.overlay.el.querySelector('#gptBatchPromptRow');
         const galleryLimitRow = this.overlay.el.querySelector('#gptGalleryLimitRow');
 
         if (quickBtn) quickBtn.style.display = running ? 'none' : '';
         if (promptedBtn) promptedBtn.style.display = running ? 'none' : '';
         if (stopBtn) stopBtn.style.display = running ? '' : 'none';
         if (batchStatus) batchStatus.style.display = running ? 'block' : 'none';
-        if (promptRow) promptRow.style.display = running ? 'none' : '';
         if (galleryLimitRow) galleryLimitRow.style.display = running ? 'none' : '';
         if (batchStatus) {
             const ctx = this.batchContext ? ` [${this.batchContext}]` : '';
@@ -1668,6 +1982,9 @@ class GrokScraper {
         this.overlay = null;
         this.processedIds = new Set();
         this.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
+        this.backupMode = false;
+        this.backupStats = { totalSeen: 0, uploaded: 0, errors: 0 };
+        this._backupVisited = new Set();
         this.Config = { actionWait: 2000, navWait: 2000 };
         this.init();
     }
@@ -1717,7 +2034,23 @@ class GrokScraper {
             } else if (request.action === 'ABORT_SCRAPE') {
                 this.stop();
                 sendResponse({ status: 'stopped' });
+            } else if (request.action === 'INIT_R2_BACKUP') {
+                this.startBackupMode();
+                sendResponse({ status: 'started' });
+            } else if (request.action === 'ABORT_R2_BACKUP') {
+                this.stopBackupMode();
+                sendResponse({ status: 'stopped' });
             }
+        });
+
+        // Page-world bridge: allows triggering actions via DOM CustomEvents
+        // (useful for browser automation tools that run in the page context)
+        document.addEventListener('grok-powertools-command', (e) => {
+            const action = e.detail?.action;
+            if (action === 'INIT_R2_BACKUP') this.startBackupMode();
+            else if (action === 'ABORT_R2_BACKUP') this.stopBackupMode();
+            else if (action === 'INIT_SCRAPE') this.start();
+            else if (action === 'ABORT_SCRAPE') this.stop();
         });
     }
 
@@ -1736,6 +2069,47 @@ class GrokScraper {
         await chrome.storage.local.set({ scraperState: 'idle' });
         this.log('Scraping stopped.', 'neutral');
         this.state.isRunning = false;
+    }
+
+    async startBackupMode() {
+        // Validate cloud config before starting
+        try {
+            const validation = await new Promise((resolve) => {
+                chrome.runtime.sendMessage({ action: 'VALIDATE_CLOUD_CONFIG' }, resolve);
+            });
+            if (!validation?.valid) {
+                this.log(`R2 Backup aborted: ${validation?.error || 'Cloud config invalid.'}`, 'error');
+                console.error('R2 Backup config validation failed:', validation?.error);
+                return;
+            }
+        } catch (e) {
+            this.log('R2 Backup aborted: Could not validate cloud config.', 'error');
+            return;
+        }
+
+        this.backupMode = true;
+        this.backupStats = { totalSeen: 0, uploaded: 0, errors: 0, startedAt: Date.now() };
+        this._backupVisited = new Set();
+        this.state.isRunning = true;
+        this.state.currentIndex = 0;
+        await chrome.storage.local.set({
+            scraperState: 'running',
+            currentIndex: 0,
+            r2BackupState: { isRunning: true, ...this.backupStats }
+        });
+        this.log('R2 Full Media Backup started.', 'success');
+        this.determineModeAndExecute();
+    }
+
+    async stopBackupMode() {
+        this.backupMode = false;
+        this.state.isRunning = false;
+        await chrome.storage.local.set({
+            scraperState: 'idle',
+            r2BackupState: { isRunning: false, ...this.backupStats }
+        });
+        this.log(`R2 Backup stopped. Uploaded: ${this.backupStats.uploaded}, Errors: ${this.backupStats.errors}`, 'neutral');
+        chrome.runtime.sendMessage({ action: 'R2_BACKUP_COMPLETE', stats: this.backupStats }).catch(() => {});
     }
 
     async determineModeAndExecute() {
@@ -1802,7 +2176,7 @@ class GrokScraper {
 
         const cardSelector = 'img[alt="Generated image"], [role="listitem"] img';
         let retries = 0;
-        const MAX_RETRIES = 50;
+        const MAX_RETRIES = this.backupMode ? 100 : 50;
 
         await this.sleep(1000);
 
@@ -1841,7 +2215,8 @@ class GrokScraper {
             for (let i = 0; i < visualItems.length; i++) {
                 const itemObj = visualItems[i];
                 const cleanId = this.getCleanId(itemObj.src);
-                if (cleanId && !this.processedIds.has(cleanId)) {
+                const skipSet = this.backupMode ? this._backupVisited : this.processedIds;
+                if (cleanId && !skipSet.has(cleanId)) {
                     targetItem = itemObj.element;
                     this.log(`new item: ...${cleanId.slice(-6)}`, 'success');
                     await this.processItem(targetItem, cleanId);
@@ -1860,8 +2235,13 @@ class GrokScraper {
 
         if (retries >= MAX_RETRIES) {
             if (!this.state.isRunning) return;
-            this.log('Stopped: No new items found.', 'warning');
-            this.stop();
+            if (this.backupMode) {
+                this.log(`Backup complete. ${this.backupStats.uploaded} uploaded, ${this.backupStats.errors} errors.`, 'success');
+                this.stopBackupMode();
+            } else {
+                this.log('Stopped: No new items found.', 'warning');
+                this.stop();
+            }
         }
     }
 
@@ -1881,9 +2261,9 @@ class GrokScraper {
         const storedState = await chrome.storage.local.get(['currentItemId']);
         let currentId = storedState.currentItemId;
         if (!currentId) {
-            const mediaEl = document.querySelector('img[alt="Generated image"]') || document.querySelector('video');
+            const mediaEl = document.querySelector('img[src*="imagine-public.x.ai"]') || document.querySelector('video[src]') || document.querySelector('video');
             if (mediaEl) {
-                const src = mediaEl.src || (mediaEl.querySelector('source') ? mediaEl.querySelector('source').src : null);
+                const src = mediaEl.src || mediaEl.currentSrc;
                 currentId = this.getCleanId(src);
             }
         }
@@ -1891,6 +2271,15 @@ class GrokScraper {
         if (currentId) {
             this.processedIds.add(currentId);
             await chrome.storage.local.set({ processedIds: Array.from(this.processedIds) });
+
+            if (this.backupMode) {
+                this._backupVisited.add(currentId);
+                this.backupStats.totalSeen++;
+                chrome.runtime.sendMessage({
+                    action: 'R2_BACKUP_PROGRESS',
+                    stats: this.backupStats
+                }).catch(() => {});
+            }
         }
 
         // MULTI-VIDEO SUPPORT
@@ -1953,8 +2342,47 @@ class GrokScraper {
         }
     }
 
+    async performBackupUpload() {
+        if (!this.state.isRunning) return;
+
+        const mediaEl = document.querySelector('img[src*="imagine-public.x.ai"]')
+            || document.querySelector('video[src]')
+            || document.querySelector('video');
+        const src = mediaEl?.src || mediaEl?.currentSrc;
+
+        if (!src) {
+            this.backupStats.errors++;
+            this.log('No media element found for backup.', 'error');
+            return;
+        }
+
+        const alreadyLocal = this.processedIds.has(this.getCleanId(src));
+
+        try {
+            const response = await new Promise((resolve) => {
+                chrome.runtime.sendMessage({
+                    action: 'R2_BACKUP_UPLOAD',
+                    url: src,
+                    skipLocalDownload: alreadyLocal
+                }, resolve);
+            });
+            if (response?.status === 'queued') {
+                this.backupStats.uploaded++;
+                this.log(`Queued for R2: ...${src.slice(-20)}`, 'success');
+            } else {
+                this.backupStats.errors++;
+                this.log(`Backup error: ${response?.error || 'unknown'}`, 'error');
+            }
+        } catch (e) {
+            this.backupStats.errors++;
+        }
+
+        await this.sleep(this.Config.actionWait);
+    }
+
     async performDownload() {
         if (!this.state.isRunning) return;
+        if (this.backupMode) return this.performBackupUpload();
 
         // Click Download
         let downloadBtn = null;
@@ -2012,5 +2440,20 @@ if (typeof module === 'undefined') {
     retry.overlay = overlay;
     scraper.setOverlay(overlay);
 } else {
-    module.exports = { SettingsManager, GrokOverlay, VideoRetryManager, GrokScraper, PromptHistoryManager };
+    module.exports = {
+        SettingsManager,
+        GrokOverlay,
+        VideoRetryManager,
+        GrokScraper,
+        PromptHistoryManager,
+        SAVED_PROMPT_TYPES,
+        SAVED_PROMPT_DELIMITER,
+        sanitizeSavedPromptText,
+        sanitizeSavedPromptName,
+        normalizeSavedPrompts,
+        filterSavedPrompts,
+        promptContainsToken,
+        mergePromptTextForAppend,
+        appendSnippetAtCursor
+    };
 }

@@ -12,6 +12,11 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
     : {
         RETRY_SCHEDULE_MINUTES: [1, 5, 15, 60, 180, 720],
         MAX_RETRY_ATTEMPTS: 6,
+        CLOUD_MODES: {
+            localOnly: 'local_only',
+            cloudOnly: 'cloud_only',
+            dualWrite: 'dual_write'
+        },
         DEFAULT_CLOUD_CONFIG: {
             enabled: false,
             mode: 'local_only',
@@ -26,22 +31,47 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
         },
         normalizeCloudConfig(config) {
             const merged = { ...this.DEFAULT_CLOUD_CONFIG, ...(config || {}) };
+            const validModes = new Set([
+                this.CLOUD_MODES.localOnly,
+                this.CLOUD_MODES.cloudOnly,
+                this.CLOUD_MODES.dualWrite
+            ]);
             const hasExplicitMode = !!(config && typeof config === 'object' && Object.prototype.hasOwnProperty.call(config, 'mode'));
             const explicitMode = hasExplicitMode
-                ? (merged.mode === 'dual_write' ? 'dual_write' : 'local_only')
+                ? (validModes.has(merged.mode) ? merged.mode : this.CLOUD_MODES.localOnly)
                 : null;
             const legacyEnabled = !!(config && typeof config === 'object' && config.enabled);
-            merged.mode = explicitMode || (legacyEnabled ? 'dual_write' : 'local_only');
-            merged.enabled = merged.mode === 'dual_write';
-            merged.workerUrl = String(merged.workerUrl || '').trim().replace(/\/+$/, '');
+            merged.mode = explicitMode || (legacyEnabled ? this.CLOUD_MODES.dualWrite : this.CLOUD_MODES.localOnly);
+            merged.enabled = merged.mode !== this.CLOUD_MODES.localOnly;
+            merged.workerUrl = this.normalizeWorkerUrl(merged.workerUrl);
             merged.apiKey = String(merged.apiKey || '').trim();
             merged.keyPrefix = String(merged.keyPrefix || 'grok-powertools/v1').trim().replace(/^\/+/, '').replace(/\/+$/, '');
             return merged;
         },
+        normalizeWorkerUrl(value) {
+            const trimmed = String(value || '').trim();
+            if (!trimmed) return '';
+
+            try {
+                return new URL(trimmed).origin;
+            } catch (e) {
+                return trimmed.replace(/\/+$/, '');
+            }
+        },
         validateWorkersDevUrl(value) {
             try {
-                const parsed = new URL(String(value || '').trim());
-                return parsed.protocol === 'https:' && /^[a-z0-9-]+\.workers\.dev$/i.test(parsed.hostname);
+                const parsed = new URL(this.normalizeWorkerUrl(value));
+                if (parsed.protocol !== 'https:') return false;
+
+                const hostname = parsed.hostname.toLowerCase();
+                if (hostname === 'workers.dev') return false;
+                if (!hostname.endsWith('.workers.dev')) return false;
+
+                const prefix = hostname.slice(0, -'.workers.dev'.length);
+                if (!prefix) return false;
+
+                const labels = prefix.split('.');
+                return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
             } catch (e) {
                 return false;
             }
@@ -66,13 +96,19 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             return this.RETRY_SCHEDULE_MINUTES[index];
         },
         isCloudEnabled(config) {
-            return !!config.enabled && config.mode === 'dual_write';
+            const normalized = this.normalizeCloudConfig(config);
+            return !!normalized.enabled && normalized.mode !== this.CLOUD_MODES.localOnly;
+        },
+        isLocalDownloadEnabled(config) {
+            const normalized = this.normalizeCloudConfig(config);
+            return normalized.mode !== this.CLOUD_MODES.cloudOnly;
         }
     };
 
 console.log('Grok Downloader Background Service Started');
 
 let isScraping = false;
+let isR2Backup = false;
 let currentTabId = null;
 const MAX_LOGS = 100;
 const CLOUD_ALARM_NAME = 'gptCloudRetry';
@@ -88,7 +124,10 @@ let cloudSyncState = {
     lastError: null,
     lastSyncAt: null,
     retryScheduledAt: null,
-    processing: false
+    processing: false,
+    lastTestAt: null,
+    lastTestResult: null,
+    lastTestMessage: null
 };
 let cloudMetadataTimer = null;
 let pendingMetadataKinds = new Set();
@@ -125,11 +164,23 @@ function makeQueueId(prefix = 'queue') {
 function emitCloudStatus() {
     chrome.runtime.sendMessage({
         action: 'UPDATE_CLOUD_STATUS',
-        state: {
-            ...cloudSyncState,
-            unsyncedCount: cloudSyncQueue.length
-        }
+        state: getCloudStatusSnapshot()
     }).catch(() => { });
+}
+
+function getCloudStatusSnapshot() {
+    return {
+        ...cloudSyncState,
+        unsyncedCount: cloudSyncQueue.length
+    };
+}
+
+function getCloudTestTelemetry() {
+    return {
+        lastTestAt: cloudSyncState.lastTestAt,
+        lastTestResult: cloudSyncState.lastTestResult,
+        lastTestMessage: cloudSyncState.lastTestMessage
+    };
 }
 
 async function persistCloudState() {
@@ -160,7 +211,7 @@ function getCloudValidationError(config) {
         return 'Cloud mode is disabled.';
     }
     if (!CloudSync.validateWorkersDevUrl(config.workerUrl)) {
-        return 'Worker URL must be https://<name>.workers.dev';
+        return 'Worker URL must be https://<worker>.<subdomain>.workers.dev';
     }
     if (!config.apiKey) {
         return 'API key is required.';
@@ -175,26 +226,60 @@ async function testCloudConnection(configOverride) {
 
     const validationError = getCloudValidationError(baseConfig);
     if (validationError) {
-        return { ok: false, error: validationError };
+        return { ok: false, error: validationError, errorSource: 'validation' };
     }
 
-    const response = await fetch(`${baseConfig.workerUrl}/health`, {
-        method: 'GET',
-        headers: {
-            'x-gpt-api-key': baseConfig.apiKey
+    // Stage 1: Health check
+    let healthData;
+    try {
+        const response = await fetch(`${baseConfig.workerUrl}/health`, {
+            method: 'GET',
+            headers: { 'x-gpt-api-key': baseConfig.apiKey }
+        });
+        if (!response.ok) {
+            const detail = await response.text().catch(() => 'Unknown response');
+            throw new Error(`HTTP ${response.status}: ${detail}`);
         }
-    });
-
-    if (!response.ok) {
-        const detail = await response.text().catch(() => 'Unknown response');
-        throw new Error(`Health check failed (${response.status}): ${detail}`);
+        healthData = await response.json();
+    } catch (e) {
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.healthCheck}] ${e.message}`);
     }
 
-    const data = await response.json();
+    // Stage 2: Presign test
+    const testObjectKey = CloudSync.buildTestUploadObjectKey(baseConfig.keyPrefix);
+    const testBlob = new Blob(['upload-pipeline-test'], { type: 'text/plain' });
+    let presigned;
+    try {
+        presigned = await requestPresignedUrl(baseConfig, {
+            objectKey: testObjectKey,
+            contentType: 'text/plain'
+        }, testBlob.size);
+    } catch (e) {
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
+    }
+
+    // Stage 3: R2 PUT test
+    try {
+        const uploadHeaders = { ...(presigned.headers || {}), 'Content-Type': 'text/plain' };
+        const uploadResponse = await fetch(presigned.uploadUrl, {
+            method: presigned.method || 'PUT',
+            headers: uploadHeaders,
+            body: testBlob
+        });
+        if (!uploadResponse.ok) {
+            const detail = await uploadResponse.text().catch(() => 'Unknown upload error');
+            throw new Error(`HTTP ${uploadResponse.status}: ${detail}`);
+        }
+    } catch (e) {
+        if (e.message.startsWith(`[${CloudSync.UPLOAD_STAGES.testUpload}]`)) throw e;
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.testUpload}] ${e.message}`);
+    }
+
     return {
-        ok: !!data.ok,
-        service: data.service,
-        now: data.now
+        ok: true,
+        testUpload: true,
+        service: healthData.service,
+        now: healthData.now
     };
 }
 
@@ -204,6 +289,23 @@ function updateCloudError(errorMessage) {
 
 function clearCloudError() {
     cloudSyncState.lastError = null;
+}
+
+function setCloudTestTelemetry(result, message) {
+    cloudSyncState.lastTestAt = new Date().toISOString();
+    cloudSyncState.lastTestResult = result || null;
+    cloudSyncState.lastTestMessage = message || null;
+}
+
+async function clearCloudUiStatus() {
+    cloudSyncState.lastError = null;
+    cloudSyncState.lastTestAt = null;
+    cloudSyncState.lastTestResult = null;
+    cloudSyncState.lastTestMessage = null;
+
+    await chrome.storage.local.set({ activityLogs: [] });
+    chrome.runtime.sendMessage({ action: 'UPDATE_LOGS', logs: [] }).catch(() => { });
+    await persistCloudState();
 }
 
 async function scheduleCloudRetryAlarm() {
@@ -256,7 +358,7 @@ async function enqueueCloudItem(queueItem, dedupeKey) {
 
 async function enqueueCloudMediaUpload(sourceUrl, finalPath) {
     const config = await getCloudConfig();
-    if (!CloudSync.isCloudEnabled(config)) return;
+    if (!CloudSync.isCloudEnabled(config)) return false;
 
     const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
     const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
@@ -276,10 +378,14 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath) {
     };
 
     await enqueueCloudItem(queueItem, `media:${objectKey}`);
-    processCloudQueue('media-enqueued').catch((e) => {
+    try {
+        await processCloudQueue('media-enqueued');
+    } catch (e) {
+        console.error('[CloudQueue] processCloudQueue error after media enqueue:', e);
         updateCloudError(e.message);
-        persistCloudState().catch(() => { });
-    });
+        await persistCloudState().catch(() => { });
+    }
+    return true;
 }
 
 async function enqueueMetadataSnapshot(kind, userId, payload) {
@@ -324,31 +430,54 @@ async function requestPresignedUrl(config, queueItem, contentLength) {
 }
 
 async function uploadMediaQueueItem(config, queueItem) {
-    const mediaResponse = await fetch(queueItem.sourceUrl, { method: 'GET' });
-    if (!mediaResponse.ok) {
-        throw new Error(`Media fetch failed (${mediaResponse.status})`);
+    let blob;
+    let contentType;
+
+    // Stage 1: Fetch media blob from source URL
+    try {
+        console.log('[CloudQueue] Fetching media blob from:', queueItem.sourceUrl.slice(0, 100));
+        const mediaResponse = await fetch(queueItem.sourceUrl, { method: 'GET' });
+        if (!mediaResponse.ok) {
+            throw new Error(`HTTP ${mediaResponse.status}`);
+        }
+        blob = await mediaResponse.blob();
+        contentType = mediaResponse.headers.get('content-type') || queueItem.contentType || 'application/octet-stream';
+        queueItem.contentType = contentType;
+    } catch (e) {
+        const hint = !CloudSync.isValidMediaSourceUrl(queueItem.sourceUrl)
+            ? ` (source host not in known media hosts: ${queueItem.sourceUrl})`
+            : '';
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.mediaFetch}] ${e.message}${hint}`);
     }
 
-    const blob = await mediaResponse.blob();
-    const contentType = mediaResponse.headers.get('content-type') || queueItem.contentType || 'application/octet-stream';
-    queueItem.contentType = contentType;
-
-    const presigned = await requestPresignedUrl(config, queueItem, blob.size);
-
-    const uploadHeaders = { ...(presigned.headers || {}) };
-    if (!uploadHeaders['Content-Type'] && !uploadHeaders['content-type']) {
-        uploadHeaders['Content-Type'] = contentType;
+    // Stage 2: Get presigned upload URL from worker
+    let presigned;
+    try {
+        presigned = await requestPresignedUrl(config, queueItem, blob.size);
+    } catch (e) {
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
     }
 
-    const uploadResponse = await fetch(presigned.uploadUrl, {
-        method: presigned.method || 'PUT',
-        headers: uploadHeaders,
-        body: blob
-    });
+    // Stage 3: Upload blob to R2
+    try {
+        const uploadHeaders = { ...(presigned.headers || {}) };
+        if (!uploadHeaders['Content-Type'] && !uploadHeaders['content-type']) {
+            uploadHeaders['Content-Type'] = contentType;
+        }
 
-    if (!uploadResponse.ok) {
-        const detail = await uploadResponse.text().catch(() => 'Unknown upload error');
-        throw new Error(`R2 upload failed (${uploadResponse.status}): ${detail}`);
+        const uploadResponse = await fetch(presigned.uploadUrl, {
+            method: presigned.method || 'PUT',
+            headers: uploadHeaders,
+            body: blob
+        });
+
+        if (!uploadResponse.ok) {
+            const detail = await uploadResponse.text().catch(() => 'Unknown upload error');
+            throw new Error(`HTTP ${uploadResponse.status}: ${detail}`);
+        }
+    } catch (e) {
+        if (e.message.startsWith(`[${CloudSync.UPLOAD_STAGES.r2Put}]`)) throw e;
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] ${e.message}`);
     }
 }
 
@@ -373,7 +502,10 @@ async function uploadMetadataQueueItem(config, queueItem) {
 }
 
 async function processCloudQueue(reason = 'auto', options = {}) {
-    if (cloudSyncState.processing) return;
+    if (cloudSyncState.processing) {
+        console.log('[CloudQueue] SKIPPED processCloudQueue — already processing (reason:', reason, ')');
+        return;
+    }
 
     const config = await getCloudConfig();
     if (!CloudSync.isCloudEnabled(config)) {
@@ -394,39 +526,48 @@ async function processCloudQueue(reason = 'auto', options = {}) {
     const force = !!options.force;
     const remaining = [];
 
-    for (const item of cloudSyncQueue) {
-        const attempts = item.attempts || 0;
-        if (!force && attempts >= CloudSync.MAX_RETRY_ATTEMPTS) {
-            remaining.push(item);
-            continue;
-        }
-
-        try {
-            if (item.type === 'media') {
-                await uploadMediaQueueItem(config, item);
-                log(`Cloud upload complete: ${item.objectKey}`, 'success');
-            } else if (item.type === 'metadata') {
-                await uploadMetadataQueueItem(config, item);
-                log(`Cloud metadata synced: ${item.kind}`, 'success');
-            } else {
-                throw new Error(`Unknown queue item type: ${item.type}`);
+    try {
+        for (const item of cloudSyncQueue) {
+            const attempts = item.attempts || 0;
+            if (!force && attempts >= CloudSync.MAX_RETRY_ATTEMPTS) {
+                if (!item._permanentFailLogged) {
+                    log(`Cloud sync permanently failed (${item.type}): ${item.objectKey || item.kind} after ${attempts} attempts — ${item.lastError || 'unknown error'}`, 'error');
+                    item._permanentFailLogged = true;
+                }
+                remaining.push(item);
+                continue;
             }
 
-            clearCloudError();
-            cloudSyncState.lastSyncAt = new Date().toISOString();
-        } catch (e) {
-            item.attempts = attempts + 1;
-            item.lastError = e.message;
-            item.lastAttemptAt = Date.now();
-            remaining.push(item);
-            updateCloudError(e.message);
-            log(`Cloud sync failed (${item.type}): ${e.message}`, 'warning');
+            try {
+                if (item.type === 'media') {
+                    console.log('[CloudQueue] Processing media item:', item.objectKey, '| sourceUrl:', item.sourceUrl?.slice(0, 80));
+                    await uploadMediaQueueItem(config, item);
+                    log(`Cloud upload complete: ${item.objectKey}`, 'success');
+                } else if (item.type === 'metadata') {
+                    await uploadMetadataQueueItem(config, item);
+                    log(`Cloud metadata synced: ${item.kind}`, 'success');
+                } else {
+                    throw new Error(`Unknown queue item type: ${item.type}`);
+                }
+
+                clearCloudError();
+                cloudSyncState.lastSyncAt = new Date().toISOString();
+            } catch (e) {
+                console.error('[CloudQueue] Upload FAILED:', item.type, item.objectKey || item.kind, '|', e.message);
+                item.attempts = attempts + 1;
+                item.lastError = e.message;
+                item.lastAttemptAt = Date.now();
+                remaining.push(item);
+                updateCloudError(e.message);
+                log(`Cloud sync failed (${item.type}): ${e.message}`, 'warning');
+            }
         }
+    } finally {
+        cloudSyncQueue = remaining;
+        cloudSyncState.processing = false;
+        await persistCloudState();
     }
 
-    cloudSyncQueue = remaining;
-    cloudSyncState.processing = false;
-    await persistCloudState();
     await scheduleCloudRetryAlarm();
 
     if (reason === 'manual') {
@@ -573,6 +714,28 @@ async function generateFilename(url, suggestedFilename) {
     return `${rootFolder}/${userId}/${dateStr}_Auto/${parsed.filename}.${ext}`;
 }
 
+async function generateFilenameForBackup(url) {
+    const parsed = parseFilenameInfo(url);
+
+    // No dedup check — always generate path for backup
+    // Still mark as processed so future normal scrapes skip these
+    if (parsed.uuid && !processedUUIDs.has(parsed.uuid)) {
+        processedUUIDs.add(parsed.uuid);
+        saveHistory();
+    }
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    let ext = 'png';
+    if (url.includes('.mp4')) ext = 'mp4';
+    else if (url.includes('.jpg') || url.includes('.jpeg')) ext = 'jpg';
+
+    const stored = await chrome.storage.local.get(['downloadPath', 'activeGrokUserId']);
+    const rootFolder = stored.downloadPath || 'GrokVault';
+    const userId = stored.activeGrokUserId || 'Shared_Account';
+
+    return `${rootFolder}/${userId}/${dateStr}_Auto/${parsed.filename}.${ext}`;
+}
+
 async function initializeBackgroundState() {
     const stored = await chrome.storage.local.get([
         'processedIds',
@@ -683,12 +846,140 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return false;
     }
 
-    if (request.action === 'DOWNLOAD_MEDIA') {
-        // Direct invocation
-        // We can just rely on chrome.downloads.download which triggers onDeterminingFilename
-        chrome.downloads.download({ url: request.url, conflictAction: 'overwrite' });
-        sendResponse({ status: 'queued' });
+    if (request.action === 'START_R2_BACKUP') {
+        if (isScraping) {
+            sendResponse({ status: 'busy', error: 'Scraper is already running.' });
+            return false;
+        }
+        log('Starting Full R2 Media Backup...');
+        isR2Backup = true;
+        isScraping = true;
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs[0] && (tabs[0].url.includes('x.com') || tabs[0].url.includes('grok.com'))) {
+                currentTabId = tabs[0].id;
+                chrome.tabs.sendMessage(currentTabId, { action: 'INIT_R2_BACKUP' }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        chrome.scripting.executeScript({
+                            target: { tabId: currentTabId },
+                            files: ['content.js']
+                        }, () => {
+                            setTimeout(() => {
+                                chrome.tabs.sendMessage(currentTabId, { action: 'INIT_R2_BACKUP' });
+                                chrome.storage.local.set({ isScraping: true, isR2Backup: true });
+                            }, 500);
+                        });
+                    } else {
+                        chrome.storage.local.set({ isScraping: true, isR2Backup: true });
+                    }
+                });
+                sendResponse({ status: 'started' });
+            } else {
+                isScraping = false;
+                isR2Backup = false;
+                sendResponse({ status: 'no_tab', error: 'Navigate to Grok Favorites first.' });
+            }
+        });
+        return true;
+    }
+
+    if (request.action === 'STOP_R2_BACKUP') {
+        isR2Backup = false;
+        isScraping = false;
+        chrome.storage.local.set({ isScraping: false, isR2Backup: false });
+        if (currentTabId) chrome.tabs.sendMessage(currentTabId, { action: 'ABORT_R2_BACKUP' });
+        sendResponse({ status: 'stopped' });
         return false;
+    }
+
+    if (request.action === 'R2_BACKUP_UPLOAD') {
+        (async () => {
+            const finalPath = await generateFilenameForBackup(request.url);
+            const queued = await enqueueCloudMediaUpload(request.url, finalPath);
+
+            if (!request.skipLocalDownload) {
+                const config = await getCloudConfig();
+                if (CloudSync.isLocalDownloadEnabled(config)) {
+                    chrome.downloads.download({ url: request.url, filename: finalPath, conflictAction: 'overwrite' });
+                }
+            }
+            if (queued) {
+                sendResponse({ status: 'queued' });
+            } else {
+                sendResponse({ status: 'not_queued', error: 'Cloud sync is not enabled. Check Cloud R2 Settings.' });
+            }
+        })().catch((e) => {
+            sendResponse({ status: 'error', error: e.message });
+        });
+        return true;
+    }
+
+    if (request.action === 'R2_BACKUP_PROGRESS') {
+        chrome.runtime.sendMessage({
+            action: 'UPDATE_R2_BACKUP_PROGRESS',
+            stats: request.stats
+        }).catch(() => {});
+        sendResponse({ status: 'ok' });
+        return false;
+    }
+
+    if (request.action === 'R2_BACKUP_COMPLETE') {
+        isR2Backup = false;
+        isScraping = false;
+        chrome.storage.local.set({ isScraping: false, isR2Backup: false });
+        const stats = request.stats || {};
+        log(`R2 Backup complete. Uploaded: ${stats.uploaded || 0}, Errors: ${stats.errors || 0}`, 'success');
+        chrome.runtime.sendMessage({
+            action: 'R2_BACKUP_DONE',
+            stats: stats
+        }).catch(() => {});
+        sendResponse({ status: 'ok' });
+        return false;
+    }
+
+    if (request.action === 'VALIDATE_CLOUD_CONFIG') {
+        (async () => {
+            const config = await getCloudConfig();
+            if (!CloudSync.isCloudEnabled(config)) {
+                sendResponse({ valid: false, error: 'Cloud sync is disabled. Set mode to dual_write or cloud_only.' });
+                return;
+            }
+            if (!CloudSync.validateWorkersDevUrl(config.workerUrl)) {
+                sendResponse({ valid: false, error: 'Worker URL is missing or invalid.' });
+                return;
+            }
+            if (!config.apiKey) {
+                sendResponse({ valid: false, error: 'API key is not set.' });
+                return;
+            }
+            sendResponse({ valid: true });
+        })().catch((e) => {
+            sendResponse({ valid: false, error: e.message });
+        });
+        return true;
+    }
+
+    if (request.action === 'DOWNLOAD_MEDIA') {
+        (async () => {
+            const config = await getCloudConfig();
+            const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
+
+            if (allowLocalDownload) {
+                // This triggers onDeterminingFilename.
+                chrome.downloads.download({ url: request.url, conflictAction: 'overwrite' });
+                sendResponse({ status: 'queued' });
+            } else {
+                const finalPath = await generateFilename(request.url);
+                if (!finalPath) {
+                    sendResponse({ status: 'skipped_duplicate' });
+                    return;
+                }
+                await enqueueCloudMediaUpload(request.url, finalPath);
+                sendResponse({ status: 'cloud_queued' });
+            }
+        })().catch((e) => {
+            sendResponse({ status: 'error', error: e.message });
+        });
+        return true;
     }
 
     if (request.action === 'ADD_LOG') {
@@ -700,10 +991,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'CLOUD_TEST_CONNECTION') {
         (async () => {
             try {
+                setCloudTestTelemetry('running', 'Testing upload pipeline...');
+                await persistCloudState();
+
                 const result = await testCloudConnection(request.config);
-                sendResponse({ ok: true, result });
+                if (result.ok) {
+                    clearCloudError();
+                    const successMsg = result.testUpload
+                        ? 'Full pipeline OK (health + presign + R2 upload)'
+                        : 'Cloud connection OK';
+                    setCloudTestTelemetry('success', successMsg);
+                } else if (result.error) {
+                    const sourceLabel = result.errorSource || 'validation';
+                    const message = `${sourceLabel}: ${result.error}`;
+                    updateCloudError(message);
+                    setCloudTestTelemetry('error', message);
+                }
+                await persistCloudState();
+                sendResponse({
+                    ok: true,
+                    result,
+                    telemetry: getCloudTestTelemetry(),
+                    state: getCloudStatusSnapshot()
+                });
             } catch (e) {
-                sendResponse({ ok: false, error: e.message });
+                const stageMatch = e.message.match(/^\[([^\]]+)\]/);
+                const failureSource = stageMatch ? stageMatch[1] : 'runtime';
+                const message = `${failureSource}: ${e.message}`;
+                updateCloudError(message);
+                setCloudTestTelemetry('error', message);
+                await persistCloudState();
+                sendResponse({
+                    ok: false,
+                    error: message,
+                    telemetry: getCloudTestTelemetry(),
+                    state: getCloudStatusSnapshot()
+                });
             }
         })();
         return true;
@@ -712,10 +1035,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'CLOUD_GET_STATUS') {
         sendResponse({
             ok: true,
-            state: {
-                ...cloudSyncState,
-                unsyncedCount: cloudSyncQueue.length
-            }
+            telemetry: getCloudTestTelemetry(),
+            state: getCloudStatusSnapshot()
         });
         return false;
     }
@@ -726,10 +1047,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 await processCloudQueue('manual', { force: true });
                 sendResponse({
                     ok: true,
-                    state: {
-                        ...cloudSyncState,
-                        unsyncedCount: cloudSyncQueue.length
-                    }
+                    state: getCloudStatusSnapshot()
                 });
             } catch (e) {
                 sendResponse({ ok: false, error: e.message });
@@ -744,10 +1062,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 await runCloudBackfill();
                 sendResponse({
                     ok: true,
-                    state: {
-                        ...cloudSyncState,
-                        unsyncedCount: cloudSyncQueue.length
-                    }
+                    state: getCloudStatusSnapshot()
+                });
+            } catch (e) {
+                sendResponse({ ok: false, error: e.message });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'CLOUD_CLEAR_STATUS') {
+        (async () => {
+            try {
+                await clearCloudUiStatus();
+                sendResponse({
+                    ok: true,
+                    logs: [],
+                    state: getCloudStatusSnapshot()
                 });
             } catch (e) {
                 sendResponse({ ok: false, error: e.message });
@@ -773,10 +1104,17 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             const finalPath = await generateFilename(url);
 
             if (finalPath) {
-                chrome.downloads.download({ url: url, filename: finalPath, conflictAction: 'overwrite' }, (id) => {
-                    if (chrome.runtime.lastError) console.error('BG Download failed:', chrome.runtime.lastError);
-                    else console.log('BG Download started:', id);
-                });
+                const config = await getCloudConfig();
+                const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
+
+                if (allowLocalDownload) {
+                    chrome.downloads.download({ url: url, filename: finalPath, conflictAction: 'overwrite' }, (id) => {
+                        if (chrome.runtime.lastError) console.error('BG Download failed:', chrome.runtime.lastError);
+                        else console.log('BG Download started:', id);
+                    });
+                } else {
+                    console.log('Cloud-only mode active: local download skipped.');
+                }
 
                 enqueueCloudMediaUpload(url, finalPath).catch((e) => {
                     updateCloudError(e.message);
@@ -798,9 +1136,16 @@ chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
     if (!isScraping && !item.url.includes('imagine-public')) return;
 
     const finalPath = await generateFilename(item.url, item.filename);
+    const config = await getCloudConfig();
+    const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
 
     if (finalPath) {
-        suggest({ filename: finalPath, conflictAction: 'overwrite' });
+        if (allowLocalDownload) {
+            suggest({ filename: finalPath, conflictAction: 'overwrite' });
+        } else {
+            chrome.downloads.cancel(item.id);
+        }
+
         enqueueCloudMediaUpload(item.url, finalPath).catch((e) => {
             updateCloudError(e.message);
             persistCloudState().catch(() => { });

@@ -36,7 +36,6 @@ describe('VideoRetryManager', () => {
             <div id="gptPromptedBatchBtn"></div>
             <div id="gptBatchStopBtn"></div>
             <div id="gptBatchStatus"></div>
-            <div id="gptBatchPromptRow"></div>
             <div id="gptGalleryLimitRow"></div>
         `;
 
@@ -180,5 +179,10 @@ describe('VideoRetryManager', () => {
 
         expect(mockOverlay.el.querySelector('#gptProgressLabel').textContent).toBe('Images Processed');
         expect(mockOverlay.el.querySelector('#gptVideoCounter').textContent).toBe('2/5');
+    });
+
+    test('updateBatchButtons works without prompted selector row', () => {
+        expect(() => retryManager.updateBatchButtons(true)).not.toThrow();
+        expect(() => retryManager.updateBatchButtons(false)).not.toThrow();
     });
 });

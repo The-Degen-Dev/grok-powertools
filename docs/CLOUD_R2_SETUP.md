@@ -52,29 +52,29 @@ Deploy:
 npm run deploy
 ```
 
-After deploy, copy your Worker URL (`https://<name>.workers.dev`).
+After deploy, copy your Worker URL (`https://<worker>.<subdomain>.workers.dev`).
 
 ## 3) Configure extension popup
 
 Open extension popup and set:
 
 - `Backup Mode`: `Dual-write (Local + R2)`
-- `Worker URL`: `https://<name>.workers.dev`
+- `Worker URL`: `https://<worker>.<subdomain>.workers.dev`
 - `API Key`: same value as `CLIENT_API_KEY`
 - `Key Prefix`: default `grok-powertools/v1` (or your override)
 
-Click `Test Connection`.
+Click `Test Upload Pipeline`. This runs a 3-stage test: health check, presigned URL generation, and a test R2 upload.
 
 ## 4) Optional backfill
 
-Click `Run Backfill` to upload:
+Click `Run Backfill` to upload metadata:
 
 - `savedPrompts`
 - `promptHistory`
 - `processedIds`
 - `backfill-manifest.<timestamp>.json`
 
-Note: Existing local media files are not backfilled in v1.
+**Important:** Backfill is metadata-only. Existing local media files (images/videos) are not uploaded to R2 during backfill. Media files are only synced to R2 when downloaded through the extension going forward.
 
 ## Worker API
 
@@ -104,7 +104,27 @@ Backfill manifest:
 
 ## Troubleshooting
 
-### "Worker URL must match https://<name>.workers.dev"
+### Error prefix reference
+
+Errors from the upload pipeline include a stage tag to help diagnose failures:
+
+| Prefix | Stage | Meaning |
+|--------|-------|---------|
+| `[media-fetch]` | Fetch media blob | Extension cannot download the image/video from the source URL |
+| `[presign]` | Get presigned URL | Worker failed to generate an R2 upload URL |
+| `[r2-put]` | Upload to R2 | Uploading the media blob to R2 failed |
+| `[health-check]` | Worker health | Worker is unreachable or API key is wrong |
+| `[test-upload]` | Pipeline test | Test upload to R2 failed during pipeline test |
+
+### `[media-fetch]` errors
+
+The background service worker cannot fetch media from the source URL. Common causes:
+
+- **Missing host permission**: `manifest.json` must include `*://imagine-public.x.ai/*` in `host_permissions`. If you see "source host not in known media hosts" in the error, this is the issue.
+- **Temporary URL expired**: Some media URLs may expire. Retry the download.
+- **Network error**: Check your internet connection.
+
+### "Worker URL must match https://<worker>.<subdomain>.workers.dev"
 
 Use your deployed `workers.dev` URL exactly. Custom domains are not supported in v1 validation.
 
@@ -124,4 +144,14 @@ Use your deployed `workers.dev` URL exactly. Custom domains are not supported in
 
 ### Metadata not syncing
 
-Metadata sync is debounced (~2 seconds) on local changes. Ensure backup mode is `Dual-write`.
+Metadata sync is debounced (~2 seconds) on local changes. Ensure backup mode is `Cloud only` or `Dual-write`.
+
+### Test Upload Pipeline looks idle or confusing
+
+Expected sequence in popup/log:
+
+- `Testing upload pipeline...`
+- `Full pipeline OK (health + presign + R2 upload)`
+- `Last Test: OK at ...`
+
+If you just reloaded the unpacked extension and still have existing `grok.com` tabs open, old content-script contexts may emit warnings like "Extension context refreshed/skipped ...". That warning is expected after reloads and does not indicate cloud auth failure. Close old Grok tabs and open a fresh `https://grok.com/imagine` tab.
