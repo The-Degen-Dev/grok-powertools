@@ -1,24 +1,29 @@
 import { openDB, type IDBPDatabase } from "idb";
 import { v4 as uuidv4 } from "uuid";
-import type { Collection, VideoItem, AppSettings } from "./types";
+import type { Collection, VideoItem, AppSettings, Movie } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
 const DB_NAME = "grok-power-tools";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
 function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        const collectionStore = db.createObjectStore("collections", {
-          keyPath: "id",
-        });
-        collectionStore.createIndex("by-status", "status");
-        collectionStore.createIndex("by-updated", "updatedAt");
-
-        db.createObjectStore("settings");
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          const collectionStore = db.createObjectStore("collections", {
+            keyPath: "id",
+          });
+          collectionStore.createIndex("by-status", "status");
+          collectionStore.createIndex("by-updated", "updatedAt");
+          db.createObjectStore("settings");
+        }
+        if (oldVersion < 2) {
+          const movieStore = db.createObjectStore("movies", { keyPath: "id" });
+          movieStore.createIndex("by-updated", "updatedAt");
+        }
       },
     });
   }
@@ -167,4 +172,46 @@ export async function updateSettings(
   const updated = { ...current, ...partial };
   await db.put("settings", updated, "app-settings");
   return updated;
+}
+
+// --- Movies ---
+
+export async function getAllMovies(): Promise<Movie[]> {
+  const db = await getDB();
+  const movies: Movie[] = await db.getAll("movies");
+  return movies.sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+}
+
+export async function getMovie(id: string): Promise<Movie | undefined> {
+  const db = await getDB();
+  return db.get("movies", id) as Promise<Movie | undefined>;
+}
+
+export async function createMovie(name: string): Promise<Movie> {
+  const db = await getDB();
+  const now = new Date().toISOString();
+  const movie: Movie = {
+    id: uuidv4(),
+    name,
+    resolution: { w: 1080, h: 1920 },
+    clips: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.put("movies", movie);
+  return movie;
+}
+
+export async function updateMovie(movie: Movie): Promise<Movie> {
+  const db = await getDB();
+  movie.updatedAt = new Date().toISOString();
+  await db.put("movies", movie);
+  return movie;
+}
+
+export async function deleteMovie(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete("movies", id);
 }

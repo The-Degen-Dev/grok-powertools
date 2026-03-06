@@ -54,3 +54,36 @@ export const DEFAULT_SETTINGS: AppSettings = {
   gifStartTrimMs: 1000,
   theme: "system",
 };
+
+export interface Transition {
+  type: "cut" | "fade" | "crossfade";
+  duration: number; // seconds — 0 for cut, 0.3-2.0 for fade/crossfade
+}
+
+export interface MovieClip {
+  id: string;
+  type: "video" | "title";
+  // Video clips
+  videoUrl?: string;
+  sourceCollectionId?: string;
+  trimStart?: number;
+  trimEnd?: number;
+  // Title cards
+  titleText?: string;
+  titleSubtext?: string;
+  titleDuration?: number;   // seconds, default 3
+  titleBgColor?: string;    // default "#000000"
+  titleTextColor?: string;  // default "#ffffff"
+  // Shared
+  transition: Transition;
+  position: number;
+}
+
+export interface Movie {
+  id: string;
+  name: string;
+  resolution: { w: number; h: number };
+  clips: MovieClip[];
+  createdAt: string;
+  updatedAt: string;
+}
