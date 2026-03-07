@@ -13,6 +13,8 @@ interface CanvasPlayerProps {
   onFullscreenChange?: (fs: boolean) => void;
   currentTime?: number;
   onTimeUpdate?: (time: number) => void;
+  onCanvasRef?: (ref: HTMLCanvasElement | null) => void;
+  onTotalDurationChange?: (duration: number) => void;
 }
 
 interface TimelineEntry {
@@ -72,6 +74,8 @@ export default function CanvasPlayer({
   onFullscreenChange,
   currentTime: externalTime,
   onTimeUpdate,
+  onCanvasRef,
+  onTotalDurationChange,
 }: CanvasPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
@@ -83,6 +87,11 @@ export default function CanvasPlayer({
   const [totalDuration, setTotalDuration] = useState(0);
 
   const currentTimeValue = externalTime ?? localTime;
+
+  // Notify parent of total duration changes
+  useEffect(() => {
+    onTotalDurationChange?.(totalDuration);
+  }, [totalDuration, onTotalDurationChange]);
 
   // Create/update video elements when clips change
   useEffect(() => {
@@ -317,7 +326,10 @@ export default function CanvasPlayer({
           <p className="text-sm text-neutral-500">Add clips to preview your movie</p>
         ) : (
           <canvas
-            ref={canvasRef}
+            ref={(el) => {
+              (canvasRef as React.MutableRefObject<HTMLCanvasElement | null>).current = el;
+              onCanvasRef?.(el);
+            }}
             className="max-h-full max-w-full"
             style={{
               aspectRatio: `${resolution.w}/${resolution.h}`,

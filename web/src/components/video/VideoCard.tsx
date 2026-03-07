@@ -5,56 +5,48 @@ import {
   Play,
   Pause,
   Maximize2,
-  Info,
-  ExternalLink,
   Download,
   Trash2,
   GripVertical,
   Copy,
-  X,
   Scissors,
+  FilmIcon,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import type { VideoItem } from "@/lib/types";
+import Spinner from "@/components/ui/Spinner";
 
 interface VideoCardProps {
   item: VideoItem;
   aspectRatio?: string;
-  size?: "small" | "medium" | "large";
   fitMode?: "cover" | "contain";
-  showNotes?: boolean;
   onDelete?: (id: string) => void;
   onExpand?: (item: VideoItem) => void;
+  onEdit?: (item: VideoItem) => void;
+  onAddToMovie?: (item: VideoItem) => void;
   dragHandleProps?: Record<string, unknown>;
 }
 
-const SIZE_CLASSES = {
-  small: "w-48",
-  medium: "w-64",
-  large: "w-80",
-};
-
 export default function VideoCard({
   item,
-  aspectRatio = "2:3",
-  size = "medium",
+  aspectRatio = "9:16",
   fitMode = "cover",
-  showNotes = false,
   onDelete,
   onExpand,
+  onEdit,
+  onAddToMovie,
   dragHandleProps,
 }: VideoCardProps) {
-  const router = useRouter();
-  const [showInfo, setShowInfo] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loadVideo, setLoadVideo] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const [w, h] = aspectRatio.split(":").map(Number);
   const paddingPercent = (h / w) * 100;
 
-  function handleTogglePlay() {
+  function handleTogglePlay(e: React.MouseEvent) {
+    e.stopPropagation();
     if (!loadVideo) setLoadVideo(true);
     if (videoRef.current) {
       if (isPlaying) {
@@ -68,7 +60,7 @@ export default function VideoCard({
   }
 
   function handleMouseEnter() {
-    // Trigger video load on first hover
+    setIsHovered(true);
     if (!loadVideo) setLoadVideo(true);
     if (videoRef.current && !isPlaying) {
       videoRef.current.play().catch(() => {});
@@ -76,13 +68,15 @@ export default function VideoCard({
   }
 
   function handleMouseLeave() {
+    setIsHovered(false);
     if (videoRef.current && !isPlaying) {
       videoRef.current.pause();
       videoRef.current.currentTime = 0;
     }
   }
 
-  function handleDownload() {
+  function handleDownload(e: React.MouseEvent) {
+    e.stopPropagation();
     if (item.videoUrl) {
       const a = document.createElement("a");
       a.href = item.videoUrl;
@@ -91,37 +85,33 @@ export default function VideoCard({
     }
   }
 
-  function handleCopyPrompt() {
+  function handleCopyPrompt(e: React.MouseEvent) {
+    e.stopPropagation();
     if (item.promptText) {
       navigator.clipboard.writeText(item.promptText);
     }
   }
 
   return (
-    <div className={`group relative flex-shrink-0 ${SIZE_CLASSES[size]}`}>
-      {/* Drag handle + delete bar */}
-      <div className="flex items-center justify-between rounded-t-lg border border-b-0 border-neutral-200 bg-neutral-50 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900">
-        <div
-          className="cursor-grab text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
-          {...dragHandleProps}
-        >
-          <GripVertical className="h-4 w-4" />
+    <div
+      className="group relative w-full overflow-hidden rounded-(--radius-card) bg-(--color-surface-0) shadow-(--shadow-card) transition-all duration-(--duration-normal) hover:shadow-(--shadow-card-hover) hover:scale-[1.02] dark:bg-(--color-surface-900)"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      {/* Drag handle — visible on hover */}
+      <div
+        className="absolute left-1/2 top-1 z-20 -translate-x-1/2 cursor-grab opacity-0 transition-opacity group-hover:opacity-100"
+        {...dragHandleProps}
+      >
+        <div className="rounded-full bg-black/40 px-3 py-0.5 backdrop-blur-sm">
+          <GripVertical className="h-3.5 w-3.5 text-white/80" />
         </div>
-        <button
-          type="button"
-          onClick={() => onDelete?.(item.id)}
-          className="rounded p-0.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
       </div>
 
       {/* Video container */}
       <div
-        className="relative overflow-hidden border border-neutral-200 bg-black dark:border-neutral-700"
+        className="relative overflow-hidden bg-(--color-surface-950)"
         style={{ paddingBottom: `${paddingPercent}%` }}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
       >
         {item.videoUrl ? (
           <>
@@ -139,21 +129,20 @@ export default function VideoCard({
               />
             )}
             {!hasLoaded && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4">
                 {loadVideo ? (
-                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-neutral-600 border-t-orange-500" />
+                  <Spinner className="h-6 w-6" />
                 ) : (
-                  <Play className="h-8 w-8 text-neutral-500" />
+                  <Play className="h-10 w-10 text-white/40" />
                 )}
                 {item.promptText && (
-                  <p className="line-clamp-3 text-center text-xs leading-relaxed text-neutral-500">
+                  <p className="line-clamp-4 text-center text-xs leading-relaxed text-white/50">
                     {item.promptText}
                   </p>
                 )}
               </div>
             )}
           </>
-
         ) : item.thumbnailUrl ? (
           <img
             src={item.thumbnailUrl}
@@ -161,112 +150,101 @@ export default function VideoCard({
             className={`absolute inset-0 h-full w-full ${fitMode === "contain" ? "object-contain" : "object-cover"}`}
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-neutral-500">
-            No preview
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Play className="h-10 w-10 text-white/30" />
           </div>
         )}
 
-        {/* Info overlay */}
-        {showInfo && item.promptText && (
-          <div className="absolute inset-0 flex flex-col justify-start bg-black/80 p-3">
-            <div className="flex items-start justify-between">
-              <p className="flex-1 text-xs leading-relaxed text-white/90">
-                {item.promptText}
-              </p>
-              <div className="ml-2 flex flex-col gap-1">
-                <button
-                  type="button"
-                  onClick={() => setShowInfo(false)}
-                  className="rounded p-1 text-white/70 hover:bg-white/10 hover:text-white"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCopyPrompt}
-                  className="rounded p-1 text-white/70 hover:bg-white/10 hover:text-white"
-                  title="Copy prompt"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-              </div>
+        {/* Hover overlay — frosted glass with actions + prompt */}
+        <div
+          className={`absolute inset-0 flex flex-col justify-between transition-opacity duration-(--duration-fast) ${
+            isHovered ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
+        >
+          {/* Top actions */}
+          <div className="flex items-start justify-between p-2">
+            <div className="flex gap-1">
+              <OverlayButton
+                icon={isPlaying ? Pause : Play}
+                label={isPlaying ? "Pause" : "Play"}
+                onClick={handleTogglePlay}
+              />
+              <OverlayButton
+                icon={Maximize2}
+                label="Fullscreen"
+                onClick={(e) => { e.stopPropagation(); onExpand?.(item); }}
+              />
+            </div>
+            <div className="flex gap-1">
+              {item.videoUrl && onEdit && (
+                <OverlayButton
+                  icon={Scissors}
+                  label="Edit clip"
+                  onClick={(e) => { e.stopPropagation(); onEdit(item); }}
+                />
+              )}
+              {item.videoUrl && onAddToMovie && (
+                <OverlayButton
+                  icon={FilmIcon}
+                  label="Add to Movie"
+                  onClick={(e) => { e.stopPropagation(); onAddToMovie(item); }}
+                />
+              )}
+              <OverlayButton icon={Download} label="Download" onClick={handleDownload} />
+              <OverlayButton
+                icon={Trash2}
+                label="Delete"
+                onClick={(e) => { e.stopPropagation(); onDelete?.(item.id); }}
+                danger
+              />
             </div>
           </div>
-        )}
-      </div>
 
-      {/* Action bar */}
-      <div className="flex items-center justify-between rounded-b-lg border border-t-0 border-neutral-200 bg-white px-2 py-1.5 dark:border-neutral-700 dark:bg-neutral-900">
-        <div className="flex gap-0.5">
-          <ActionButton
-            icon={isPlaying ? Pause : Play}
-            label={isPlaying ? "Pause" : "Play"}
-            onClick={handleTogglePlay}
-          />
-          <ActionButton
-            icon={Maximize2}
-            label="Fullscreen"
-            onClick={() => onExpand?.(item)}
-          />
-          {item.videoUrl && (
-            <ActionButton
-              icon={Scissors}
-              label="Edit clip"
-              onClick={() => router.push(`/edit?video=${encodeURIComponent(item.videoUrl)}`)}
-            />
+          {/* Bottom — prompt text */}
+          {item.promptText && (
+            <div className="bg-gradient-to-t from-black/70 via-black/30 to-transparent p-3 pt-8">
+              <p className="line-clamp-3 text-xs leading-relaxed text-white/90">
+                {item.promptText}
+              </p>
+              <button
+                type="button"
+                onClick={handleCopyPrompt}
+                className="mt-1.5 flex items-center gap-1 text-[10px] text-white/50 hover:text-white/80 transition-colors"
+              >
+                <Copy className="h-3 w-3" />
+                Copy prompt
+              </button>
+            </div>
           )}
-          <ActionButton
-            icon={Info}
-            label="Prompt info"
-            onClick={() => setShowInfo(!showInfo)}
-            active={showInfo}
-          />
-          <ActionButton
-            icon={ExternalLink}
-            label="Open on Grok"
-            onClick={() => window.open(item.sourceUrl, "_blank")}
-          />
-          <ActionButton
-            icon={Download}
-            label="Download"
-            onClick={handleDownload}
-          />
         </div>
       </div>
-
-      {/* Notes */}
-      {showNotes && item.notes && (
-        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-          {item.notes}
-        </p>
-      )}
     </div>
   );
 }
 
-function ActionButton({
+function OverlayButton({
   icon: Icon,
   label,
   onClick,
-  active = false,
+  danger = false,
 }: {
   icon: React.ElementType;
   label: string;
-  onClick: () => void;
-  active?: boolean;
+  onClick: (e: React.MouseEvent) => void;
+  danger?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`rounded p-1.5 transition ${
-        active
-          ? "bg-orange-50 text-orange-600 dark:bg-orange-950 dark:text-orange-400"
-          : "text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+      className={`rounded-(--radius-btn) p-1.5 backdrop-blur-sm transition-colors ${
+        danger
+          ? "bg-black/30 text-white/70 hover:bg-red-600/80 hover:text-white"
+          : "bg-black/30 text-white/70 hover:bg-black/50 hover:text-white"
       }`}
       title={label}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="h-3.5 w-3.5" />
     </button>
   );
 }

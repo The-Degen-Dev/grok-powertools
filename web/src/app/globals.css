@@ -1,6 +1,190 @@
 @import "tailwindcss";
 
+/* Satoshi — distinctive geometric display font (variable, free) */
+@font-face {
+  font-family: "Satoshi";
+  src: url("https://cdn.jsdelivr.net/gh/nicholasgillespie/fonts@main/satoshi/Satoshi-Variable.woff2")
+    format("woff2");
+  font-weight: 300 900;
+  font-display: swap;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("https://cdn.jsdelivr.net/gh/nicholasgillespie/fonts@main/satoshi/Satoshi-VariableItalic.woff2")
+    format("woff2");
+  font-weight: 300 900;
+  font-display: swap;
+  font-style: italic;
+}
+
 @theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Typography */
+  --font-display: "Satoshi", system-ui, sans-serif;
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Warm neutral palette — light */
+  --color-surface-0: #fafaf8;
+  --color-surface-50: #f5f4f0;
+  --color-surface-100: #eeede8;
+  --color-surface-200: #e2e0d9;
+  --color-surface-300: #ccc9c0;
+  --color-surface-400: #a8a49a;
+  --color-surface-500: #84807a;
+  --color-surface-600: #625f5a;
+  --color-surface-700: #48463f;
+  --color-surface-800: #302e29;
+  --color-surface-900: #1c1b18;
+  --color-surface-950: #0f0e0c;
+
+  /* Accent — orange */
+  --color-accent: #f97316;
+  --color-accent-hover: #ea580c;
+  --color-accent-light: #fff7ed;
+  --color-accent-muted: #fdba74;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 8px 25px rgba(0, 0, 0, 0.08),
+    0 4px 10px rgba(0, 0, 0, 0.04);
+  --shadow-overlay: 0 20px 60px rgba(0, 0, 0, 0.15),
+    0 8px 20px rgba(0, 0, 0, 0.1);
+
+  /* Radii */
+  --radius-card: 12px;
+  --radius-btn: 8px;
+  --radius-input: 8px;
+  --radius-overlay: 16px;
+
+  /* Transitions */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+
+  /* Animations */
+  --animate-fade-in-up: fade-in-up 0.4s var(--ease-out) both;
+  --animate-slide-in-right: slide-in-right 0.3s var(--ease-out) both;
+  --animate-scale-in: scale-in 0.2s var(--ease-out) both;
+}
+
+/* Keyframes */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Base */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  color: var(--color-surface-800);
+  background-color: var(--color-surface-0);
+}
+
+/* Dark mode */
+html.dark body {
+  color: var(--color-surface-200);
+  background-color: var(--color-surface-950);
+}
+
+/* Frosted glass effect */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+}
+
+html.dark .glass {
+  background: rgba(15, 14, 12, 0.7);
+}
+
+/* Masonry stagger */
+.masonry-item {
+  animation: fade-in-up 0.4s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+/* Dashboard card stagger */
+.dashboard-card {
+  animation: fade-in-up 0.4s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 80ms);
+}
+
+/* Scrollbar thin utility */
+.scrollbar-thin::-webkit-scrollbar {
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--color-surface-300);
+  border-radius: 3px;
+}
+html.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--color-surface-700);
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-100) 25%,
+    var(--color-surface-50) 50%,
+    var(--color-surface-100) 75%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+html.dark .skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-800) 25%,
+    var(--color-surface-900) 50%,
+    var(--color-surface-800) 75%
+  );
+  background-size: 400% 100%;
 }

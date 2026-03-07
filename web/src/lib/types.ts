@@ -41,6 +41,8 @@ export interface AppSettings {
   showVideoControls: boolean;
   gifStartTrimMs: number;
   theme: "system" | "light" | "dark";
+  onboardingComplete: boolean;
+  sidebarCollapsed: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -53,6 +55,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showVideoControls: false,
   gifStartTrimMs: 1000,
   theme: "system",
+  onboardingComplete: false,
+  sidebarCollapsed: false,
 };
 
 export interface Transition {

@@ -8,6 +8,7 @@ import { getMovie, updateMovie } from "@/lib/local-storage";
 import StoryboardPanel from "./StoryboardPanel";
 import CanvasPlayer from "./CanvasPlayer";
 import MovieTimeline from "./MovieTimeline";
+import ExportMovieButton from "./ExportMovieButton";
 
 interface MovieMakerProps {
   movieId: string;
@@ -22,6 +23,7 @@ export default function MovieMaker({ movieId }: MovieMakerProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     getMovie(movieId).then((m) => {
@@ -113,6 +115,18 @@ export default function MovieMaker({ movieId }: MovieMakerProps) {
           <span className="text-xs text-neutral-500">
             {movie.clips.length} clip{movie.clips.length !== 1 ? "s" : ""}
           </span>
+          <div className="ml-auto">
+            <ExportMovieButton
+              canvasRef={canvasRef}
+              totalDuration={totalDuration}
+              onStartPlayback={() => {
+                setCurrentTime(0);
+                setIsPlaying(true);
+              }}
+              onStopPlayback={() => setIsPlaying(false)}
+              movieName={movie.name}
+            />
+          </div>
         </div>
       )}
 
@@ -140,10 +154,9 @@ export default function MovieMaker({ movieId }: MovieMakerProps) {
             fullscreen={isFullscreen}
             onFullscreenChange={setIsFullscreen}
             currentTime={currentTime}
-            onTimeUpdate={(t) => {
-              setCurrentTime(t);
-              setTotalDuration((prev) => prev); // keep existing
-            }}
+            onTimeUpdate={setCurrentTime}
+            onCanvasRef={(el) => { canvasRef.current = el; }}
+            onTotalDurationChange={setTotalDuration}
           />
         </div>
       </div>
