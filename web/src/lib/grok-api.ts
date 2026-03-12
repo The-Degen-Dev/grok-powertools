@@ -55,6 +55,13 @@ export function parseGrokLinks(text: string): string[] {
   return Array.from(ids);
 }
 
+// GrokImagineHub share URL: https://www.grokimaginehub.com/s/{shareId}
+const GIH_SHARE_PATTERN =
+  /https?:\/\/(?:www\.)?grokimaginehub\.com\/s\/([a-zA-Z0-9_-]+)/i;
+
+// Grok Imagine public CDN
+const GROK_VIDEO_CDN = "https://imagine-public.x.ai/imagine-public/share-videos";
+
 /**
  * Construct URLs for a Grok Imagine post by UUID.
  */
@@ -62,9 +69,72 @@ export function buildGrokUrls(postId: string) {
   return {
     postUrl: `https://grok.com/imagine/post/${postId}`,
     shareUrl: `https://x.com/i/grok/share/${postId}`,
-    // Video and image URLs follow predictable CDN patterns
-    // The actual media URLs need to be fetched from the page or API
+    videoUrl: `${GROK_VIDEO_CDN}/${postId}.mp4?cache=1`,
   };
+}
+
+/**
+ * Detect if text contains a GrokImagineHub share link.
+ */
+export function parseGihShareLink(text: string): string | null {
+  const match = text.trim().match(GIH_SHARE_PATTERN);
+  return match ? match[1] : null;
+}
+
+/**
+ * Import a collection from a GrokImagineHub share link.
+ * Fetches the share page to extract UUIDs, then fetches prompts from GIH API.
+ */
+export async function importFromGih(
+  shareId: string,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<{ name: string; items: Omit<VideoItem, "id" | "position" | "createdAt">[] }> {
+  // Fetch the share page via our proxy to extract UUIDs from RSC payload
+  const res = await fetch(`/api/gih-import?shareId=${shareId}`);
+  if (!res.ok) throw new Error(`Failed to fetch GIH share: ${res.status}`);
+  const { name, uuids } = (await res.json()) as { name: string; uuids: string[] };
+
+  if (!uuids || uuids.length === 0) {
+    throw new Error("No items found in GIH share link");
+  }
+
+  // Fetch prompts from GIH API in batches of 24
+  const promptMap = new Map<string, string>();
+  const batchSize = 24;
+  for (let i = 0; i < uuids.length; i += batchSize) {
+    const batch = uuids.slice(i, i + batchSize);
+    try {
+      const promptRes = await fetch(
+        `/api/gih-import?prompts=${batch.join(",")}`
+      );
+      if (promptRes.ok) {
+        const data = await promptRes.json();
+        if (data.prompts) {
+          for (const [uuid, info] of Object.entries(data.prompts)) {
+            const p = info as { prompt?: string };
+            if (p.prompt) promptMap.set(uuid, p.prompt);
+          }
+        }
+      }
+    } catch {
+      // Continue without prompts for this batch
+    }
+    onProgress?.(Math.min(i + batchSize, uuids.length), uuids.length);
+  }
+
+  // Build items with CDN URLs and prompts
+  const items: Omit<VideoItem, "id" | "position" | "createdAt">[] = uuids.map(
+    (uuid) => ({
+      grokPostId: uuid,
+      sourceUrl: `https://grok.com/imagine/post/${uuid}`,
+      videoUrl: `${GROK_VIDEO_CDN}/${uuid}.mp4?cache=1`,
+      thumbnailUrl: "",
+      promptText: promptMap.get(uuid) || "",
+      notes: "",
+    })
+  );
+
+  return { name: name || "GIH Import", items };
 }
 
 /**

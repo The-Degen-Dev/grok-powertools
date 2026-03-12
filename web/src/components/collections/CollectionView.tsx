@@ -30,7 +30,7 @@ import {
   removeItemFromCollection,
   reorderItems,
 } from "@/lib/local-storage";
-import { parseGrokLinks, batchFetchMetadata } from "@/lib/grok-api";
+import { parseGrokLinks, batchFetchMetadata, importFromGih } from "@/lib/grok-api";
 import CollectionSidebar from "./CollectionSidebar";
 import LinkInput from "./LinkInput";
 import VideoCard from "@/components/video/VideoCard";
@@ -115,7 +115,7 @@ function SortableVideoCard({
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes}>
+    <div ref={setNodeRef} style={style} className="w-48" {...attributes}>
       <VideoCard
         item={item}
         onDelete={onDelete}
@@ -144,6 +144,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [editingItem, setEditingItem] = useState<VideoItem | null>(null);
   const [addToMovieItem, setAddToMovieItem] = useState<VideoItem | null>(null);
+  const [importProgress, setImportProgress] = useState<{ loaded: number; total: number } | null>(null);
 
   const activeCollection = collections.find((c) => c.id === activeCollectionId);
   const displayItems = activeCollection?.items ?? unsavedItems;
@@ -265,6 +266,38 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
       setUnsavedItems((prev) => [...prev, ...newExamples]);
     }
   }, [displayItems, activeCollection]);
+
+  const handleGihImport = useCallback(
+    async (shareId: string) => {
+      setIsLoading(true);
+      setImportProgress({ loaded: 0, total: 1 });
+      try {
+        const { name, items } = await importFromGih(shareId, (loaded, total) => {
+          setImportProgress({ loaded, total });
+        });
+        const newCol = await createCollection(
+          name,
+          items.map((item, index) => ({
+            ...item,
+            id: crypto.randomUUID(),
+            position: index,
+            createdAt: new Date().toISOString(),
+          }))
+        );
+        setCollections((prev) => [newCol, ...prev]);
+        setActiveCollectionId(newCol.id);
+        setCollectionName(newCol.name);
+        setUnsavedItems([]);
+        router.push(`/collections/${newCol.id}`);
+      } catch (err) {
+        console.error("GIH import failed:", err);
+      } finally {
+        setIsLoading(false);
+        setImportProgress(null);
+      }
+    },
+    [router]
+  );
 
   const handleDeleteItem = useCallback(
     async (itemId: string) => {
@@ -399,7 +432,13 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto p-6">
-          <LinkInput onAddLinks={handleAddLinks} onLoadExamples={handleLoadExamples} isLoading={isLoading} />
+          <LinkInput
+            onAddLinks={handleAddLinks}
+            onImportGih={handleGihImport}
+            onLoadExamples={handleLoadExamples}
+            isLoading={isLoading}
+            importProgress={importProgress}
+          />
 
           {itemCount > 0 && (
             <div className="mt-3">
