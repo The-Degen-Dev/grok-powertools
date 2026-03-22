@@ -85,7 +85,14 @@ export default function ClipEditor() {
     setBlobUrl(null);
 
     try {
-      const resp = await fetch(url);
+      // Use proxy for cross-origin URLs (they may lack CORS headers)
+      const isCrossOrigin =
+        url.startsWith("http") && !url.startsWith(window.location.origin);
+      const fetchUrl = isCrossOrigin
+        ? `/api/video-proxy?url=${encodeURIComponent(url)}`
+        : url;
+
+      const resp = await fetch(fetchUrl);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const blob = await resp.blob();
       setBlobUrl(URL.createObjectURL(blob));

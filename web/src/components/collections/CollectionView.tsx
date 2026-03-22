@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Save, FolderPlus, Presentation, Share2, Check } from "lucide-react";
+import { Save, FolderPlus, Presentation, Share2, Check, ClipboardCopy, CheckSquare, X } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -41,6 +41,8 @@ import { generateShareUrl } from "@/lib/share";
 import EmptyState from "@/components/ui/EmptyState";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
+import { useToast } from "@/components/ui/Toast";
+import BulkActionBar from "./BulkActionBar";
 
 const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
@@ -91,12 +93,20 @@ function SortableVideoCard({
   onExpand,
   onEdit,
   onAddToMovie,
+  onSavePrompt,
+  isMultiSelectMode,
+  isSelected,
+  onSelect,
 }: {
   item: VideoItem;
   onDelete: (id: string) => void;
   onExpand?: (item: VideoItem) => void;
   onEdit?: (item: VideoItem) => void;
   onAddToMovie?: (item: VideoItem) => void;
+  onSavePrompt?: (item: VideoItem) => void;
+  isMultiSelectMode?: boolean;
+  isSelected?: boolean;
+  onSelect?: (id: string) => void;
 }) {
   const {
     attributes,
@@ -122,7 +132,11 @@ function SortableVideoCard({
         onExpand={onExpand}
         onEdit={onEdit}
         onAddToMovie={onAddToMovie}
+        onSavePrompt={onSavePrompt}
         dragHandleProps={listeners}
+        isMultiSelectMode={isMultiSelectMode}
+        isSelected={isSelected}
+        onSelect={onSelect}
       />
     </div>
   );
@@ -145,6 +159,9 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
   const [editingItem, setEditingItem] = useState<VideoItem | null>(null);
   const [addToMovieItem, setAddToMovieItem] = useState<VideoItem | null>(null);
   const [importProgress, setImportProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
 
   const activeCollection = collections.find((c) => c.id === activeCollectionId);
   const displayItems = activeCollection?.items ?? unsavedItems;
@@ -355,6 +372,55 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
     [activeCollectionId, router]
   );
 
+  const handleCopyAllLinks = useCallback(() => {
+    const links = displayItems.map((i) => i.sourceUrl).join("\n");
+    navigator.clipboard.writeText(links);
+    toast(`Copied ${displayItems.length} link${displayItems.length !== 1 ? "s" : ""}`, "success");
+  }, [displayItems, toast]);
+
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleToggleMultiSelect = useCallback(() => {
+    setIsMultiSelectMode((prev) => {
+      if (prev) setSelectedIds(new Set());
+      return !prev;
+    });
+  }, []);
+
+  const handleBulkDelete = useCallback(async () => {
+    for (const id of selectedIds) {
+      await handleDeleteItem(id);
+    }
+    setSelectedIds(new Set());
+    setIsMultiSelectMode(false);
+    toast(`Deleted ${selectedIds.size} item${selectedIds.size !== 1 ? "s" : ""}`, "success");
+  }, [selectedIds, handleDeleteItem, toast]);
+
+  const handleBulkCopyLinks = useCallback(() => {
+    const selected = displayItems.filter((i) => selectedIds.has(i.id));
+    const links = selected.map((i) => i.sourceUrl).join("\n");
+    navigator.clipboard.writeText(links);
+    toast(`Copied ${selected.length} link${selected.length !== 1 ? "s" : ""}`, "success");
+  }, [displayItems, selectedIds, toast]);
+
+  const handleBulkDownload = useCallback(() => {
+    const selected = displayItems.filter((i) => selectedIds.has(i.id) && i.videoUrl);
+    selected.forEach((item) => {
+      const a = document.createElement("a");
+      a.href = item.videoUrl;
+      a.download = `${item.grokPostId}.mp4`;
+      a.click();
+    });
+    toast(`Downloading ${selected.length} video${selected.length !== 1 ? "s" : ""}`, "success");
+  }, [displayItems, selectedIds, toast]);
+
   if (!initialLoaded) {
     return (
       <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center">
@@ -396,6 +462,22 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={handleCopyAllLinks}
+              disabled={itemCount === 0}
+            >
+              <ClipboardCopy className="h-4 w-4" />
+              Copy Links
+            </Button>
+            <Button
+              variant={isMultiSelectMode ? "primary" : "secondary"}
+              onClick={handleToggleMultiSelect}
+              disabled={itemCount === 0}
+            >
+              {isMultiSelectMode ? <X className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
+              {isMultiSelectMode ? "Cancel" : "Select"}
+            </Button>
             <Button
               variant="secondary"
               onClick={() => {
@@ -461,6 +543,9 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
                       onExpand={() => setViewerIndex(index)}
                       onEdit={setEditingItem}
                       onAddToMovie={setAddToMovieItem}
+                      isMultiSelectMode={isMultiSelectMode}
+                      isSelected={selectedIds.has(item.id)}
+                      onSelect={handleToggleSelect}
                     />
                   ))}
                 </div>
@@ -502,6 +587,16 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
           open={!!addToMovieItem}
           onClose={() => setAddToMovieItem(null)}
           item={addToMovieItem}
+        />
+      )}
+
+      {isMultiSelectMode && selectedIds.size > 0 && (
+        <BulkActionBar
+          selectedCount={selectedIds.size}
+          onDelete={handleBulkDelete}
+          onDownload={handleBulkDownload}
+          onCopyLinks={handleBulkCopyLinks}
+          onDeselectAll={() => setSelectedIds(new Set())}
         />
       )}
     </div>

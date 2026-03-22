@@ -4,7 +4,8 @@ import { useState, useRef, useCallback } from "react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
 
-const BASE_URL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+// Use single-threaded build — multi-threaded requires COEP/SharedArrayBuffer
+const BASE_URL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
 
 export function useFFmpeg() {
   const ffmpegRef = useRef<FFmpeg | null>(null);

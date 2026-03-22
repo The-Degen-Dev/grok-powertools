@@ -3,9 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Scissors, Film, Sparkles, Settings } from "lucide-react";
+import { Scissors, Film, Sparkles, Settings, BookOpen } from "lucide-react";
 import ThemeToggle from "@/components/ui/ThemeToggle";
 import SettingsPanel from "@/components/settings/SettingsPanel";
+import PromptLibrary from "@/components/prompts/PromptLibrary";
+import UserMenu from "@/components/auth/UserMenu";
+import { useSyncContext } from "@/components/auth/SyncProvider";
 
 const NAV_ITEMS = [
   { href: "/edit", icon: Scissors, label: "Clip Editor" },
@@ -28,6 +31,8 @@ export default function Header() {
   const pathname = usePathname();
   const breadcrumb = useBreadcrumb();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [promptLibOpen, setPromptLibOpen] = useState(false);
+  const { user, syncStatus, lastSyncAt, syncNow, signIn, signOut } = useSyncContext();
 
   return (
     <header className="sticky top-0 z-50 border-b border-(--color-surface-200) bg-(--color-surface-0)/80 backdrop-blur-lg dark:border-(--color-surface-800) dark:bg-(--color-surface-950)/80">
@@ -72,6 +77,14 @@ export default function Header() {
               </Link>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setPromptLibOpen(true)}
+            className="flex items-center gap-1.5 rounded-(--radius-btn) px-3 py-1.5 text-sm text-(--color-surface-600) transition-colors duration-(--duration-fast) hover:bg-(--color-surface-100) dark:text-(--color-surface-400) dark:hover:bg-(--color-surface-800)"
+          >
+            <BookOpen className="h-4 w-4" />
+            Prompts
+          </button>
           <div className="mx-2 h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700)" />
           <ThemeToggle />
           <button
@@ -82,8 +95,18 @@ export default function Header() {
           >
             <Settings className="h-4 w-4" />
           </button>
+          <div className="mx-2 h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700)" />
+          <UserMenu
+            user={user}
+            onSignIn={signIn}
+            onSignOut={signOut}
+            syncStatus={syncStatus}
+            lastSyncAt={lastSyncAt}
+            onSyncNow={syncNow}
+          />
         </nav>
         <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <PromptLibrary open={promptLibOpen} onClose={() => setPromptLibOpen(false)} />
       </div>
     </header>
   );

@@ -1,5 +1,60 @@
 // Grok Power Tools - Content Script
 
+// --- PAGE-WORLD BRIDGE ---
+// Content scripts run in Chrome's isolated world and cannot access expando properties
+// (like TipTap's `ce.editor`) set by the page's JavaScript. This bridge injects a
+// tiny script into the page's MAIN world that listens for custom DOM events and
+// accesses TipTap/ProseMirror and Grok's fetch on our behalf.
+(function injectPageWorldBridge() {
+    const script = document.createElement('script');
+    script.textContent = `
+        document.addEventListener('__gpt_set_editor_content', function(e) {
+            var ce = document.querySelector('[contenteditable="true"]');
+            if (ce && ce.editor) {
+                ce.editor.commands.clearContent();
+                ce.editor.commands.insertContent(e.detail.text);
+            }
+        });
+        document.addEventListener('__gpt_append_editor_content', function(e) {
+            var ce = document.querySelector('[contenteditable="true"]');
+            if (ce && ce.editor) {
+                ce.editor.commands.focus('end');
+                ce.editor.commands.insertContent(e.detail.text);
+            }
+        });
+        (function() {
+            var _origFetch = window.fetch;
+            window.fetch = function() {
+                var args = arguments;
+                var resp = _origFetch.apply(this, args);
+                resp.then(function(r) {
+                    try {
+                        var url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url);
+                        if (url && url.indexOf('/rest/app-chat/upload-file') !== -1) {
+                            r.clone().json().then(function(data) {
+                                if (data && data.fileMetadata && data.fileMetadata.url) {
+                                    document.dispatchEvent(new CustomEvent('__gpt_upload_complete', {
+                                        detail: { imageUrl: data.fileMetadata.url }
+                                    }));
+                                }
+                            });
+                        }
+                    } catch(e) {}
+                });
+                return resp;
+            };
+        })();
+    `;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+
+    // Listen for upload completion events from the page world
+    document.addEventListener('__gpt_upload_complete', function(e) {
+        window._lastUploadedImageUrl = e.detail && e.detail.imageUrl;
+        console.log('GrokPowerTools: Captured uploaded image URL');
+    });
+})();
+
 // --- CONFIGURATION DEFAULTS ---
 const SettingsDefaults = {
     maxRetries: 3,
@@ -540,6 +595,22 @@ class GrokOverlay {
                     </div>
 
                     <div class="gpt-section">
+                        <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Template Batch</label>
+                        <div class="gpt-row" style="gap:6px; align-items:center;">
+                            <select id="gptTemplateSelect" style="flex:1; padding:4px 6px; border-radius:4px; border:1px solid #555; background:#222; color:#fff; font-size:11px;">
+                                <option value="c666d4b7-5c53-418a-8448-99ad7c5ca649">Funky Dance</option>
+                            </select>
+                            <label style="font-size:11px; white-space:nowrap;">×</label>
+                            <input type="number" id="gptTemplateBatchCount" min="1" max="50" value="10" style="width:48px; padding:4px; border-radius:4px; border:1px solid #555; background:#222; color:#fff; font-size:11px;">
+                        </div>
+                        <div class="gpt-row" style="margin-top:6px; gap:4px;">
+                            <button id="gptTemplateBatchBtn" class="gpt-btn gpt-btn-primary" style="flex:1; background:#e67e22; font-size:11px;">Start Template Batch</button>
+                            <button id="gptTemplateBatchStopBtn" class="gpt-btn" style="flex:1; background:#f4212e; display:none; font-size:11px;">Stop</button>
+                        </div>
+                        <div id="gptTemplateBatchStatus" style="font-size:10px; color:#71767b; margin-top:4px;"></div>
+                    </div>
+
+                    <div class="gpt-section">
                         <div style="display:flex; gap:8px; margin-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
                              <div class="gpt-tab active" id="tab-btn-history" style="flex:1; text-align:center;">History</div>
                              <div class="gpt-tab" id="tab-btn-saved" style="flex:1; text-align:center;">Saved</div>
@@ -790,6 +861,32 @@ class GrokOverlay {
             this.retryManager.stopBatch();
         });
         this.el.querySelector('#gptAddPromptBtn').addEventListener('click', () => this.saveCurrentPrompt(this.savedPromptType));
+
+        // --- Template Batch ---
+        this.templateBatchManager = new TemplateBatchManager(this.toast);
+        this.el.querySelector('#gptTemplateBatchBtn').addEventListener('click', async () => {
+            const count = parseInt(this.el.querySelector('#gptTemplateBatchCount').value, 10) || 10;
+            const templateId = this.el.querySelector('#gptTemplateSelect').value;
+            if (!templateId) {
+                this.toast.show('Select a template', 'error');
+                return;
+            }
+            const imageUrl = this.captureTemplateImageUrl();
+            if (!imageUrl) {
+                this.toast.show('Upload an image in the template dialog first', 'error');
+                return;
+            }
+            this.el.querySelector('#gptTemplateBatchBtn').style.display = 'none';
+            this.el.querySelector('#gptTemplateBatchStopBtn').style.display = '';
+            await this.templateBatchManager.start(templateId, imageUrl, count);
+            this.el.querySelector('#gptTemplateBatchBtn').style.display = '';
+            this.el.querySelector('#gptTemplateBatchStopBtn').style.display = 'none';
+        });
+        this.el.querySelector('#gptTemplateBatchStopBtn').addEventListener('click', () => {
+            this.templateBatchManager.stop();
+            this.el.querySelector('#gptTemplateBatchBtn').style.display = '';
+            this.el.querySelector('#gptTemplateBatchStopBtn').style.display = 'none';
+        });
 
         const bindInput = (id, key, type = 'int') => {
             this.el.querySelector('#' + id).addEventListener('change', (e) => {
@@ -1119,6 +1216,21 @@ class GrokOverlay {
         return '';
     }
 
+    captureTemplateImageUrl() {
+        // Method 1: Find a user-uploaded image in the template dialog
+        const dialog = document.querySelector('[role="dialog"]');
+        if (dialog) {
+            const imgs = Array.from(dialog.querySelectorAll('img')).filter(img => {
+                const src = img.src || '';
+                return src.includes('assets.grok.com/users/') && !src.includes('share-images') && !src.includes('share-videos');
+            });
+            if (imgs.length > 0) return imgs[0].src;
+        }
+        // Method 2: Captured from intercepted upload-file response
+        if (window._lastUploadedImageUrl) return window._lastUploadedImageUrl;
+        return null;
+    }
+
     injectPrompt(text, mode = 'replace') {
         if (mode === 'append') {
             return this.appendPromptText(text);
@@ -1127,20 +1239,26 @@ class GrokOverlay {
         const ta = document.querySelector('textarea[aria-required="true"]');
         if (ta) {
             ta.focus();
-            // React 16+ State Hack:
+            // Reset React's internal value tracker so it detects our programmatic change
+            const tracker = ta._valueTracker;
+            if (tracker) {
+                tracker.setValue('');
+            }
             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
                 window.HTMLTextAreaElement.prototype,
                 "value"
             ).set;
             nativeInputValueSetter.call(ta, text);
             ta.dispatchEvent(new Event('input', { bubbles: true }));
+            ta.dispatchEvent(new Event('change', { bubbles: true }));
         } else {
-            // Fallback: contenteditable div (used on favorites gallery)
+            // Fallback: contenteditable div (TipTap/ProseMirror on Grok)
             const ce = document.querySelector('[contenteditable="true"]');
             if (ce) {
                 ce.focus();
-                ce.textContent = text;
-                ce.dispatchEvent(new Event('input', { bubbles: true }));
+                document.dispatchEvent(new CustomEvent('__gpt_set_editor_content', {
+                    detail: { text }
+                }));
             }
         }
     }
@@ -1155,9 +1273,14 @@ class GrokOverlay {
             const start = Number.isFinite(ta.selectionStart) ? ta.selectionStart : ta.value.length;
             const end = Number.isFinite(ta.selectionEnd) ? ta.selectionEnd : start;
             const next = appendSnippetAtCursor(ta.value, snippet, start, end, SAVED_PROMPT_DELIMITER);
+            const tracker = ta._valueTracker;
+            if (tracker) {
+                tracker.setValue('');
+            }
             const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
             setter.call(ta, next.text);
             ta.dispatchEvent(new Event('input', { bubbles: true }));
+            ta.dispatchEvent(new Event('change', { bubbles: true }));
             ta.setSelectionRange(next.caret, next.caret);
             return true;
         }
@@ -1165,13 +1288,9 @@ class GrokOverlay {
         const ce = document.querySelector('[contenteditable="true"]');
         if (ce) {
             ce.focus();
-            const offsets = this.getContentEditableSelectionOffsets(ce);
-            const start = offsets ? offsets.start : (ce.textContent || '').length;
-            const end = offsets ? offsets.end : start;
-            const next = appendSnippetAtCursor(ce.textContent || '', snippet, start, end, SAVED_PROMPT_DELIMITER);
-            ce.textContent = next.text;
-            this.setContentEditableCaret(ce, next.caret);
-            ce.dispatchEvent(new Event('input', { bubbles: true }));
+            document.dispatchEvent(new CustomEvent('__gpt_append_editor_content', {
+                detail: { text: SAVED_PROMPT_DELIMITER + snippet }
+            }));
             return true;
         }
 
@@ -1334,20 +1453,119 @@ class VideoRetryManager {
         const ta = document.querySelector('textarea[aria-required="true"]');
         if (ta) {
             ta.focus();
+            // Reset React's internal value tracker so it detects our programmatic change
+            const tracker = ta._valueTracker;
+            if (tracker) {
+                tracker.setValue('');
+            }
             const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
             setter.call(ta, text);
             ta.dispatchEvent(new Event('input', { bubbles: true }));
+            ta.dispatchEvent(new Event('change', { bubbles: true }));
             return true;
         }
 
         const ce = document.querySelector('[contenteditable="true"]');
         if (ce) {
             ce.focus();
-            ce.textContent = text;
-            ce.dispatchEvent(new Event('input', { bubbles: true }));
+            // Use page-world bridge — ce.editor is not accessible from isolated world
+            document.dispatchEvent(new CustomEvent('__gpt_set_editor_content', {
+                detail: { text }
+            }));
             return true;
         }
 
+        return false;
+    }
+
+    // --- Prompted Batch Helpers ---
+
+    // Dispatches a full pointer event sequence that works with Radix UI dropdowns
+    // (bare .click() does NOT trigger Grok's Radix-based dropdowns/menus)
+    simulateClick(el) {
+        const rect = el.getBoundingClientRect();
+        const x = rect.x + rect.width / 2;
+        const y = rect.y + rect.height / 2;
+        const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
+        el.dispatchEvent(new PointerEvent('pointerdown', opts));
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        el.dispatchEvent(new PointerEvent('pointerup', opts));
+        el.dispatchEvent(new MouseEvent('mouseup', opts));
+        el.dispatchEvent(new MouseEvent('click', opts));
+    }
+
+    // Detects censored/blurred gallery cards that would redirect to homepage if clicked
+    isCensoredCard(container) {
+        const img = container.querySelector('img');
+        if (!img) return true;
+
+        // Walk up from img to container checking for CSS blur filter
+        let el = img;
+        while (el && el !== container.parentElement) {
+            const style = window.getComputedStyle(el);
+            if (style.filter && style.filter.includes('blur')) return true;
+            if (style.opacity && parseFloat(style.opacity) < 0.5) return true;
+            el = el.parentElement;
+        }
+
+        // Check for blur-related classes
+        const classes = container.className + ' ' + (img.className || '');
+        if (/blur|censor|blocked|nsfw|flagged/i.test(classes)) return true;
+
+        return false;
+    }
+
+    // Gets a stable identifier for a gallery card (image src survives React re-renders)
+    _getCardImageSrc(container) {
+        const img = container.querySelector('img');
+        return img?.src || '';
+    }
+
+    // Clicks the Settings dropdown and selects "Make Video" mode so the submit
+    // button sends the prompt with --mode=custom instead of --mode=normal
+    async selectMakeVideoMode() {
+        const settingsBtn = document.querySelector('button[aria-label="Settings"]');
+        if (!settingsBtn) {
+            console.log('VideoRetryManager: Settings dropdown not found');
+            return false;
+        }
+        this.simulateClick(settingsBtn);
+        await this.sleep(500);
+
+        // Find and click "Make Video" in the dropdown menu
+        let found = false;
+        const menuItems = document.querySelectorAll('[role="menuitem"], [role="option"]');
+        for (const item of menuItems) {
+            if (item.textContent?.includes('Make Video')) {
+                this.simulateClick(item);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            // Fallback: search all clickable elements in any popup/dropdown
+            const allClickable = document.querySelectorAll('div[class*="cursor-pointer"], button');
+            for (const el of allClickable) {
+                if (el.textContent?.trim()?.startsWith('Make Video')) {
+                    this.simulateClick(el);
+                    found = true;
+                    break;
+                }
+            }
+        }
+        await this.sleep(500);
+        return found;
+    }
+
+    // Clicks the submit button (↑) which changes aria-label based on mode
+    clickSubmitButton() {
+        const submitBtn = document.querySelector('button[aria-label="Make video"]')
+            || document.querySelector('button[aria-label="Edit"]')
+            || document.querySelector('button[aria-label="Submit"]');
+        if (submitBtn) {
+            this.simulateClick(submitBtn);
+            return true;
+        }
         return false;
     }
 
@@ -1426,6 +1644,8 @@ class VideoRetryManager {
         this.batchMode = 'prompted';
         this.batchContext = 'gallery';
         this.batchPrompt = prompt;
+        this.batchGalleryUrl = window.location.href;
+        this.batchProcessedSrcs = new Set();
         this.scrollAttempts = 0;
         this.goalCount = 0;
         this.goalTotal = Math.max(1, galleryLimit);
@@ -1457,6 +1677,19 @@ class VideoRetryManager {
             }
 
             if (item.container.querySelector(this.PROGRESS_SELECTOR)) {
+                this.batchIndex++;
+                continue;
+            }
+
+            // Skip already-processed or censored images
+            const itemSrc = this._getCardImageSrc(item.container);
+            if (itemSrc && this.batchProcessedSrcs?.has(itemSrc)) {
+                this.batchIndex++;
+                continue;
+            }
+            if (this.isCensoredCard(item.container)) {
+                console.log(`Prompted Batch [gallery]: Item ${this.batchIndex + 1} is censored, skipping.`);
+                if (itemSrc) this.batchProcessedSrcs?.add(itemSrc);
                 this.batchIndex++;
                 continue;
             }
@@ -1504,20 +1737,23 @@ class VideoRetryManager {
 
         while (this.batchRunning && !this.batchAborted && this.goalCount < this.goalTotal) {
             if (this.batchPrompt) {
+                const modeSet = await this.selectMakeVideoMode();
+                if (!modeSet) {
+                    console.log('Prompted Batch [detail]: Could not set Make Video mode');
+                }
+                await this.sleep(300);
                 this.injectPromptText(this.batchPrompt);
                 await this.sleep(300);
             }
 
-            const makeBtn = document.querySelector(this.BUTTON_SELECTOR);
-            if (!makeBtn) {
-                this.safeStatus('Prompted Batch [detail]: Make video button not found', 'warning');
+            this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
+            const submitted = this.clickSubmitButton();
+            if (!submitted) {
+                this.safeStatus('Prompted Batch [detail]: Submit button not found', 'warning');
                 break;
             }
-
-            this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
             this.lastClickTime = Date.now();
-            makeBtn.click();
-            console.log(`Prompted Batch [detail]: Clicked Make Video (${this.goalCount + 1}/${this.goalTotal}).`);
+            console.log(`Prompted Batch [detail]: Submitted video (${this.goalCount + 1}/${this.goalTotal}).`);
 
             const result = await this.awaitBatchItemCompletion(document, {
                 allowRetry: true,
@@ -1560,6 +1796,7 @@ class VideoRetryManager {
         this.isVerifying = false;
         this.targetContext = null;
         this.batchContext = null;
+        this.batchProcessedSrcs = null;
         this.safeStatus('Batch Stopped', 'neutral');
         this.updateCounters();
         this.updateBatchButtons(false);
@@ -1577,8 +1814,12 @@ class VideoRetryManager {
             if (Math.abs(a.top - b.top) > 20) return a.top - b.top;
             return a.left - b.left;
         });
-        // Filter out items that already have a completed video
-        return items.filter(item => !item.container.querySelector(this.PROGRESS_SELECTOR));
+        // Filter out completed, censored, or already-processed items
+        return items.filter(item =>
+            !item.container.querySelector(this.PROGRESS_SELECTOR)
+            && !this.isCensoredCard(item.container)
+            && !this.batchProcessedSrcs?.has(this._getCardImageSrc(item.container))
+        );
     }
 
     async processBatchNext() {
@@ -1654,23 +1895,40 @@ class VideoRetryManager {
         img.click();
         await this.sleep(2000); // Wait for detail view to load
 
-        // Inject the prompt
-        if (this.batchPrompt) {
-            const injected = this.injectPromptText(this.batchPrompt);
-            if (injected) {
-                console.log('Prompted Batch [gallery]: Injected prompt.');
-                await this.sleep(500);
-            }
+        // Verify we actually reached detail view (censored images redirect to homepage)
+        const isDetail = /\/imagine\/post\//.test(window.location.pathname);
+        if (!isDetail) {
+            const failedSrc = this._getCardImageSrc(item.container);
+            if (failedSrc) this.batchProcessedSrcs?.add(failedSrc);
+            console.log(`Prompted Batch [gallery]: Navigation failed for item ${this.batchIndex + 1} (likely censored), skipping.`);
+            // Always rebuild queue after navigation — DOM may have been re-rendered by React
+            await this.sleep(1000);
+            this.batchQueue = this.buildBatchQueue();
+            this.batchIndex = 0;
+            this.updateCounters();
+            return;
         }
 
-        // Find and click "Make video" in the detail view
-        const makeBtn = document.querySelector(this.BUTTON_SELECTOR);
-        if (!makeBtn) {
-            console.log('Prompted Batch [gallery]: No Make video button in detail view.');
+        // Switch to "Make Video" mode via dropdown and inject prompt
+        if (this.batchPrompt) {
+            const modeSet = await this.selectMakeVideoMode();
+            if (!modeSet) {
+                console.log('Prompted Batch [gallery]: Could not set Make Video mode');
+            }
+            await this.sleep(300);
+            this.injectPromptText(this.batchPrompt);
+            await this.sleep(500);
+        }
+
+        // Click the SUBMIT button (not the overlay "Make video" button)
+        const submitted = this.clickSubmitButton();
+        if (!submitted) {
+            console.log('Prompted Batch [gallery]: Submit button not found in detail view.');
         } else {
             this.lastClickTime = Date.now();
-            makeBtn.click();
-            console.log(`Prompted Batch [gallery]: Clicked Make Video for item ${this.batchIndex + 1}.`);
+            const submittedSrc = this._getCardImageSrc(item.container);
+            if (submittedSrc) this.batchProcessedSrcs?.add(submittedSrc);
+            console.log(`Prompted Batch [gallery]: Submitted video for item ${this.batchIndex + 1}.`);
             await this.sleep(1200); // safety wait before navigating back
         }
 
@@ -1974,6 +2232,62 @@ class VideoRetryManager {
     }
 
     sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+}
+
+class TemplateBatchManager {
+    constructor(toast) {
+        this.toast = toast;
+        this.running = false;
+        this.aborted = false;
+        this.count = 0;
+        this.total = 0;
+    }
+
+    async start(templateId, imageUrl, count) {
+        this.running = true;
+        this.aborted = false;
+        this.count = 0;
+        this.total = count;
+        this.updateStatus(`Starting 0/${count}...`);
+
+        for (let i = 0; i < count && this.running && !this.aborted; i++) {
+            try {
+                const resp = await fetch('https://grok.com/rest/media/pipeline/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        templateId,
+                        inputs: [{ name: 'photo', imageUrl }]
+                    })
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                this.count++;
+                this.updateStatus(`Submitted ${this.count}/${this.total}`);
+                console.log(`TemplateBatch: Submitted ${this.count}/${this.total}`);
+            } catch (e) {
+                console.error('TemplateBatch error:', e);
+                this.updateStatus(`Error at ${this.count + 1}/${this.total}: ${e.message}`);
+            }
+            // Brief delay between submissions to avoid rate limiting
+            await new Promise(r => setTimeout(r, 2000));
+        }
+
+        this.running = false;
+        this.updateStatus(`Done: ${this.count}/${this.total} submitted`);
+        this.toast.show(`Template batch complete: ${this.count}/${this.total}`, 'success');
+    }
+
+    stop() {
+        this.aborted = true;
+        this.running = false;
+        this.updateStatus(`Stopped at ${this.count}/${this.total}`);
+    }
+
+    updateStatus(text) {
+        const el = document.querySelector('#gptTemplateBatchStatus');
+        if (el) el.textContent = text;
+    }
 }
 
 

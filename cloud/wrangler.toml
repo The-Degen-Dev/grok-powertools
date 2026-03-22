@@ -11,3 +11,8 @@ R2_BUCKET_NAME = "grok-gallery-001"
 [[r2_buckets]]
 binding = "R2_BUCKET"
 bucket_name = "grok-gallery-001"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "grok-powertools-db"
+database_id = "ad89e4bb-0b68-4c72-93d9-b90e6eb45aa6"

@@ -11,6 +11,9 @@ import {
   Copy,
   Scissors,
   FilmIcon,
+  Volume2,
+  VolumeX,
+  BookmarkPlus,
 } from "lucide-react";
 import type { VideoItem } from "@/lib/types";
 import Spinner from "@/components/ui/Spinner";
@@ -23,7 +26,11 @@ interface VideoCardProps {
   onExpand?: (item: VideoItem) => void;
   onEdit?: (item: VideoItem) => void;
   onAddToMovie?: (item: VideoItem) => void;
+  onSavePrompt?: (item: VideoItem) => void;
   dragHandleProps?: Record<string, unknown>;
+  isMultiSelectMode?: boolean;
+  isSelected?: boolean;
+  onSelect?: (id: string) => void;
 }
 
 export default function VideoCard({
@@ -34,12 +41,17 @@ export default function VideoCard({
   onExpand,
   onEdit,
   onAddToMovie,
+  onSavePrompt,
   dragHandleProps,
+  isMultiSelectMode = false,
+  isSelected = false,
+  onSelect,
 }: VideoCardProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loadVideo, setLoadVideo] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const [w, h] = aspectRatio.split(":").map(Number);
@@ -85,6 +97,13 @@ export default function VideoCard({
     }
   }
 
+  function handleToggleMute(e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = !isMuted;
+    setIsMuted(next);
+    if (videoRef.current) videoRef.current.muted = next;
+  }
+
   function handleCopyPrompt(e: React.MouseEvent) {
     e.stopPropagation();
     if (item.promptText) {
@@ -92,12 +111,38 @@ export default function VideoCard({
     }
   }
 
+  function handleCardClick() {
+    if (isMultiSelectMode && onSelect) {
+      onSelect(item.id);
+    }
+  }
+
   return (
     <div
-      className="group relative w-full overflow-hidden rounded-(--radius-card) bg-(--color-surface-0) shadow-(--shadow-card) transition-all duration-(--duration-normal) hover:shadow-(--shadow-card-hover) hover:scale-[1.02] dark:bg-(--color-surface-900)"
+      className={`group relative w-full overflow-hidden rounded-(--radius-card) bg-(--color-surface-0) shadow-(--shadow-card) transition-all duration-(--duration-normal) hover:shadow-(--shadow-card-hover) hover:scale-[1.02] dark:bg-(--color-surface-900) ${isMultiSelectMode ? "cursor-pointer" : ""} ${isSelected ? "ring-2 ring-(--color-accent) ring-offset-2 dark:ring-offset-(--color-surface-950)" : ""}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onClick={handleCardClick}
     >
+      {/* Multi-select checkbox */}
+      {isMultiSelectMode && (
+        <div className="absolute right-2 top-2 z-30">
+          <div
+            className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition-colors ${
+              isSelected
+                ? "border-(--color-accent) bg-(--color-accent) text-white"
+                : "border-white/70 bg-black/30"
+            }`}
+          >
+            {isSelected && (
+              <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none">
+                <path d="M2.5 6L5 8.5L9.5 3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Drag handle — visible on hover */}
       <div
         className="absolute left-1/2 top-1 z-20 -translate-x-1/2 cursor-grab opacity-0 transition-opacity group-hover:opacity-100"
@@ -121,7 +166,7 @@ export default function VideoCard({
                 src={item.videoUrl}
                 className={`absolute inset-0 h-full w-full ${fitMode === "contain" ? "object-contain" : "object-cover"}`}
                 loop
-                muted
+                muted={isMuted}
                 playsInline
                 preload="auto"
                 poster={item.thumbnailUrl || undefined}
@@ -170,6 +215,11 @@ export default function VideoCard({
                 onClick={handleTogglePlay}
               />
               <OverlayButton
+                icon={isMuted ? VolumeX : Volume2}
+                label={isMuted ? "Unmute" : "Mute"}
+                onClick={handleToggleMute}
+              />
+              <OverlayButton
                 icon={Maximize2}
                 label="Fullscreen"
                 onClick={(e) => { e.stopPropagation(); onExpand?.(item); }}
@@ -188,6 +238,13 @@ export default function VideoCard({
                   icon={FilmIcon}
                   label="Add to Movie"
                   onClick={(e) => { e.stopPropagation(); onAddToMovie(item); }}
+                />
+              )}
+              {item.promptText && onSavePrompt && (
+                <OverlayButton
+                  icon={BookmarkPlus}
+                  label="Save prompt"
+                  onClick={(e) => { e.stopPropagation(); onSavePrompt(item); }}
                 />
               )}
               <OverlayButton icon={Download} label="Download" onClick={handleDownload} />

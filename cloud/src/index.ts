@@ -5,8 +5,12 @@ import type {
     MetadataKind,
     MetadataSnapshotRequest,
     PresignRequest,
-    PresignResponse
+    PresignResponse,
+    SyncPushRequest,
+    SyncPullResponse
 } from './types';
+import { verifyJWT, extractBearerToken } from './auth';
+import { upsertEntity, getEntitiesSince, ensureUser } from './db';
 
 const SERVICE_NAME = 'grok-r2-backup';
 const PRESIGN_EXPIRY_SECONDS = 3600;
@@ -28,7 +32,7 @@ function corsHeaders(): HeadersInit {
     return {
         'access-control-allow-origin': '*',
         'access-control-allow-methods': 'GET,POST,OPTIONS',
-        'access-control-allow-headers': 'Content-Type,x-gpt-api-key'
+        'access-control-allow-headers': 'Content-Type,x-gpt-api-key,Authorization'
     };
 }
 
@@ -208,6 +212,96 @@ async function handleMetadataSnapshot(request: Request, env: Env): Promise<Respo
     }
 }
 
+// --- Sync Endpoints (JWT auth) ---
+
+async function assertSyncAuth(request: Request, env: Env): Promise<{ userId: string; email: string; name: string } | Response> {
+    const token = extractBearerToken(request);
+    if (!token) return errorResponse('Missing Authorization header', 401);
+
+    if (!env.SYNC_SECRET) return errorResponse('SYNC_SECRET not configured', 500);
+
+    const payload = await verifyJWT(token, env.SYNC_SECRET);
+    if (!payload || !payload.sub) return errorResponse('Invalid or expired token', 401);
+
+    return {
+        userId: payload.sub,
+        email: payload.email || '',
+        name: payload.name || '',
+    };
+}
+
+async function handleSyncPush(request: Request, env: Env): Promise<Response> {
+    const authResult = await assertSyncAuth(request, env);
+    if (authResult instanceof Response) return authResult;
+
+    const { userId, email, name } = authResult;
+
+    let payload: SyncPushRequest;
+    try {
+        payload = await parseJson<SyncPushRequest>(request);
+    } catch {
+        return errorResponse('Invalid JSON payload.', 400);
+    }
+
+    await ensureUser(env.DB, userId, email, name, '');
+
+    if (payload.collections) {
+        for (const col of payload.collections) {
+            await upsertEntity(env.DB, 'collections', {
+                id: col.id,
+                user_id: userId,
+                data: col.data,
+                updated_at: col.updatedAt,
+                deleted_at: col.deletedAt ?? null,
+            });
+        }
+    }
+
+    if (payload.movies) {
+        for (const movie of payload.movies) {
+            await upsertEntity(env.DB, 'movies', {
+                id: movie.id,
+                user_id: userId,
+                data: movie.data,
+                updated_at: movie.updatedAt,
+                deleted_at: movie.deletedAt ?? null,
+            });
+        }
+    }
+
+    return jsonResponse({ ok: true, syncedAt: new Date().toISOString() });
+}
+
+async function handleSyncPull(request: Request, env: Env): Promise<Response> {
+    const authResult = await assertSyncAuth(request, env);
+    if (authResult instanceof Response) return authResult;
+
+    const { userId } = authResult;
+    const url = new URL(request.url);
+    const since = url.searchParams.get('since') || new Date(0).toISOString();
+
+    const collections = await getEntitiesSince(env.DB, 'collections', userId, since);
+    const movies = await getEntitiesSince(env.DB, 'movies', userId, since);
+
+    const response: SyncPullResponse = {
+        collections: collections.map((c) => ({
+            id: c.id,
+            data: c.data,
+            updatedAt: c.updated_at,
+            deletedAt: c.deleted_at,
+        })),
+        movies: movies.map((m) => ({
+            id: m.id,
+            data: m.data,
+            updatedAt: m.updated_at,
+            deletedAt: m.deleted_at,
+        })),
+        syncedAt: new Date().toISOString(),
+    };
+
+    return jsonResponse(response);
+}
+
 export default {
     async fetch(request: Request, env: Env): Promise<Response> {
         if (request.method === 'OPTIONS') {
@@ -217,15 +311,28 @@ export default {
             });
         }
 
+        const url = new URL(request.url);
+
+        // Sync endpoints use JWT auth (separate from extension API key auth)
+        if (url.pathname.startsWith('/v1/sync/')) {
+            if (request.method === 'POST' && url.pathname === '/v1/sync/push') {
+                return handleSyncPush(request, env);
+            }
+            if (request.method === 'GET' && url.pathname === '/v1/sync/pull') {
+                return handleSyncPull(request, env);
+            }
+            return errorResponse('Not found', 404);
+        }
+
+        // Health check — no auth required
+        if (request.method === 'GET' && url.pathname === '/health') {
+            return jsonResponse({ ok: true, service: SERVICE_NAME, now: new Date().toISOString() });
+        }
+
+        // Extension endpoints use API key auth
         const authError = assertAuthorized(request, env);
         if (authError) {
             return errorResponse(authError, 401);
-        }
-
-        const url = new URL(request.url);
-
-        if (request.method === 'GET' && url.pathname === '/health') {
-            return jsonResponse({ ok: true, service: SERVICE_NAME, now: new Date().toISOString() });
         }
 
         if (request.method === 'POST' && url.pathname === '/v1/presign') {

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -15,8 +15,10 @@
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "idb": "^8.0.3",
+    "jose": "^6.2.1",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",
+    "next-auth": "^5.0.0-beta.30",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "uuid": "^13.0.0"

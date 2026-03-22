@@ -45,11 +45,17 @@ export default function Dashboard() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    Promise.all([getAllCollections(), getAllMovies()]).then(([cols, movs]) => {
-      setCollections(cols);
-      setMovies(movs);
-      setLoaded(true);
-    });
+    Promise.all([getAllCollections(), getAllMovies()])
+      .then(([cols, movs]) => {
+        setCollections(cols);
+        setMovies(movs);
+      })
+      .catch((err) => {
+        console.error("[Dashboard] failed to load:", err);
+      })
+      .finally(() => {
+        setLoaded(true);
+      });
   }, []);
 
   async function handleNewCollection() {

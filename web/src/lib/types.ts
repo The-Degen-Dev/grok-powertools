@@ -19,6 +19,8 @@ export interface Collection {
   items: VideoItem[];
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
+  syncVersion?: number;
 }
 
 export interface ShareLink {
@@ -90,4 +92,21 @@ export interface Movie {
   clips: MovieClip[];
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
+  syncVersion?: number;
+}
+
+export interface SavedPrompt {
+  id: string;
+  text: string;
+  tags: string[];
+  sourceVideoId?: string;
+  usageCount: number;
+  createdAt: string;
+}
+
+export interface SyncMeta {
+  lastSyncAt: string;
+  lastPushAt: string;
+  deviceId: string;
 }

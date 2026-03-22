@@ -1,10 +1,10 @@
 import { openDB, type IDBPDatabase } from "idb";
 import { v4 as uuidv4 } from "uuid";
-import type { Collection, VideoItem, AppSettings, Movie } from "./types";
+import type { Collection, VideoItem, AppSettings, Movie, SavedPrompt, SyncMeta } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
 const DB_NAME = "grok-power-tools";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -24,6 +24,11 @@ function getDB(): Promise<IDBPDatabase> {
           const movieStore = db.createObjectStore("movies", { keyPath: "id" });
           movieStore.createIndex("by-updated", "updatedAt");
         }
+        if (oldVersion < 3) {
+          const promptStore = db.createObjectStore("prompts", { keyPath: "id" });
+          promptStore.createIndex("by-created", "createdAt");
+          db.createObjectStore("sync_meta");
+        }
       },
     });
   }
@@ -35,9 +40,11 @@ function getDB(): Promise<IDBPDatabase> {
 export async function getAllCollections(): Promise<Collection[]> {
   const db = await getDB();
   const collections: Collection[] = await db.getAll("collections");
-  return collections.sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-  );
+  return collections
+    .filter((c) => !c.deletedAt)
+    .sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
 }
 
 export async function getCollection(id: string): Promise<Collection | undefined> {
@@ -179,9 +186,11 @@ export async function updateSettings(
 export async function getAllMovies(): Promise<Movie[]> {
   const db = await getDB();
   const movies: Movie[] = await db.getAll("movies");
-  return movies.sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-  );
+  return movies
+    .filter((m) => !m.deletedAt)
+    .sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
 }
 
 export async function getMovie(id: string): Promise<Movie | undefined> {
@@ -214,4 +223,123 @@ export async function updateMovie(movie: Movie): Promise<Movie> {
 export async function deleteMovie(id: string): Promise<void> {
   const db = await getDB();
   await db.delete("movies", id);
+}
+
+// --- Soft Delete (for sync) ---
+
+export async function softDeleteCollection(id: string): Promise<void> {
+  const db = await getDB();
+  const col = await db.get("collections", id) as Collection | undefined;
+  if (!col) return;
+  col.deletedAt = new Date().toISOString();
+  col.updatedAt = new Date().toISOString();
+  col.syncVersion = (col.syncVersion ?? 0) + 1;
+  await db.put("collections", col);
+}
+
+export async function softDeleteMovie(id: string): Promise<void> {
+  const db = await getDB();
+  const movie = await db.get("movies", id) as Movie | undefined;
+  if (!movie) return;
+  movie.deletedAt = new Date().toISOString();
+  movie.updatedAt = new Date().toISOString();
+  movie.syncVersion = (movie.syncVersion ?? 0) + 1;
+  await db.put("movies", movie);
+}
+
+// --- Sync Helpers ---
+
+export async function getChangesSince(since: string): Promise<{
+  collections: Collection[];
+  movies: Movie[];
+}> {
+  const db = await getDB();
+  const allCollections: Collection[] = await db.getAll("collections");
+  const allMovies: Movie[] = await db.getAll("movies");
+  const sinceDate = new Date(since).getTime();
+
+  return {
+    collections: allCollections.filter(
+      (c) => new Date(c.updatedAt).getTime() > sinceDate
+    ),
+    movies: allMovies.filter(
+      (m) => new Date(m.updatedAt).getTime() > sinceDate
+    ),
+  };
+}
+
+export async function getAllCollectionsIncludingDeleted(): Promise<Collection[]> {
+  const db = await getDB();
+  return db.getAll("collections") as Promise<Collection[]>;
+}
+
+export async function getAllMoviesIncludingDeleted(): Promise<Movie[]> {
+  const db = await getDB();
+  return db.getAll("movies") as Promise<Movie[]>;
+}
+
+export async function getSyncMeta(): Promise<SyncMeta | undefined> {
+  const db = await getDB();
+  return db.get("sync_meta", "sync-state") as Promise<SyncMeta | undefined>;
+}
+
+export async function updateSyncMeta(partial: Partial<SyncMeta>): Promise<SyncMeta> {
+  const db = await getDB();
+  const current = await getSyncMeta();
+  const updated: SyncMeta = {
+    lastSyncAt: current?.lastSyncAt ?? new Date(0).toISOString(),
+    lastPushAt: current?.lastPushAt ?? new Date(0).toISOString(),
+    deviceId: current?.deviceId ?? crypto.randomUUID(),
+    ...partial,
+  };
+  await db.put("sync_meta", updated, "sync-state");
+  return updated;
+}
+
+// --- Saved Prompts ---
+
+export async function getSavedPrompts(): Promise<SavedPrompt[]> {
+  const db = await getDB();
+  const prompts: SavedPrompt[] = await db.getAll("prompts");
+  return prompts.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}
+
+export async function addPrompt(text: string, sourceVideoId?: string): Promise<SavedPrompt> {
+  const db = await getDB();
+  const prompt: SavedPrompt = {
+    id: uuidv4(),
+    text,
+    tags: [],
+    sourceVideoId,
+    usageCount: 0,
+    createdAt: new Date().toISOString(),
+  };
+  await db.put("prompts", prompt);
+  return prompt;
+}
+
+export async function deletePrompt(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete("prompts", id);
+}
+
+export async function searchPrompts(query: string): Promise<SavedPrompt[]> {
+  const all = await getSavedPrompts();
+  if (!query.trim()) return all;
+  const lower = query.toLowerCase();
+  return all.filter(
+    (p) =>
+      p.text.toLowerCase().includes(lower) ||
+      p.tags.some((t) => t.toLowerCase().includes(lower))
+  );
+}
+
+export async function incrementPromptUsage(id: string): Promise<void> {
+  const db = await getDB();
+  const prompt = await db.get("prompts", id) as SavedPrompt | undefined;
+  if (!prompt) return;
+  prompt.usageCount += 1;
+  await db.put("prompts", prompt);
 }

@@ -28,3 +28,4 @@ playwright-report/
 AGENT_STATE.md
 AGENT_HANDOFF.md
 .agent/delegate-reports/
+.gstack/

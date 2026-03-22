@@ -117,10 +117,12 @@ export default function CollectionSidebar({
               const isActive = activeId === col.id;
               return (
                 <li key={col.id}>
-                  <button
-                    type="button"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => onSelect(col.id)}
-                    className={`group flex w-full items-center justify-between rounded-(--radius-btn) px-3 py-2 text-left text-sm transition-colors ${
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(col.id); } }}
+                    className={`group flex w-full cursor-pointer items-center justify-between rounded-(--radius-btn) px-3 py-2 text-left text-sm transition-colors ${
                       isActive
                         ? "border-l-2 border-l-(--color-accent) bg-(--color-accent)/5 pl-2.5 text-(--color-accent) dark:bg-(--color-accent)/10"
                         : "text-(--color-surface-600) hover:bg-(--color-surface-100) dark:text-(--color-surface-400) dark:hover:bg-(--color-surface-800)"
@@ -142,7 +144,7 @@ export default function CollectionSidebar({
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
-                  </button>
+                  </div>
                 </li>
               );
             })}
