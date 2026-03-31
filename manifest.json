@@ -26,6 +26,12 @@
     "default_popup": "popup.html",
     "default_title": "Grok Downloader"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["bridge.js"],
+      "matches": ["*://grok.com/*", "*://*.grok.com/*", "*://*.x.com/*"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": [

@@ -683,7 +683,25 @@ function parseFilenameInfo(url, suggestedFilename) {
 }
 
 // --- HELPER: Centralized Filename Generation ---
-async function generateFilename(url, suggestedFilename) {
+async function detectExtension(url, extHint) {
+    if (extHint) return extHint;
+    if (url.includes('.mp4')) return 'mp4';
+    if (url.includes('.webm')) return 'webm';
+    if (url.includes('.jpg') || url.includes('.jpeg')) return 'jpg';
+    if (url.includes('.webp')) return 'webp';
+    if (url.includes('.png')) return 'png';
+    // No extension in URL — probe content type via HEAD request
+    try {
+        const head = await fetch(url, { method: 'HEAD' });
+        const ct = (head.headers.get('content-type') || '').toLowerCase();
+        if (ct.startsWith('video/')) return 'mp4';
+        if (ct.includes('jpeg')) return 'jpg';
+        if (ct.includes('webp')) return 'webp';
+    } catch (e) { /* keep default */ }
+    return 'png';
+}
+
+async function generateFilename(url, suggestedFilename, extHint) {
     const parsed = parseFilenameInfo(url, suggestedFilename);
 
     // 2. Deduplication Check
@@ -700,11 +718,7 @@ async function generateFilename(url, suggestedFilename) {
 
     // 4. Build Path
     const dateStr = new Date().toISOString().split('T')[0];
-
-    // Extension
-    let ext = 'png';
-    if (url.includes('.mp4')) ext = 'mp4';
-    else if (url.includes('.jpg') || url.includes('.jpeg')) ext = 'jpg';
+    const ext = await detectExtension(url, extHint);
 
     const stored = await chrome.storage.local.get(['downloadPath', 'activeGrokUserId']);
     const rootFolder = stored.downloadPath || 'GrokVault';
@@ -714,7 +728,7 @@ async function generateFilename(url, suggestedFilename) {
     return `${rootFolder}/${userId}/${dateStr}_Auto/${parsed.filename}.${ext}`;
 }
 
-async function generateFilenameForBackup(url) {
+async function generateFilenameForBackup(url, extHint) {
     const parsed = parseFilenameInfo(url);
 
     // No dedup check — always generate path for backup
@@ -725,9 +739,7 @@ async function generateFilenameForBackup(url) {
     }
 
     const dateStr = new Date().toISOString().split('T')[0];
-    let ext = 'png';
-    if (url.includes('.mp4')) ext = 'mp4';
-    else if (url.includes('.jpg') || url.includes('.jpeg')) ext = 'jpg';
+    const ext = await detectExtension(url, extHint);
 
     const stored = await chrome.storage.local.get(['downloadPath', 'activeGrokUserId']);
     const rootFolder = stored.downloadPath || 'GrokVault';
@@ -893,7 +905,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === 'R2_BACKUP_UPLOAD') {
         (async () => {
-            const finalPath = await generateFilenameForBackup(request.url);
+            const extHint = request.isVideo ? 'mp4' : null;
+            const finalPath = await generateFilenameForBackup(request.url, extHint);
             const queued = await enqueueCloudMediaUpload(request.url, finalPath);
 
             if (!request.skipLocalDownload) {
@@ -954,6 +967,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ valid: true });
         })().catch((e) => {
             sendResponse({ valid: false, error: e.message });
+        });
+        return true;
+    }
+
+    if (request.action === 'GET_CLOUD_CONFIG') {
+        (async () => {
+            const config = await getCloudConfig();
+            sendResponse({ config });
+        })().catch(() => {
+            sendResponse({ config: null });
         });
         return true;
     }

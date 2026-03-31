@@ -1,52 +1,12 @@
 // Grok Power Tools - Content Script
 
 // --- PAGE-WORLD BRIDGE ---
-// Content scripts run in Chrome's isolated world and cannot access expando properties
-// (like TipTap's `ce.editor`) set by the page's JavaScript. This bridge injects a
-// tiny script into the page's MAIN world that listens for custom DOM events and
-// accesses TipTap/ProseMirror and Grok's fetch on our behalf.
+// Loads bridge.js in the page's MAIN world (bypasses CSP since it's a file, not inline).
+// bridge.js provides access to TipTap editor and Grok's fetch via custom DOM events.
 (function injectPageWorldBridge() {
     const script = document.createElement('script');
-    script.textContent = `
-        document.addEventListener('__gpt_set_editor_content', function(e) {
-            var ce = document.querySelector('[contenteditable="true"]');
-            if (ce && ce.editor) {
-                ce.editor.commands.clearContent();
-                ce.editor.commands.insertContent(e.detail.text);
-            }
-        });
-        document.addEventListener('__gpt_append_editor_content', function(e) {
-            var ce = document.querySelector('[contenteditable="true"]');
-            if (ce && ce.editor) {
-                ce.editor.commands.focus('end');
-                ce.editor.commands.insertContent(e.detail.text);
-            }
-        });
-        (function() {
-            var _origFetch = window.fetch;
-            window.fetch = function() {
-                var args = arguments;
-                var resp = _origFetch.apply(this, args);
-                resp.then(function(r) {
-                    try {
-                        var url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url);
-                        if (url && url.indexOf('/rest/app-chat/upload-file') !== -1) {
-                            r.clone().json().then(function(data) {
-                                if (data && data.fileMetadata && data.fileMetadata.url) {
-                                    document.dispatchEvent(new CustomEvent('__gpt_upload_complete', {
-                                        detail: { imageUrl: data.fileMetadata.url }
-                                    }));
-                                }
-                            });
-                        }
-                    } catch(e) {}
-                });
-                return resp;
-            };
-        })();
-    `;
+    script.src = chrome.runtime.getURL('bridge.js');
     (document.head || document.documentElement).appendChild(script);
-    script.remove();
 
     // Listen for upload completion events from the page world
     document.addEventListener('__gpt_upload_complete', function(e) {
@@ -611,6 +571,15 @@ class GrokOverlay {
                     </div>
 
                     <div class="gpt-section">
+                        <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Gallery Download</label>
+                        <div class="gpt-row" style="margin-top:6px; gap:4px;">
+                            <button id="gptScrapeDownloadBtn" class="gpt-btn gpt-btn-primary" style="flex:1; background:#22c55e; font-size:11px;">Download Gallery</button>
+                            <button id="gptScrapeStopBtn" class="gpt-btn" style="flex:1; background:#f4212e; display:none; font-size:11px;">Stop</button>
+                        </div>
+                        <div id="gptScrapeStatus" style="font-size:10px; color:#71767b; margin-top:4px;">Scrolls through gallery, clicks into each item, downloads all media.</div>
+                    </div>
+
+                    <div class="gpt-section">
                         <div style="display:flex; gap:8px; margin-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
                              <div class="gpt-tab active" id="tab-btn-history" style="flex:1; text-align:center;">History</div>
                              <div class="gpt-tab" id="tab-btn-saved" style="flex:1; text-align:center;">Saved</div>
@@ -886,6 +855,26 @@ class GrokOverlay {
             this.templateBatchManager.stop();
             this.el.querySelector('#gptTemplateBatchBtn').style.display = '';
             this.el.querySelector('#gptTemplateBatchStopBtn').style.display = 'none';
+        });
+
+        this.el.querySelector('#gptScrapeDownloadBtn').addEventListener('click', () => {
+            const btn = this.el.querySelector('#gptScrapeDownloadBtn');
+            const stopBtn = this.el.querySelector('#gptScrapeStopBtn');
+            const status = this.el.querySelector('#gptScrapeStatus');
+            btn.style.display = 'none';
+            stopBtn.style.display = '';
+            status.textContent = 'Starting gallery scan...';
+            // Use the existing scraper which scrolls, clicks into items, and downloads
+            this.scraper.start();
+        });
+        this.el.querySelector('#gptScrapeStopBtn').addEventListener('click', () => {
+            const btn = this.el.querySelector('#gptScrapeDownloadBtn');
+            const stopBtn = this.el.querySelector('#gptScrapeStopBtn');
+            const status = this.el.querySelector('#gptScrapeStatus');
+            btn.style.display = '';
+            stopBtn.style.display = 'none';
+            status.textContent = 'Stopped.';
+            this.scraper.stop();
         });
 
         const bindInput = (id, key, type = 'int') => {
@@ -2386,7 +2375,7 @@ class GrokScraper {
     }
 
     async startBackupMode() {
-        // Validate cloud config before starting
+        // Validate cloud config before starting R2 backup
         try {
             const validation = await new Promise((resolve) => {
                 chrome.runtime.sendMessage({ action: 'VALIDATE_CLOUD_CONFIG' }, resolve);
@@ -2659,10 +2648,17 @@ class GrokScraper {
     async performBackupUpload() {
         if (!this.state.isRunning) return;
 
-        const mediaEl = document.querySelector('img[src*="imagine-public.x.ai"]')
-            || document.querySelector('video[src]')
+        // Prefer video over image — on detail pages both may exist
+        const videoEl = document.querySelector('video[src]')
+            || document.querySelector('video source[src]')
             || document.querySelector('video');
-        const src = mediaEl?.src || mediaEl?.currentSrc;
+        const imgEl = document.querySelector('img[src*="imagine-public.x.ai"]');
+
+        const isVideo = !!(videoEl && (videoEl.src || videoEl.currentSrc || videoEl.querySelector?.('source')?.src));
+        const mediaEl = isVideo ? videoEl : imgEl;
+        const src = isVideo
+            ? (videoEl.src || videoEl.currentSrc || videoEl.querySelector?.('source')?.src)
+            : mediaEl?.src;
 
         if (!src) {
             this.backupStats.errors++;
@@ -2677,6 +2673,7 @@ class GrokScraper {
                 chrome.runtime.sendMessage({
                     action: 'R2_BACKUP_UPLOAD',
                     url: src,
+                    isVideo,
                     skipLocalDownload: alreadyLocal
                 }, resolve);
             });
