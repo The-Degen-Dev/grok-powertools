@@ -568,7 +568,12 @@ async function processCloudQueue(reason = 'auto', options = {}) {
         await persistCloudState();
     }
 
-    await scheduleCloudRetryAlarm();
+    // If new items were queued while we were processing, drain immediately
+    if (cloudSyncQueue.length > 0 && cloudSyncQueue.some(i => (i.attempts || 0) === 0)) {
+        setTimeout(() => processCloudQueue('drain'), 100);
+    } else {
+        await scheduleCloudRetryAlarm();
+    }
 
     if (reason === 'manual') {
         log('Manual cloud retry completed.', 'info');
@@ -664,8 +669,8 @@ function parseFilenameInfo(url, suggestedFilename) {
             filename = cleanName;
         }
 
-        // Try to match UUID pattern for robustness
-        const uuidMatch = filename.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+        // Try to match UUID pattern anywhere in the URL for robustness
+        const uuidMatch = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
         if (uuidMatch) {
             uuid = uuidMatch[0];
             filename = uuid; // Enforce UUID as filename
@@ -674,7 +679,11 @@ function parseFilenameInfo(url, suggestedFilename) {
             filename = suggestedFilename.split('.')[0];
         }
 
-        if (filename.length < 10) filename = Date.now().toString();
+        // Generic filenames (e.g. "generated_video") get a timestamp to prevent overwrites
+        const GENERIC_NAMES = ['generated_video', 'generated_image', 'unknown', 'image', 'video'];
+        if (filename.length < 10 || GENERIC_NAMES.includes(filename.toLowerCase())) {
+            filename = `${filename}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        }
     } catch (e) {
         filename = Date.now().toString();
     }

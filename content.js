@@ -2288,7 +2288,7 @@ class GrokScraper {
         this.backupMode = false;
         this.backupStats = { totalSeen: 0, uploaded: 0, errors: 0 };
         this._backupVisited = new Set();
-        this.Config = { actionWait: 2000, navWait: 2000 };
+        this.Config = { actionWait: 600, navWait: 800 };
         this.init();
     }
     setOverlay(overlay) { this.overlay = overlay; }
@@ -2447,9 +2447,9 @@ class GrokScraper {
         }
         // ------------------------------
 
-        await this.sleep(1000);
+        // Quick scroll jiggle to trigger lazy loading
         window.scrollBy(0, 10);
-        await this.sleep(500);
+        await this.sleep(200);
         window.scrollBy(0, -10);
         await this.sleep(this.Config.navWait);
         if (!this.state.isRunning) return;
@@ -2481,7 +2481,7 @@ class GrokScraper {
         let retries = 0;
         const MAX_RETRIES = this.backupMode ? 100 : 50;
 
-        await this.sleep(1000);
+        await this.sleep(300);
 
         while (this.state.isRunning && retries < MAX_RETRIES) {
             const items = Array.from(document.querySelectorAll(cardSelector));
@@ -2531,7 +2531,7 @@ class GrokScraper {
             console.log('No new items visible. Scrolling...');
             const scroller = document.querySelector('.overflow-scroll') || document.querySelector('[role="list"]')?.parentElement || window;
             scroller.scrollBy(0, window.innerHeight);
-            await this.sleep(1000);
+            await this.sleep(400);
             if (!this.state.isRunning) return;
             retries++;
         }
@@ -2618,9 +2618,8 @@ class GrokScraper {
                 this.log(`Processing Version ${i + 1}/${thumbnailButtons.length}...`);
                 btn.click();
 
-                // Active state check: The active button usually has a ring or opacity change
-                // We just wait a bit to be safe.
-                await this.sleep(1500);
+                // Wait for video/image to swap after thumbnail click
+                await this.sleep(500);
 
                 await this.performDownload();
             }
