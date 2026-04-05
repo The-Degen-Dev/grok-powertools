@@ -181,7 +181,7 @@
         testUpload: 'test-upload'
     };
 
-    const KNOWN_MEDIA_HOSTS = ['imagine-public.x.ai'];
+    const KNOWN_MEDIA_HOSTS = ['imagine-public.x.ai', 'assets.grok.com'];
 
     function isValidMediaSourceUrl(url) {
         if (typeof url !== 'string' || !url) return false;

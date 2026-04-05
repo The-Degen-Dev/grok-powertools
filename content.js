@@ -2391,6 +2391,7 @@ class GrokScraper {
         }
 
         this.backupMode = true;
+        this._videoTabDone = false;
         this.backupStats = { totalSeen: 0, uploaded: 0, errors: 0, startedAt: Date.now() };
         this._backupVisited = new Set();
         this.state.isRunning = true;
@@ -2539,6 +2540,24 @@ class GrokScraper {
         if (retries >= MAX_RETRIES) {
             if (!this.state.isRunning) return;
             if (this.backupMode) {
+                // Switch to Video tab before finishing (Image tab done)
+                if (!this._videoTabDone) {
+                    this._videoTabDone = true;
+                    const videoTab = Array.from(document.querySelectorAll('button[role="radio"]'))
+                        .find(b => b.textContent.trim() === 'Video');
+                    if (videoTab) {
+                        this.log('Image tab done. Switching to Video tab...', 'info');
+                        videoTab.click();
+                        await this.sleep(1000);
+                        // Scroll to top to reset view
+                        const scroller = document.querySelector('.overflow-scroll') || window;
+                        scroller.scrollTo?.(0, 0) || window.scrollTo(0, 0);
+                        await this.sleep(500);
+                        // Re-run list view scan for Video tab
+                        this.executeListView();
+                        return;
+                    }
+                }
                 this.log(`Backup complete. ${this.backupStats.uploaded} uploaded, ${this.backupStats.errors} errors.`, 'success');
                 this.stopBackupMode();
             } else {
@@ -2564,7 +2583,9 @@ class GrokScraper {
         const storedState = await chrome.storage.local.get(['currentItemId']);
         let currentId = storedState.currentItemId;
         if (!currentId) {
-            const mediaEl = document.querySelector('img[src*="imagine-public.x.ai"]') || document.querySelector('video[src]') || document.querySelector('video');
+            const mediaEl = document.querySelector('img[src*="imagine-public.x.ai"]')
+                || document.querySelector('img[src*="assets.grok.com/users/"]')
+                || document.querySelector('video[src]') || document.querySelector('video');
             if (mediaEl) {
                 const src = mediaEl.src || mediaEl.currentSrc;
                 currentId = this.getCleanId(src);
@@ -2572,10 +2593,13 @@ class GrokScraper {
         }
 
         if (currentId) {
-            this.processedIds.add(currentId);
-            await chrome.storage.local.set({ processedIds: Array.from(this.processedIds) });
-
-            if (this.backupMode) {
+            if (!this.backupMode) {
+                // Normal scrape: mark processed immediately (download via native button always works)
+                this.processedIds.add(currentId);
+                await chrome.storage.local.set({ processedIds: Array.from(this.processedIds) });
+            } else {
+                // Backup mode: only track visit, NOT processedIds
+                // processedIds is updated inside performBackupUpload after successful upload
                 this._backupVisited.add(currentId);
                 this.backupStats.totalSeen++;
                 chrome.runtime.sendMessage({
@@ -2663,7 +2687,8 @@ class GrokScraper {
             await this.sleep(200);
         }
 
-        const imgEl = document.querySelector('img[src*="imagine-public.x.ai"]');
+        const imgEl = document.querySelector('img[src*="imagine-public.x.ai"]')
+            || document.querySelector('img[src*="assets.grok.com/users/"]');
         const isVideo = !!videoSrc;
         const src = isVideo ? videoSrc : imgEl?.src;
 
@@ -2692,6 +2717,12 @@ class GrokScraper {
             if (response?.status === 'queued') {
                 this.backupStats.uploaded++;
                 this.log(`Queued for R2: ...${src.slice(-20)}`, 'success');
+                // Mark as processed only after successful queue
+                const cleanId = this.getCleanId(src);
+                if (cleanId) {
+                    this.processedIds.add(cleanId);
+                    chrome.storage.local.set({ processedIds: Array.from(this.processedIds) });
+                }
             } else {
                 this.backupStats.errors++;
                 this.log(`Backup error: ${response?.error || 'unknown'}`, 'error');
