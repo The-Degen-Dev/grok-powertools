@@ -378,7 +378,9 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
         promptText: promptText || ''
     };
 
-    await enqueueCloudItem(queueItem, `media:${objectKey}`);
+    // Dedup by source URL (not objectKey which includes date folder)
+    const cleanSource = sourceUrl.split('?')[0];
+    await enqueueCloudItem(queueItem, `media:${cleanSource}`);
     try {
         await processCloudQueue('media-enqueued');
     } catch (e) {

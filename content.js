@@ -2518,8 +2518,8 @@ class GrokScraper {
             for (let i = 0; i < visualItems.length; i++) {
                 const itemObj = visualItems[i];
                 const cleanId = this.getCleanId(itemObj.src);
-                const skipSet = this.backupMode ? this._backupVisited : this.processedIds;
-                if (cleanId && !skipSet.has(cleanId)) {
+                const alreadyDone = this.processedIds.has(cleanId) || (this.backupMode && this._backupVisited.has(cleanId));
+                if (cleanId && !alreadyDone) {
                     targetItem = itemObj.element;
                     this.log(`new item: ...${cleanId.slice(-6)}`, 'success');
                     await this.processItem(targetItem, cleanId);
