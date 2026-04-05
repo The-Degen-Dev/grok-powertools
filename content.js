@@ -2644,20 +2644,30 @@ class GrokScraper {
         }
     }
 
+    _getVideoSrc(videoEl) {
+        if (!videoEl) return null;
+        return videoEl.src || videoEl.currentSrc || videoEl.querySelector?.('source')?.src || null;
+    }
+
     async performBackupUpload() {
         if (!this.state.isRunning) return;
 
-        // Prefer video over image — on detail pages both may exist
-        const videoEl = document.querySelector('video[src]')
-            || document.querySelector('video source[src]')
-            || document.querySelector('video');
-        const imgEl = document.querySelector('img[src*="imagine-public.x.ai"]');
+        // Wait for video element to get its src (lazy-loaded on Grok detail pages)
+        let videoEl = null;
+        let videoSrc = null;
+        const videoStart = Date.now();
+        while (Date.now() - videoStart < 3000) {
+            videoEl = document.querySelector('video');
+            videoSrc = this._getVideoSrc(videoEl);
+            if (videoSrc) break;
+            await this.sleep(200);
+        }
 
-        const isVideo = !!(videoEl && (videoEl.src || videoEl.currentSrc || videoEl.querySelector?.('source')?.src));
-        const mediaEl = isVideo ? videoEl : imgEl;
-        const src = isVideo
-            ? (videoEl.src || videoEl.currentSrc || videoEl.querySelector?.('source')?.src)
-            : mediaEl?.src;
+        const imgEl = document.querySelector('img[src*="imagine-public.x.ai"]');
+        const isVideo = !!videoSrc;
+        const src = isVideo ? videoSrc : imgEl?.src;
+
+        console.log('[BackupUpload]', isVideo ? 'VIDEO' : 'IMAGE', 'src:', (src || 'NONE').slice(0, 80));
 
         if (!src) {
             this.backupStats.errors++;
