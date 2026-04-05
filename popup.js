@@ -257,6 +257,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    document.getElementById('resetProcessedIdsBtn').addEventListener('click', () => {
+        const btn = document.getElementById('resetProcessedIdsBtn');
+        btn.disabled = true;
+        chrome.storage.local.set({ processedIds: [] }, () => {
+            addLog('Processed IDs cleared. Scraper will re-scan all items.', 'success');
+            btn.disabled = false;
+        });
+    });
+
     cloudClearBtn.addEventListener('click', () => {
         cloudClearBtn.disabled = true;
         chrome.runtime.sendMessage({ action: 'CLOUD_CLEAR_STATUS' }, (response) => {

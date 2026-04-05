@@ -2391,7 +2391,6 @@ class GrokScraper {
         }
 
         this.backupMode = true;
-        this._videoTabDone = false;
         this.backupStats = { totalSeen: 0, uploaded: 0, errors: 0, startedAt: Date.now() };
         this._backupVisited = new Set();
         this.state.isRunning = true;
@@ -2540,24 +2539,6 @@ class GrokScraper {
         if (retries >= MAX_RETRIES) {
             if (!this.state.isRunning) return;
             if (this.backupMode) {
-                // Switch to Video tab before finishing (Image tab done)
-                if (!this._videoTabDone) {
-                    this._videoTabDone = true;
-                    const videoTab = Array.from(document.querySelectorAll('button[role="radio"]'))
-                        .find(b => b.textContent.trim() === 'Video');
-                    if (videoTab) {
-                        this.log('Image tab done. Switching to Video tab...', 'info');
-                        videoTab.click();
-                        await this.sleep(1000);
-                        // Scroll to top to reset view
-                        const scroller = document.querySelector('.overflow-scroll') || window;
-                        scroller.scrollTo?.(0, 0) || window.scrollTo(0, 0);
-                        await this.sleep(500);
-                        // Re-run list view scan for Video tab
-                        this.executeListView();
-                        return;
-                    }
-                }
                 this.log(`Backup complete. ${this.backupStats.uploaded} uploaded, ${this.backupStats.errors} errors.`, 'success');
                 this.stopBackupMode();
             } else {
