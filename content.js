@@ -2676,6 +2676,8 @@ class GrokScraper {
         }
 
         const alreadyLocal = this.processedIds.has(this.getCleanId(src));
+        const promptText = this.overlay?.readCurrentPromptInput?.() || '';
+        if (promptText) console.log('[BackupUpload] Prompt:', promptText.slice(0, 60));
 
         try {
             const response = await new Promise((resolve) => {
@@ -2683,6 +2685,7 @@ class GrokScraper {
                     action: 'R2_BACKUP_UPLOAD',
                     url: src,
                     isVideo,
+                    promptText,
                     skipLocalDownload: alreadyLocal
                 }, resolve);
             });

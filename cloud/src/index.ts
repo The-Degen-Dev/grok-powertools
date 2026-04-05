@@ -146,7 +146,8 @@ async function handlePresign(request: Request, env: Env): Promise<Response> {
             Bucket: env.R2_BUCKET_NAME,
             Key: payload.objectKey,
             ContentType: contentType,
-            ContentLength: contentLength
+            ContentLength: contentLength,
+            Metadata: payload.metadata || undefined
         });
 
         const uploadUrl = await getSignedUrl(client, command, {

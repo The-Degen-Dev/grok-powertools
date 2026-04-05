@@ -51,6 +51,7 @@ export interface PresignRequest {
     objectKey: string;
     contentType: string;
     contentLength: number;
+    metadata?: Record<string, string>;
 }
 
 export interface PresignResponse {

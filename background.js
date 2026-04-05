@@ -356,7 +356,7 @@ async function enqueueCloudItem(queueItem, dedupeKey) {
     await persistCloudState();
 }
 
-async function enqueueCloudMediaUpload(sourceUrl, finalPath) {
+async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
     const config = await getCloudConfig();
     if (!CloudSync.isCloudEnabled(config)) return false;
 
@@ -374,7 +374,8 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath) {
         sourceUrl,
         finalPath,
         objectKey,
-        contentType: CloudSync.detectContentTypeFromUrl(sourceUrl)
+        contentType: CloudSync.detectContentTypeFromUrl(sourceUrl),
+        promptText: promptText || ''
     };
 
     await enqueueCloudItem(queueItem, `media:${objectKey}`);
@@ -408,17 +409,22 @@ async function enqueueMetadataSnapshot(kind, userId, payload) {
 }
 
 async function requestPresignedUrl(config, queueItem, contentLength) {
+    const body = {
+        objectKey: queueItem.objectKey,
+        contentType: queueItem.contentType || 'application/octet-stream',
+        contentLength
+    };
+    // Attach prompt as R2 custom metadata (max 1KB)
+    if (queueItem.promptText) {
+        body.metadata = { prompt: queueItem.promptText.substring(0, 1024) };
+    }
     const response = await fetch(`${config.workerUrl}/v1/presign`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'x-gpt-api-key': config.apiKey
         },
-        body: JSON.stringify({
-            objectKey: queueItem.objectKey,
-            contentType: queueItem.contentType || 'application/octet-stream',
-            contentLength
-        })
+        body: JSON.stringify(body)
     });
 
     if (!response.ok) {
@@ -478,6 +484,28 @@ async function uploadMediaQueueItem(config, queueItem) {
     } catch (e) {
         if (e.message.startsWith(`[${CloudSync.UPLOAD_STAGES.r2Put}]`)) throw e;
         throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] ${e.message}`);
+    }
+
+    // Stage 4: Upload sidecar prompt JSON (non-blocking)
+    if (queueItem.promptText) {
+        try {
+            const sidecarKey = queueItem.objectKey + '.prompt.json';
+            const sidecar = JSON.stringify({
+                prompt: queueItem.promptText,
+                mediaKey: queueItem.objectKey,
+                uploadedAt: new Date().toISOString()
+            });
+            const sidecarItem = { objectKey: sidecarKey, contentType: 'application/json' };
+            const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, new Blob([sidecar]).size);
+            await fetch(sidecarPresigned.uploadUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: sidecar
+            });
+            console.log('[CloudQueue] Prompt sidecar uploaded:', sidecarKey);
+        } catch (e) {
+            console.warn('[CloudQueue] Sidecar prompt upload failed (non-fatal):', e.message);
+        }
     }
 }
 
@@ -916,7 +944,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (async () => {
             const extHint = request.isVideo ? 'mp4' : null;
             const finalPath = await generateFilenameForBackup(request.url, extHint);
-            const queued = await enqueueCloudMediaUpload(request.url, finalPath);
+            const queued = await enqueueCloudMediaUpload(request.url, finalPath, request.promptText);
 
             if (!request.skipLocalDownload) {
                 const config = await getCloudConfig();
