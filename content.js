@@ -2695,12 +2695,32 @@ class GrokScraper {
         if (promptText) console.log('[BackupUpload] Prompt:', promptText.slice(0, 60));
 
         try {
+            // Fetch the media blob from the content script (has page cookies)
+            // This is critical for assets.grok.com URLs which require auth
+            let blobData = null;
+            try {
+                const mediaResp = await fetch(src, { credentials: 'include' });
+                if (mediaResp.ok) {
+                    const blob = await mediaResp.blob();
+                    // Convert to base64 for sending to background
+                    const reader = new FileReader();
+                    blobData = await new Promise((resolve) => {
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.readAsDataURL(blob);
+                    });
+                    console.log('[BackupUpload] Fetched blob:', blob.size, 'bytes, type:', blob.type);
+                }
+            } catch (fetchErr) {
+                console.warn('[BackupUpload] Content fetch failed, background will retry:', fetchErr.message);
+            }
+
             const response = await new Promise((resolve) => {
                 chrome.runtime.sendMessage({
                     action: 'R2_BACKUP_UPLOAD',
                     url: src,
                     isVideo,
                     promptText,
+                    blobDataUrl: blobData,
                     skipLocalDownload: alreadyLocal
                 }, resolve);
             });

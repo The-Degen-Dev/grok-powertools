@@ -946,6 +946,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (async () => {
             const extHint = request.isVideo ? 'mp4' : null;
             const finalPath = await generateFilenameForBackup(request.url, extHint);
+
+            // If content script provided blob data (fetched with cookies), upload directly
+            if (request.blobDataUrl) {
+                const config = await getCloudConfig();
+                if (!CloudSync.isCloudEnabled(config)) {
+                    sendResponse({ status: 'not_queued', error: 'Cloud sync is not enabled.' });
+                    return;
+                }
+
+                try {
+                    const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
+                    const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
+                    const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(finalPath, {
+                        keyPrefix: config.keyPrefix,
+                        fallbackUserId: activeUserId
+                    });
+
+                    // Convert data URL back to blob
+                    const resp = await fetch(request.blobDataUrl);
+                    const blob = await resp.blob();
+                    const contentType = blob.type || (extHint === 'mp4' ? 'video/mp4' : 'image/png');
+
+                    console.log('[CloudQueue] Direct blob upload:', objectKey, blob.size, 'bytes');
+
+                    // Get presigned URL and upload
+                    const queueItem = { objectKey, contentType, promptText: request.promptText || '' };
+                    const presigned = await requestPresignedUrl(config, queueItem, blob.size);
+                    const uploadResp = await fetch(presigned.uploadUrl, {
+                        method: presigned.method || 'PUT',
+                        headers: { 'Content-Type': contentType },
+                        body: blob
+                    });
+
+                    if (!uploadResp.ok) throw new Error(`R2 PUT failed: ${uploadResp.status}`);
+                    log(`Cloud upload complete: ${objectKey}`, 'success');
+
+                    // Upload sidecar prompt if available
+                    if (request.promptText) {
+                        try {
+                            const sidecarKey = objectKey + '.prompt.json';
+                            const sidecar = JSON.stringify({ prompt: request.promptText, mediaKey: objectKey, uploadedAt: new Date().toISOString() });
+                            const sidecarItem = { objectKey: sidecarKey, contentType: 'application/json' };
+                            const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, new Blob([sidecar]).size);
+                            await fetch(sidecarPresigned.uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: sidecar });
+                        } catch (e) { console.warn('[CloudQueue] Sidecar failed:', e.message); }
+                    }
+
+                    sendResponse({ status: 'queued' });
+                } catch (e) {
+                    console.error('[CloudQueue] Direct blob upload failed:', e.message);
+                    sendResponse({ status: 'error', error: e.message });
+                }
+                return;
+            }
+
+            // No blob data — fall back to service worker fetch (works for public URLs)
             const queued = await enqueueCloudMediaUpload(request.url, finalPath, request.promptText);
 
             if (!request.skipLocalDownload) {
