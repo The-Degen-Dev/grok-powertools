@@ -2343,6 +2343,10 @@ class GrokScraper {
             } else if (request.action === 'ABORT_R2_BACKUP') {
                 this.stopBackupMode();
                 sendResponse({ status: 'stopped' });
+            } else if (request.action === 'RESET_PROCESSED_IDS') {
+                this.processedIds = new Set();
+                console.log('Processed IDs cleared in-memory.');
+                sendResponse({ status: 'cleared', size: 0 });
             }
         });
 
