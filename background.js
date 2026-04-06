@@ -444,7 +444,23 @@ async function uploadMediaQueueItem(config, queueItem) {
     // Stage 1: Fetch media blob from source URL
     try {
         console.log('[CloudQueue] Fetching media blob from:', queueItem.sourceUrl.slice(0, 100));
-        const mediaResponse = await fetch(queueItem.sourceUrl, { method: 'GET' });
+        const fetchOpts = { method: 'GET' };
+
+        // For assets.grok.com URLs, manually attach cookies (service worker has no cookie jar)
+        if (queueItem.sourceUrl.includes('assets.grok.com')) {
+            try {
+                const cookies = await chrome.cookies.getAll({ domain: '.grok.com' });
+                if (cookies.length > 0) {
+                    const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+                    fetchOpts.headers = { 'Cookie': cookieHeader };
+                    console.log('[CloudQueue] Attached', cookies.length, 'cookies for assets.grok.com');
+                }
+            } catch (cookieErr) {
+                console.warn('[CloudQueue] Failed to get cookies:', cookieErr.message);
+            }
+        }
+
+        const mediaResponse = await fetch(queueItem.sourceUrl, fetchOpts);
         if (!mediaResponse.ok) {
             throw new Error(`HTTP ${mediaResponse.status}`);
         }
@@ -1249,9 +1265,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 // --- STANDARD DOWNLOAD LISTENER ---
-// Pending downloads awaiting R2 upload after completion
-const _pendingR2Downloads = new Map();
-
 chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
     // If not scraping and not a Grok file, ignore
     if (!isScraping && !item.url.includes('imagine-public') && !item.url.includes('assets.grok.com')) return;
@@ -1259,7 +1272,6 @@ chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
     const finalPath = await generateFilename(item.url, item.filename);
     const config = await getCloudConfig();
     const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
-    const cloudEnabled = CloudSync.isCloudEnabled(config);
 
     if (finalPath) {
         if (allowLocalDownload) {
@@ -1268,72 +1280,12 @@ chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
             chrome.downloads.cancel(item.id);
         }
 
-        if (cloudEnabled) {
-            // For public URLs (imagine-public), direct fetch works
-            if (item.url.includes('imagine-public')) {
-                enqueueCloudMediaUpload(item.url, finalPath).catch((e) => {
-                    updateCloudError(e.message);
-                    persistCloudState().catch(() => { });
-                });
-            } else if (allowLocalDownload) {
-                // For auth-required URLs (assets.grok.com), wait for download to complete
-                // then read the local file and upload to R2
-                _pendingR2Downloads.set(item.id, { finalPath, url: item.url });
-            }
-        }
+        // Enqueue for R2 — uploadMediaQueueItem now handles cookies for assets.grok.com
+        enqueueCloudMediaUpload(item.url, finalPath).catch((e) => {
+            updateCloudError(e.message);
+            persistCloudState().catch(() => { });
+        });
     } else {
         chrome.downloads.cancel(item.id);
-    }
-});
-
-// Upload completed downloads to R2 (for auth-required URLs like assets.grok.com)
-chrome.downloads.onChanged.addListener(async (delta) => {
-    if (!delta.state || delta.state.current !== 'complete') return;
-    const pending = _pendingR2Downloads.get(delta.id);
-    if (!pending) return;
-    _pendingR2Downloads.delete(delta.id);
-
-    try {
-        const [dlItem] = await chrome.downloads.search({ id: delta.id });
-        if (!dlItem || !dlItem.filename) return;
-
-        const config = await getCloudConfig();
-        if (!CloudSync.isCloudEnabled(config)) return;
-
-        const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
-        const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(pending.finalPath, {
-            keyPrefix: config.keyPrefix,
-            fallbackUserId: userInfo.activeGrokUserId || 'Shared_Account'
-        });
-
-        const ext = dlItem.filename.split('.').pop()?.toLowerCase() || 'png';
-        const contentType = ext === 'mp4' ? 'video/mp4' : ext === 'webm' ? 'video/webm' :
-            (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : 'image/png';
-
-        console.log('[CloudQueue] Download complete, reading file for R2:', dlItem.filename.slice(-50));
-
-        // Read the downloaded file — use fetch with file:// in the service worker
-        // MV3 service workers CAN fetch file:// URLs if the extension has file access
-        const fileBlob = await fetch('file://' + dlItem.filename).then(r => r.blob()).catch(() => null);
-
-        if (!fileBlob || fileBlob.size === 0) {
-            // file:// fetch failed — try reading via offscreen or skip
-            console.warn('[CloudQueue] Cannot read local file, skipping R2 upload for:', objectKey);
-            return;
-        }
-
-        const presigned = await requestPresignedUrl(config, { objectKey, contentType }, fileBlob.size);
-        const uploadResp = await fetch(presigned.uploadUrl, {
-            method: presigned.method || 'PUT',
-            headers: { 'Content-Type': contentType },
-            body: fileBlob
-        });
-
-        if (!uploadResp.ok) throw new Error(`R2 PUT ${uploadResp.status}`);
-        log(`Cloud upload complete: ${objectKey}`, 'success');
-
-    } catch (e) {
-        console.error('[CloudQueue] Download-to-R2 failed:', e.message);
-        log(`Cloud upload failed: ${e.message}`, 'warning');
     }
 });
