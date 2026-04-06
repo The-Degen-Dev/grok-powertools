@@ -1,0 +1,69 @@
+// bridge.js — Runs in the page's MAIN world (not the content script's isolated world)
+// Provides access to TipTap editor and Grok's fetch for the content script via custom events
+
+document.addEventListener('__gpt_set_editor_content', function(e) {
+    var ce = document.querySelector('[contenteditable="true"]');
+    if (ce && ce.editor) {
+        ce.editor.commands.clearContent();
+        ce.editor.commands.insertContent(e.detail.text);
+    }
+});
+
+document.addEventListener('__gpt_append_editor_content', function(e) {
+    var ce = document.querySelector('[contenteditable="true"]');
+    if (ce && ce.editor) {
+        ce.editor.commands.focus('end');
+        ce.editor.commands.insertContent(e.detail.text);
+    }
+});
+
+// Fetch media with page cookies for R2 backup (content script can't include page cookies)
+document.addEventListener('__gpt_fetch_media', function(e) {
+    var url = e.detail && e.detail.url;
+    var requestId = e.detail && e.detail.requestId;
+    if (!url || !requestId) return;
+
+    fetch(url, { credentials: 'include' })
+        .then(function(resp) {
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.blob();
+        })
+        .then(function(blob) {
+            var reader = new FileReader();
+            reader.onloadend = function() {
+                document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+                    detail: { requestId: requestId, dataUrl: reader.result, size: blob.size, type: blob.type }
+                }));
+            };
+            reader.readAsDataURL(blob);
+        })
+        .catch(function(err) {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+                detail: { requestId: requestId, error: err.message }
+            }));
+        });
+});
+
+// Intercept upload-file responses to capture image URLs for template batch
+(function() {
+    var _origFetch = window.fetch;
+    window.fetch = function() {
+        var args = arguments;
+        var resp = _origFetch.apply(this, args);
+        resp.then(function(r) {
+            try {
+                var url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url);
+                if (url && url.indexOf('/rest/app-chat/upload-file') !== -1) {
+                    r.clone().json().then(function(data) {
+                        if (data && data.fileMetadata && data.fileMetadata.url) {
+                            document.dispatchEvent(new CustomEvent('__gpt_upload_complete', {
+                                detail: { imageUrl: data.fileMetadata.url }
+                            }));
+                        }
+                    });
+                }
+            } catch(e) {}
+        });
+        return resp;
+    };
+})();

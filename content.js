@@ -2695,23 +2695,27 @@ class GrokScraper {
         if (promptText) console.log('[BackupUpload] Prompt:', promptText.slice(0, 60));
 
         try {
-            // Fetch the media blob from the content script (has page cookies)
-            // This is critical for assets.grok.com URLs which require auth
+            // Fetch the media blob via bridge.js (runs in page's MAIN world with cookies)
+            // Content script's fetch() runs in isolated world without page cookies
             let blobData = null;
             try {
-                const mediaResp = await fetch(src, { credentials: 'include' });
-                if (mediaResp.ok) {
-                    const blob = await mediaResp.blob();
-                    // Convert to base64 for sending to background
-                    const reader = new FileReader();
-                    blobData = await new Promise((resolve) => {
-                        reader.onloadend = () => resolve(reader.result);
-                        reader.readAsDataURL(blob);
+                const requestId = 'fetch_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+                const fetchPromise = new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('Bridge fetch timeout')), 30000);
+                    document.addEventListener('__gpt_fetch_media_result', function handler(e) {
+                        if (e.detail?.requestId !== requestId) return;
+                        document.removeEventListener('__gpt_fetch_media_result', handler);
+                        clearTimeout(timeout);
+                        if (e.detail.error) reject(new Error(e.detail.error));
+                        else resolve(e.detail);
                     });
-                    console.log('[BackupUpload] Fetched blob:', blob.size, 'bytes, type:', blob.type);
-                }
+                });
+                document.dispatchEvent(new CustomEvent('__gpt_fetch_media', { detail: { url: src, requestId } }));
+                const result = await fetchPromise;
+                blobData = result.dataUrl;
+                console.log('[BackupUpload] Bridge fetched blob:', result.size, 'bytes, type:', result.type);
             } catch (fetchErr) {
-                console.warn('[BackupUpload] Content fetch failed, background will retry:', fetchErr.message);
+                console.warn('[BackupUpload] Bridge fetch failed, background will retry:', fetchErr.message);
             }
 
             const response = await new Promise((resolve) => {
