@@ -2358,6 +2358,11 @@ class GrokScraper {
             else if (action === 'ABORT_R2_BACKUP') this.stopBackupMode();
             else if (action === 'INIT_SCRAPE') this.start();
             else if (action === 'ABORT_SCRAPE') this.stop();
+            else if (action === 'RESET_PROCESSED_IDS') {
+                this.processedIds = new Set();
+                chrome.storage.local.set({ processedIds: [] });
+                console.log('[GrokScraper] processedIds cleared via custom event');
+            }
         });
     }
 
