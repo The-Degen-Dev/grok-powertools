@@ -1195,7 +1195,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // --- STANDARD DOWNLOAD LISTENER ---
 chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
     // If not scraping and not a Grok file, ignore
-    if (!isScraping && !item.url.includes('imagine-public')) return;
+    if (!isScraping && !item.url.includes('imagine-public') && !item.url.includes('assets.grok.com')) return;
 
     const finalPath = await generateFilename(item.url, item.filename);
     const config = await getCloudConfig();
