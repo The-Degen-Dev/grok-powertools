@@ -29,13 +29,11 @@ document.addEventListener('__gpt_fetch_media', function(e) {
             return resp.blob();
         })
         .then(function(blob) {
-            var reader = new FileReader();
-            reader.onloadend = function() {
-                document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
-                    detail: { requestId: requestId, dataUrl: reader.result, size: blob.size, type: blob.type }
-                }));
-            };
-            reader.readAsDataURL(blob);
+            // Create blob URL — accessible from content script's isolated world (same page)
+            var blobUrl = URL.createObjectURL(blob);
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+                detail: { requestId: requestId, blobUrl: blobUrl, size: blob.size, type: blob.type }
+            }));
         })
         .catch(function(err) {
             document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {

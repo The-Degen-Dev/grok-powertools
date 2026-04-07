@@ -2712,7 +2712,17 @@ class GrokScraper {
                 });
                 document.dispatchEvent(new CustomEvent('__gpt_fetch_media', { detail: { url: src, requestId } }));
                 const result = await fetchPromise;
-                blobData = result.dataUrl;
+                // Bridge returns a blob URL — fetch it from content script (blob URLs are cross-world)
+                // Then convert to base64 in chunks to avoid message size limits
+                if (result.blobUrl) {
+                    const blobResp = await fetch(result.blobUrl);
+                    const blob = await blobResp.blob();
+                    const reader = new FileReader();
+                    blobData = await new Promise(r => { reader.onloadend = () => r(reader.result); reader.readAsDataURL(blob); });
+                    URL.revokeObjectURL(result.blobUrl);
+                } else if (result.dataUrl) {
+                    blobData = result.dataUrl;
+                }
                 console.log('[BackupUpload] Bridge fetched blob:', result.size, 'bytes, type:', result.type);
             } catch (fetchErr) {
                 console.warn('[BackupUpload] Bridge fetch failed, background will retry:', fetchErr.message);
