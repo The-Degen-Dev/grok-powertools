@@ -715,8 +715,10 @@ function parseFilenameInfo(url, suggestedFilename) {
             filename = cleanName;
         }
 
-        // Try to match UUID pattern anywhere in the URL for robustness
-        const uuidMatch = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+        // Match the LAST UUID in the URL — for assets.grok.com/users/{USER_ID}/generated/{VIDEO_ID}/...
+        // the first UUID is the user ID, the last is the actual media UUID
+        const allUuids = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) || [];
+        const uuidMatch = allUuids.length ? [allUuids[allUuids.length - 1]] : null;
         if (uuidMatch) {
             uuid = uuidMatch[0];
             filename = uuid; // Enforce UUID as filename
