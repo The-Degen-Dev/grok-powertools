@@ -2750,8 +2750,8 @@ class GrokScraper {
 
     async performDownload() {
         if (!this.state.isRunning) return;
-        // In backup mode with no Download button, fall back to direct URL upload
-        // But FIRST try the Download button — it handles auth cookies for assets.grok.com
+        // In backup mode, use bridge.js MAIN world fetch (has page cookies + CORS allowed)
+        if (this.backupMode) return this.performBackupUpload();
 
         // Click Download
         let downloadBtn = null;
@@ -2775,25 +2775,6 @@ class GrokScraper {
                 targetToClick.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
             });
             await this.sleep(this.Config.actionWait);
-
-            // In backup mode, track stats and mark processed
-            if (this.backupMode) {
-                this.backupStats.uploaded++;
-                const mediaEl = document.querySelector('video')
-                    || document.querySelector('img[src*="imagine-public"]')
-                    || document.querySelector('img[src*="assets.grok.com"]');
-                const mediaSrc = mediaEl?.src || mediaEl?.currentSrc || '';
-                if (mediaSrc) {
-                    const cleanId = this.getCleanId(mediaSrc);
-                    if (cleanId) {
-                        this.processedIds.add(cleanId);
-                        chrome.storage.local.set({ processedIds: Array.from(this.processedIds) });
-                    }
-                }
-            }
-        } else if (this.backupMode) {
-            // No Download button — fall back to direct URL upload
-            return this.performBackupUpload();
         } else {
             this.log('Download button missing.', 'error');
         }
