@@ -1306,6 +1306,7 @@ chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
 // --- POST-DOWNLOAD R2 UPLOAD (for auth URLs like assets.grok.com) ---
 chrome.downloads.onChanged.addListener(async (delta) => {
     if (!delta.state || delta.state.current !== 'complete') return;
+    console.log('[CloudQueue] Download state changed to complete:', delta.id, 'pending:', _pendingR2Downloads.has(delta.id));
     const pending = _pendingR2Downloads.get(delta.id);
     if (!pending) return;
     _pendingR2Downloads.delete(delta.id);

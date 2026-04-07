@@ -4,10 +4,14 @@
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action !== 'READ_FILE_FOR_UPLOAD') return false;
 
+    console.log('[Offscreen] Received READ_FILE_FOR_UPLOAD for:', request.filePath);
+
     (async () => {
         try {
+            console.log('[Offscreen] Fetching file://' + request.filePath);
             const resp = await fetch('file://' + request.filePath);
             if (!resp.ok) throw new Error(`Failed to read file: HTTP ${resp.status}`);
+            console.log('[Offscreen] File fetched, reading blob...');
             const blob = await resp.blob();
 
             // Convert to ArrayBuffer then to base64 for transfer
