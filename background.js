@@ -1265,27 +1265,126 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 // --- STANDARD DOWNLOAD LISTENER ---
+const _pendingR2Downloads = new Map();
+
 chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
-    // If not scraping and not a Grok file, ignore
     if (!isScraping && !item.url.includes('imagine-public') && !item.url.includes('assets.grok.com')) return;
 
     const finalPath = await generateFilename(item.url, item.filename);
     const config = await getCloudConfig();
-    const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
+    const cloudEnabled = CloudSync.isCloudEnabled(config);
+    const allowLocal = CloudSync.isLocalDownloadEnabled(config);
+    const isAuthUrl = item.url.includes('assets.grok.com');
 
-    if (finalPath) {
-        if (allowLocalDownload) {
-            suggest({ filename: finalPath, conflictAction: 'overwrite' });
+    if (!finalPath) {
+        chrome.downloads.cancel(item.id);
+        return;
+    }
+
+    // Always allow download to complete — we need the file for R2 upload
+    suggest({ filename: finalPath, conflictAction: 'overwrite' });
+
+    if (cloudEnabled) {
+        if (isAuthUrl) {
+            // Auth URL: can't re-fetch from service worker. Track for post-download R2 upload.
+            _pendingR2Downloads.set(item.id, { finalPath, url: item.url, deleteAfter: !allowLocal });
+            console.log('[CloudQueue] Tracking auth download for R2:', item.id, finalPath.slice(-30));
         } else {
-            chrome.downloads.cancel(item.id);
+            // Public URL: service worker can fetch directly
+            enqueueCloudMediaUpload(item.url, finalPath).catch((e) => {
+                updateCloudError(e.message);
+                persistCloudState().catch(() => {});
+            });
+            // If Cloud Only, delete local file after queue (public URLs don't need it)
+            if (!allowLocal) {
+                _pendingR2Downloads.set(item.id, { finalPath, url: item.url, deleteAfter: true, skipUpload: true });
+            }
+        }
+    }
+});
+
+// --- POST-DOWNLOAD R2 UPLOAD (for auth URLs like assets.grok.com) ---
+chrome.downloads.onChanged.addListener(async (delta) => {
+    if (!delta.state || delta.state.current !== 'complete') return;
+    const pending = _pendingR2Downloads.get(delta.id);
+    if (!pending) return;
+    _pendingR2Downloads.delete(delta.id);
+
+    if (pending.skipUpload) {
+        // Just clean up local file
+        if (pending.deleteAfter) {
+            chrome.downloads.removeFile(delta.id, () => {
+                chrome.downloads.erase({ id: delta.id });
+            });
+        }
+        return;
+    }
+
+    try {
+        const [dlItem] = await chrome.downloads.search({ id: delta.id });
+        if (!dlItem || !dlItem.filename) throw new Error('Download item not found');
+
+        console.log('[CloudQueue] Download complete, reading file for R2:', dlItem.filename.slice(-50));
+
+        // Create offscreen document to read the file
+        try {
+            await chrome.offscreen.createDocument({
+                url: 'offscreen.html',
+                reasons: ['BLOBS'],
+                justification: 'Read downloaded file for R2 cloud backup upload'
+            });
+        } catch (e) {
+            // Already exists — that's fine
+            if (!e.message.includes('already exists') && !e.message.includes('Only a single offscreen')) throw e;
         }
 
-        // Enqueue for R2 — uploadMediaQueueItem now handles cookies for assets.grok.com
-        enqueueCloudMediaUpload(item.url, finalPath).catch((e) => {
-            updateCloudError(e.message);
-            persistCloudState().catch(() => { });
+        // Read file via offscreen document
+        const fileData = await chrome.runtime.sendMessage({
+            action: 'READ_FILE_FOR_UPLOAD',
+            filePath: dlItem.filename,
+            contentType: dlItem.mime || 'application/octet-stream'
         });
-    } else {
-        chrome.downloads.cancel(item.id);
+
+        if (!fileData || !fileData.ok) throw new Error(fileData?.error || 'Failed to read file');
+
+        console.log('[CloudQueue] File read:', fileData.size, 'bytes, uploading to R2...');
+
+        // Build R2 object key
+        const config = await getCloudConfig();
+        const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
+        const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(pending.finalPath, {
+            keyPrefix: config.keyPrefix,
+            fallbackUserId: userInfo.activeGrokUserId || 'Shared_Account'
+        });
+
+        // Convert base64 back to blob
+        const binaryStr = atob(fileData.base64);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+        const blob = new Blob([bytes], { type: fileData.type });
+
+        // Get presigned URL and upload
+        const presigned = await requestPresignedUrl(config, { objectKey, contentType: fileData.type }, blob.size);
+        const uploadResp = await fetch(presigned.uploadUrl, {
+            method: presigned.method || 'PUT',
+            headers: { 'Content-Type': fileData.type },
+            body: blob
+        });
+        if (!uploadResp.ok) throw new Error(`R2 PUT failed: ${uploadResp.status}`);
+
+        log(`Cloud upload complete: ${objectKey}`, 'success');
+
+        // Delete local file if Cloud Only mode
+        if (pending.deleteAfter) {
+            chrome.downloads.removeFile(delta.id, () => {
+                chrome.downloads.erase({ id: delta.id });
+                console.log('[CloudQueue] Local file deleted (Cloud Only mode)');
+            });
+        }
+    } catch (e) {
+        console.error('[CloudQueue] Post-download R2 upload failed:', e.message);
+        log(`Cloud upload failed: ${e.message}`, 'warning');
+        updateCloudError(e.message);
+        persistCloudState().catch(() => {});
     }
 });

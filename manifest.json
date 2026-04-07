@@ -9,7 +9,8 @@
     "scripting",
     "downloads",
     "alarms",
-    "cookies"
+    "cookies",
+    "offscreen"
   ],
   "host_permissions": [
     "*://*.x.com/*",
