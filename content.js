@@ -1554,32 +1554,38 @@ class VideoRetryManager {
     // Clicks the Settings dropdown and selects "Make Video" mode so the submit
     // button sends the prompt with --mode=custom instead of --mode=normal
     async selectMakeVideoMode() {
-        // The video camera icon button has aria-label="Settings" on the detail page
-        const settingsBtn = document.querySelector('button[aria-label="Settings"]');
-        if (!settingsBtn) {
-            console.log('VideoRetryManager: Video camera button (Settings) not found');
+        // Click the video camera icon to switch to video mode
+        // On image posts: aria-label="Video" (the mode toggle button)
+        // On some posts: aria-label="Settings" (opens video presets)
+        const videoBtn = document.querySelector('button[aria-label="Video"]')
+            || document.querySelector('button[aria-label="Settings"]');
+        if (!videoBtn) {
+            console.log('VideoRetryManager: Video mode button not found');
             return false;
         }
-        this.simulateClick(settingsBtn);
+        this.simulateClick(videoBtn);
         await this.sleep(500);
-        // Close the video presets dropdown — video mode is now active
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        await this.sleep(300);
         return true;
     }
 
-    // Clicks the submit button (↑) which changes aria-label based on mode
+    // Clicks the submit arrow (↑) in the input bar — NOT the "Make video" action button on the image
     clickSubmitButton() {
-        // Multiple buttons may share aria-label="Make video" — pick the visible one
-        const candidates = document.querySelectorAll(
-            'button[aria-label="Make video"], button[aria-label="Edit"], button[aria-label="Submit"]'
-        );
-        for (const btn of candidates) {
-            const rect = btn.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-                this.simulateClick(btn);
-                return true;
+        // Prefer Edit/Submit (the input bar submit arrow) over "Make video" (the image action button)
+        // "Make video" action button is wide (~134px), submit arrow is small (~40px)
+        for (const label of ['Edit', 'Submit', 'Make video']) {
+            const btns = document.querySelectorAll(`button[aria-label="${label}"]`);
+            for (const btn of btns) {
+                const rect = btn.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0 && rect.width < 60) {
+                    this.simulateClick(btn);
+                    return true;
+                }
             }
+        }
+        // Fallback: any visible submit-like button
+        for (const label of ['Edit', 'Submit', 'Make video']) {
+            const btn = document.querySelector(`button[aria-label="${label}"]`);
+            if (btn) { const r = btn.getBoundingClientRect(); if (r.width > 0) { this.simulateClick(btn); return true; } }
         }
         return false;
     }
