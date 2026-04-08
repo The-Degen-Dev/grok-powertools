@@ -2269,17 +2269,18 @@ class VideoRetryManager {
         );
     }
 
-    countGeneratedImages() {
-        return document.querySelectorAll(
-            'img[src*="imagine-public"], img[src*="assets.grok.com"]'
-        ).length;
-    }
-
-    async waitForNewImages(countBefore, timeout = 30000) {
+    async waitForGenerationComplete(timeout = 45000) {
         const start = Date.now();
+        // Phase 1: wait for button to disappear (confirms click worked)
+        while (Date.now() - start < 5000) {
+            if (!this.qualityRepeatRunning) return false;
+            if (!this.findGenerateMoreButton()) break;
+            await this.sleep(200);
+        }
+        // Phase 2: wait for button to reappear (generation complete)
         while (Date.now() - start < timeout) {
             if (!this.qualityRepeatRunning) return false;
-            if (this.countGeneratedImages() > countBefore) return true;
+            if (this.findGenerateMoreButton()) return true;
             await this.sleep(500);
         }
         return false;
@@ -2332,10 +2333,9 @@ class VideoRetryManager {
                 break;
             }
 
-            const countBefore = this.countGeneratedImages();
             btn.click();
 
-            const appeared = await this.waitForNewImages(countBefore);
+            const appeared = await this.waitForGenerationComplete();
             if (!this.qualityRepeatRunning) break;
 
             this.qualityRepeatCompleted++;
