@@ -1554,37 +1554,18 @@ class VideoRetryManager {
     // Clicks the Settings dropdown and selects "Make Video" mode so the submit
     // button sends the prompt with --mode=custom instead of --mode=normal
     async selectMakeVideoMode() {
+        // The video camera icon button has aria-label="Settings" on the detail page
         const settingsBtn = document.querySelector('button[aria-label="Settings"]');
         if (!settingsBtn) {
-            console.log('VideoRetryManager: Settings dropdown not found');
+            console.log('VideoRetryManager: Video camera button (Settings) not found');
             return false;
         }
         this.simulateClick(settingsBtn);
         await this.sleep(500);
-
-        // Find and click "Make Video" in the dropdown menu
-        let found = false;
-        const menuItems = document.querySelectorAll('[role="menuitem"], [role="option"]');
-        for (const item of menuItems) {
-            if (item.textContent?.includes('Make Video')) {
-                this.simulateClick(item);
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            // Fallback: search all clickable elements in any popup/dropdown
-            const allClickable = document.querySelectorAll('div[class*="cursor-pointer"], button');
-            for (const el of allClickable) {
-                if (el.textContent?.trim()?.startsWith('Make Video')) {
-                    this.simulateClick(el);
-                    found = true;
-                    break;
-                }
-            }
-        }
-        await this.sleep(500);
-        return found;
+        // Close the video presets dropdown — video mode is now active
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await this.sleep(300);
+        return true;
     }
 
     // Clicks the submit button (↑) which changes aria-label based on mode
@@ -1771,6 +1752,7 @@ class VideoRetryManager {
 
         while (this.batchRunning && !this.batchAborted && this.goalCount < this.goalTotal) {
             if (this.batchPrompt) {
+                await this.selectMakeVideoMode();
                 this.injectPromptText(this.batchPrompt);
                 await this.sleep(500);
             }
@@ -1938,13 +1920,14 @@ class VideoRetryManager {
             return;
         }
 
-        // Inject video prompt text
+        // Activate video mode and inject prompt text
         if (this.batchPrompt) {
+            await this.selectMakeVideoMode();
             this.injectPromptText(this.batchPrompt);
             await this.sleep(500);
         }
 
-        // Click the SUBMIT button (not the overlay "Make video" button)
+        // Click the SUBMIT button (the visible up-arrow, not the image action button)
         const submitted = this.clickSubmitButton();
         if (!submitted) {
             console.log('Prompted Batch [gallery]: Submit button not found in detail view.');
