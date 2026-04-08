@@ -1415,6 +1415,15 @@ class VideoRetryManager {
         this.settingsManager.subscribe(() => this.updateConfig());
         this.updateConfig();
         this.startObserver();
+
+        // Watch for "Generate More" button appearing on the page
+        this.generateMoreObserver = new MutationObserver(() => {
+            const btn = this.findGenerateMoreButton();
+            if (btn && !btn.parentElement.querySelector('.gpt-quality-repeat-inline')) {
+                this.injectQuickRepeatButtons(btn);
+            }
+        });
+        this.generateMoreObserver.observe(document.body, { childList: true, subtree: true });
     }
 
     updateConfig() { }
@@ -2354,8 +2363,69 @@ class VideoRetryManager {
         this.qualityRepeatRunning = false;
     }
 
+    // --- On-page quick buttons next to "Generate More" ---
+
+    injectQuickRepeatButtons(generateMoreBtn) {
+        if (generateMoreBtn.parentElement.querySelector('.gpt-quality-repeat-inline')) return;
+
+        const container = document.createElement('span');
+        container.className = 'gpt-quality-repeat-inline';
+        container.style.cssText = 'display:inline-flex; gap:4px; margin-left:8px; align-items:center;';
+        this._buildQuickButtons(container);
+        generateMoreBtn.parentElement.appendChild(container);
+    }
+
+    _buildQuickButtons(container) {
+        while (container.firstChild) container.removeChild(container.firstChild);
+        [2, 5, 10].forEach(count => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = 'x' + count;
+            btn.style.cssText = 'padding:4px 10px; font-size:11px; font-weight:600; border-radius:9999px; border:none; cursor:pointer; background:rgba(139,92,246,0.15); color:#a78bfa; transition:background 0.2s;';
+            btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(139,92,246,0.3)'; });
+            btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(139,92,246,0.15)'; });
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.startQualityRepeat(count);
+                this._showOnPageProgress(container);
+            });
+            container.appendChild(btn);
+        });
+    }
+
+    _showOnPageProgress(container) {
+        while (container.firstChild) container.removeChild(container.firstChild);
+
+        const status = document.createElement('span');
+        status.className = 'gpt-qr-inline-status';
+        status.style.cssText = 'font-size:11px; color:#a78bfa; font-weight:600;';
+        status.textContent = 'Starting...';
+        container.appendChild(status);
+
+        const stopBtn = document.createElement('button');
+        stopBtn.type = 'button';
+        stopBtn.textContent = 'Stop';
+        stopBtn.style.cssText = 'padding:2px 8px; font-size:11px; font-weight:600; border-radius:9999px; border:none; cursor:pointer; background:rgba(244,33,46,0.2); color:#f4212e; margin-left:6px;';
+        stopBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.stopQualityRepeat();
+        });
+        container.appendChild(stopBtn);
+
+        const interval = setInterval(() => {
+            if (!this.qualityRepeatRunning) {
+                clearInterval(interval);
+                this._buildQuickButtons(container);
+                return;
+            }
+            status.textContent = this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal + '...';
+        }, 500);
+    }
+
     updateOnPageButtons(running) {
-        // Populated in Task 4
+        const container = document.querySelector('.gpt-quality-repeat-inline');
+        if (!container) return;
+        if (!running) this._buildQuickButtons(container);
     }
 
     sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
