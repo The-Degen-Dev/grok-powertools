@@ -1589,12 +1589,16 @@ class VideoRetryManager {
 
     // Clicks the submit button (↑) which changes aria-label based on mode
     clickSubmitButton() {
-        const submitBtn = document.querySelector('button[aria-label="Make video"]')
-            || document.querySelector('button[aria-label="Edit"]')
-            || document.querySelector('button[aria-label="Submit"]');
-        if (submitBtn) {
-            this.simulateClick(submitBtn);
-            return true;
+        // Multiple buttons may share aria-label="Make video" — pick the visible one
+        const candidates = document.querySelectorAll(
+            'button[aria-label="Make video"], button[aria-label="Edit"], button[aria-label="Submit"]'
+        );
+        for (const btn of candidates) {
+            const rect = btn.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                this.simulateClick(btn);
+                return true;
+            }
         }
         return false;
     }
@@ -1767,13 +1771,8 @@ class VideoRetryManager {
 
         while (this.batchRunning && !this.batchAborted && this.goalCount < this.goalTotal) {
             if (this.batchPrompt) {
-                const modeSet = await this.selectMakeVideoMode();
-                if (!modeSet) {
-                    console.log('Prompted Batch [detail]: Could not set Make Video mode');
-                }
-                await this.sleep(300);
                 this.injectPromptText(this.batchPrompt);
-                await this.sleep(300);
+                await this.sleep(500);
             }
 
             this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
@@ -1939,13 +1938,8 @@ class VideoRetryManager {
             return;
         }
 
-        // Switch to "Make Video" mode via dropdown and inject prompt
+        // Inject video prompt text
         if (this.batchPrompt) {
-            const modeSet = await this.selectMakeVideoMode();
-            if (!modeSet) {
-                console.log('Prompted Batch [gallery]: Could not set Make Video mode');
-            }
-            await this.sleep(300);
             this.injectPromptText(this.batchPrompt);
             await this.sleep(500);
         }
