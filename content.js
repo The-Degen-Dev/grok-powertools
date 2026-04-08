@@ -571,6 +571,20 @@ class GrokOverlay {
                     </div>
 
                     <div class="gpt-section">
+                        <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Quality Repeat</label>
+                        <div class="gpt-row" style="gap:6px; align-items:center;">
+                            <span style="font-size:11px;">Repeats:</span>
+                            <input type="number" id="gptQualityRepeatCount" class="gpt-input" value="5" min="1" max="50" style="width:48px;">
+                            <span id="gptQualityRepeatCalc" style="font-size:10px; color:#71767b;">(x4 = 20 images)</span>
+                        </div>
+                        <div class="gpt-row" style="margin-top:6px; gap:4px;">
+                            <button id="gptQualityRepeatBtn" class="gpt-btn gpt-btn-primary" style="flex:1; background:#8b5cf6; font-size:11px;">Start Quality Repeat</button>
+                            <button id="gptQualityRepeatStopBtn" class="gpt-btn" style="flex:1; background:#f4212e; display:none; font-size:11px;">Stop</button>
+                        </div>
+                        <div id="gptQualityRepeatStatus" style="font-size:10px; color:#71767b; margin-top:4px;"></div>
+                    </div>
+
+                    <div class="gpt-section">
                         <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Gallery Download</label>
                         <div class="gpt-row" style="margin-top:6px; gap:4px;">
                             <button id="gptScrapeDownloadBtn" class="gpt-btn gpt-btn-primary" style="flex:1; background:#22c55e; font-size:11px;">Download Gallery</button>
@@ -855,6 +869,19 @@ class GrokOverlay {
             this.templateBatchManager.stop();
             this.el.querySelector('#gptTemplateBatchBtn').style.display = '';
             this.el.querySelector('#gptTemplateBatchStopBtn').style.display = 'none';
+        });
+        // Quality Repeat controls
+        this.el.querySelector('#gptQualityRepeatCount').addEventListener('input', (e) => {
+            const count = Math.max(1, parseInt(e.target.value, 10) || 1);
+            const calcEl = this.el.querySelector('#gptQualityRepeatCalc');
+            if (calcEl) calcEl.textContent = '(x4 = ' + (count * 4) + ' images)';
+        });
+        this.el.querySelector('#gptQualityRepeatBtn').addEventListener('click', () => {
+            const count = Math.max(1, parseInt(this.el.querySelector('#gptQualityRepeatCount').value, 10) || 5);
+            this.retryManager.startQualityRepeat(count);
+        });
+        this.el.querySelector('#gptQualityRepeatStopBtn').addEventListener('click', () => {
+            this.retryManager.stopQualityRepeat();
         });
 
         this.el.querySelector('#gptScrapeDownloadBtn').addEventListener('click', () => {
@@ -1379,6 +1406,11 @@ class VideoRetryManager {
         this.batchPrompt = null;     // Prompt text for prompted mode
         this.scrollAttempts = 0;
         this.batchContext = null;    // 'gallery' or 'detail'
+
+        // Quality Repeat state
+        this.qualityRepeatRunning = false;
+        this.qualityRepeatTotal = 0;
+        this.qualityRepeatCompleted = 0;
 
         this.settingsManager.subscribe(() => this.updateConfig());
         this.updateConfig();
@@ -2218,6 +2250,112 @@ class VideoRetryManager {
             btn.click();
             console.log('VideoRetryManager: Clicked Make Video.');
         }
+    }
+
+    // --- Quality Repeat: auto-click "Generate More" N times ---
+
+    findGenerateMoreButton() {
+        return Array.from(document.querySelectorAll('button')).find(
+            b => b.textContent.trim() === 'Generate More'
+        );
+    }
+
+    countGeneratedImages() {
+        return document.querySelectorAll(
+            'img[src*="imagine-public"], img[src*="assets.grok.com"]'
+        ).length;
+    }
+
+    async waitForNewImages(countBefore, timeout = 30000) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            if (!this.qualityRepeatRunning) return false;
+            if (this.countGeneratedImages() > countBefore) return true;
+            await this.sleep(500);
+        }
+        return false;
+    }
+
+    updateQualityRepeatUI(running) {
+        if (!this.overlay || !this.overlay.el) return;
+        const startBtn = this.overlay.el.querySelector('#gptQualityRepeatBtn');
+        const stopBtn = this.overlay.el.querySelector('#gptQualityRepeatStopBtn');
+        const statusEl = this.overlay.el.querySelector('#gptQualityRepeatStatus');
+        if (startBtn) startBtn.style.display = running ? 'none' : '';
+        if (stopBtn) stopBtn.style.display = running ? '' : 'none';
+        if (statusEl) {
+            if (running) {
+                const images = this.qualityRepeatCompleted * 4;
+                const totalImages = this.qualityRepeatTotal * 4;
+                statusEl.textContent = 'Generating: ' + images + '/' + totalImages + ' images (' + this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal + ' repeats)';
+            } else if (this.qualityRepeatCompleted > 0) {
+                statusEl.textContent = 'Done: ' + (this.qualityRepeatCompleted * 4) + ' images (' + this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal + ' repeats)';
+            } else {
+                statusEl.textContent = '';
+            }
+        }
+    }
+
+    async startQualityRepeat(targetRepeats) {
+        if (this.qualityRepeatRunning) return;
+        this.qualityRepeatRunning = true;
+        this.qualityRepeatTotal = targetRepeats;
+        this.qualityRepeatCompleted = 0;
+        this.updateQualityRepeatUI(true);
+        this.safeStatus('Quality Repeat: Starting 0/' + targetRepeats, 'info');
+
+        while (this.qualityRepeatCompleted < this.qualityRepeatTotal && this.qualityRepeatRunning) {
+            let btn = this.findGenerateMoreButton();
+            if (!btn) {
+                const waitStart = Date.now();
+                while (!btn && Date.now() - waitStart < 5000) {
+                    await this.sleep(500);
+                    btn = this.findGenerateMoreButton();
+                }
+            }
+            if (!btn) {
+                this.safeStatus('Quality Repeat: Generate More button not found', 'warning');
+                break;
+            }
+
+            if (!location.href.includes('/imagine')) {
+                this.safeStatus('Quality Repeat: Navigated away from Imagine', 'warning');
+                break;
+            }
+
+            const countBefore = this.countGeneratedImages();
+            btn.click();
+
+            const appeared = await this.waitForNewImages(countBefore);
+            if (!this.qualityRepeatRunning) break;
+
+            this.qualityRepeatCompleted++;
+            this.updateQualityRepeatUI(true);
+            this.safeStatus('Quality Repeat: ' + this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal, 'info');
+
+            if (!appeared) {
+                console.warn('Quality Repeat: Timeout waiting for images on repeat ' + this.qualityRepeatCompleted);
+            }
+
+            await this.sleep(1000);
+        }
+
+        this.qualityRepeatRunning = false;
+        this.updateQualityRepeatUI(false);
+        const done = this.qualityRepeatCompleted >= this.qualityRepeatTotal;
+        const msg = done
+            ? 'Quality Repeat: Complete (' + (this.qualityRepeatCompleted * 4) + ' images)'
+            : 'Quality Repeat: Stopped (' + (this.qualityRepeatCompleted * 4) + ' images)';
+        this.safeStatus(msg, done ? 'success' : 'neutral');
+        this.updateOnPageButtons(false);
+    }
+
+    stopQualityRepeat() {
+        this.qualityRepeatRunning = false;
+    }
+
+    updateOnPageButtons(running) {
+        // Populated in Task 4
     }
 
     sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
