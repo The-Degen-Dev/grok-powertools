@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing! We welcome bug reports, feature requests, and pull requests.
 
+> **New to this codebase?** Read [HACKING.md](./HACKING.md) first — it explains the Chrome MV3 quirks (three separate DevTools consoles, MAIN world vs. isolated world, why selectors break when Grok updates) that will otherwise eat half your first day.
+
 ## Development Setup
 
 1.  **Clone the repository**:

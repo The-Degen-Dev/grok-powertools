@@ -25,14 +25,22 @@ const baseGlobals = {
 
 module.exports = [
     {
-        files: ['**/*.js'],
+        // Global ignores — in ESLint flat config, an ignores-only entry applies
+        // everywhere. Inline ignores inside a `files`-scoped entry do not.
         ignores: [
             'node_modules/**',
             'cloud/node_modules/**',
             'playwright-report/**',
             'test-results/**',
-            'temp_ref/**'
-        ],
+            'temp_ref/**',
+            // web/ is a separate Next.js app with its own tooling; skip it
+            // at the extension root so `npm run lint` here stays fast and clean.
+            'web/**',
+            '.next/**'
+        ]
+    },
+    {
+        files: ['**/*.js'],
         languageOptions: {
             ecmaVersion: 2021,
             sourceType: 'script',

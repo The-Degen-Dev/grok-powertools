@@ -50,7 +50,8 @@ Full setup guide: [docs/CLOUD_R2_SETUP.md](docs/CLOUD_R2_SETUP.md)
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on setting up the development environment, running tests, and contributing code.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, tests, PR workflow
+- [HACKING.md](HACKING.md) — architecture, debugging, and the Chrome MV3 gotchas you'll hit on day one (**read this first if you're new to Chrome extensions**)
 
 ## License
 

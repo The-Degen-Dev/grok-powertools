@@ -274,7 +274,10 @@ describe('isValidMediaSourceUrl', () => {
         expect(CloudSync.isValidMediaSourceUrl('https://evil.com/image.png')).toBe(false);
         expect(CloudSync.isValidMediaSourceUrl('https://x.com/image.png')).toBe(false);
         expect(CloudSync.isValidMediaSourceUrl('https://grok.com/image.png')).toBe(false);
-        expect(CloudSync.isValidMediaSourceUrl('https://assets.grok.com/video.mp4')).toBe(false);
+    });
+
+    test('accepts assets.grok.com (trusted Grok video CDN — requires session cookies, fetched via bridge.js)', () => {
+        expect(CloudSync.isValidMediaSourceUrl('https://assets.grok.com/users/abc/generated/xyz/generated_video.mp4')).toBe(true);
     });
 
     test('rejects blob URLs', () => {
@@ -302,7 +305,7 @@ describe('media element selectors on Grok detail page', () => {
         // Use DOM APIs to safely set test fixture content
         const container = document.createElement('div');
         // jsdom test fixture setup — static HTML, not user input
-        container.innerHTML = htmlStr; // eslint-disable-line no-unsanitized/property
+        container.innerHTML = htmlStr; // test fixture; htmlStr is a literal in each test
         document.body.appendChild(container);
     }
 
@@ -702,8 +705,8 @@ describe('known media hosts', () => {
         expect(CloudSync.KNOWN_MEDIA_HOSTS).toContain('imagine-public.x.ai');
     });
 
-    test('does NOT include assets.grok.com (video CDN uses different domain)', () => {
-        expect(CloudSync.KNOWN_MEDIA_HOSTS).not.toContain('assets.grok.com');
+    test('includes assets.grok.com (video CDN; fetched through bridge.js with session cookies)', () => {
+        expect(CloudSync.KNOWN_MEDIA_HOSTS).toContain('assets.grok.com');
     });
 });
 

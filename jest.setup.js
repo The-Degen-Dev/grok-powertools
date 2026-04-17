@@ -4,11 +4,15 @@ const removeListenerMock = jest.fn();
 
 global.chrome = {
     runtime: {
+        // content.js calls this at module load to inject bridge.js; without it,
+        // importing content.js from tests throws before any code under test runs.
+        getURL: jest.fn((path) => `chrome-extension://test-id/${path}`),
         sendMessage: jest.fn(() => Promise.resolve()),
         onMessage: {
             addListener: addListenerMock,
             removeListener: removeListenerMock
-        }
+        },
+        lastError: null
     },
     tabs: {
         query: jest.fn(),
