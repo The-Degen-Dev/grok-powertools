@@ -2541,6 +2541,24 @@ class GrokScraper {
             }
         });
 
+        // Fallback stop signal via storage.onChanged. chrome.tabs.sendMessage can be
+        // dropped silently (stale currentTabId, invalidated context, etc.), leaving the
+        // scraper running after a Stop click. Storage-change events always reach every
+        // context, so this catches stops the direct-message path misses.
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area !== 'local') return;
+            const stopSignal =
+                changes.isR2Backup?.newValue === false ||
+                changes.isScraping?.newValue === false ||
+                changes.scraperState?.newValue === 'idle' ||
+                changes.r2BackupState?.newValue?.isRunning === false;
+            if (stopSignal && this.state.isRunning) {
+                console.log('GrokScraper: stop signal received via storage.onChanged');
+                if (this.backupMode) this.stopBackupMode();
+                else this.stop();
+            }
+        });
+
         // Page-world bridge: allows triggering actions via DOM CustomEvents
         // (useful for browser automation tools that run in the page context)
         document.addEventListener('grok-powertools-command', (e) => {
@@ -2749,11 +2767,13 @@ class GrokScraper {
     }
 
     async processItem(targetItem, cleanId) {
+        if (!this.state.isRunning) return;
         targetItem.style.outline = "2px solid rgba(29,155,240,0.5)";
         this.log(`Opening item...`);
         if (cleanId) await chrome.storage.local.set({ currentItemId: cleanId });
         targetItem.click();
         await this.sleep(this.Config.navWait);
+        if (!this.state.isRunning) return;
         this.determineModeAndExecute();
     }
 
