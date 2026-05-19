@@ -2,7 +2,7 @@
 
 Welcome. This is the orientation doc for people who want to **change the code**. `README.md` tells users what the extension does; `CONTRIBUTING.md` explains the PR process; this file explains the weird parts of Chrome MV3 extensions and the Grok-specific gotchas that will trip you up on day one.
 
-If you've never built a Chrome extension before, start here and read top to bottom. Then skim `CLAUDE.md` for the architecture overview and the canonical DOM selector reference.
+If you've never built a Chrome extension before, start here and read top to bottom. Then skim `AGENTS.md` for the architecture overview and `docs/AGENT_HANDOFF_PROMPT.md` for a paste-ready agent onboarding prompt.
 
 ---
 
@@ -54,7 +54,7 @@ Grok is a Next.js + React app with Radix UI components. The DOM is regenerated a
 1. Open `grok.com/imagine` → F12 → Elements panel
 2. Copy the `aria-label` of the actual button you want
 3. In the content script Console, run `document.querySelector('button[aria-label="whatever-you-copied"]')` to confirm it matches
-4. Update the selector in `content.js` (the canonical list lives in `CLAUDE.md` under "DOM Selectors for Grok UI")
+4. Update the selector in `content.js` after verifying the current Grok DOM. Historical selector notes may exist in ignored local files, but current code and live DOM are the source of truth.
 5. Test by reloading the extension + refreshing the Grok tab
 
 ### Rules of thumb
@@ -175,7 +175,8 @@ Grok updates their UI on an unpredictable cadence. When a batch stops working, t
 
 ## 9. Further reading
 
-- `CLAUDE.md` — detailed architecture, class responsibilities, Grok page structure (views, known-working selectors, observed quirks)
+- `AGENTS.md` — tracked agent guide with architecture, tool routing, validation, branch, and safety notes
+- `docs/AGENT_HANDOFF_PROMPT.md` — paste-ready onboarding prompt for another coding agent
 - `README.md` — user-facing feature list and install flow
 - `CONTRIBUTING.md` — PR workflow, commit message style, LICENSE
 - `manifest.json` — permissions and `web_accessible_resources` declarations (if you add a new MAIN-world script, it goes here)
