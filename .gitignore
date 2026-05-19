@@ -25,6 +25,7 @@ npm-debug.log*
 temp_ref/
 test-results/
 playwright-report/
+.superpowers/
 AGENT_STATE.md
 AGENT_HANDOFF.md
 .agent/delegate-reports/
