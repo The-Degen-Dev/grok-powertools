@@ -42,6 +42,7 @@
         <li><strong>Notes location:</strong> This file lives inside <code>docs/audits/2026-05-20-grok-powertools-full-system-audit/</code> so implementation decisions stay beside the evidence and final report.</li>
         <li><strong>Audit artifacts over product edits:</strong> Helper scripts and evidence files should live in the audit folder unless a product-code fix is explicitly approved or required to unblock the audit.</li>
         <li><strong>Audit scaffold:</strong> The audit uses a timestamped folder with separate inventory, logs, screenshots, reconciliations, and scripts directories so raw evidence is easy to inspect without mixing it into product code.</li>
+        <li><strong>Local service reuse:</strong> Task 3 reused existing localhost listeners on ports <code>3001</code> and <code>8787</code> instead of starting duplicate web or Worker processes; the listener and health evidence is in <code>logs/local-services.txt</code>.</li>
       </ul>
     </section>
 
@@ -58,6 +59,7 @@
         <li><strong>Commit strategy:</strong> The plan and this notes file are safe to commit. Raw screenshots and logs may contain private Grok/account/media data, so the execution plan treats final staging of audit evidence as a review decision rather than an automatic bulk commit.</li>
         <li><strong>R2 verification path:</strong> Direct Wrangler R2 listing is currently blocked by account/auth state, so the plan prioritizes extension-configured Worker/API-key evidence and records a precise blocker if no valid R2 path is available.</li>
         <li><strong>Baseline interpretation:</strong> Automated checks are treated as audit evidence, not blockers to live testing, unless they reveal a failure that prevents extension, web app, or Worker runtime from launching.</li>
+        <li><strong>Worker health boundary:</strong> The local Worker <code>/health</code> endpoint passing is enough to continue browser and integration audit work, but it is not treated as proof that R2 backup objects exist or are complete.</li>
       </ul>
     </section>
 
