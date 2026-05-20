@@ -217,6 +217,24 @@
               full labels retained on wider viewports.
             </td>
           </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Verification fix</td>
+            <td>
+              Final code review found skim mode did not explicitly stop playback at the final queue item
+              when the skim interval elapsed. The viewer now pauses the video and marks playback stopped
+              at the final item, covered by a Playwright regression.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Design decision</td>
+            <td>
+              Final code review also flagged that the first mobile sidebar fix exposed only the first eight
+              collections. The compact mobile rail now opens a full collection drawer with search and all
+              collections, while preserving the compact rail underneath.
+            </td>
+          </tr>
         </tbody>
       </table>
 

@@ -138,6 +138,105 @@ async function getMovies(page) {
     });
 }
 
+async function seedCollections(page, seeds) {
+    await resetDatabase(page);
+    await page.evaluate(async (seedCollections) => {
+        const db = await new Promise((resolve, reject) => {
+            const request = indexedDB.open('grok-power-tools', 1);
+
+            request.onupgradeneeded = () => {
+                const db = request.result;
+
+                const collectionStore = db.createObjectStore('collections', { keyPath: 'id' });
+                collectionStore.createIndex('by-status', 'status');
+                collectionStore.createIndex('by-updated', 'updatedAt');
+                db.createObjectStore('settings');
+            };
+
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+
+        const tx = db.transaction('collections', 'readwrite');
+        for (const seedCollection of seedCollections) {
+            tx.objectStore('collections').put(seedCollection);
+        }
+        await new Promise((resolve, reject) => {
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+        db.close();
+    }, seeds);
+
+    await page.goto(`/collections/${seeds[0].id}`);
+}
+
+async function installMediaPlaybackStub(page) {
+    await page.addInitScript(() => {
+        window.__watchModePauseCalls = 0;
+
+        Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
+            configurable: true,
+            get() {
+                return this.__watchModePaused ?? true;
+            },
+        });
+
+        HTMLMediaElement.prototype.load = function load() {};
+        HTMLMediaElement.prototype.play = function play() {
+            this.__watchModePaused = false;
+            return Promise.resolve();
+        };
+        HTMLMediaElement.prototype.pause = function pause() {
+            this.__watchModePaused = true;
+            window.__watchModePauseCalls += 1;
+        };
+    });
+}
+
+async function createPlayableVideoDataUrl(page) {
+    await page.goto('/favicon.ico');
+    return page.evaluate(async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 160;
+        canvas.height = 90;
+        const context = canvas.getContext('2d');
+        const stream = canvas.captureStream(12);
+        const chunks = [];
+        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+            ? 'video/webm;codecs=vp8'
+            : 'video/webm';
+        const recorder = new MediaRecorder(stream, { mimeType });
+        recorder.ondataavailable = (event) => {
+            if (event.data.size) chunks.push(event.data);
+        };
+
+        const done = new Promise((resolve, reject) => {
+            recorder.onstop = resolve;
+            recorder.onerror = () => reject(recorder.error);
+        });
+
+        context.fillStyle = '#0f766e';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = '#ffffff';
+        context.font = '700 18px system-ui, sans-serif';
+        context.fillText('Watch', 42, 52);
+        recorder.start();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        recorder.stop();
+        await done;
+        stream.getTracks().forEach((track) => track.stop());
+
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+        });
+    });
+}
+
 test.describe('Collection Watch Mode', () => {
     test('Watch All opens playable videos only and saves a crossfade movie', async ({ page }) => {
         await seedCollection(page);
@@ -223,5 +322,59 @@ test.describe('Collection Watch Mode', () => {
         const viewer = page.getByTestId('fullscreen-viewer');
         await expect(viewer.getByText('Watch Mode', { exact: true })).toBeVisible();
         await expect(viewer.getByText('1 / 2')).toBeVisible();
+    });
+
+    test('Skim playback stops on the final video after the skim interval', async ({ page }) => {
+        await installMediaPlaybackStub(page);
+        const videoUrl = await createPlayableVideoDataUrl(page);
+        await seedCollection(page, {
+            ...collection,
+            id: 'watch-mode-skim-final-collection',
+            name: 'Watch Mode Skim Final Test',
+            items: collection.items.map((item) => ({
+                ...item,
+                videoUrl: item.videoUrl ? videoUrl : '',
+            })).filter((item) => item.videoUrl).slice(0, 1),
+        });
+
+        await page.getByRole('button', { name: /Watch All/i }).click();
+
+        const viewer = page.getByTestId('fullscreen-viewer');
+        await expect(viewer.getByText('Watch Mode', { exact: true })).toBeVisible();
+        await expect(viewer.getByText('1 / 1')).toBeVisible();
+
+        await viewer.getByRole('button', { name: 'Skim' }).click();
+        await viewer.getByLabel('Skim interval').selectOption('5');
+        await page.evaluate(() => {
+            document.querySelectorAll('video').forEach((video) => {
+                video.__watchModePaused = true;
+            });
+        });
+        await viewer.getByRole('button', { name: /Play \(Space\)/ }).click();
+        await expect(viewer.getByText('Video failed to load')).toHaveCount(0);
+        await expect(viewer.getByRole('button', { name: /Pause \(Space\)/ })).toBeVisible();
+        await expect.poll(() => page.evaluate(() => window.__watchModePauseCalls)).toBe(0);
+
+        await page.waitForTimeout(5500);
+
+        expect(await page.evaluate(() => window.__watchModePauseCalls)).toBeGreaterThan(0);
+        await expect(viewer.getByRole('button', { name: /Play \(Space\)/ })).toBeVisible();
+    });
+
+    test('Mobile collection drawer can reach collections outside the compact rail', async ({ page }) => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        const manyCollections = Array.from({ length: 10 }, (_, index) => ({
+            ...collection,
+            id: `watch-mode-collection-${index + 1}`,
+            name: `Collection ${index + 1}`,
+            items: [],
+        }));
+
+        await seedCollections(page, manyCollections);
+
+        await page.getByRole('button', { name: /Open collections/i }).click();
+        await page.getByRole('button', { name: /^Collection 10\b/ }).click();
+
+        await expect(page).toHaveURL(/\/collections\/watch-mode-collection-10$/);
     });
 });

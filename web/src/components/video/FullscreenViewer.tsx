@@ -61,6 +61,11 @@ export default function FullscreenViewer({
   const previousDisabled = watchMode && currentIndex <= 0;
   const nextDisabled = watchMode && currentIndex >= items.length - 1;
 
+  const stopPlayback = useCallback(() => {
+    videoRef.current?.pause();
+    setIsPlaying(false);
+  }, []);
+
   const goTo = useCallback(
     (index: number) => {
       if (items.length === 0) return;
@@ -120,10 +125,17 @@ export default function FullscreenViewer({
     if (!watchMode || playbackMode !== "skim" || !isPlaying) return;
 
     clearTimeout(skimTimerRef.current);
-    skimTimerRef.current = setTimeout(goNext, skimInterval * 1000);
+    skimTimerRef.current = setTimeout(() => {
+      if (currentIndex >= items.length - 1) {
+        stopPlayback();
+        return;
+      }
+
+      goNext();
+    }, skimInterval * 1000);
 
     return () => clearTimeout(skimTimerRef.current);
-  }, [watchMode, playbackMode, skimInterval, currentIndex, isPlaying, goNext]);
+  }, [watchMode, playbackMode, skimInterval, currentIndex, isPlaying, items.length, goNext, stopPlayback]);
 
   // Auto-hide controls
   useEffect(() => {

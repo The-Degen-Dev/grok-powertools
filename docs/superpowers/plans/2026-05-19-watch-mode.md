@@ -16,19 +16,19 @@ The approved spec covers one connected subsystem: collection watch playback plus
 
 ## File Structure
 
-- Create: `implementation-notes.html`  
+- Create: `implementation-notes.html`
   Running implementation log for spec interpretations, deviations, tradeoffs, and open questions.
-- Create: `web/src/lib/watch-mode.ts`  
+- Create: `web/src/lib/watch-mode.ts`
   Pure queue filtering helpers plus movie creation helpers. This keeps persistence and generated transition defaults out of React JSX.
-- Modify: `web/src/components/video/FullscreenViewer.tsx`  
+- Modify: `web/src/components/video/FullscreenViewer.tsx`
   Extend the existing viewer into a queue-aware Watch Mode while preserving normal per-card fullscreen behavior.
-- Modify: `web/src/components/collections/CollectionView.tsx`  
+- Modify: `web/src/components/collections/CollectionView.tsx`
   Build Watch All and Watch Selected queues, handle empty queue toasts, pass queue context into the viewer, and route after movie creation.
-- Modify: `web/src/components/collections/BulkActionBar.tsx`  
+- Modify: `web/src/components/collections/BulkActionBar.tsx`
   Add `Watch Selected` as an explicit bulk action.
-- Create: `playwright.web.config.js`  
+- Create: `playwright.web.config.js`
   Separate Playwright config for the Next.js web app so existing extension E2E config stays untouched.
-- Create: `tests/e2e-web/watch-mode.spec.js`  
+- Create: `tests/e2e-web/watch-mode.spec.js`
   Browser regression coverage for Watch All, Watch Selected, playable-only queue filtering, and Save as Movie persistence.
 
 ## Task 1: Add Implementation Notes And Watch Queue Helper

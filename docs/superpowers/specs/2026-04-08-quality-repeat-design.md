@@ -64,22 +64,22 @@ Add a `QualityRepeatManager` section within `VideoRetryManager` (reuse the exist
 qualityRepeat(targetRepeats):
   running = true
   completed = 0
-  
+
   while completed < targetRepeats AND running:
     btn = findGenerateMoreButton()
     if not btn:
       wait up to 5s for btn to appear
       if still not found: stop with error
-    
+
     countBefore = countGeneratedImages()
     btn.click()
-    
+
     // Wait for new images to appear (or timeout)
     waitForNewImages(countBefore, timeout=30s)
-    
+
     completed++
     updateProgress(completed, targetRepeats)
-  
+
   running = false
   showComplete(completed, targetRepeats)
 ```
