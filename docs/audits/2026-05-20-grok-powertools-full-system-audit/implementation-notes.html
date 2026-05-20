@@ -43,6 +43,7 @@
         <li><strong>Audit artifacts over product edits:</strong> Helper scripts and evidence files should live in the audit folder unless a product-code fix is explicitly approved or required to unblock the audit.</li>
         <li><strong>Audit scaffold:</strong> The audit uses a timestamped folder with separate inventory, logs, screenshots, reconciliations, and scripts directories so raw evidence is easy to inspect without mixing it into product code.</li>
         <li><strong>Local service reuse:</strong> Task 3 reused existing localhost listeners on ports <code>3001</code> and <code>8787</code> instead of starting duplicate web or Worker processes; the listener and health evidence is in <code>logs/local-services.txt</code>.</li>
+        <li><strong>Prompt JSON scope:</strong> Task 4's prompt-root JSON inventory excludes files inside <code>node_modules</code> so dependency metadata does not drown out user/export prompt evidence. This matches the approved Task 4 script and is recorded in <code>inventory/prompt-json-summary.json</code>.</li>
       </ul>
     </section>
 
