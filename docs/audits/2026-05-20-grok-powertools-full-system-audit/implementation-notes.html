@@ -49,6 +49,10 @@
         <li><strong>R2 log sanitization:</strong> Task 6 preserves Cloudflare account IDs and exact Wrangler error codes, but redacts local email and account display-name text because those details are not needed to diagnose the R2 blocker.</li>
         <li><strong>Credential metadata redaction:</strong> After evidence review, <code>inventory/prompt-json-summary.json</code> redacts credential-like filenames/paths and credential-key field names while preserving file counts, parseability, byte sizes, and non-sensitive inventory shape.</li>
         <li><strong>Web smoke classification:</strong> Task 7 classifies the web app as locally rendering with findings, not fully functional, because browser smoke exposed <code>/api/auth/session</code> 500 errors, a missing remote font, and no live R2/Grok reconciliation surface.</li>
+        <li><strong>Canary evidence scoping:</strong> Task 8 keeps Grok creation evidence focused on harmless compass canaries and narrow screenshots so unrelated live Grok media and prompt text do not enter the audit artifacts.</li>
+        <li><strong>Image-to-video path:</strong> Task 8 uses the visible <code>Make video</code> action from the confirmed canary image result for video creation, because that is the current direct post-detail flow Grok exposes for a safe generated image.</li>
+        <li><strong>Screenshot write path:</strong> Chrome screenshot calls returned bytes even when a path option was provided, so Task 8 writes returned screenshot bytes to disk explicitly for the final image/video result crops.</li>
+        <li><strong>Screenshot format normalization:</strong> Task 8 normalizes canary screenshot files to actual PNG bitstreams after capture so file content matches the planned <code>.png</code> artifact names.</li>
       </ul>
     </section>
 
@@ -59,6 +63,8 @@
         <li><strong>Observed Grok URL differs from requested URL:</strong> The user requested the existing Chrome tab at <code>grok.com/imagine/saved</code>, but Chrome reported and loaded <code>https://grok.com/imagine</code>. The page still exposed Saved/discovery controls, so Task 5 records route drift instead of forcing navigation.</li>
         <li><strong>Extension cloud test not run:</strong> Task 6 could not safely confirm Worker URL/API key presence because live popup access was already policy-blocked. The audit therefore records extension cloud testing as <code>not_run</code> instead of trying to bypass the browser policy.</li>
         <li><strong>Collections route interpretation:</strong> Task 7 treats <code>/collections</code> as a redirect to the dashboard because the current app intentionally redirects it to <code>/</code>. The route is therefore rendered but not counted as a separate collections workspace view.</li>
+        <li><strong>Video prompt not entered:</strong> The Task 8 plan allowed video creation from the image result or a new video prompt. The observed <code>Make video</code> flow immediately started generation and disabled the composer, so the intended video prompt is recorded as the test intent while the actual flow is documented as image-to-video.</li>
+        <li><strong>Video duration differed from intent:</strong> Grok produced a 10 second canary video even though the intended audit prompt described five seconds. This is recorded as current Grok product behavior rather than an extension failure.</li>
       </ul>
     </section>
 
@@ -74,6 +80,8 @@
         <li><strong>Blocker image versus live screenshot:</strong> Task 6 creates <code>screenshots/extension-cloud-test-result.png</code> as a clearly labeled blocker card, not as a live browser screenshot, so downstream audit readers do not mistake a missing cloud test for an omitted artifact.</li>
         <li><strong>Visual evidence after redaction:</strong> The Grok starting screenshot now preserves only the left navigation/sidebar context. This is intentionally less visually complete than the first capture, but it removes edge-case prompt text fragments from the committed artifact.</li>
         <li><strong>Local identifiers in audit artifacts:</strong> The audit keeps local filesystem paths, Cloudflare account IDs, and bucket names where they are needed for reproducible troubleshooting. These are not secret values, but the final artifact set should be treated as local/private unless explicitly redacted for public sharing.</li>
+        <li><strong>Canary URL retention:</strong> The public image post URL and public image media URL are retained because they are needed for later reconciliation. The raw video asset URL is omitted from logs because it includes a user-scoped path; the Grok post URL and post ID are enough for audit continuity.</li>
+        <li><strong>Submission evidence versus privacy:</strong> Task 8 prioritizes clean result crops and sanitized metadata over broad full-page screenshots, because the live Grok tab still contains unrelated non-canary media and hidden extension history content.</li>
       </ul>
     </section>
 
@@ -86,6 +94,8 @@
         <li><strong>Grok saved route:</strong> Confirm whether the product should target <code>/imagine</code> with observed Saved controls, <code>/imagine/saved</code>, or both as valid current Grok Saved entrypoints.</li>
         <li><strong>Cloudflare account mapping:</strong> Confirm which Cloudflare account should own <code>grok-gallery-001</code> and whether the active Wrangler OAuth token should be refreshed or switched before object-level R2 verification.</li>
         <li><strong>Web product scope:</strong> Confirm whether the web app should remain a collection/editor companion or become the operating dashboard for Vault/R2/Grok audit health and live generation status.</li>
+        <li><strong>Direct text-to-video scope:</strong> Confirm whether a separate direct text-to-video canary should be exercised in addition to the observed image-to-video flow.</li>
+        <li><strong>Video control expectations:</strong> Confirm whether the product should surface duration/quality expectations when Grok turns a static image into a 10 second 480p result without a prompt entry step.</li>
       </ul>
     </section>
   </body>
