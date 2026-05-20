@@ -57,6 +57,8 @@
         <li><strong>Task 9 R2 blocker card:</strong> The R2 sync result image is a clearly labeled blocker card, not a live popup screenshot, because live popup config access remains policy-blocked.</li>
         <li><strong>Task 10 stress screenshots:</strong> Scraper start/stop evidence is cropped to the overlay Gallery Download section so live Grok media and prompt text stay out of the committed screenshots.</li>
         <li><strong>Task 11 safe-generation scope:</strong> Batch and quality-repeat tests use audit-owned compass canaries and cropped overlay screenshots so the exercise does not operate on unrelated Grok content.</li>
+        <li><strong>Task 12 final inventory isolation:</strong> The final Vault inventory script was run from a temporary working directory so its side-effect inventory writes did not overwrite the earlier redacted inventory artifacts in the repo.</li>
+        <li><strong>Plan self-review timing:</strong> The written plan's self-review task was run after execution rather than before it, because it was discovered during final wrap-up. The useful checks still ran: spec-section coverage, placeholder scan, and audit-path consistency.</li>
       </ul>
     </section>
 
@@ -65,7 +67,7 @@
       <ul>
         <li><strong>Live extension popup not inspected:</strong> The original Task 5 plan called for live popup cloud settings. Browser automation blocked <code>chrome-extension://.../popup.html</code>, so the audit recorded the blocker and used source preview for UI shape only. This avoids reading Chrome profile internals or routing around the browser security policy.</li>
         <li><strong>Observed Grok URL differs from requested URL:</strong> The user requested the existing Chrome tab at <code>grok.com/imagine/saved</code>, but Chrome reported and loaded <code>https://grok.com/imagine</code>. The page still exposed Saved/discovery controls, so Task 5 records route drift instead of forcing navigation.</li>
-        <li><strong>Extension cloud test not run:</strong> Task 6 could not safely confirm Worker URL/API key presence because live popup access was already policy-blocked. The audit therefore records extension cloud testing as <code>not_run</code> instead of trying to bypass the browser policy.</li>
+        <li><strong>Extension cloud test not exercised:</strong> Task 6 could not safely confirm Worker URL/API key presence because live popup access was already policy-blocked. The audit therefore records extension cloud testing as not exercised instead of trying to bypass the browser policy.</li>
         <li><strong>Collections route interpretation:</strong> Task 7 treats <code>/collections</code> as a redirect to the dashboard because the current app intentionally redirects it to <code>/</code>. The route is therefore rendered but not counted as a separate collections workspace view.</li>
         <li><strong>Video prompt not entered:</strong> The Task 8 plan allowed video creation from the image result or a new video prompt. The observed <code>Make video</code> flow immediately started generation and disabled the composer, so the intended video prompt is recorded as the test intent while the actual flow is documented as image-to-video.</li>
         <li><strong>Video duration differed from intent:</strong> Grok produced a 10 second canary video even though the intended audit prompt described five seconds. This is recorded as current Grok product behavior rather than an extension failure.</li>
@@ -73,6 +75,7 @@
         <li><strong>Backfill and retry not run:</strong> Task 10 records <code>Run Backfill</code> and <code>Retry Unsynced</code> as blocked because those controls live only in the policy-blocked extension popup; the page overlay does not expose equivalent controls, and the content page cannot send extension runtime messages.</li>
         <li><strong>Task 10 blocker class:</strong> The backfill/retry blocker is an approved-automation access blocker, not an R2/config error. The audit does not claim backfill or retry reached the cloud pipeline.</li>
         <li><strong>Quality repeat setup:</strong> Task 11 creates a fresh safe image canary before running Quality Repeat because <code>Generate More</code> was visible in another existing tab but was not attached to audit-owned content.</li>
+        <li><strong>Final status vocabulary:</strong> The final reconciliation uses the plan's closest available status labels, but the notes preserve the exact blocker classes where the status enum is too coarse: Chrome popup policy for extension storage and Cloudflare account/auth state for R2.</li>
       </ul>
     </section>
 
@@ -93,6 +96,7 @@
         <li><strong>Native download versus extension path:</strong> Task 9 did not move the native downloaded video into <code>GrokVault</code> manually. The zero Vault delta is preserved because manually relocating the file would hide the product behavior the audit is meant to expose.</li>
         <li><strong>Controlled scraper run versus exhaustive scrape:</strong> Task 10 starts and stops the gallery scraper quickly instead of allowing a bulk scrape to run through the full Saved surface, because the control being audited is reliability of start/stop and the current UI exposes no true gallery item limit.</li>
         <li><strong>Batch count minimization:</strong> Task 11 reduces persisted batch counters from <code>200</code> to <code>1</code> before exercising Prompted Batch. This limits spend and avoids bulk generation while still testing the flow.</li>
+        <li><strong>Final completeness boundary:</strong> Task 12 marks the audit complete only in the sense that every planned flow was either exercised or precisely blocked. It does not mark the product backup system complete, because Grok Saved-to-Vault-to-R2 reconciliation remains unproven.</li>
       </ul>
     </section>
 
@@ -110,6 +114,7 @@
         <li><strong>Download root expectation:</strong> Confirm whether native Grok downloads should be considered valid evidence when they land in the parent media folder, or whether every successful backup must land under <code>GrokVault</code>.</li>
         <li><strong>Cloud recovery controls:</strong> Confirm whether <code>Run Backfill</code> and <code>Retry Unsynced</code> should move into the page overlay or a web dashboard so operators can run them without the Chrome extension popup.</li>
         <li><strong>Batch retry behavior:</strong> Confirm whether Prompted Batch should treat post-detail URL changes during retries as success candidates, hard failures, or a state that requires operator review.</li>
+        <li><strong>Authoritative Saved source:</strong> Confirm whether Grok Saved should be reconciled through a stable export/API, a durable extension index, or visual scraping plus media URL identity.</li>
       </ul>
     </section>
   </body>
