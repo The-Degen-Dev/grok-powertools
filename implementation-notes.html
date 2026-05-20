@@ -160,6 +160,25 @@
               overlay so card-grid text and the Next.js dev-tools button cannot satisfy watch-mode checks.
             </td>
           </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Test wiring</td>
+            <td>
+              The web watch-mode regression now has a root <code>test:e2e:web</code> script, and the default
+              <code>test</code> script runs unit tests, extension E2E, and web E2E while keeping
+              <code>test:e2e</code> extension-only.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Design decision</td>
+            <td>
+              The collection header and bulk action bar wrap at narrow widths after adding watch actions.
+              Watch entry points are disabled from computed playable queues, with the existing empty-queue
+              toast kept as a race-condition fallback. Opening a watch queue exits multi-select so the
+              bulk action bar cannot sit above fullscreen viewer controls.
+            </td>
+          </tr>
         </tbody>
       </table>
 

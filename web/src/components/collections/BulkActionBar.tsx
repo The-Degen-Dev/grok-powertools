@@ -6,6 +6,7 @@ import Button from "@/components/ui/Button";
 interface BulkActionBarProps {
   selectedCount: number;
   onWatchSelected: () => void;
+  watchSelectedDisabled?: boolean;
   onDelete: () => void;
   onDownload: () => void;
   onCopyLinks: () => void;
@@ -15,35 +16,42 @@ interface BulkActionBarProps {
 export default function BulkActionBar({
   selectedCount,
   onWatchSelected,
+  watchSelectedDisabled = false,
   onDelete,
   onDownload,
   onCopyLinks,
   onDeselectAll,
 }: BulkActionBarProps) {
   return (
-    <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 animate-fade-in-up">
-      <div className="flex items-center gap-3 rounded-(--radius-card) bg-(--color-surface-0) px-5 py-3 shadow-(--shadow-overlay) dark:bg-(--color-surface-800)">
-        <span className="text-sm font-medium text-(--color-surface-700) dark:text-(--color-surface-200)">
+    <div className="fixed inset-x-3 bottom-4 z-50 flex justify-center animate-fade-in-up sm:bottom-6">
+      <div className="flex max-w-full flex-wrap items-center justify-center gap-2 rounded-(--radius-card) bg-(--color-surface-0) px-3 py-3 shadow-(--shadow-overlay) dark:bg-(--color-surface-800) sm:gap-3 sm:px-5">
+        <span className="shrink-0 text-sm font-medium text-(--color-surface-700) dark:text-(--color-surface-200)">
           {selectedCount} selected
         </span>
-        <div className="h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700)" />
-        <Button variant="ghost" size="sm" onClick={onWatchSelected}>
+        <div className="hidden h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700) sm:block" />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onWatchSelected}
+          disabled={watchSelectedDisabled}
+          className="shrink-0 whitespace-nowrap"
+        >
           <Play className="h-3.5 w-3.5" />
           Watch Selected
         </Button>
-        <Button variant="ghost" size="sm" onClick={onCopyLinks}>
+        <Button variant="ghost" size="sm" onClick={onCopyLinks} className="shrink-0 whitespace-nowrap">
           <ClipboardCopy className="h-3.5 w-3.5" />
           Copy Links
         </Button>
-        <Button variant="ghost" size="sm" onClick={onDownload}>
+        <Button variant="ghost" size="sm" onClick={onDownload} className="shrink-0 whitespace-nowrap">
           <Download className="h-3.5 w-3.5" />
           Download
         </Button>
-        <Button variant="danger" size="sm" onClick={onDelete}>
+        <Button variant="danger" size="sm" onClick={onDelete} className="shrink-0 whitespace-nowrap">
           <Trash2 className="h-3.5 w-3.5" />
           Delete
         </Button>
-        <div className="h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700)" />
+        <div className="hidden h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700) sm:block" />
         <button
           type="button"
           onClick={onDeselectAll}

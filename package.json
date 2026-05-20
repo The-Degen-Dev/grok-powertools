@@ -4,9 +4,10 @@
   "description": "[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)",
   "main": "background.js",
   "scripts": {
-    "test": "npm run test:unit && npm run test:e2e",
+    "test": "npm run test:unit && npm run test:e2e && npm run test:e2e:web",
     "test:unit": "jest",
     "test:e2e": "playwright test tests/e2e",
+    "test:e2e:web": "playwright test -c playwright.web.config.js",
     "lint": "eslint . --ext .js",
     "format": "prettier --write ."
   },

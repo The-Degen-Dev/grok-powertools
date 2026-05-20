@@ -248,7 +248,10 @@ export default function FullscreenViewer({
   if (!currentItem) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black"
+      data-testid="fullscreen-viewer"
+    >
       {/* Video */}
       <video
         ref={videoRef}

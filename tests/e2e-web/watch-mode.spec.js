@@ -56,6 +56,25 @@ const collection = {
     ],
 };
 
+const unplayableCollection = {
+    ...collection,
+    id: 'watch-mode-unplayable-collection',
+    name: 'Watch Mode Empty Queue Test',
+    items: [
+        {
+            id: 'video-empty-only',
+            grokPostId: 'video-empty-only',
+            sourceUrl: 'https://grok.com/imagine/post/video-empty-only',
+            videoUrl: '',
+            thumbnailUrl: '',
+            promptText: 'Only missing video URL prompt',
+            position: 0,
+            notes: '',
+            createdAt: '2026-05-19T00:00:00.000Z',
+        },
+    ],
+};
+
 async function resetDatabase(page) {
     await page.goto('/favicon.ico');
     await page.evaluate(async () => {
@@ -68,7 +87,7 @@ async function resetDatabase(page) {
     });
 }
 
-async function seedCollection(page) {
+async function seedCollection(page, seed = collection) {
     await resetDatabase(page);
     await page.evaluate(async (seedCollection) => {
         const db = await new Promise((resolve, reject) => {
@@ -95,9 +114,9 @@ async function seedCollection(page) {
             tx.onerror = () => reject(tx.error);
         });
         db.close();
-    }, collection);
+    }, seed);
 
-    await page.goto(`/collections/${collection.id}`);
+    await page.goto(`/collections/${seed.id}`);
 }
 
 async function getMovies(page) {
@@ -127,7 +146,7 @@ test.describe('Collection Watch Mode', () => {
         await expect(watchAllButton).toBeVisible({ timeout: 5000 });
         await watchAllButton.click();
 
-        const viewer = page.locator('div.fixed.inset-0.z-50');
+        const viewer = page.getByTestId('fullscreen-viewer');
         await expect(viewer.getByText('Watch Mode', { exact: true })).toBeVisible();
         await expect(viewer.getByText('1 / 3')).toBeVisible();
 
@@ -163,7 +182,7 @@ test.describe('Collection Watch Mode', () => {
         await expect(watchSelectedButton).toBeVisible({ timeout: 5000 });
         await watchSelectedButton.click();
 
-        const viewer = page.locator('div.fixed.inset-0.z-50');
+        const viewer = page.getByTestId('fullscreen-viewer');
         await expect(viewer.getByText('Watch Mode', { exact: true })).toBeVisible();
         await expect(viewer.getByText('1 / 2')).toBeVisible();
         await viewer.getByRole('button', { name: /Prompt info/i }).click();
@@ -172,5 +191,16 @@ test.describe('Collection Watch Mode', () => {
         await viewer.getByRole('button', { name: 'Next' }).click();
         await expect(viewer.getByText('2 / 2')).toBeVisible();
         await expect(viewer.getByText('Third playable prompt', { exact: true })).toBeVisible();
+    });
+
+    test('Watch actions are disabled when no playable videos are available', async ({ page }) => {
+        await seedCollection(page, unplayableCollection);
+
+        await expect(page.getByRole('button', { name: /Watch All/i })).toBeDisabled();
+
+        await page.getByRole('button', { name: /^Select$/i }).click();
+        await page.getByRole('button', { name: /Only missing video URL prompt/ }).first().click();
+
+        await expect(page.getByRole('button', { name: /Watch Selected/i })).toBeDisabled();
     });
 });

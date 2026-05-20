@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Save, FolderPlus, Share2, Check, ClipboardCopy, CheckSquare, X, Play } from "lucide-react";
 import {
@@ -178,6 +178,11 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
 
   const activeCollection = collections.find((c) => c.id === activeCollectionId);
   const displayItems = activeCollection?.items ?? unsavedItems;
+  const playableItems = useMemo(() => getPlayableQueue(displayItems), [displayItems]);
+  const selectedPlayableItems = useMemo(
+    () => getSelectedPlayableQueue(displayItems, selectedIds),
+    [displayItems, selectedIds]
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -449,17 +454,19 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
         sourceCollectionId: activeCollection?.id,
         movieKind,
       });
+      setIsMultiSelectMode(false);
+      setSelectedIds(new Set());
     },
     [activeCollection?.id, collectionName, toast]
   );
 
   const handleWatchAll = useCallback(() => {
-    openWatchQueue(getPlayableQueue(displayItems), "compilation");
-  }, [displayItems, openWatchQueue]);
+    openWatchQueue(playableItems, "compilation");
+  }, [openWatchQueue, playableItems]);
 
   const handleWatchSelected = useCallback(() => {
-    openWatchQueue(getSelectedPlayableQueue(displayItems, selectedIds), "selection");
-  }, [displayItems, openWatchQueue, selectedIds]);
+    openWatchQueue(selectedPlayableItems, "selection");
+  }, [openWatchQueue, selectedPlayableItems]);
 
   const handleSaveViewerQueueAsMovie = useCallback(
     async (queue: VideoItem[]) => {
@@ -504,13 +511,13 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
 
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* Collection header */}
-        <div className="flex items-center justify-between border-b border-(--color-surface-200) px-6 py-3 dark:border-(--color-surface-800)">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 border-b border-(--color-surface-200) px-4 py-3 dark:border-(--color-surface-800) sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <input
               type="text"
               value={collectionName}
               onChange={(e) => setCollectionName(e.target.value)}
-              className="bg-transparent font-[family-name:var(--font-display)] text-lg font-semibold text-(--color-surface-900) focus:outline-none dark:text-(--color-surface-100)"
+              className="min-w-0 flex-1 basis-48 bg-transparent font-[family-name:var(--font-display)] text-lg font-semibold text-(--color-surface-900) focus:outline-none dark:text-(--color-surface-100)"
             />
             <span className="text-sm text-(--color-surface-400)">
               {itemCount} video{itemCount !== 1 ? "s" : ""}
@@ -521,11 +528,12 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
             <Button
               variant="primary"
               onClick={handleWatchAll}
-              disabled={itemCount === 0}
+              disabled={playableItems.length === 0}
+              className="shrink-0 whitespace-nowrap"
             >
               <Play className="h-4 w-4" />
               Watch All
@@ -534,6 +542,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
               variant="secondary"
               onClick={handleCopyAllLinks}
               disabled={itemCount === 0}
+              className="shrink-0 whitespace-nowrap"
             >
               <ClipboardCopy className="h-4 w-4" />
               Copy Links
@@ -542,6 +551,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
               variant={isMultiSelectMode ? "primary" : "secondary"}
               onClick={handleToggleMultiSelect}
               disabled={itemCount === 0}
+              className="shrink-0 whitespace-nowrap"
             >
               {isMultiSelectMode ? <X className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
               {isMultiSelectMode ? "Cancel" : "Select"}
@@ -565,15 +575,21 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
                 setTimeout(() => setShareCopied(false), 2000);
               }}
               disabled={itemCount === 0}
+              className="shrink-0 whitespace-nowrap"
             >
               {shareCopied ? <Check className="h-4 w-4 text-green-500" /> : <Share2 className="h-4 w-4" />}
               {shareCopied ? "Copied!" : "Share"}
             </Button>
-            <Button variant="secondary" onClick={handleNewWorkspace}>
+            <Button variant="secondary" onClick={handleNewWorkspace} className="shrink-0 whitespace-nowrap">
               <FolderPlus className="h-4 w-4" />
               New
             </Button>
-            <Button variant="primary" onClick={handleSaveCollection} disabled={itemCount === 0}>
+            <Button
+              variant="primary"
+              onClick={handleSaveCollection}
+              disabled={itemCount === 0}
+              className="shrink-0 whitespace-nowrap"
+            >
               <Save className="h-4 w-4" />
               Save
             </Button>
@@ -665,6 +681,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
         <BulkActionBar
           selectedCount={selectedIds.size}
           onWatchSelected={handleWatchSelected}
+          watchSelectedDisabled={selectedPlayableItems.length === 0}
           onDelete={handleBulkDelete}
           onDownload={handleBulkDownload}
           onCopyLinks={handleBulkCopyLinks}
