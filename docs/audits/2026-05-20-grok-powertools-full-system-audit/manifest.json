@@ -14,11 +14,28 @@
     "chromeGrokUrl": "https://grok.com/imagine/saved",
     "localVaultPath": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault"
   },
-  "canaries": [],
+  "canaries": [
+    {
+      "type": "image",
+      "prompt": "AUDIT CANARY 2026-05-20 image: a clean product-style tabletop photo of a small chrome compass on a white desk, no text, square composition, neutral lighting.",
+      "status": "created",
+      "grokUrl": "https://grok.com/imagine/post/8f02896a-552f-4825-8803-670f09024a43",
+      "localPath": "",
+      "r2ObjectKey": ""
+    },
+    {
+      "type": "video",
+      "prompt": "AUDIT CANARY 2026-05-20 video: a five-second gentle camera push toward the small chrome compass on a white desk, no text, minimal motion, neutral lighting.",
+      "status": "created",
+      "grokUrl": "https://grok.com/imagine/post/595cb61b-d261-45ef-888f-bc4bd1fdb833",
+      "localPath": "",
+      "r2ObjectKey": ""
+    }
+  ],
   "subsystems": {
     "repo": "working_with_findings",
     "extension": "overlay_visible_popup_live_blocked_static_source_preview",
-    "chromeGrok": "imagine_loaded_no_login_prompt_saved_surface_observed",
+    "chromeGrok": "imagine_loaded_creation_canaries_created",
     "localVault": "inventoried",
     "cloudWorkerR2": "local_worker_running_direct_r2_blocked_extension_test_not_run",
     "webApp": "routes_render_with_findings"
@@ -180,6 +197,36 @@
       "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-share.png",
       "command": "Playwright Chromium screenshot for /share",
       "outcome": "Share route renders Invalid Share Link for a URL without share data."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/pre-canary-vault-count.txt",
+      "command": "find '/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault' -type f | wc -l",
+      "outcome": "Pre-canary local Vault count was 1,853 files before live creation/download work."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/grok-canaries.md",
+      "command": "Chrome browser-client live Grok image and image-to-video creation canaries",
+      "outcome": "Image canary created at https://grok.com/imagine/post/8f02896a-552f-4825-8803-670f09024a43; video canary created at https://grok.com/imagine/post/595cb61b-d261-45ef-888f-bc4bd1fdb833."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-image-canary-submitted.png",
+      "command": "Chrome screenshot crop of the live Grok image canary composer/submission state",
+      "outcome": "Submission crop records the canary image flow after Grok accepted the prompt and cleared the composer."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-image-canary-result.png",
+      "command": "Chrome screenshot crop of live Grok canary image post",
+      "outcome": "Clean result crop shows the generated chrome compass image; source image was 960x960."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-video-canary-submitted.png",
+      "command": "Chrome screenshot crop during live Grok image-to-video generation",
+      "outcome": "Submission/progress crop shows Grok generating the canary video with a progress indicator and Cancel control."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-video-canary-result.png",
+      "command": "Chrome screenshot crop of live Grok canary video post",
+      "outcome": "Clean result crop shows the generated compass video at 480p with a 10 second duration."
     }
   ]
 }
