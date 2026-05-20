@@ -1,0 +1,30 @@
+
+> chrome-extension-powertools@0.2.0 test:unit
+> jest
+
+  console.log
+    VideoRetryManager: Clicked Make Video.
+
+      at VideoRetryManager.clickMakeVideo (content.js:2243:21)
+
+  console.log
+    VideoRetryManager: Retrying... Attempt 1
+
+      at VideoRetryManager.attemptRetry (content.js:2210:17)
+
+  console.log
+    VideoRetryManager: SUCCESS detected.
+
+      at VideoRetryManager.checkAndAct (content.js:2158:25)
+
+  console.log
+    VideoRetryManager: Goal Reached.
+
+      at VideoRetryManager.checkAndAct (content.js:2165:29)
+
+Test Suites: 4 passed, 4 total
+Tests:       112 passed, 112 total
+Snapshots:   0 total
+Time:        0.637 s, estimated 1 s
+Ran all test suites.
+## exit status: 0
