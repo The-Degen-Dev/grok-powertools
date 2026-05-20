@@ -1,0 +1,571 @@
+[
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/AI Product Videos using NanoBanana Pro & VEO3.1 - without video download.json",
+    "fileName": "AI Product Videos using NanoBanana Pro & VEO3.1 - without video download.json",
+    "bytes": 31361,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/Create AI Product Images using NanoBanana Pro - without video (1).json",
+    "fileName": "Create AI Product Images using NanoBanana Pro - without video (1).json",
+    "bytes": 15508,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/Create AI Product Images using NanoBanana Pro - without video.json",
+    "fileName": "Create AI Product Images using NanoBanana Pro - without video.json",
+    "bytes": 15513,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/Create AI Product Videos using NanoBanana Pro & VEO3.1- with video download.json",
+    "fileName": "Create AI Product Videos using NanoBanana Pro & VEO3.1- with video download.json",
+    "bytes": 30787,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/agi-matrix-v5/projects/_template/baseline/results.json",
+    "fileName": "results.json",
+    "bytes": 302,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "version",
+      "project",
+      "peerId",
+      "runNumber",
+      "hypothesis",
+      "result",
+      "improvement",
+      "isNewBest",
+      "gpu",
+      "inspiredBy"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/agi-matrix-v5/projects/academic-papers/baseline/results.json",
+    "fileName": "results.json",
+    "bytes": 3,
+    "parseable": true,
+    "type": "object",
+    "count": 0,
+    "firstKeys": []
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/agi-matrix-v5/projects/astrophysics/baseline/results.json",
+    "fileName": "results.json",
+    "bytes": 415,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "version",
+      "project",
+      "peerId",
+      "runNumber",
+      "hypothesis",
+      "result",
+      "improvement",
+      "isNewBest",
+      "gpu",
+      "inspiredBy"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/agi-matrix-v5/projects/financial-analysis/baseline/results.json",
+    "fileName": "results.json",
+    "bytes": 3,
+    "parseable": true,
+    "type": "object",
+    "count": 0,
+    "firstKeys": []
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/agi-matrix-v5/projects/gpt2-tinystories/baseline/results.json",
+    "fileName": "results.json",
+    "bytes": 402,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "version",
+      "project",
+      "peerId",
+      "runNumber",
+      "hypothesis",
+      "result",
+      "improvement",
+      "isNewBest",
+      "gpu",
+      "inspiredBy"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/agi-matrix-v5/projects/matrix/v5-training-report.json",
+    "fileName": "v5-training-report.json",
+    "bytes": 1640,
+    "parseable": true,
+    "type": "object",
+    "count": 11,
+    "firstKeys": [
+      "model",
+      "backbone",
+      "colbert_dim",
+      "capabilities_indexed",
+      "training",
+      "metrics",
+      "distillation",
+      "deployment",
+      "capability_breakdown",
+      "published_at",
+      "published_by"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/agi-matrix-v5/projects/p2p-network/baseline/results.json",
+    "fileName": "results.json",
+    "bytes": 3,
+    "parseable": true,
+    "type": "object",
+    "count": 0,
+    "firstKeys": []
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/agi-matrix-v5/projects/search-engine/baseline/results.json",
+    "fileName": "results.json",
+    "bytes": 3,
+    "parseable": true,
+    "type": "object",
+    "count": 0,
+    "firstKeys": []
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/agi-matrix-v5/projects/skills-and-tools/baseline/results.json",
+    "fileName": "results.json",
+    "bytes": 3,
+    "parseable": true,
+    "type": "object",
+    "count": 0,
+    "firstKeys": []
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/client_secret_2_739725102112-6sqq3d8m9hlvb5qffgh8r8e0shtaeqa8.apps.googleusercontent.com.json",
+    "fileName": "client_secret_2_739725102112-6sqq3d8m9hlvb5qffgh8r8e0shtaeqa8.apps.googleusercontent.com.json",
+    "bytes": 488,
+    "parseable": true,
+    "type": "object",
+    "count": 1,
+    "firstKeys": [
+      "web"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/client_secret_442961366415-4mbdqcthhqdqd7mrijf4d3mq0nunfk1p.apps.googleusercontent.com.json",
+    "fileName": "client_secret_442961366415-4mbdqcthhqdqd7mrijf4d3mq0nunfk1p.apps.googleusercontent.com.json",
+    "bytes": 548,
+    "parseable": true,
+    "type": "object",
+    "count": 1,
+    "firstKeys": [
+      "web"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/client_secret_458456926730-taar6sm8b6obs8npcg1a8olh14onlb3o.apps.googleusercontent.com.json",
+    "fileName": "client_secret_458456926730-taar6sm8b6obs8npcg1a8olh14onlb3o.apps.googleusercontent.com.json",
+    "bytes": 436,
+    "parseable": true,
+    "type": "object",
+    "count": 1,
+    "firstKeys": [
+      "web"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/grok_prompts (1).json",
+    "fileName": "grok_prompts (1).json",
+    "bytes": 30,
+    "parseable": true,
+    "type": "array",
+    "count": 1,
+    "firstKeys": [
+      "name",
+      "text"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/grok_prompts.json",
+    "fileName": "grok_prompts.json",
+    "bytes": 2,
+    "parseable": true,
+    "type": "array",
+    "count": 0,
+    "firstKeys": []
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/mockup/vercel.json",
+    "fileName": "vercel.json",
+    "bytes": 101,
+    "parseable": true,
+    "type": "object",
+    "count": 2,
+    "firstKeys": [
+      "version",
+      "builds"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/philip-bankier-site/components.json",
+    "fileName": "components.json",
+    "bytes": 388,
+    "parseable": true,
+    "type": "object",
+    "count": 6,
+    "firstKeys": [
+      "$schema",
+      "style",
+      "rsc",
+      "tsx",
+      "tailwind",
+      "aliases"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/philip-bankier-site/package.json",
+    "fileName": "package.json",
+    "bytes": 3470,
+    "parseable": true,
+    "type": "object",
+    "count": 9,
+    "firstKeys": [
+      "name",
+      "version",
+      "type",
+      "license",
+      "scripts",
+      "dependencies",
+      "devDependencies",
+      "packageManager",
+      "pnpm"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/philip-bankier-site/tsconfig.json",
+    "fileName": "tsconfig.json",
+    "bytes": 657,
+    "parseable": true,
+    "type": "object",
+    "count": 3,
+    "firstKeys": [
+      "include",
+      "exclude",
+      "compilerOptions"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/philip-bankier-site/tsconfig.node.json",
+    "fileName": "tsconfig.node.json",
+    "bytes": 479,
+    "parseable": false,
+    "error": "Expected double-quoted property name in JSON at position 127"
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/ttl/30d/export_data/73e01e47-8b4d-4560-8d6e-d72f00b02b82/prod-grok-backend.json",
+    "fileName": "prod-grok-backend.json",
+    "bytes": 66375457,
+    "parseable": true,
+    "type": "object",
+    "count": 4,
+    "firstKeys": [
+      "conversations",
+      "projects",
+      "tasks",
+      "media_posts"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/ttl/30d/export_data/73e01e47-8b4d-4560-8d6e-d72f00b02b82/prod-mc-auth-mgmt-api.json",
+    "fileName": "prod-mc-auth-mgmt-api.json",
+    "bytes": 11147,
+    "parseable": true,
+    "type": "object",
+    "count": 7,
+    "firstKeys": [
+      "user",
+      "sessions",
+      "teams",
+      "invitations",
+      "api_keys",
+      "management_api_keys",
+      "team_acls"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/ttl/30d/export_data/73e01e47-8b4d-4560-8d6e-d72f00b02b82/prod-mc-billing.json",
+    "fileName": "prod-mc-billing.json",
+    "bytes": 58,
+    "parseable": true,
+    "type": "object",
+    "count": 1,
+    "firstKeys": [
+      "balance_map"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1 (1).json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1 (1).json",
+    "bytes": 31171,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1 (2).json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1 (2).json",
+    "bytes": 30894,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1 (3).json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1 (3).json",
+    "bytes": 30810,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1 (4).json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1 (4).json",
+    "bytes": 30810,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download (1).json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download (1).json",
+    "bytes": 29466,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download (2).json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download (2).json",
+    "bytes": 29466,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download (3).json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download (3).json",
+    "bytes": 29535,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download (4).json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download (4).json",
+    "bytes": 32431,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download.json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1- without video download.json",
+    "bytes": 29467,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  },
+  {
+    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1.json",
+    "fileName": "💥 Create AI Viral Videos using NanoBanana Pro & VEO3.1.json",
+    "bytes": 30883,
+    "parseable": true,
+    "type": "object",
+    "count": 10,
+    "firstKeys": [
+      "name",
+      "nodes",
+      "pinData",
+      "connections",
+      "active",
+      "settings",
+      "versionId",
+      "meta",
+      "id",
+      "tags"
+    ]
+  }
+]
