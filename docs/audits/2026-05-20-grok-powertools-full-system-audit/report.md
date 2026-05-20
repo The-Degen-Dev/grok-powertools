@@ -10,14 +10,16 @@ Audit date: 2026-05-20
 | Chrome extension | Not run | Pending Chrome/Grok task |
 | Live Grok Imagine integration | Not run | Pending Chrome/Grok task |
 | Local Vault | Not run | Pending inventory task |
-| Worker/R2 backup | Not run | Pending R2 task |
-| Web app | Build passes; lint fails | `cd web && npm run build` exits 0 in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-build.txt`; `cd web && npm run lint` exits 1 with 9 errors and 24 warnings in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt`. |
+| Worker/R2 backup | Local Worker running; R2 object verification pending | Existing listener on port 8787 responds to `curl -sS http://localhost:8787/health` with `{"ok":true,...}` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`. This confirms local Worker health only, not R2 object completeness. |
+| Web app | Running; browser smoke pending; lint fails | Existing listener on port 3001 responds to `curl -sS -I http://localhost:3001` with `HTTP/1.1 200 OK` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`. `cd web && npm run build` exits 0 in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-build.txt`; `cd web && npm run lint` exits 1 with 9 errors and 24 warnings in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt`. |
 
 ## Confirmed Working Flows
 
 - Root unit tests pass: `npm run test:unit` exits 0 with 4 passed suites and 112 passed tests in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-test-unit.txt`.
 - Worker typecheck passes: `cd cloud && npm run typecheck` exits 0 in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/cloud-typecheck.txt`.
 - Web production build passes: `cd web && npm run build` exits 0 and compiles successfully, with the expected multiple-lockfile workspace-root warning, in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-build.txt`.
+- Local web server responds: port 3001 was already listening, and `curl -sS -I http://localhost:3001` returned `HTTP/1.1 200 OK` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`.
+- Local Worker health responds: port 8787 was already listening, and `curl -sS http://localhost:8787/health` returned `{"ok":true,"service":"grok-r2-backup",...}` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`.
 
 ## Broken Or Regressed Flows
 
@@ -28,6 +30,7 @@ Audit date: 2026-05-20
 ## Blocked Or Unverified Flows
 
 - Root lint has an environment-sensitive failure mode because generated Wrangler temp files under `cloud/.wrangler/tmp` are included by the root ESLint command; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-lint.txt`.
+- R2 object-level backup verification remains pending. Local Worker `/health` confirms the runtime is reachable, but it does not prove Grok media objects exist in R2 or reconcile with the local Vault.
 
 ## Backup Completeness Findings
 
