@@ -11,6 +11,7 @@ Audit date: 2026-05-20
 | Live Grok Imagine integration | Image and image-to-video canaries created; auth not independently verified | Existing user-profile Chrome tab loaded `https://grok.com/imagine` with no login prompt and with Saved/discovery controls, Save/Unsave actions, Make video actions, and Generate More controls. Live canaries created a 960x960 image post and a 10 second 480p image-to-video post; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/grok-canaries.md`. Starting-state evidence remains sanitized in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/chrome-grok-saved-start.png`. |
 | Local Vault | Inventoried; canary download did not enter Vault | Local inventory completed against `/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault`: 1,853 files and 1,767,268,127 bytes in `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/local-vault-summary.json`; file-level CSV and hashes are in `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/local-vault-files.csv`. Task 9 pre/post snapshots stayed at 1,853 files after live Download clicks. |
 | Worker/R2 backup | Local Worker running; direct R2 blocked; extension cloud test not run | Existing listener on port 8787 responds to `curl -sS http://localhost:8787/health` with `{"ok":true,...}` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`. Direct Wrangler R2 listing is blocked by current Cloudflare OAuth/account state, and the extension cloud test was not run because live popup config access was policy-blocked; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/r2-access.md` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/r2-evidence.json`. |
+| Scraper/recovery controls | Start/Stop exercised; backfill/retry access-blocked | On `https://grok.com/imagine/saved`, Gallery Download start/stop was exercised live from the overlay and captured in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/stress-paths.md`. Stop returned the overlay to idle, but an in-flight item open had already navigated to the canary video post. `Run Backfill` and `Retry Unsynced` were not exercised because they are popup-only controls and the live popup remains policy-blocked. |
 | Web app | Routes render with findings; lint and auth session fail | Existing listener on port 3001 responds to HTTP requests, and Playwright screenshots show nonblank Dashboard, Edit, Movie, and Share states. `/collections` redirects to `/`. Browser runtime evidence found repeated `/api/auth/session` 500 errors and a remote Satoshi font 404; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-smoke.md`. `cd web && npm run lint` exits 1 with 9 errors and 24 warnings in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt`. |
 
 ## Confirmed Working Flows
@@ -28,6 +29,7 @@ Audit date: 2026-05-20
 - Live Grok image creation works in the observed session: the audit image prompt created `https://grok.com/imagine/post/8f02896a-552f-4825-8803-670f09024a43`, with a public `imagine-public.x.ai` image at natural size `960x960`. Evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/grok-canaries.md` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-image-canary-result.png`.
 - Live Grok image-to-video creation works from the canary image result: clicking `Make video` created `https://grok.com/imagine/post/595cb61b-d261-45ef-888f-bc4bd1fdb833`. The resulting video element loaded with `readyState=4`, natural size `544x544`, duration `10s`, and the UI showed `480p`; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-video-canary-submitted.png` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-video-canary-result.png`.
 - Native Grok video Download works in the observed browser session, but not as a Vault backup: it created `/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8f02896a-552f-4825-8803-670f09024a43.mp4` with 1,880,994 bytes and SHA-256 `0fdd748b08ddd4d6d2f65a2db18fc347f6650cb56129de5319077927f64bac94`. Evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/download-backup-flow.md` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/canary-local-delta.json`.
+- Overlay Gallery Download start/stop works at the UI level on `/imagine/saved`: Start showed `Starting gallery scan...` with the Stop button visible, and Stop returned the overlay to `Stopped.` with `Download Gallery` visible. Evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/stress-paths.md` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/scraper-*.png`.
 
 ## Broken Or Regressed Flows
 
@@ -37,6 +39,7 @@ Audit date: 2026-05-20
 - Web auth session endpoint fails locally: browser capture and direct endpoint check show `/api/auth/session` returns `500 Internal Server Error` with `There was a problem with the server configuration`; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-smoke.md`.
 - Web font dependency fails locally: browser capture shows `https://cdn.jsdelivr.net/gh/nicholasgillespie/fonts@main/satoshi/Satoshi-Variable.woff2` returns 404 on tested routes.
 - The canary Download-to-Vault path is not working in the observed live flow. Grok's native video Download created a file in the parent media folder, not under `GrokVault`; repeated image-post Download clicks produced no observed image file.
+- Scraper Stop is not instantaneous. During the controlled `/imagine/saved` run, Stop returned the overlay to idle but the page had already navigated into `https://grok.com/imagine/post/595cb61b-d261-45ef-888f-bc4bd1fdb833`, so in-flight item opening is not cancelled before navigation.
 
 ## Blocked Or Unverified Flows
 
@@ -47,6 +50,7 @@ Audit date: 2026-05-20
 - The extension cloud upload pipeline test was not run because Worker URL/API key presence could not be verified without bypassing the blocked live popup access. `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-cloud-test-result.png` is a generated blocker card, not a live cloud test result screenshot.
 - The requested `/imagine/saved` URL was not the observed Chrome URL. The live tab stayed on `https://grok.com/imagine` while exposing Saved/discovery-style controls. The audit treats this as current Grok UI routing drift rather than an extension failure until later flows prove otherwise.
 - The canary media have not been proven backed up into the local Vault or uploaded into R2. Task 9 proves one native video download outside `GrokVault`, zero `GrokVault` delta, and blocked R2 canary verification.
+- `Run Backfill` and `Retry Unsynced` were not run in Task 10 because those controls are only available in the live extension popup, which remains policy-blocked. This is an approved-automation access blocker, not evidence that backfill or retry reached and failed an R2/config step. The page overlay does not expose equivalent cloud recovery controls, and the content page does not expose `chrome.runtime.sendMessage`.
 
 ## Backup Completeness Findings
 
@@ -71,6 +75,7 @@ Audit date: 2026-05-20
 - The `Make video` path starts generation immediately from an image result. In this observed flow there was no prompt entry step, and Grok produced a 10 second video even though the audit's intended prompt described five seconds. Treat duration/prompt control as a Grok product constraint to account for in UX and tests.
 - Grok's native Download file naming differs from the extension's Vault naming model. The downloaded video filename used the image canary ID and a `grok-video-...mp4` prefix, while the extension backup code expects UUID-based paths under `GrokVault/<user>/<date>_Auto/`.
 - The Grok Power Tools overlay can cover a substantial portion of Grok's media grid. It is functional, but for long live exercises the product should consider a compact/minimized state that preserves visibility of Grok's changing controls.
+- The Gallery Download controls are buried low enough in the overlay that the panel had to be unminimized and scrolled before the control was interactable. For a critical backup workflow, start/stop/recovery controls should be easier to reach.
 - The local web app still feels like a collection/editor companion, not a live Grok/R2 operations console. In smoke, it did not expose current R2 status, local Vault reconciliation, Grok Saved drift, or live creation progress.
 - `/collections` is not a distinct route in the current app; it redirects to `/`, which may be surprising given the navigation/product framing.
 
@@ -81,6 +86,7 @@ Audit date: 2026-05-20
 - Add first-class support for post-detail flows where media actions move from card overlays to side actions, and where image-to-video generation starts without a prompt field.
 - Track generated media as canary jobs with explicit lifecycle states: submitted, placeholder visible, public image/video URL ready, downloaded locally, uploaded to R2, reconciled.
 - Add an overlay-visible "download this post to Vault" command that calls the extension's own `DOWNLOAD_MEDIA`/filename path directly instead of relying on Grok's native Download behavior.
+- Move `Run Backfill`, `Retry Unsynced`, unsynced count, and last cloud error into a non-secret overlay or web dashboard status surface so recovery actions are not popup-only.
 - Add a built-in privacy-safe audit/export mode that redacts prompt text and media thumbnails while preserving UI layout evidence.
 - Add a web dashboard surface for live backup health: local Vault count, R2 verification status, unsynced queue count, last cloud test, and latest Grok route/selector drift.
 - Make `/collections` either a real workspace URL or remove/avoid that route in navigation and documentation.
@@ -98,6 +104,7 @@ Audit date: 2026-05-20
 - Restore an object-level R2 verification path. Current blockers are Cloudflare account/auth mismatch for direct Wrangler listing and policy-blocked live popup config access for extension pipeline testing; evidence: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/r2-access.md`.
 - Reconcile the two live canary posts against local Vault and R2. Current canary Grok post IDs are `8f02896a-552f-4825-8803-670f09024a43` for image and `595cb61b-d261-45ef-888f-bc4bd1fdb833` for video.
 - Fix or expose the local backup path so canary downloads land in `/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault` rather than the parent media folder.
+- Make scraper stop/abort cancel in-flight item navigation/download work, not only return the overlay to idle after the click is already underway.
 
 ### P1 Functionality
 
@@ -106,6 +113,7 @@ Audit date: 2026-05-20
 - Replace or self-host the missing Satoshi font dependency so local route loads do not emit a remote 404.
 - Decide whether root lint should ignore generated `cloud/.wrangler/tmp` artifacts or clean them before linting; evidence: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-lint.txt`.
 - Add fallback selectors for Grok's current Video control and route-agnostic Saved/discovery detection; evidence: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md`.
+- Expose cloud recovery controls outside the popup or add a safe diagnostic command surface so backfill/retry can be exercised and audited without `chrome-extension://` popup access.
 
 ### P2 Product And UX
 

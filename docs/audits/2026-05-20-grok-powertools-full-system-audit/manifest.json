@@ -5,8 +5,8 @@
   "repo": {
     "path": "/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools",
     "baselineCommit": "a4a50ccd300217d0c8409c8369b89fb842d7cdf8",
-    "evidenceGeneratedAfterCommit": "735ccf7bdc4e13e27d2605e6285daef4cd787f76",
-    "gitStatusShort": "Detached HEAD at 735ccf7 when Task 9 download/reconciliation evidence was generated; pre-existing untracked .superpowers/ left untouched."
+    "evidenceGeneratedAfterCommit": "7afbc3da467fdbcc9c95f0376fe3b31244faccea",
+    "gitStatusShort": "Detached HEAD at 7afbc3d when Task 10 scraper/recovery evidence was generated; pre-existing untracked .superpowers/ left untouched."
   },
   "targets": {
     "localWebUrl": "http://localhost:3001",
@@ -38,6 +38,7 @@
     "chromeGrok": "imagine_loaded_creation_canaries_created",
     "localVault": "inventoried_no_canary_delta_after_native_download",
     "cloudWorkerR2": "local_worker_running_direct_r2_blocked_extension_test_not_run",
+    "scraperRecovery": "scraper_start_stop_exercised_backfill_retry_blocked",
     "webApp": "routes_render_with_findings"
   },
   "blockers": [
@@ -55,6 +56,11 @@
       "scope": "canary_r2_sync",
       "status": "blocked",
       "details": "Canary R2 sync was not run because live extension popup config access is still policy-blocked, so Worker URL/API key presence could not be verified without bypassing the browser policy."
+    },
+    {
+      "scope": "backfill_and_retry_unsynced",
+      "status": "blocked",
+      "details": "Run Backfill and Retry Unsynced were not run because those controls live only in the policy-blocked extension popup; the page overlay does not expose equivalent cloud recovery controls. This is an approved-automation access blocker, not an observed R2/config failure."
     }
   ],
   "evidenceIndex": [
@@ -267,6 +273,31 @@
       "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-r2-sync-result.png",
       "command": "ImageMagick-generated blocker card",
       "outcome": "Not a live screenshot; records that canary R2 sync was not run because extension config access is still policy-blocked."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/stress-paths.md",
+      "command": "Chrome browser-client live Gallery Download start/stop plus popup-blocker reconciliation",
+      "outcome": "Overlay scraper start/stop was exercised on /imagine/saved; backfill and retry are blocked by popup-only control placement."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/scraper-running.png",
+      "command": "Chrome screenshot crop of live overlay Gallery Download running state",
+      "outcome": "Shows Stop visible and status text at scraper start without exposing live Grok media."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/scraper-stopped.png",
+      "command": "Chrome screenshot crop of live overlay Gallery Download stopped state",
+      "outcome": "Shows Download Gallery restored and status text Stopped after the stop action."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/backfill-result.png",
+      "command": "ImageMagick-generated blocker card",
+      "outcome": "Not a live screenshot; records that Run Backfill was not run because it is only available in the policy-blocked extension popup."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/retry-unsynced-result.png",
+      "command": "ImageMagick-generated blocker card",
+      "outcome": "Not a live screenshot; records that Retry Unsynced was not run because it is only available in the policy-blocked extension popup."
     }
   ]
 }
