@@ -7,8 +7,8 @@ Audit date: 2026-05-20
 | Subsystem | Status | Evidence |
 | --- | --- | --- |
 | Repo and local runtime | Working with findings | Git identity captured at `a4a50ccd300217d0c8409c8369b89fb842d7cdf8`, with detached HEAD and pre-existing untracked `.superpowers/` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/baseline-git.txt`. Runtime versions are Node `v20.18.1`, npm `10.8.2`, and Wrangler `4.67.0` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/baseline-node.txt`. Unit tests, Worker typecheck, and web build pass; root lint, root E2E, and web lint currently fail as recorded below. |
-| Chrome extension | Not run | Pending Chrome/Grok task |
-| Live Grok Imagine integration | Not run | Pending Chrome/Grok task |
+| Chrome extension | Overlay visible; live popup storage blocked by automation policy | The content-script overlay is present on Grok Imagine and main controls are visible in `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-overlay-start.png`. Live extension popup storage could not be opened because `chrome-extension://.../popup.html` is blocked by Chrome automation URL policy; the cloud settings screenshot is a static source preview only. |
+| Live Grok Imagine integration | Imagine/Saved-like surface loaded; auth not independently verified | Existing user-profile Chrome tab loaded `https://grok.com/imagine` with no login prompt and with Saved/discovery controls, Save/Unsave actions, Make video actions, and Generate More controls. Evidence is sanitized in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/chrome-grok-saved-start.png`. |
 | Local Vault | Inventoried | Local inventory completed against `/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault`: 1,853 files and 1,767,268,127 bytes in `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/local-vault-summary.json`; file-level CSV and hashes are in `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/local-vault-files.csv`. |
 | Worker/R2 backup | Local Worker running; R2 object verification pending | Existing listener on port 8787 responds to `curl -sS http://localhost:8787/health` with `{"ok":true,...}` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`. This confirms local Worker health only, not R2 object completeness. |
 | Web app | Running; browser smoke pending; lint fails | Existing listener on port 3001 responds to `curl -sS -I http://localhost:3001` with `HTTP/1.1 200 OK` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`. `cd web && npm run build` exits 0 in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-build.txt`; `cd web && npm run lint` exits 1 with 9 errors and 24 warnings in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt`. |
@@ -21,6 +21,8 @@ Audit date: 2026-05-20
 - Local web server responds: port 3001 was already listening, and `curl -sS -I http://localhost:3001` returned `HTTP/1.1 200 OK` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`.
 - Local Worker health responds: port 8787 was already listening, and `curl -sS http://localhost:8787/health` returned `{"ok":true,"service":"grok-r2-backup",...}` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`.
 - Local Vault inventory script passes: `node docs/audits/2026-05-20-grok-powertools-full-system-audit/scripts/inventory-vault.mjs` exits 0 and writes summary, CSV, duplicate, prompt JSON, and log artifacts under `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-vault-inventory.txt`.
+- Chrome/Grok starting-state inspection connected to the user-profile Chrome session. The Grok Imagine tab loaded with no login prompt, the Grok Power Tools overlay is injected, and main overlay controls are visible; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md`.
+- Current Grok selector confidence: `button[aria-label="Make video"]`, `Generate More`, `img[src*="imagine-public.x.ai"]`, and `img[src*="assets.grok.com/users/"]` are present. `button[aria-label="Download"]`, `button[aria-label="Video"]`, and `video[src]` are absent in the observed state; source: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md`.
 
 ## Broken Or Regressed Flows
 
@@ -32,6 +34,8 @@ Audit date: 2026-05-20
 
 - Root lint has an environment-sensitive failure mode because generated Wrangler temp files under `cloud/.wrangler/tmp` are included by the root ESLint command; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-lint.txt`.
 - R2 object-level backup verification remains pending. Local Worker `/health` confirms the runtime is reachable, but it does not prove Grok media objects exist in R2 or reconcile with the local Vault.
+- Live extension popup storage/config inspection is blocked by Chrome automation URL policy for `chrome-extension://.../popup.html`. The screenshot at `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-popup-cloud-settings.png` is a static source preview and must not be treated as proof of live Worker URL, API key, unsynced count, or last test status.
+- The requested `/imagine/saved` URL was not the observed Chrome URL. The live tab stayed on `https://grok.com/imagine` while exposing Saved/discovery-style controls. The audit treats this as current Grok UI routing drift rather than an extension failure until later flows prove otherwise.
 
 ## Backup Completeness Findings
 
@@ -46,15 +50,21 @@ Audit date: 2026-05-20
 
 ## UI/UX Drift And Product Discovery
 
-Pending live Grok Imagine walkthrough.
+- Grok's current saved/discovery experience is not tied to the requested `/imagine/saved` URL in the observed session. Automation and extension logic should prefer visible controls and robust URL-agnostic page-state detection over a hard dependency on `/saved`.
+- The current Video mode control is a visible text/radio button, not `button[aria-label="Video"]`. Any workflow that relies on the ARIA selector alone will miss the control.
+- No visible `button[aria-label="Download"]` was present on the starting surface. Download/backfill flows should handle Grok states where media cards expose Save/Unsave and Make video before Download.
+- The Grok Power Tools overlay can cover a substantial portion of Grok's media grid. It is functional, but for long live exercises the product should consider a compact/minimized state that preserves visibility of Grok's changing controls.
 
 ## Feature Opportunities
 
-Pending live Grok Imagine walkthrough.
+- Add a non-secret diagnostic panel or status export in the overlay that summarizes cloud mode, Worker URL host, key-prefix, unsynced count, and last test result without requiring live extension popup access.
+- Harden selector strategy around Grok's fast-moving UI: combine ARIA selectors, text/radio fallback selectors, and page-state checks for Saved, Video, Generate More, Save/Unsave, Make video, and Download.
+- Add a built-in privacy-safe audit/export mode that redacts prompt text and media thumbnails while preserving UI layout evidence.
 
 ## Architecture Rethink Triggers
 
-Pending audit evidence.
+- Cloud/R2 verification should not depend solely on the Chrome extension popup. A non-secret runtime status endpoint or overlay-accessible status view would make audits and recovery work more reliable.
+- The extension's current automation surface should model Grok state as capabilities observed on the page, not as a single expected route.
 
 ## Prioritized Next Actions
 
@@ -66,10 +76,12 @@ Pending audit evidence.
 
 - Fix web lint errors, starting with React hook/compiler errors and Next `<Link />` usage; evidence: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt`.
 - Decide whether root lint should ignore generated `cloud/.wrangler/tmp` artifacts or clean them before linting; evidence: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-lint.txt`.
+- Add fallback selectors for Grok's current Video control and route-agnostic Saved/discovery detection; evidence: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md`.
 
 ### P2 Product And UX
 
-No P2 items have been confirmed in this audit run yet.
+- Consider a compact overlay or clearer minimize affordance for long Grok sessions so the extension does not obscure the media grid while batch work is being monitored.
+- Add a non-secret Cloud/R2 status summary to the overlay or exported diagnostics so audits can verify configuration presence without opening the extension popup.
 
 ## Operator Runbook
 
