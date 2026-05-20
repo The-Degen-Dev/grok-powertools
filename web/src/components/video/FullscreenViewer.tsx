@@ -7,49 +7,78 @@ import {
   ChevronRight,
   Play,
   Pause,
-  SkipForward,
   Repeat,
   Copy,
   Download,
   ExternalLink,
   Info,
+  Film,
 } from "lucide-react";
 import type { VideoItem } from "@/lib/types";
+
+type PlaybackMode = "manual" | "natural" | "skim";
+
+const SKIM_INTERVALS = [5, 10, 15];
 
 interface FullscreenViewerProps {
   items: VideoItem[];
   startIndex: number;
   onClose: () => void;
+  sourceName?: string;
+  watchMode?: boolean;
+  onSaveAsMovie?: (queue: VideoItem[]) => Promise<void>;
 }
 
 export default function FullscreenViewer({
   items,
   startIndex,
   onClose,
+  sourceName,
+  watchMode = false,
+  onSaveAsMovie,
 }: FullscreenViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(startIndex);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [slideshowActive, setSlideshowActive] = useState(false);
-  const [slideshowInterval, setSlideshowInterval] = useState(5); // seconds
-  const [loopVideo, setLoopVideo] = useState(true);
+  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>(
+    watchMode ? "natural" : "manual"
+  );
+  const [skimInterval, setSkimInterval] = useState(10);
+  const [loopVideo, setLoopVideo] = useState(!watchMode);
   const [showInfo, setShowInfo] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [videoError, setVideoError] = useState(false);
+  const [isSavingMovie, setIsSavingMovie] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const slideshowTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const skimTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const currentItem = items[currentIndex];
 
   const goTo = useCallback(
     (index: number) => {
-      const wrapped = ((index % items.length) + items.length) % items.length;
-      setCurrentIndex(wrapped);
+      if (items.length === 0) return;
+
+      const nextIndex = watchMode
+        ? Math.max(0, Math.min(index, items.length - 1))
+        : ((index % items.length) + items.length) % items.length;
+
+      setCurrentIndex(nextIndex);
       setIsPlaying(true);
+      setVideoError(false);
     },
-    [items.length]
+    [items.length, watchMode]
   );
 
-  const goNext = useCallback(() => goTo(currentIndex + 1), [currentIndex, goTo]);
+  const goNext = useCallback(() => {
+    if (watchMode && currentIndex >= items.length - 1) {
+      setIsPlaying(false);
+      videoRef.current?.pause();
+      return;
+    }
+
+    goTo(currentIndex + 1);
+  }, [currentIndex, goTo, items.length, watchMode]);
+
   const goPrev = useCallback(() => goTo(currentIndex - 1), [currentIndex, goTo]);
 
   // Auto-play video when index changes
@@ -62,12 +91,14 @@ export default function FullscreenViewer({
     }
   }, [currentIndex, isPlaying]);
 
-  // Slideshow timer
   useEffect(() => {
-    if (!slideshowActive) return;
-    slideshowTimerRef.current = setTimeout(goNext, slideshowInterval * 1000);
-    return () => clearTimeout(slideshowTimerRef.current);
-  }, [slideshowActive, slideshowInterval, currentIndex, goNext]);
+    if (!watchMode || playbackMode !== "skim" || !isPlaying) return;
+
+    clearTimeout(skimTimerRef.current);
+    skimTimerRef.current = setTimeout(goNext, skimInterval * 1000);
+
+    return () => clearTimeout(skimTimerRef.current);
+  }, [watchMode, playbackMode, skimInterval, currentIndex, isPlaying, goNext]);
 
   // Auto-hide controls
   useEffect(() => {
@@ -110,17 +141,21 @@ export default function FullscreenViewer({
           setShowInfo((v) => !v);
           break;
         case "s":
-          setSlideshowActive((v) => !v);
+          if (watchMode) {
+            setPlaybackMode((mode) => (mode === "skim" ? "natural" : "skim"));
+          }
           break;
         case "l":
-          setLoopVideo((v) => !v);
+          if (!watchMode) {
+            setLoopVideo((v) => !v);
+          }
           break;
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [goNext, goPrev, onClose]);
+  }, [goNext, goPrev, onClose, watchMode]);
 
   function togglePlay() {
     const video = videoRef.current;
@@ -149,6 +184,22 @@ export default function FullscreenViewer({
     }
   }
 
+  function handleVideoEnded() {
+    if (watchMode && playbackMode === "natural") {
+      goNext();
+    }
+  }
+
+  async function handleSaveAsMovie() {
+    if (!onSaveAsMovie || items.length === 0) return;
+    setIsSavingMovie(true);
+    try {
+      await onSaveAsMovie(items);
+    } finally {
+      setIsSavingMovie(false);
+    }
+  }
+
   if (!currentItem) return null;
 
   return (
@@ -158,11 +209,13 @@ export default function FullscreenViewer({
         ref={videoRef}
         src={currentItem.videoUrl}
         className="h-full w-full object-contain"
-        loop={loopVideo}
+        loop={!watchMode && loopVideo}
         muted={false}
         playsInline
         autoPlay
         onClick={togglePlay}
+        onEnded={handleVideoEnded}
+        onError={() => setVideoError(true)}
       />
 
       {/* Controls overlay */}
@@ -177,9 +230,19 @@ export default function FullscreenViewer({
             <span className="text-sm font-medium text-white/90">
               {currentIndex + 1} / {items.length}
             </span>
-            {slideshowActive && (
+            {watchMode && (
               <span className="rounded-full bg-orange-500/20 px-2 py-0.5 text-xs font-medium text-orange-400">
-                Slideshow
+                Watch Mode
+              </span>
+            )}
+            {sourceName && (
+              <span className="max-w-[40vw] truncate text-xs text-white/60">
+                {sourceName}
+              </span>
+            )}
+            {videoError && (
+              <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-xs font-medium text-red-300">
+                Video failed to load
               </span>
             )}
           </div>
@@ -198,6 +261,7 @@ export default function FullscreenViewer({
             <button
               type="button"
               onClick={goPrev}
+              aria-label="Previous"
               className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white/80 backdrop-blur-sm transition hover:bg-white/20 hover:text-white"
             >
               <ChevronLeft className="h-6 w-6" />
@@ -205,6 +269,7 @@ export default function FullscreenViewer({
             <button
               type="button"
               onClick={goNext}
+              aria-label="Next"
               className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white/80 backdrop-blur-sm transition hover:bg-white/20 hover:text-white"
             >
               <ChevronRight className="h-6 w-6" />
@@ -239,33 +304,66 @@ export default function FullscreenViewer({
                 label={isPlaying ? "Pause (Space)" : "Play (Space)"}
                 onClick={togglePlay}
               />
-              <ControlButton
-                icon={SkipForward}
-                label={`Slideshow ${slideshowActive ? "ON" : "OFF"} (S)`}
-                onClick={() => setSlideshowActive((v) => !v)}
-                active={slideshowActive}
-              />
-              <ControlButton
-                icon={Repeat}
-                label={`Loop ${loopVideo ? "ON" : "OFF"} (L)`}
-                onClick={() => setLoopVideo((v) => !v)}
-                active={loopVideo}
-              />
-              {slideshowActive && (
-                <select
-                  value={slideshowInterval}
-                  onChange={(e) => setSlideshowInterval(Number(e.target.value))}
-                  className="ml-2 rounded bg-white/10 px-2 py-1.5 text-sm text-white/80 backdrop-blur-sm"
-                >
-                  <option value={3}>3s</option>
-                  <option value={5}>5s</option>
-                  <option value={8}>8s</option>
-                  <option value={10}>10s</option>
-                  <option value={15}>15s</option>
-                </select>
+              {watchMode ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setPlaybackMode("natural")}
+                    className={`rounded-lg px-3 py-2 text-sm transition ${
+                      playbackMode === "natural"
+                        ? "bg-orange-500/20 text-orange-400"
+                        : "bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+                    }`}
+                  >
+                    Natural
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlaybackMode("skim")}
+                    className={`rounded-lg px-3 py-2 text-sm transition ${
+                      playbackMode === "skim"
+                        ? "bg-orange-500/20 text-orange-400"
+                        : "bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+                    }`}
+                  >
+                    Skim
+                  </button>
+                  {playbackMode === "skim" && (
+                    <select
+                      value={skimInterval}
+                      onChange={(e) => setSkimInterval(Number(e.target.value))}
+                      className="ml-2 rounded bg-white/10 px-2 py-1.5 text-sm text-white/80 backdrop-blur-sm"
+                      aria-label="Skim interval"
+                    >
+                      {SKIM_INTERVALS.map((seconds) => (
+                        <option key={seconds} value={seconds}>
+                          {seconds}s
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </>
+              ) : (
+                <ControlButton
+                  icon={Repeat}
+                  label={`Loop ${loopVideo ? "ON" : "OFF"} (L)`}
+                  onClick={() => setLoopVideo((v) => !v)}
+                  active={loopVideo}
+                />
               )}
             </div>
             <div className="flex items-center gap-1">
+              {watchMode && onSaveAsMovie && (
+                <button
+                  type="button"
+                  onClick={handleSaveAsMovie}
+                  disabled={isSavingMovie || items.length === 0}
+                  className="inline-flex items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm text-white/80 transition hover:bg-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Film className="h-4 w-4" />
+                  {isSavingMovie ? "Saving..." : "Save as Movie"}
+                </button>
+              )}
               <ControlButton
                 icon={Info}
                 label="Prompt info (I)"
@@ -287,7 +385,7 @@ export default function FullscreenViewer({
 
           {/* Keyboard hint */}
           <div className="mt-2 text-center text-xs text-white/30">
-            Arrow keys: navigate &middot; Space: play/pause &middot; S: slideshow &middot; I: info &middot; Esc: close
+            Arrow keys: navigate &middot; Space: play/pause &middot; {watchMode ? "S: skim/natural" : "L: loop"} &middot; I: info &middot; Esc: close
           </div>
         </div>
       </div>
