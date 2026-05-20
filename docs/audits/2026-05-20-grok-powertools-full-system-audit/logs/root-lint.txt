@@ -1,0 +1,46 @@
+
+> chrome-extension-powertools@0.2.0 lint
+> eslint . --ext .js
+
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/background.js
+    57:22  warning  'e' is defined but never used                                                          no-unused-vars
+    75:22  warning  'e' is defined but never used                                                          no-unused-vars
+   111:5   warning  'isR2Backup' is assigned a value but never used. Allowed unused vars must match /^_/u  no-unused-vars
+   735:14  warning  'e' is defined but never used                                                          no-unused-vars
+   757:14  warning  'e' is defined but never used                                                          no-unused-vars
+   884:87  warning  'response' is defined but never used. Allowed unused args must match /^_/u             no-unused-vars
+   929:86  warning  'response' is defined but never used. Allowed unused args must match /^_/u             no-unused-vars
+  1230:61  warning  'tab' is defined but never used. Allowed unused args must match /^_/u                  no-unused-vars
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/bridge.js
+  63:21  warning  'e' is defined but never used  no-unused-vars
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/cloud/.wrangler/tmp/bundle-YSgLep/middleware-insertion-facade.js
+  1:5  error  Parsing error: 'import' and 'export' may appear only with 'sourceType: module'
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/cloud/.wrangler/tmp/dev-9iorNQ/index.js
+  57:14  error  Parsing error: Unexpected token {
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/cloudSyncUtils.js
+   51:18  warning  'e' is defined but never used  no-unused-vars
+   63:18  warning  'e' is defined but never used  no-unused-vars
+  192:18  warning  'e' is defined but never used  no-unused-vars
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/content.js
+   319:18  warning  'e' is defined but never used                                                         no-unused-vars
+   415:18  warning  'e' is defined but never used                                                         no-unused-vars
+   735:19  warning  'newHeight' is assigned a value but never used. Allowed unused vars must match /^_/u  no-unused-vars
+   762:44  warning  'e' is defined but never used. Allowed unused args must match /^_/u                   no-unused-vars
+  2513:18  warning  'e' is defined but never used                                                         no-unused-vars
+  2578:87  warning  'e' is defined but never used                                                         no-unused-vars
+  2606:18  warning  'e' is defined but never used                                                         no-unused-vars
+  2965:18  warning  'e' is defined but never used                                                         no-unused-vars
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/popup.js
+  383:18  warning  'e' is defined but never used  no-unused-vars
+  406:18  warning  'e' is defined but never used  no-unused-vars
+
+✖ 24 problems (2 errors, 22 warnings)
+
+## exit status: 1

@@ -57,6 +57,7 @@
       <ul>
         <li><strong>Commit strategy:</strong> The plan and this notes file are safe to commit. Raw screenshots and logs may contain private Grok/account/media data, so the execution plan treats final staging of audit evidence as a review decision rather than an automatic bulk commit.</li>
         <li><strong>R2 verification path:</strong> Direct Wrangler R2 listing is currently blocked by account/auth state, so the plan prioritizes extension-configured Worker/API-key evidence and records a precise blocker if no valid R2 path is available.</li>
+        <li><strong>Baseline interpretation:</strong> Automated checks are treated as audit evidence, not blockers to live testing, unless they reveal a failure that prevents extension, web app, or Worker runtime from launching.</li>
       </ul>
     </section>
 

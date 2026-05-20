@@ -1,0 +1,212 @@
+
+> web@0.1.0 lint
+> eslint
+
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/app/api/video-meta/route.ts
+  61:12  warning  'error' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/app/share/page.tsx
+  21:7   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/app/share/page.tsx:21:7
+  19 |     const data = searchParams.get("d");
+  20 |     if (!data) {
+> 21 |       setError("No share data found in URL.");
+     |       ^^^^^^^^ Avoid calling setState() directly within an effect
+  22 |       return;
+  23 |     }
+  24 |     const decoded = decodeShareData(data);  react-hooks/set-state-in-effect
+  41:11  error  Do not use an `<a>` element to navigate to `/`. Use `<Link />` from `next/link` instead. See: https://nextjs.org/docs/messages/no-html-link-for-pages                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @next/next/no-html-link-for-pages
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/auth/UserMenu.tsx
+   4:29  warning  'User' is defined but never used                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+  80:11  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/collections/CollectionView.tsx
+   25:3   warning  'getCollection' is defined but never used  @typescript-eslint/no-unused-vars
+  247:31  warning  '_id' is defined but never used            @typescript-eslint/no-unused-vars
+  247:46  warning  '_pos' is defined but never used           @typescript-eslint/no-unused-vars
+  247:63  warning  '_ca' is defined but never used            @typescript-eslint/no-unused-vars
+  276:32  warning  '_id' is defined but never used            @typescript-eslint/no-unused-vars
+  276:47  warning  '_pos' is defined but never used           @typescript-eslint/no-unused-vars
+  276:64  warning  '_ca' is defined but never used            @typescript-eslint/no-unused-vars
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/collections/Workspace.tsx
+  228:27  warning  'id' is defined but never used         @typescript-eslint/no-unused-vars
+  228:31  warning  'position' is defined but never used   @typescript-eslint/no-unused-vars
+  228:41  warning  'createdAt' is defined but never used  @typescript-eslint/no-unused-vars
+  260:28  warning  'id' is defined but never used         @typescript-eslint/no-unused-vars
+  260:32  warning  'position' is defined but never used   @typescript-eslint/no-unused-vars
+  260:42  warning  'createdAt' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/editor/ClipEditor.tsx
+  134:7  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/editor/ClipEditor.tsx:134:7
+  132 |     if (exportedBlobUrl) {
+  133 |       URL.revokeObjectURL(exportedBlobUrl);
+> 134 |       setExportedBlobUrl(null);
+      |       ^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  135 |     }
+  136 |     setExportError(null);
+  137 |     // eslint-disable-next-line react-hooks/exhaustive-deps  react-hooks/set-state-in-effect
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/editor/SlideOverEditor.tsx
+  31:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/editor/SlideOverEditor.tsx:31:5
+  29 |   // Reset state when video changes
+  30 |   useEffect(() => {
+> 31 |     setDuration(0);
+     |     ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  32 |     setCurrentTime(0);
+  33 |     setTrimStart(0);
+  34 |     setTrimEnd(0);  react-hooks/set-state-in-effect
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/editor/VideoPreview.tsx
+   63:9   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  107:20  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/movie/ClipSourcePicker.tsx
+    4:10  warning  'X' is defined but never used                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+  158:33  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/movie/ExportMovieButton.tsx
+   4:20  warning  'Loader2' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+  77:9   error    Error: Cannot access variable before it is declared
+
+`stopRecording` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/movie/ExportMovieButton.tsx:77:9
+  75 |       if (elapsed >= totalDuration + 0.5) {
+  76 |         // Auto-stop after duration + buffer
+> 77 |         stopRecording();
+     |         ^^^^^^^^^^^^^ `stopRecording` accessed before it is declared
+  78 |       }
+  79 |     }, 200);
+  80 |
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/movie/ExportMovieButton.tsx:85:3
+  83 |   }, [canvasRef, totalDuration, onStartPlayback, blobUrl]);
+  84 |
+> 85 |   const stopRecording = useCallback(() => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 86 |     if (recorderRef.current && recorderRef.current.state !== "inactive") {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 87 |       recorderRef.current.stop();
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 88 |     }
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 89 |     onStopPlayback();
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 90 |     clearInterval(progressIntervalRef.current);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 91 |   }, [onStopPlayback]);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^ `stopRecording` is declared here
+  92 |
+  93 |   const handleDownload = useCallback(() => {
+  94 |     if (!blobUrl) return;  react-hooks/immutability
+  83:6   warning  React Hook useCallback has a missing dependency: 'stopRecording'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 react-hooks/exhaustive-deps
+  85:37  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. This value was memoized in source but not in compilation output.
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/movie/ExportMovieButton.tsx:85:37
+  83 |   }, [canvasRef, totalDuration, onStartPlayback, blobUrl]);
+  84 |
+> 85 |   const stopRecording = useCallback(() => {
+     |                                     ^^^^^^^
+> 86 |     if (recorderRef.current && recorderRef.current.state !== "inactive") {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 87 |       recorderRef.current.stop();
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 88 |     }
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 89 |     onStopPlayback();
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 90 |     clearInterval(progressIntervalRef.current);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 91 |   }, [onStopPlayback]);
+     | ^^^^ Could not preserve existing memoization
+  92 |
+  93 |   const handleDownload = useCallback(() => {
+  94 |     if (!blobUrl) return;                                                                                                                                                                                                                                                                                                                                          react-hooks/preserve-manual-memoization
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/movie/MovieTimeline.tsx
+  38:5  error  Error: Cannot reassign variable after render completes
+
+Reassigning `accumulated` after render has completed can cause inconsistent behavior on subsequent renders. Consider using state instead.
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/movie/MovieTimeline.tsx:38:5
+  36 |     const dur = clip.type === "title" ? (clip.titleDuration ?? 3) : 5; // approximate for video
+  37 |     const start = accumulated;
+> 38 |     accumulated += dur;
+     |     ^^^^^^^^^^^ Cannot reassign `accumulated` after render completes
+  39 |     return { clip, start, dur };
+  40 |   });
+  41 |   const total = accumulated || 1;  react-hooks/immutability
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/movie/StoryboardPanel.tsx
+  33:3  warning  'index' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/prompts/PromptLibrary.tsx
+  38:15  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/prompts/PromptLibrary.tsx:38:15
+  36 |
+  37 |   useEffect(() => {
+> 38 |     if (open) loadPrompts();
+     |               ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  39 |   }, [open, loadPrompts]);
+  40 |
+  41 |   async function handleAdd() {  react-hooks/set-state-in-effect
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/video/AddToMoviePopover.tsx
+  27:7  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/video/AddToMoviePopover.tsx:27:7
+  25 |     if (open) {
+  26 |       getAllMovies().then(setMovies);
+> 27 |       setShowNewInput(false);
+     |       ^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  28 |       setNewMovieName("");
+  29 |     }
+  30 |   }, [open]);  react-hooks/set-state-in-effect
+
+/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/web/src/components/video/VideoCard.tsx
+  192:11  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+✖ 33 problems (9 errors, 24 warnings)
+
+## exit status: 1
