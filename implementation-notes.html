@@ -141,6 +141,25 @@
               Save-as-movie failures are caught and surfaced in the viewer, and bottom controls wrap on narrow screens.
             </td>
           </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Design decision</td>
+            <td>
+              Per-card fullscreen expansion remains non-watch mode. <code>Watch All</code> and
+              <code>Watch Selected</code> are the only entry points that enable continuous queue playback
+              and <code>Save as Movie</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Test interpretation</td>
+            <td>
+              The web E2E watch-mode assertion uses exact text for the <code>Watch Mode</code> badge because
+              the seeded collection is named <code>Watch Mode Test</code>, which also appears in the sidebar
+              and viewer source label. Viewer controls and prompt assertions are scoped to the fullscreen
+              overlay so card-grid text and the Next.js dev-tools button cannot satisfy watch-mode checks.
+            </td>
+          </tr>
         </tbody>
       </table>
 

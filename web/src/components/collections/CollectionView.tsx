@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Save, FolderPlus, Presentation, Share2, Check, ClipboardCopy, CheckSquare, X } from "lucide-react";
+import { Save, FolderPlus, Share2, Check, ClipboardCopy, CheckSquare, X, Play } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -38,6 +38,12 @@ import FullscreenViewer from "@/components/video/FullscreenViewer";
 import SlideOverEditor from "@/components/editor/SlideOverEditor";
 import AddToMoviePopover from "@/components/video/AddToMoviePopover";
 import { generateShareUrl } from "@/lib/share";
+import {
+  createMovieFromWatchQueue,
+  getPlayableQueue,
+  getSelectedPlayableQueue,
+  type WatchQueueKind,
+} from "@/lib/watch-mode";
 import EmptyState from "@/components/ui/EmptyState";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
@@ -153,7 +159,14 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
   const [unsavedItems, setUnsavedItems] = useState<VideoItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [collectionName, setCollectionName] = useState("Unsaved Collection");
-  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [viewerState, setViewerState] = useState<{
+    items: VideoItem[];
+    startIndex: number;
+    watchMode: boolean;
+    sourceName?: string;
+    sourceCollectionId?: string;
+    movieKind: WatchQueueKind;
+  } | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [editingItem, setEditingItem] = useState<VideoItem | null>(null);
@@ -421,6 +434,53 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
     toast(`Downloading ${selected.length} video${selected.length !== 1 ? "s" : ""}`, "success");
   }, [displayItems, selectedIds, toast]);
 
+  const openWatchQueue = useCallback(
+    (queue: VideoItem[], movieKind: WatchQueueKind) => {
+      if (queue.length === 0) {
+        toast("No playable videos in this queue", "info");
+        return;
+      }
+
+      setViewerState({
+        items: queue,
+        startIndex: 0,
+        watchMode: true,
+        sourceName: collectionName,
+        sourceCollectionId: activeCollection?.id,
+        movieKind,
+      });
+    },
+    [activeCollection?.id, collectionName, toast]
+  );
+
+  const handleWatchAll = useCallback(() => {
+    openWatchQueue(getPlayableQueue(displayItems), "compilation");
+  }, [displayItems, openWatchQueue]);
+
+  const handleWatchSelected = useCallback(() => {
+    openWatchQueue(getSelectedPlayableQueue(displayItems, selectedIds), "selection");
+  }, [displayItems, openWatchQueue, selectedIds]);
+
+  const handleSaveViewerQueueAsMovie = useCallback(
+    async (queue: VideoItem[]) => {
+      if (!viewerState) return;
+
+      const movie = await createMovieFromWatchQueue({
+        queue,
+        collectionName,
+        kind: viewerState.movieKind,
+        sourceCollectionId: viewerState.sourceCollectionId,
+      });
+
+      setViewerState(null);
+      setIsMultiSelectMode(false);
+      setSelectedIds(new Set());
+      toast(`Created "${movie.name}"`, "success");
+      router.push(`/movie?id=${movie.id}`);
+    },
+    [collectionName, router, toast, viewerState]
+  );
+
   if (!initialLoaded) {
     return (
       <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center">
@@ -462,6 +522,14 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="primary"
+              onClick={handleWatchAll}
+              disabled={itemCount === 0}
+            >
+              <Play className="h-4 w-4" />
+              Watch All
+            </Button>
             <Button
               variant="secondary"
               onClick={handleCopyAllLinks}
@@ -522,15 +590,6 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
             importProgress={importProgress}
           />
 
-          {itemCount > 0 && (
-            <div className="mt-3">
-              <Button variant="ghost" onClick={() => setViewerIndex(0)}>
-                <Presentation className="h-4 w-4" />
-                Slideshow
-              </Button>
-            </div>
-          )}
-
           {itemCount > 0 ? (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext items={displayItems.map((i) => i.id)} strategy={rectSortingStrategy}>
@@ -540,7 +599,16 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
                       key={item.id}
                       item={item}
                       onDelete={handleDeleteItem}
-                      onExpand={() => setViewerIndex(index)}
+                      onExpand={() =>
+                        setViewerState({
+                          items: displayItems,
+                          startIndex: index,
+                          watchMode: false,
+                          sourceName: collectionName,
+                          sourceCollectionId: activeCollection?.id,
+                          movieKind: "compilation",
+                        })
+                      }
                       onEdit={setEditingItem}
                       onAddToMovie={setAddToMovieItem}
                       isMultiSelectMode={isMultiSelectMode}
@@ -566,11 +634,14 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
         </div>
       </main>
 
-      {viewerIndex !== null && (
+      {viewerState && (
         <FullscreenViewer
-          items={displayItems}
-          startIndex={viewerIndex}
-          onClose={() => setViewerIndex(null)}
+          items={viewerState.items}
+          startIndex={viewerState.startIndex}
+          sourceName={viewerState.sourceName}
+          watchMode={viewerState.watchMode}
+          onSaveAsMovie={viewerState.watchMode ? handleSaveViewerQueueAsMovie : undefined}
+          onClose={() => setViewerState(null)}
         />
       )}
 
@@ -593,6 +664,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
       {isMultiSelectMode && selectedIds.size > 0 && (
         <BulkActionBar
           selectedCount={selectedIds.size}
+          onWatchSelected={handleWatchSelected}
           onDelete={handleBulkDelete}
           onDownload={handleBulkDownload}
           onCopyLinks={handleBulkCopyLinks}

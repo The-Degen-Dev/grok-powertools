@@ -1,10 +1,11 @@
 "use client";
 
-import { Trash2, Download, ClipboardCopy, XCircle } from "lucide-react";
+import { Trash2, Download, ClipboardCopy, XCircle, Play } from "lucide-react";
 import Button from "@/components/ui/Button";
 
 interface BulkActionBarProps {
   selectedCount: number;
+  onWatchSelected: () => void;
   onDelete: () => void;
   onDownload: () => void;
   onCopyLinks: () => void;
@@ -13,6 +14,7 @@ interface BulkActionBarProps {
 
 export default function BulkActionBar({
   selectedCount,
+  onWatchSelected,
   onDelete,
   onDownload,
   onCopyLinks,
@@ -25,6 +27,10 @@ export default function BulkActionBar({
           {selectedCount} selected
         </span>
         <div className="h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700)" />
+        <Button variant="ghost" size="sm" onClick={onWatchSelected}>
+          <Play className="h-3.5 w-3.5" />
+          Watch Selected
+        </Button>
         <Button variant="ghost" size="sm" onClick={onCopyLinks}>
           <ClipboardCopy className="h-3.5 w-3.5" />
           Copy Links
