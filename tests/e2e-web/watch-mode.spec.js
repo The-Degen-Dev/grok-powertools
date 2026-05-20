@@ -203,4 +203,25 @@ test.describe('Collection Watch Mode', () => {
 
         await expect(page.getByRole('button', { name: /Watch Selected/i })).toBeDisabled();
     });
+
+    test('Watch Selected is clickable from the mobile bulk action bar', async ({ page }) => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await seedCollection(page);
+
+        await page.getByRole('button', { name: /^Select$/i }).click();
+        await page.getByRole('button', { name: /Third playable prompt/ }).first().click();
+        await page.getByRole('button', { name: /Missing video URL prompt/ }).first().click();
+        await page.getByRole('button', { name: /First playable prompt/ }).first().click();
+
+        const hasHorizontalOverflow = await page.evaluate(
+            () => document.documentElement.scrollWidth > window.innerWidth + 1
+        );
+        expect(hasHorizontalOverflow).toBe(false);
+
+        await page.getByRole('button', { name: /Watch Selected/i }).click();
+
+        const viewer = page.getByTestId('fullscreen-viewer');
+        await expect(viewer.getByText('Watch Mode', { exact: true })).toBeVisible();
+        await expect(viewer.getByText('1 / 2')).toBeVisible();
+    });
 });

@@ -36,22 +36,22 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-(--color-surface-200) bg-(--color-surface-0)/80 backdrop-blur-lg dark:border-(--color-surface-800) dark:bg-(--color-surface-950)/80">
-      <div className="mx-auto flex h-14 max-w-screen-2xl items-center justify-between px-4">
+      <div className="mx-auto flex h-14 max-w-screen-2xl items-center justify-between gap-2 px-3 sm:px-4">
         {/* Left: Logo + Breadcrumb */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <Link
             href="/"
             className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold tracking-tight text-(--color-surface-900) dark:text-(--color-surface-100)"
           >
-            <Sparkles className="h-5 w-5 text-(--color-accent)" />
-            GrokPowerTools
+            <Sparkles className="h-5 w-5 shrink-0 text-(--color-accent)" />
+            <span className="hidden sm:inline">GrokPowerTools</span>
           </Link>
           {breadcrumb && (
             <>
-              <span className="text-(--color-surface-300) dark:text-(--color-surface-600)">
+              <span className="hidden text-(--color-surface-300) dark:text-(--color-surface-600) sm:inline">
                 /
               </span>
-              <span className="text-sm text-(--color-surface-500)">
+              <span className="hidden truncate text-sm text-(--color-surface-500) sm:inline">
                 {breadcrumb.label}
               </span>
             </>
@@ -59,33 +59,35 @@ export default function Header() {
         </div>
 
         {/* Right: Nav */}
-        <nav className="flex items-center gap-1">
+        <nav className="flex shrink-0 items-center gap-1">
           {NAV_ITEMS.map(({ href, icon: Icon, label }) => {
             const isActive = pathname.startsWith(href);
             return (
               <Link
                 key={href}
                 href={href}
-                className={`flex items-center gap-1.5 rounded-(--radius-btn) px-3 py-1.5 text-sm transition-colors duration-(--duration-fast) ${
+                title={label}
+                className={`flex items-center gap-1.5 rounded-(--radius-btn) px-2 py-1.5 text-sm transition-colors duration-(--duration-fast) sm:px-3 ${
                   isActive
                     ? "bg-(--color-accent-light) font-medium text-(--color-accent) dark:bg-(--color-accent)/10"
                     : "text-(--color-surface-600) hover:bg-(--color-surface-100) dark:text-(--color-surface-400) dark:hover:bg-(--color-surface-800)"
                 }`}
               >
-                <Icon className="h-4 w-4" />
-                {label}
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="hidden md:inline">{label}</span>
               </Link>
             );
           })}
           <button
             type="button"
             onClick={() => setPromptLibOpen(true)}
-            className="flex items-center gap-1.5 rounded-(--radius-btn) px-3 py-1.5 text-sm text-(--color-surface-600) transition-colors duration-(--duration-fast) hover:bg-(--color-surface-100) dark:text-(--color-surface-400) dark:hover:bg-(--color-surface-800)"
+            className="flex items-center gap-1.5 rounded-(--radius-btn) px-2 py-1.5 text-sm text-(--color-surface-600) transition-colors duration-(--duration-fast) hover:bg-(--color-surface-100) dark:text-(--color-surface-400) dark:hover:bg-(--color-surface-800) sm:px-3"
+            title="Prompts"
           >
-            <BookOpen className="h-4 w-4" />
-            Prompts
+            <BookOpen className="h-4 w-4 shrink-0" />
+            <span className="hidden md:inline">Prompts</span>
           </button>
-          <div className="mx-2 h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700)" />
+          <div className="mx-1 hidden h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700) sm:block" />
           <ThemeToggle />
           <button
             type="button"
@@ -95,7 +97,7 @@ export default function Header() {
           >
             <Settings className="h-4 w-4" />
           </button>
-          <div className="mx-2 h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700)" />
+          <div className="mx-1 hidden h-5 w-px bg-(--color-surface-200) dark:bg-(--color-surface-700) sm:block" />
           <UserMenu
             user={user}
             onSignIn={signIn}

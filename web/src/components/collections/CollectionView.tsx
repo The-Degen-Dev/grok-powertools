@@ -509,7 +509,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
         onDelete={handleDeleteCollection}
       />
 
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Collection header */}
         <div className="flex flex-col gap-3 border-b border-(--color-surface-200) px-4 py-3 dark:border-(--color-surface-800) sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -597,7 +597,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
         </div>
 
         {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="min-w-0 flex-1 overflow-y-auto p-6">
           <LinkInput
             onAddLinks={handleAddLinks}
             onImportGih={handleGihImport}

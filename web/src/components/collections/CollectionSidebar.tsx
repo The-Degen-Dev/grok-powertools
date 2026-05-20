@@ -26,9 +26,9 @@ export default function CollectionSidebar({
     c.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  if (collapsed) {
-    return (
-      <aside className="flex h-full w-12 flex-shrink-0 flex-col items-center border-r border-(--color-surface-200) bg-(--color-surface-50) py-3 dark:border-(--color-surface-800) dark:bg-(--color-surface-950)">
+  const compactSidebar = (className: string, showExpandButton: boolean) => (
+    <aside className={className}>
+      {showExpandButton ? (
         <button
           type="button"
           onClick={() => setCollapsed(false)}
@@ -37,39 +37,58 @@ export default function CollectionSidebar({
         >
           <PanelLeftOpen className="h-4 w-4" />
         </button>
-        <div className="mt-4 flex flex-col gap-1">
-          {collections.slice(0, 8).map((col) => (
-            <button
-              key={col.id}
-              type="button"
-              onClick={() => onSelect(col.id)}
-              className={`flex h-8 w-8 items-center justify-center rounded-(--radius-btn) text-xs font-medium transition-colors ${
-                activeId === col.id
-                  ? "bg-(--color-accent)/10 text-(--color-accent)"
-                  : "text-(--color-surface-400) hover:bg-(--color-surface-100) dark:hover:bg-(--color-surface-800)"
-              }`}
-              title={col.name}
-            >
-              {col.name[0]?.toUpperCase()}
-            </button>
-          ))}
+      ) : (
+        <div
+          className="rounded-(--radius-btn) p-2 text-(--color-surface-400)"
+          title="Collections"
+        >
+          <FolderOpen className="h-4 w-4" />
         </div>
-        <div className="mt-auto">
+      )}
+      <div className="mt-4 flex flex-col gap-1">
+        {collections.slice(0, 8).map((col) => (
           <button
+            key={col.id}
             type="button"
-            onClick={onNew}
-            className="rounded-(--radius-btn) p-2 text-(--color-surface-400) hover:text-(--color-accent) hover:bg-(--color-surface-100) dark:hover:bg-(--color-surface-800)"
-            title="New collection"
+            onClick={() => onSelect(col.id)}
+            className={`flex h-8 w-8 items-center justify-center rounded-(--radius-btn) text-xs font-medium transition-colors ${
+              activeId === col.id
+                ? "bg-(--color-accent)/10 text-(--color-accent)"
+                : "text-(--color-surface-400) hover:bg-(--color-surface-100) dark:hover:bg-(--color-surface-800)"
+            }`}
+            title={col.name}
           >
-            <Plus className="h-4 w-4" />
+            {col.name[0]?.toUpperCase()}
           </button>
-        </div>
-      </aside>
+        ))}
+      </div>
+      <div className="mt-auto">
+        <button
+          type="button"
+          onClick={onNew}
+          className="rounded-(--radius-btn) p-2 text-(--color-surface-400) hover:text-(--color-accent) hover:bg-(--color-surface-100) dark:hover:bg-(--color-surface-800)"
+          title="New collection"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+    </aside>
+  );
+
+  if (collapsed) {
+    return compactSidebar(
+      "flex h-full w-12 flex-shrink-0 flex-col items-center border-r border-(--color-surface-200) bg-(--color-surface-50) py-3 dark:border-(--color-surface-800) dark:bg-(--color-surface-950)",
+      true
     );
   }
 
   return (
-    <aside className="flex h-full w-64 flex-shrink-0 flex-col border-r border-(--color-surface-200) bg-(--color-surface-50) dark:border-(--color-surface-800) dark:bg-(--color-surface-950)">
+    <>
+      {compactSidebar(
+        "flex h-full w-12 flex-shrink-0 flex-col items-center border-r border-(--color-surface-200) bg-(--color-surface-50) py-3 dark:border-(--color-surface-800) dark:bg-(--color-surface-950) sm:hidden",
+        false
+      )}
+      <aside className="hidden h-full w-64 flex-shrink-0 flex-col border-r border-(--color-surface-200) bg-(--color-surface-50) dark:border-(--color-surface-800) dark:bg-(--color-surface-950) sm:flex">
       {/* Header with collapse toggle */}
       <div className="flex items-center justify-between border-b border-(--color-surface-200) px-3 py-2 dark:border-(--color-surface-800)">
         <span className="text-xs font-semibold uppercase tracking-wider text-(--color-surface-400)">
@@ -163,6 +182,7 @@ export default function CollectionSidebar({
           New Collection
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

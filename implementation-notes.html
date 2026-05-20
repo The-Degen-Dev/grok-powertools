@@ -198,6 +198,25 @@
               production and local app configuration untouched.
             </td>
           </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Design decision</td>
+            <td>
+              Browser smoke testing found the expanded collection sidebar could intercept the mobile
+              <code>Watch Selected</code> action bar. The sidebar now uses the compact rail below the
+              <code>sm</code> breakpoint, while desktop and manually collapsed behavior keep the existing
+              sidebar controls.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Design decision</td>
+            <td>
+              The same mobile smoke pass found the global header nav overflowed at phone width. Header
+              navigation now becomes icon-first on small screens, with titles preserved for tooltips and
+              full labels retained on wider viewports.
+            </td>
+          </tr>
         </tbody>
       </table>
 
