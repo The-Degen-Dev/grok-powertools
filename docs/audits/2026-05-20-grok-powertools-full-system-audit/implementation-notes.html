@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Grok Power Tools Audit Implementation Notes</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+        margin: 32px;
+        color: #171717;
+      }
+      h1, h2 {
+        margin-bottom: 8px;
+      }
+      section {
+        border-top: 1px solid #ddd;
+        padding-top: 16px;
+        margin-top: 24px;
+      }
+      li {
+        margin: 8px 0;
+      }
+      code {
+        background: #f4f4f5;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      .meta {
+        color: #555;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Grok Power Tools Full System Audit - Implementation Notes</h1>
+    <p class="meta">Created during planning on 2026-05-20. This file is maintained as the audit work proceeds.</p>
+
+    <section>
+      <h2>Design Decisions</h2>
+      <ul>
+        <li><strong>Integrated plan:</strong> The audit plan remains one cross-system plan instead of separate subsystem plans because the central risk is reconciliation across Grok, Chrome extension state, local Vault, R2, and the web app.</li>
+        <li><strong>Notes location:</strong> This file lives inside <code>docs/audits/2026-05-20-grok-powertools-full-system-audit/</code> so implementation decisions stay beside the evidence and final report.</li>
+        <li><strong>Audit artifacts over product edits:</strong> Helper scripts and evidence files should live in the audit folder unless a product-code fix is explicitly approved or required to unblock the audit.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Deviations</h2>
+      <ul>
+        <li><strong>No approved deviations yet:</strong> The plan currently follows the approved spec. Any execution-time departure should be added here with the reason and evidence path.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Tradeoffs</h2>
+      <ul>
+        <li><strong>Commit strategy:</strong> The plan and this notes file are safe to commit. Raw screenshots and logs may contain private Grok/account/media data, so the execution plan treats final staging of audit evidence as a review decision rather than an automatic bulk commit.</li>
+        <li><strong>R2 verification path:</strong> Direct Wrangler R2 listing is currently blocked by account/auth state, so the plan prioritizes extension-configured Worker/API-key evidence and records a precise blocker if no valid R2 path is available.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Open Questions</h2>
+      <ul>
+        <li><strong>R2 credentials:</strong> If the extension popup does not already contain a valid Worker URL and API key, the audit will need either corrected Cloudflare access or user-provided Worker credentials to verify object-level R2 backup state.</li>
+        <li><strong>Evidence privacy:</strong> After the audit, confirm which screenshots/logs should be committed versus kept local only.</li>
+      </ul>
+    </section>
+  </body>
+</html>
