@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Collection Watch Mode Implementation Notes</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f8fafc;
+        color: #111827;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+
+      h2 {
+        margin-top: 28px;
+        font-size: 18px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+      }
+
+      th,
+      td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #e5e7eb;
+        text-align: left;
+        vertical-align: top;
+        font-size: 14px;
+      }
+
+      th {
+        background: #f3f4f6;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      code {
+        background: #eef2ff;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Collection Watch Mode Implementation Notes</h1>
+      <p>
+        This file records implementation decisions, deviations, tradeoffs, and open questions for
+        <code>docs/superpowers/specs/2026-05-19-watch-mode-design.md</code>.
+      </p>
+
+      <h2>Running Notes</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Design decision</td>
+            <td>
+              The implementation will keep Watch Mode inside the existing <code>FullscreenViewer</code>
+              and put queue/movie helpers in <code>web/src/lib/watch-mode.ts</code>, matching the approved spec.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Open Questions</h2>
+      <p>No open questions at plan start.</p>
+    </main>
+  </body>
+</html>
