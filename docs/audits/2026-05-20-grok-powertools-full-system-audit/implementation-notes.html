@@ -44,13 +44,16 @@
         <li><strong>Audit scaffold:</strong> The audit uses a timestamped folder with separate inventory, logs, screenshots, reconciliations, and scripts directories so raw evidence is easy to inspect without mixing it into product code.</li>
         <li><strong>Local service reuse:</strong> Task 3 reused existing localhost listeners on ports <code>3001</code> and <code>8787</code> instead of starting duplicate web or Worker processes; the listener and health evidence is in <code>logs/local-services.txt</code>.</li>
         <li><strong>Prompt JSON scope:</strong> Task 4's prompt-root JSON inventory excludes files inside <code>node_modules</code> so dependency metadata does not drown out user/export prompt evidence. This matches the approved Task 4 script and is recorded in <code>inventory/prompt-json-summary.json</code>.</li>
+        <li><strong>Privacy-safe Grok evidence:</strong> Task 5 treats Grok page titles, prompts, tab titles, media thumbnails, and generated content as sensitive. The saved-start screenshot is redacted before being saved, and the log records selector/status facts instead of prompt text.</li>
+        <li><strong>Popup source preview:</strong> Because live <code>chrome-extension://</code> popup navigation is blocked by Chrome automation policy, Task 5 uses a static <code>popup.html</code> screenshot only to document the Cloud Backup UI shape. It is not interpreted as live storage/config evidence.</li>
       </ul>
     </section>
 
     <section>
       <h2>Deviations</h2>
       <ul>
-        <li><strong>No approved deviations yet:</strong> The plan currently follows the approved spec. Any execution-time departure should be added here with the reason and evidence path.</li>
+        <li><strong>Live extension popup not inspected:</strong> The original Task 5 plan called for live popup cloud settings. Browser automation blocked <code>chrome-extension://.../popup.html</code>, so the audit recorded the blocker and used source preview for UI shape only. This avoids reading Chrome profile internals or routing around the browser security policy.</li>
+        <li><strong>Observed Grok URL differs from requested URL:</strong> The user requested the existing Chrome tab at <code>grok.com/imagine/saved</code>, but Chrome reported and loaded <code>https://grok.com/imagine</code>. The page still exposed Saved/discovery controls, so Task 5 records route drift instead of forcing navigation.</li>
       </ul>
     </section>
 
@@ -61,6 +64,8 @@
         <li><strong>R2 verification path:</strong> Direct Wrangler R2 listing is currently blocked by account/auth state, so the plan prioritizes extension-configured Worker/API-key evidence and records a precise blocker if no valid R2 path is available.</li>
         <li><strong>Baseline interpretation:</strong> Automated checks are treated as audit evidence, not blockers to live testing, unless they reveal a failure that prevents extension, web app, or Worker runtime from launching.</li>
         <li><strong>Worker health boundary:</strong> The local Worker <code>/health</code> endpoint passing is enough to continue browser and integration audit work, but it is not treated as proof that R2 backup objects exist or are complete.</li>
+        <li><strong>Screenshot completeness versus privacy:</strong> Task 5 preserves UI structure while obscuring media/prompt content. This sacrifices visual proof of the exact generated items in exchange for keeping audit artifacts commit-safe.</li>
+        <li><strong>Selector evidence over raw DOM dumps:</strong> The audit records boolean selector confidence instead of saving broad DOM text because the live Grok page includes prompt and generated-content text in titles, buttons, and accessible nodes.</li>
       </ul>
     </section>
 
@@ -69,6 +74,8 @@
       <ul>
         <li><strong>R2 credentials:</strong> If the extension popup does not already contain a valid Worker URL and API key, the audit will need either corrected Cloudflare access or user-provided Worker credentials to verify object-level R2 backup state.</li>
         <li><strong>Evidence privacy:</strong> After the audit, confirm which screenshots/logs should be committed versus kept local only.</li>
+        <li><strong>Cloud status access:</strong> Confirm whether a non-secret overlay status/export should be added so future audits can verify cloud mode, Worker host, queue count, and last test result without opening the extension popup.</li>
+        <li><strong>Grok saved route:</strong> Confirm whether the product should target <code>/imagine</code> with observed Saved controls, <code>/imagine/saved</code>, or both as valid current Grok Saved entrypoints.</li>
       </ul>
     </section>
   </body>
