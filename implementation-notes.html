@@ -125,6 +125,22 @@
               can advance on <code>ended</code>. The non-watch fullscreen viewer keeps its existing wraparound and loop behavior.
             </td>
           </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Deviation</td>
+            <td>
+              Although the plan replaced the old slideshow timer, the implementation preserves it for non-watch
+              per-card fullscreen so existing <code>S</code> shortcut, slideshow interval, and loop controls stay intact.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Design decision</td>
+            <td>
+              Watch Mode boundary navigation is both visually disabled at queue ends and guarded with a no-op clamp.
+              Save-as-movie failures are caught and surfaced in the viewer, and bottom controls wrap on narrow screens.
+            </td>
+          </tr>
         </tbody>
       </table>
 
