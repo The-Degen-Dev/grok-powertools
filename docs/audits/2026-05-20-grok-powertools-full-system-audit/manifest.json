@@ -5,8 +5,8 @@
   "repo": {
     "path": "/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools",
     "baselineCommit": "a4a50ccd300217d0c8409c8369b89fb842d7cdf8",
-    "evidenceGeneratedAfterCommit": "0f7321d1b8d3900afe179e56ef3f4d5627bbe7aa",
-    "gitStatusShort": "Detached HEAD at 0f7321d when Task 6 evidence was generated; pre-existing untracked .superpowers/ left untouched."
+    "evidenceGeneratedAfterCommit": "3cc9d585587a884ee6e02e00e240de8033ba36ac",
+    "gitStatusShort": "Detached HEAD at 3cc9d58 when Task 7 web-smoke evidence was generated; pre-existing untracked .superpowers/ left untouched."
   },
   "targets": {
     "localWebUrl": "http://localhost:3001",
@@ -21,7 +21,7 @@
     "chromeGrok": "imagine_loaded_no_login_prompt_saved_surface_observed",
     "localVault": "inventoried",
     "cloudWorkerR2": "local_worker_running_direct_r2_blocked_extension_test_not_run",
-    "webApp": "running_pending_browser_smoke"
+    "webApp": "routes_render_with_findings"
   },
   "blockers": [
     {
@@ -145,6 +145,41 @@
       "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-cloud-test-result.png",
       "command": "ImageMagick-generated blocker card",
       "outcome": "Not a live screenshot; records that extension cloud test was not run because live popup config access was policy-blocked."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-smoke.md",
+      "command": "/usr/bin/curl -sS -I for /, /collections, /edit, /movie, /share plus Playwright Chromium route screenshots and runtime notes",
+      "outcome": "Routes render nonblank UI. /collections returns a 307 redirect to /. Browser capture found repeated /api/auth/session 500 errors and a jsdelivr Satoshi font 404."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-dashboard.png",
+      "command": "Playwright Chromium screenshot after dismissing first-run onboarding",
+      "outcome": "Dashboard empty state renders with New Collection and Load Examples actions."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-dashboard-onboarding.png",
+      "command": "Playwright Chromium screenshot before dismissing first-run onboarding",
+      "outcome": "First-run onboarding modal is visible and blocks the dashboard until skipped or completed."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-collections.png",
+      "command": "Playwright Chromium screenshot for /collections",
+      "outcome": "/collections redirects to / and shows the dashboard empty state."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-edit.png",
+      "command": "Playwright Chromium screenshot for /edit",
+      "outcome": "Clip Editor empty/no-video shell renders."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-movie.png",
+      "command": "Playwright Chromium screenshot for /movie",
+      "outcome": "Movie Maker empty state renders."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-share.png",
+      "command": "Playwright Chromium screenshot for /share",
+      "outcome": "Share route renders Invalid Share Link for a URL without share data."
     }
   ]
 }

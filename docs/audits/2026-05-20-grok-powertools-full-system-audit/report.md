@@ -11,7 +11,7 @@ Audit date: 2026-05-20
 | Live Grok Imagine integration | Imagine/Saved-like surface loaded; auth not independently verified | Existing user-profile Chrome tab loaded `https://grok.com/imagine` with no login prompt and with Saved/discovery controls, Save/Unsave actions, Make video actions, and Generate More controls. Evidence is sanitized in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/chrome-grok-saved-start.png`. |
 | Local Vault | Inventoried | Local inventory completed against `/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault`: 1,853 files and 1,767,268,127 bytes in `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/local-vault-summary.json`; file-level CSV and hashes are in `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/local-vault-files.csv`. |
 | Worker/R2 backup | Local Worker running; direct R2 blocked; extension cloud test not run | Existing listener on port 8787 responds to `curl -sS http://localhost:8787/health` with `{"ok":true,...}` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`. Direct Wrangler R2 listing is blocked by current Cloudflare OAuth/account state, and the extension cloud test was not run because live popup config access was policy-blocked; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/r2-access.md` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/r2-evidence.json`. |
-| Web app | Running; browser smoke pending; lint fails | Existing listener on port 3001 responds to `curl -sS -I http://localhost:3001` with `HTTP/1.1 200 OK` in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt`. `cd web && npm run build` exits 0 in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-build.txt`; `cd web && npm run lint` exits 1 with 9 errors and 24 warnings in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt`. |
+| Web app | Routes render with findings; lint and auth session fail | Existing listener on port 3001 responds to HTTP requests, and Playwright screenshots show nonblank Dashboard, Edit, Movie, and Share states. `/collections` redirects to `/`. Browser runtime evidence found repeated `/api/auth/session` 500 errors and a remote Satoshi font 404; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-smoke.md`. `cd web && npm run lint` exits 1 with 9 errors and 24 warnings in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt`. |
 
 ## Confirmed Working Flows
 
@@ -24,12 +24,15 @@ Audit date: 2026-05-20
 - Local Vault inventory script passes: `node docs/audits/2026-05-20-grok-powertools-full-system-audit/scripts/inventory-vault.mjs` exits 0 and writes summary, CSV, duplicate, prompt JSON, and log artifacts under `docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/` and `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-vault-inventory.txt`.
 - Chrome/Grok starting-state inspection connected to the user-profile Chrome session. The Grok Imagine tab loaded with no login prompt, the Grok Power Tools overlay is injected, and main overlay controls are visible; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md`.
 - Current Grok selector confidence: `button[aria-label="Make video"]`, `Generate More`, `img[src*="imagine-public.x.ai"]`, and `img[src*="assets.grok.com/users/"]` are present. `button[aria-label="Download"]`, `button[aria-label="Video"]`, and `video[src]` are absent in the observed state; source: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md`.
+- Web routes render nonblank UI in Playwright: Dashboard, Edit, Movie, and Share are direct 200 states; `/collections` returns 307 and redirects to `/`. Screenshots are in `docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-*.png`.
 
 ## Broken Or Regressed Flows
 
 - Root E2E is broken in the current baseline: `npm run test:e2e` exits 1 with 2 failed Playwright tests because `chrome.runtime.getURL` is not a function in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-test-e2e.txt`.
 - Web lint is broken in the current baseline: `cd web && npm run lint` exits 1 with 33 total problems, including 9 errors and 24 warnings, in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt`. Representative error files include `web/src/app/share/page.tsx`, `web/src/components/editor/ClipEditor.tsx`, `web/src/components/editor/SlideOverEditor.tsx`, `web/src/components/movie/ExportMovieButton.tsx`, `web/src/components/movie/MovieTimeline.tsx`, `web/src/components/prompts/PromptLibrary.tsx`, and `web/src/components/video/AddToMoviePopover.tsx`.
 - Root lint does not match the expected planning baseline in this environment: `npm run lint` exits 1 with 2 parse errors in generated `cloud/.wrangler/tmp` files and 22 warnings in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-lint.txt`. Representative warning files include `background.js`, `bridge.js`, `cloudSyncUtils.js`, `content.js`, and `popup.js`.
+- Web auth session endpoint fails locally: browser capture and direct endpoint check show `/api/auth/session` returns `500 Internal Server Error` with `There was a problem with the server configuration`; evidence is in `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-smoke.md`.
+- Web font dependency fails locally: browser capture shows `https://cdn.jsdelivr.net/gh/nicholasgillespie/fonts@main/satoshi/Satoshi-Variable.woff2` returns 404 on tested routes.
 
 ## Blocked Or Unverified Flows
 
@@ -58,12 +61,16 @@ Audit date: 2026-05-20
 - The current Video mode control is a visible text/radio button, not `button[aria-label="Video"]`. Any workflow that relies on the ARIA selector alone will miss the control.
 - No visible `button[aria-label="Download"]` was present on the starting surface. Download/backfill flows should handle Grok states where media cards expose Save/Unsave and Make video before Download.
 - The Grok Power Tools overlay can cover a substantial portion of Grok's media grid. It is functional, but for long live exercises the product should consider a compact/minimized state that preserves visibility of Grok's changing controls.
+- The local web app still feels like a collection/editor companion, not a live Grok/R2 operations console. In smoke, it did not expose current R2 status, local Vault reconciliation, Grok Saved drift, or live creation progress.
+- `/collections` is not a distinct route in the current app; it redirects to `/`, which may be surprising given the navigation/product framing.
 
 ## Feature Opportunities
 
 - Add a non-secret diagnostic panel or status export in the overlay that summarizes cloud mode, Worker URL host, key-prefix, unsynced count, and last test result without requiring live extension popup access.
 - Harden selector strategy around Grok's fast-moving UI: combine ARIA selectors, text/radio fallback selectors, and page-state checks for Saved, Video, Generate More, Save/Unsave, Make video, and Download.
 - Add a built-in privacy-safe audit/export mode that redacts prompt text and media thumbnails while preserving UI layout evidence.
+- Add a web dashboard surface for live backup health: local Vault count, R2 verification status, unsynced queue count, last cloud test, and latest Grok route/selector drift.
+- Make `/collections` either a real workspace URL or remove/avoid that route in navigation and documentation.
 
 ## Architecture Rethink Triggers
 
@@ -80,6 +87,8 @@ Audit date: 2026-05-20
 ### P1 Functionality
 
 - Fix web lint errors, starting with React hook/compiler errors and Next `<Link />` usage; evidence: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt`.
+- Fix local Auth.js configuration so `/api/auth/session` does not return 500 in an unauthenticated local smoke test.
+- Replace or self-host the missing Satoshi font dependency so local route loads do not emit a remote 404.
 - Decide whether root lint should ignore generated `cloud/.wrangler/tmp` artifacts or clean them before linting; evidence: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-lint.txt`.
 - Add fallback selectors for Grok's current Video control and route-agnostic Saved/discovery detection; evidence: `docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md`.
 
