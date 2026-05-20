@@ -53,6 +53,8 @@
         <li><strong>Image-to-video path:</strong> Task 8 uses the visible <code>Make video</code> action from the confirmed canary image result for video creation, because that is the current direct post-detail flow Grok exposes for a safe generated image.</li>
         <li><strong>Screenshot write path:</strong> Chrome screenshot calls returned bytes even when a path option was provided, so Task 8 writes returned screenshot bytes to disk explicitly for the final image/video result crops.</li>
         <li><strong>Screenshot format normalization:</strong> Task 8 normalizes canary screenshot files to actual PNG bitstreams after capture so file content matches the planned <code>.png</code> artifact names.</li>
+        <li><strong>Task 9 download classification:</strong> The native Grok Download button is recorded separately from a successful Vault backup because it produced a local video file outside <code>GrokVault</code>.</li>
+        <li><strong>Task 9 R2 blocker card:</strong> The R2 sync result image is a clearly labeled blocker card, not a live popup screenshot, because live popup config access remains policy-blocked.</li>
       </ul>
     </section>
 
@@ -65,6 +67,7 @@
         <li><strong>Collections route interpretation:</strong> Task 7 treats <code>/collections</code> as a redirect to the dashboard because the current app intentionally redirects it to <code>/</code>. The route is therefore rendered but not counted as a separate collections workspace view.</li>
         <li><strong>Video prompt not entered:</strong> The Task 8 plan allowed video creation from the image result or a new video prompt. The observed <code>Make video</code> flow immediately started generation and disabled the composer, so the intended video prompt is recorded as the test intent while the actual flow is documented as image-to-video.</li>
         <li><strong>Video duration differed from intent:</strong> Grok produced a 10 second canary video even though the intended audit prompt described five seconds. This is recorded as current Grok product behavior rather than an extension failure.</li>
+        <li><strong>Canary R2 sync not run:</strong> Task 9 records canary R2 sync as blocked instead of running it, because the audit still cannot verify live Worker URL/API key presence without opening the blocked extension popup or using Chrome profile internals.</li>
       </ul>
     </section>
 
@@ -82,6 +85,7 @@
         <li><strong>Local identifiers in audit artifacts:</strong> The audit keeps local filesystem paths, Cloudflare account IDs, and bucket names where they are needed for reproducible troubleshooting. These are not secret values, but the final artifact set should be treated as local/private unless explicitly redacted for public sharing.</li>
         <li><strong>Canary URL retention:</strong> The public image post URL and public image media URL are retained because they are needed for later reconciliation. The raw video asset URL is omitted from logs because it includes a user-scoped path; the Grok post URL and post ID are enough for audit continuity.</li>
         <li><strong>Submission evidence versus privacy:</strong> Task 8 prioritizes clean result crops and sanitized metadata over broad full-page screenshots, because the live Grok tab still contains unrelated non-canary media and hidden extension history content.</li>
+        <li><strong>Native download versus extension path:</strong> Task 9 did not move the native downloaded video into <code>GrokVault</code> manually. The zero Vault delta is preserved because manually relocating the file would hide the product behavior the audit is meant to expose.</li>
       </ul>
     </section>
 
@@ -96,6 +100,7 @@
         <li><strong>Web product scope:</strong> Confirm whether the web app should remain a collection/editor companion or become the operating dashboard for Vault/R2/Grok audit health and live generation status.</li>
         <li><strong>Direct text-to-video scope:</strong> Confirm whether a separate direct text-to-video canary should be exercised in addition to the observed image-to-video flow.</li>
         <li><strong>Video control expectations:</strong> Confirm whether the product should surface duration/quality expectations when Grok turns a static image into a 10 second 480p result without a prompt entry step.</li>
+        <li><strong>Download root expectation:</strong> Confirm whether native Grok downloads should be considered valid evidence when they land in the parent media folder, or whether every successful backup must land under <code>GrokVault</code>.</li>
       </ul>
     </section>
   </body>

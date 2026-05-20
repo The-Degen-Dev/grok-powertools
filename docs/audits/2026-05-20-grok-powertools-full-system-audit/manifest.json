@@ -5,8 +5,8 @@
   "repo": {
     "path": "/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools",
     "baselineCommit": "a4a50ccd300217d0c8409c8369b89fb842d7cdf8",
-    "evidenceGeneratedAfterCommit": "3cc9d585587a884ee6e02e00e240de8033ba36ac",
-    "gitStatusShort": "Detached HEAD at 3cc9d58 when Task 7 web-smoke evidence was generated; pre-existing untracked .superpowers/ left untouched."
+    "evidenceGeneratedAfterCommit": "735ccf7bdc4e13e27d2605e6285daef4cd787f76",
+    "gitStatusShort": "Detached HEAD at 735ccf7 when Task 9 download/reconciliation evidence was generated; pre-existing untracked .superpowers/ left untouched."
   },
   "targets": {
     "localWebUrl": "http://localhost:3001",
@@ -28,7 +28,7 @@
       "prompt": "AUDIT CANARY 2026-05-20 video: a five-second gentle camera push toward the small chrome compass on a white desk, no text, minimal motion, neutral lighting.",
       "status": "created",
       "grokUrl": "https://grok.com/imagine/post/595cb61b-d261-45ef-888f-bc4bd1fdb833",
-      "localPath": "",
+      "localPath": "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8f02896a-552f-4825-8803-670f09024a43.mp4",
       "r2ObjectKey": ""
     }
   ],
@@ -36,7 +36,7 @@
     "repo": "working_with_findings",
     "extension": "overlay_visible_popup_live_blocked_static_source_preview",
     "chromeGrok": "imagine_loaded_creation_canaries_created",
-    "localVault": "inventoried",
+    "localVault": "inventoried_no_canary_delta_after_native_download",
     "cloudWorkerR2": "local_worker_running_direct_r2_blocked_extension_test_not_run",
     "webApp": "routes_render_with_findings"
   },
@@ -50,6 +50,11 @@
       "scope": "direct_wrangler_r2_access",
       "status": "blocked",
       "details": "Wrangler R2 listing is blocked by current Cloudflare OAuth/account state: account e8d3925cac56cc5a4927c16024531994 reports R2 disabled with code 10042; accounts ae55f67eccbee0bca65247faea6d5024 and ba5339fd86e87c226bdc306347636042 report authentication error code 10000."
+    },
+    {
+      "scope": "canary_r2_sync",
+      "status": "blocked",
+      "details": "Canary R2 sync was not run because live extension popup config access is still policy-blocked, so Worker URL/API key presence could not be verified without bypassing the browser policy."
     }
   ],
   "evidenceIndex": [
@@ -227,6 +232,41 @@
       "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-video-canary-result.png",
       "command": "Chrome screenshot crop of live Grok canary video post",
       "outcome": "Clean result crop shows the generated compass video at 480p with a 10 second duration."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/download-backup-flow.md",
+      "command": "Chrome browser-client live Grok post-detail Download clicks plus local filesystem search",
+      "outcome": "Native video download succeeded outside GrokVault; image download produced no observed file; GrokVault count did not change."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/pre-download-vault-summary.json",
+      "command": "node docs/audits/2026-05-20-grok-powertools-full-system-audit/scripts/inventory-vault.mjs",
+      "outcome": "Pre-download GrokVault snapshot: 1,853 files and 1,767,268,127 bytes."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/post-download-vault-summary.json",
+      "command": "node docs/audits/2026-05-20-grok-powertools-full-system-audit/scripts/inventory-vault.mjs",
+      "outcome": "Post-download GrokVault snapshot remained 1,853 files and 1,767,268,127 bytes."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/canary-local-delta.json",
+      "command": "Diff pre/post GrokVault summaries and filesystem-search native canary download",
+      "outcome": "GrokVault delta is zero; one canary video file exists outside GrokVault at the configured parent media folder."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/canary-r2-delta.json",
+      "command": "Structured R2 canary status",
+      "outcome": "R2 canary sync status is blocked with no object keys because live extension config access and direct Wrangler listing are unavailable."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-download-flow.png",
+      "command": "Chrome screenshot crop of live Grok post-detail Download controls",
+      "outcome": "Shows the visible Download side action used for the native canary download attempt."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-r2-sync-result.png",
+      "command": "ImageMagick-generated blocker card",
+      "outcome": "Not a live screenshot; records that canary R2 sync was not run because extension config access is still policy-blocked."
     }
   ]
 }
