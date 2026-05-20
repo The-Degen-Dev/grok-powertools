@@ -1,0 +1,8 @@
+{
+  "generatedAt": "2026-05-20T02:17:00.000Z",
+  "attempted": false,
+  "status": "blocked",
+  "objectKeys": [],
+  "extensionStatusText": "Not run: live extension popup config access is policy-blocked, so Worker URL/API key presence could not be verified.",
+  "error": "Direct Wrangler R2 listing remains blocked by Cloudflare account/auth state; no object-level canary evidence is available."
+}

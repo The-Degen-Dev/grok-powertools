@@ -1,0 +1,36 @@
+{
+  "generatedAt": "2026-05-20T02:15:55.297Z",
+  "totalFilesBefore": 1853,
+  "totalFilesAfter": 1853,
+  "totalFilesDelta": 0,
+  "totalBytesBefore": 1767268127,
+  "totalBytesAfter": 1767268127,
+  "totalBytesDelta": 0,
+  "byExtensionBefore": {
+    "[noext]": 1,
+    "mp4": 774,
+    "png": 1077,
+    "jpeg": 1
+  },
+  "byExtensionAfter": {
+    "[noext]": 1,
+    "mp4": 774,
+    "png": 1077,
+    "jpeg": 1
+  },
+  "canarySearch": {
+    "searchedIds": [
+      "8f02896a-552f-4825-8803-670f09024a43",
+      "595cb61b-d261-45ef-888f-bc4bd1fdb833"
+    ],
+    "foundInVault": []
+  },
+  "nativeDownloadOutsideVault": [
+    {
+      "type": "video",
+      "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8f02896a-552f-4825-8803-670f09024a43.mp4",
+      "bytes": 1880994,
+      "sha256": "0fdd748b08ddd4d6d2f65a2db18fc347f6650cb56129de5319077927f64bac94"
+    }
+  ]
+}
