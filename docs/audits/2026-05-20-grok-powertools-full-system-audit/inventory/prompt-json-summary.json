@@ -206,8 +206,8 @@
     "firstKeys": []
   },
   {
-    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/client_secret_2_739725102112-6sqq3d8m9hlvb5qffgh8r8e0shtaeqa8.apps.googleusercontent.com.json",
-    "fileName": "client_secret_2_739725102112-6sqq3d8m9hlvb5qffgh8r8e0shtaeqa8.apps.googleusercontent.com.json",
+    "path": "[redacted-google-client-secret-json-path-1]",
+    "fileName": "[redacted-google-client-secret-json-1]",
     "bytes": 488,
     "parseable": true,
     "type": "object",
@@ -217,8 +217,8 @@
     ]
   },
   {
-    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/client_secret_442961366415-4mbdqcthhqdqd7mrijf4d3mq0nunfk1p.apps.googleusercontent.com.json",
-    "fileName": "client_secret_442961366415-4mbdqcthhqdqd7mrijf4d3mq0nunfk1p.apps.googleusercontent.com.json",
+    "path": "[redacted-google-client-secret-json-path-2]",
+    "fileName": "[redacted-google-client-secret-json-2]",
     "bytes": 548,
     "parseable": true,
     "type": "object",
@@ -228,8 +228,8 @@
     ]
   },
   {
-    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/client_secret_458456926730-taar6sm8b6obs8npcg1a8olh14onlb3o.apps.googleusercontent.com.json",
-    "fileName": "client_secret_458456926730-taar6sm8b6obs8npcg1a8olh14onlb3o.apps.googleusercontent.com.json",
+    "path": "[redacted-google-client-secret-json-path-3]",
+    "fileName": "[redacted-google-client-secret-json-3]",
     "bytes": 436,
     "parseable": true,
     "type": "object",
@@ -341,8 +341,8 @@
     ]
   },
   {
-    "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/ttl/30d/export_data/73e01e47-8b4d-4560-8d6e-d72f00b02b82/prod-mc-auth-mgmt-api.json",
-    "fileName": "prod-mc-auth-mgmt-api.json",
+    "path": "[redacted-prod-auth-export-path]",
+    "fileName": "[redacted-prod-auth-export-json]",
     "bytes": 11147,
     "parseable": true,
     "type": "object",
@@ -352,8 +352,8 @@
       "sessions",
       "teams",
       "invitations",
-      "api_keys",
-      "management_api_keys",
+      "[redacted-credential-key-field]",
+      "[redacted-management-key-field]",
       "team_acls"
     ]
   },
