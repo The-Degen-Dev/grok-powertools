@@ -179,6 +179,25 @@
               bulk action bar cannot sit above fullscreen viewer controls.
             </td>
           </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Verification fix</td>
+            <td>
+              Final root verification exposed a stale extension E2E Chrome mock:
+              <code>content.js</code> now calls <code>chrome.runtime.getURL</code> while injecting its bridge.
+              The mock was updated so <code>npm test</code> validates both the existing extension overlay and the
+              new web watch-mode regression suite in one command.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-05-19</td>
+            <td>Test wiring</td>
+            <td>
+              The web Playwright server injects a deterministic <code>AUTH_SECRET</code> for E2E runs.
+              This keeps Auth.js session polling from producing missing-secret errors while still leaving
+              production and local app configuration untouched.
+            </td>
+          </tr>
         </tbody>
       </table>
 

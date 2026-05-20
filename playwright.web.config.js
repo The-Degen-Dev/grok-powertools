@@ -17,6 +17,10 @@ module.exports = defineConfig({
         url: 'http://127.0.0.1:3101',
         reuseExistingServer: false,
         timeout: 120000,
+        env: {
+            ...process.env,
+            AUTH_SECRET: 'watch-mode-e2e-secret',
+        },
     },
     projects: [
         {
