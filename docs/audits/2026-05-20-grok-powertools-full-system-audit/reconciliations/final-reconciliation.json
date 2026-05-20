@@ -1,0 +1,61 @@
+{
+  "generatedAt": "2026-05-20T02:58:54.209Z",
+  "localVault": {
+    "status": "verified_inventory_no_canary_delta",
+    "initialInventory": "inventory/local-vault-summary.json",
+    "finalInventory": "reconciliations/final-vault-summary.json",
+    "canaryLocalDelta": "reconciliations/canary-local-delta.json",
+    "initialTotalFiles": 1853,
+    "finalTotalFiles": 1853,
+    "finalTotalBytes": 1767268127,
+    "canaryFoundInVault": false,
+    "nativeCanaryDownloadOutsideVault": true
+  },
+  "grokSaved": {
+    "status": "exercised_not_reconciled_no_authoritative_saved_count",
+    "evidence": [
+      "logs/chrome-grok-starting-state.md",
+      "logs/stress-paths.md",
+      "logs/grok-canaries.md",
+      "logs/batch-quality-repeat.md"
+    ],
+    "note": "Grok Imagine and /imagine/saved were exercised live, but no authoritative Saved export/count was available to reconcile every Saved item against local Vault/R2."
+  },
+  "extensionStorage": {
+    "status": "blocked_by_chrome_extension_popup_policy",
+    "evidence": [
+      "logs/chrome-grok-starting-state.md",
+      "logs/r2-access.md",
+      "logs/stress-paths.md",
+      "screenshots/extension-popup-cloud-settings.png"
+    ],
+    "note": "Live chrome-extension:// popup/storage access is blocked by Chrome automation URL policy; source preview exists but is not live storage evidence."
+  },
+  "r2": {
+    "status": "blocked_auth",
+    "evidence": [
+      "inventory/r2-evidence.json",
+      "logs/r2-access.md",
+      "reconciliations/canary-r2-delta.json",
+      "screenshots/extension-r2-sync-result.png"
+    ],
+    "note": "Wrangler object listing is blocked by Cloudflare account/auth state; canary R2 sync was not run because extension config could not be verified."
+  },
+  "liveFlows": {
+    "grokCreation": "image_created_video_created_quality_repeat_created",
+    "nativeDownload": "video_downloaded_outside_vault_image_not_observed",
+    "scraper": "start_stop_exercised_stop_not_instant",
+    "backfillRetry": "popup_only_access_blocked",
+    "promptedBatch": "failed_0_of_1_after_3_retries",
+    "qualityRepeat": "passed_1_repeat_4_images"
+  },
+  "unresolvedGaps": [
+    "No object-level R2 listing or canary R2 object key evidence is available.",
+    "The two live canary Grok posts were not found under GrokVault after native download attempts.",
+    "Live extension popup storage/config, unsynced count, backfill, retry, and cloud test remain inaccessible through the approved Chrome automation route.",
+    "No authoritative Grok Saved export/count was available to prove every Saved item is backed up locally or in R2.",
+    "Prompted Batch failed a one-item safe run after 3/3 retries and needs product debugging.",
+    "Scraper Stop returned the overlay to idle but did not cancel the already-started post-detail navigation before it happened.",
+    "Local web auth session endpoint, web lint, root lint, and root E2E remain failing in the current baseline."
+  ]
+}
