@@ -49,6 +49,6 @@
 
 ## Screenshot Privacy Review
 
-- `screenshots/chrome-grok-saved-start.png`: media and prompt regions redacted with opaque blocks before saving.
+- `screenshots/chrome-grok-saved-start.png`: Grok content area redacted with an opaque block before saving; only left navigation/sidebar context remains visible.
 - `screenshots/extension-overlay-start.png`: cropped to the overlay panel only.
 - `screenshots/extension-popup-cloud-settings.png`: generated from local source preview, so it does not contain live secrets.
