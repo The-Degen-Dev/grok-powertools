@@ -84,11 +84,27 @@ export default function FullscreenViewer({
   // Auto-play video when index changes
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !isPlaying) return;
+
+    let cancelled = false;
     video.load();
-    if (isPlaying) {
-      video.play().catch(() => {});
-    }
+
+    video
+      .play()
+      .then(() => {
+        if (cancelled) return;
+        setIsPlaying(true);
+        setVideoError(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setIsPlaying(false);
+        setVideoError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [currentIndex, isPlaying]);
 
   useEffect(() => {
@@ -172,8 +188,16 @@ export default function FullscreenViewer({
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
-      video.play().catch(() => {});
-      setIsPlaying(true);
+      video
+        .play()
+        .then(() => {
+          setIsPlaying(true);
+          setVideoError(false);
+        })
+        .catch(() => {
+          setIsPlaying(false);
+          setVideoError(true);
+        });
     } else {
       video.pause();
       setIsPlaying(false);

@@ -89,15 +89,15 @@
             <td>2026-05-19</td>
             <td>Tradeoff</td>
             <td>
-              Added a separate <code>playwright.web.config.js</code> instead of changing the existing
-              extension E2E config, so extension tests keep their current browser setup.
+              Task 2 red-test work in the working tree uses a separate <code>playwright.web.config.js</code>
+              instead of changing the existing extension E2E config, so extension tests keep their current browser setup.
             </td>
           </tr>
           <tr>
             <td>2026-05-19</td>
             <td>Design decision</td>
             <td>
-              The web Playwright fixture seeds only the minimal v1 IndexedDB schema from
+              The pending Task 2 web Playwright fixture seeds only the minimal v1 IndexedDB schema from
               <code>/favicon.ico</code>, then lets the React app run its normal database upgrades on load.
             </td>
           </tr>
@@ -105,16 +105,16 @@
             <td>2026-05-19</td>
             <td>Design decision</td>
             <td>
-              The web E2E config intentionally does not reuse existing dev servers, so validation cannot
-              silently run against a stale server from another worktree.
+              The pending Task 2 web E2E config intentionally does not reuse existing dev servers, so validation
+              cannot silently run against a stale server from another worktree once Task 4 commits it.
             </td>
           </tr>
           <tr>
             <td>2026-05-19</td>
             <td>Deviation</td>
             <td>
-              The plan originally used port <code>3001</code>, but web E2E uses <code>3101</code> to avoid
-              validating against manual or other-worktree dev servers on the app's default port.
+              The plan originally used port <code>3001</code>, but the pending Task 2 web E2E config uses
+              <code>3101</code> to avoid validating against manual or other-worktree dev servers on the app's default port.
             </td>
           </tr>
           <tr>
