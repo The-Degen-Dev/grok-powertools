@@ -1,0 +1,1018 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Grok Power Tools Audit Visual One-Pager</title>
+    <style>
+      :root {
+        --ink: #171412;
+        --muted: #5d5851;
+        --paper: #f6f2ea;
+        --panel: #fffaf1;
+        --line: #d8cdbf;
+        --green: #16745b;
+        --green-soft: #dcefe7;
+        --red: #b3261e;
+        --red-soft: #f3dedb;
+        --amber: #a26300;
+        --amber-soft: #f6e7c8;
+        --blue: #20677a;
+        --blue-soft: #dceaf0;
+        --violet: #6650a4;
+        --violet-soft: #e6e0f4;
+        --shadow: 0 18px 45px rgba(57, 46, 31, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(90deg, rgba(23, 20, 18, 0.045) 1px, transparent 1px),
+          linear-gradient(180deg, rgba(23, 20, 18, 0.035) 1px, transparent 1px),
+          var(--paper);
+        background-size: 28px 28px;
+        color: var(--ink);
+        font-family: ui-serif, Georgia, "Times New Roman", serif;
+      }
+
+      main {
+        width: min(1320px, calc(100vw - 40px));
+        margin: 0 auto;
+        padding: 32px 0 44px;
+      }
+
+      header {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+        gap: 18px;
+        align-items: stretch;
+        margin-bottom: 18px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(2.2rem, 5vw, 5.6rem);
+        line-height: 0.92;
+        letter-spacing: 0;
+        max-width: 900px;
+      }
+
+      h2 {
+        font-size: 1.35rem;
+        line-height: 1.08;
+      }
+
+      h3 {
+        font-size: 0.92rem;
+        line-height: 1.1;
+      }
+
+      .label {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .panel {
+        background: rgba(255, 250, 241, 0.92);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+      }
+
+      .hero {
+        padding: 24px;
+        min-height: 280px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero:after {
+        content: "";
+        position: absolute;
+        inset: auto -40px -70px auto;
+        width: 360px;
+        height: 190px;
+        border: 1px solid rgba(23, 20, 18, 0.18);
+        transform: rotate(-8deg);
+      }
+
+      .hero-top {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        position: relative;
+        z-index: 1;
+      }
+
+      .stamp {
+        border: 1px solid var(--ink);
+        border-radius: 999px;
+        padding: 7px 10px 6px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.72rem;
+        background: var(--panel);
+      }
+
+      .hero-copy {
+        position: relative;
+        z-index: 1;
+      }
+
+      .hero-copy p {
+        margin-top: 14px;
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 1.03rem;
+        line-height: 1.45;
+      }
+
+      .verdict {
+        display: grid;
+        gap: 10px;
+        padding: 16px;
+      }
+
+      .verdict-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fffdf7;
+        padding: 12px;
+        min-height: 102px;
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 1.72rem;
+        line-height: 1;
+        margin: 8px 0 5px;
+      }
+
+      .metric span {
+        color: var(--muted);
+        font-size: 0.86rem;
+        line-height: 1.25;
+      }
+
+      .metric.pass {
+        background: var(--green-soft);
+        border-color: rgba(22, 116, 91, 0.28);
+      }
+
+      .metric.fail {
+        background: var(--red-soft);
+        border-color: rgba(179, 38, 30, 0.28);
+      }
+
+      .metric.blocked {
+        background: var(--amber-soft);
+        border-color: rgba(162, 99, 0, 0.28);
+      }
+
+      .metric.neutral {
+        background: var(--blue-soft);
+        border-color: rgba(32, 103, 122, 0.26);
+      }
+
+      .grid {
+        display: grid;
+        gap: 18px;
+      }
+
+      .cols-3 {
+        grid-template-columns: 1.05fr 0.92fr 1.03fr;
+      }
+
+      .cols-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      section.panel {
+        padding: 18px;
+      }
+
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: start;
+        margin-bottom: 14px;
+      }
+
+      .section-head p {
+        max-width: 460px;
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.35;
+      }
+
+      .status-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .status-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fffdf7;
+        padding: 10px;
+        min-height: 104px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .status-card .dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+      }
+
+      .status-card p,
+      .next-card p,
+      .proof-card p,
+      .drift-item p {
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.28;
+      }
+
+      .ok .dot {
+        background: var(--green);
+      }
+
+      .warn .dot {
+        background: var(--amber);
+      }
+
+      .bad .dot {
+        background: var(--red);
+      }
+
+      .unknown .dot {
+        background: var(--blue);
+      }
+
+      .sysmap {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+
+      .sysmap-scroll {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 4px;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.72rem;
+      }
+
+      .legend i {
+        width: 16px;
+        height: 3px;
+        display: inline-block;
+      }
+
+      .vault-wrap {
+        display: grid;
+        grid-template-columns: 170px 1fr;
+        gap: 18px;
+        align-items: center;
+      }
+
+      .donut {
+        width: 168px;
+        height: 168px;
+        border-radius: 50%;
+        background: conic-gradient(var(--blue) 0 58.12%, var(--green) 58.12% 99.89%, var(--amber) 99.89% 99.94%, var(--red) 99.94% 100%);
+        position: relative;
+        box-shadow: inset 0 0 0 1px rgba(23, 20, 18, 0.12);
+      }
+
+      .donut:after {
+        content: "1,853 files";
+        position: absolute;
+        inset: 36px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        font-weight: 700;
+        line-height: 1.1;
+      }
+
+      .bar-list {
+        display: grid;
+        gap: 9px;
+      }
+
+      .bar-row {
+        display: grid;
+        grid-template-columns: 106px 1fr 88px;
+        gap: 10px;
+        align-items: center;
+        font-size: 0.84rem;
+      }
+
+      .bar-track {
+        height: 11px;
+        border-radius: 999px;
+        background: rgba(23, 20, 18, 0.08);
+        overflow: hidden;
+      }
+
+      .bar-fill {
+        height: 100%;
+        border-radius: 999px;
+      }
+
+      .flow-table {
+        display: grid;
+        gap: 8px;
+      }
+
+      .flow-row {
+        display: grid;
+        grid-template-columns: 126px 1fr 82px;
+        gap: 10px;
+        align-items: center;
+        padding: 9px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fffdf7;
+      }
+
+      .flow-row p {
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.22;
+      }
+
+      .badge {
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        padding: 6px 9px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+      }
+
+      .badge.ok {
+        color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .badge.fail {
+        color: var(--red);
+        background: var(--red-soft);
+      }
+
+      .badge.blocked {
+        color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .badge.mixed {
+        color: var(--blue);
+        background: var(--blue-soft);
+      }
+
+      .proof-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .proof-card,
+      .next-card,
+      .drift-item {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fffdf7;
+        padding: 12px;
+      }
+
+      .proof-card.good {
+        border-left: 6px solid var(--green);
+      }
+
+      .proof-card.gap {
+        border-left: 6px solid var(--red);
+      }
+
+      .screen-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      figure {
+        margin: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fffdf7;
+      }
+
+      figure img {
+        width: 100%;
+        height: 138px;
+        object-fit: cover;
+        display: block;
+      }
+
+      figcaption {
+        padding: 9px 10px;
+        font-size: 0.78rem;
+        color: var(--muted);
+        line-height: 1.25;
+      }
+
+      .drift-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .drift-item {
+        min-height: 108px;
+      }
+
+      .drift-item strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .priority {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .next-card {
+        min-height: 166px;
+      }
+
+      .next-card h3 {
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .next-card ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.32;
+      }
+
+      .next-card li {
+        margin: 6px 0;
+      }
+
+      .footer-strip {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: center;
+        padding: 14px 18px;
+        margin-top: 18px;
+      }
+
+      .footer-strip p {
+        color: var(--muted);
+        font-size: 0.86rem;
+        line-height: 1.35;
+      }
+
+      .file-link {
+        color: var(--ink);
+        text-decoration: none;
+        border-bottom: 1px solid var(--ink);
+      }
+
+      @media (max-width: 1060px) {
+        header,
+        .cols-3,
+        .cols-2,
+        .priority {
+          grid-template-columns: 1fr;
+        }
+
+        .status-grid,
+        .screen-grid,
+        .drift-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 680px) {
+        main {
+          width: min(100% - 24px, 1320px);
+          padding-top: 16px;
+        }
+
+        .hero,
+        section.panel,
+        .verdict {
+          padding: 14px;
+        }
+
+        .verdict-grid,
+        .status-grid,
+        .screen-grid,
+        .drift-grid,
+        .proof-grid,
+        .vault-wrap {
+          grid-template-columns: 1fr;
+        }
+
+        .flow-row,
+        .bar-row,
+        .footer-strip {
+          grid-template-columns: 1fr;
+        }
+
+        .sysmap {
+          min-width: 760px;
+        }
+
+        .donut {
+          margin: 0 auto;
+        }
+      }
+
+      @media print {
+        body {
+          background: #fff;
+        }
+
+        main {
+          width: 100%;
+          padding: 0;
+        }
+
+        .panel {
+          box-shadow: none;
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="panel hero">
+          <div class="hero-top">
+            <span class="stamp">Audit complete, product not yet proven complete</span>
+            <span class="stamp">2026-05-20</span>
+            <span class="stamp">Commit bf1fd74</span>
+          </div>
+          <div class="hero-copy">
+            <p class="label">Grok Power Tools full system audit</p>
+            <h1>Live creation worked. Backup proof did not close.</h1>
+            <p>The system can talk to Grok, generate audit canaries, render the local web app, and inventory the local Vault. The unresolved core risk is still the chain between Grok Saved, extension state, local Vault, and R2.</p>
+          </div>
+        </div>
+
+        <aside class="panel verdict" aria-label="Audit headline metrics">
+          <div class="verdict-grid">
+            <div class="metric pass">
+              <span class="label">Creation</span>
+              <strong>2/2</strong>
+              <span>Image and image-to-video canaries created in live Grok.</span>
+            </div>
+            <div class="metric neutral">
+              <span class="label">Vault</span>
+              <strong>1,853</strong>
+              <span>Files inventoried; no canary delta observed.</span>
+            </div>
+            <div class="metric fail">
+              <span class="label">Batch</span>
+              <strong>0/1</strong>
+              <span>Prompted Batch failed after 3/3 retries.</span>
+            </div>
+            <div class="metric blocked">
+              <span class="label">R2 proof</span>
+              <strong>0 keys</strong>
+              <span>Object-level listing and canary sync remain blocked.</span>
+            </div>
+          </div>
+        </aside>
+      </header>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <p class="label">System proof map</p>
+            <h2>Where evidence flows, and where it stops</h2>
+          </div>
+          <p>Solid lines were exercised. Dashed lines were intended or partially visible but did not produce end-to-end proof.</p>
+        </div>
+
+        <div class="sysmap-scroll">
+        <svg class="sysmap" viewBox="0 0 1180 360" role="img" aria-label="System evidence flow from Grok to extension to Vault, Worker, R2, and web app">
+          <defs>
+            <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#16745b"></path>
+            </marker>
+            <marker id="arrowAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a26300"></path>
+            </marker>
+            <marker id="arrowRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#b3261e"></path>
+            </marker>
+          </defs>
+
+          <rect x="20" y="34" width="180" height="92" rx="8" fill="#dceaf0" stroke="#20677a"></rect>
+          <text x="42" y="64" font-size="18" font-weight="700" fill="#171412">Live Grok UI</text>
+          <text x="42" y="91" font-size="14" fill="#5d5851">Image + video canaries</text>
+          <text x="42" y="112" font-size="14" fill="#16745b">PASS</text>
+
+          <rect x="272" y="34" width="190" height="92" rx="8" fill="#dcefe7" stroke="#16745b"></rect>
+          <text x="294" y="64" font-size="18" font-weight="700" fill="#171412">Extension overlay</text>
+          <text x="294" y="91" font-size="14" fill="#5d5851">Injected, controls visible</text>
+          <text x="294" y="112" font-size="14" fill="#16745b">PARTIAL PASS</text>
+
+          <rect x="528" y="34" width="190" height="92" rx="8" fill="#f6e7c8" stroke="#a26300"></rect>
+          <text x="550" y="64" font-size="18" font-weight="700" fill="#171412">Extension popup</text>
+          <text x="550" y="91" font-size="14" fill="#5d5851">Live storage blocked</text>
+          <text x="550" y="112" font-size="14" fill="#a26300">POLICY BLOCK</text>
+
+          <rect x="786" y="34" width="170" height="92" rx="8" fill="#fffaf1" stroke="#d8cdbf"></rect>
+          <text x="808" y="64" font-size="18" font-weight="700" fill="#171412">Local Worker</text>
+          <text x="808" y="91" font-size="14" fill="#5d5851">/health responds</text>
+          <text x="808" y="112" font-size="14" fill="#16745b">RUNTIME OK</text>
+
+          <rect x="1004" y="34" width="156" height="92" rx="8" fill="#f3dedb" stroke="#b3261e"></rect>
+          <text x="1026" y="64" font-size="18" font-weight="700" fill="#171412">R2 bucket</text>
+          <text x="1026" y="91" font-size="14" fill="#5d5851">No object listing</text>
+          <text x="1026" y="112" font-size="14" fill="#b3261e">AUTH BLOCK</text>
+
+          <rect x="272" y="220" width="190" height="92" rx="8" fill="#fffaf1" stroke="#d8cdbf"></rect>
+          <text x="294" y="250" font-size="18" font-weight="700" fill="#171412">Native download</text>
+          <text x="294" y="277" font-size="14" fill="#5d5851">Video file outside Vault</text>
+          <text x="294" y="298" font-size="14" fill="#20677a">PARTIAL</text>
+
+          <rect x="528" y="220" width="190" height="92" rx="8" fill="#f3dedb" stroke="#b3261e"></rect>
+          <text x="550" y="250" font-size="18" font-weight="700" fill="#171412">Local Vault</text>
+          <text x="550" y="277" font-size="14" fill="#5d5851">1,853 files unchanged</text>
+          <text x="550" y="298" font-size="14" fill="#b3261e">NO CANARY DELTA</text>
+
+          <rect x="786" y="220" width="170" height="92" rx="8" fill="#dceaf0" stroke="#20677a"></rect>
+          <text x="808" y="250" font-size="18" font-weight="700" fill="#171412">Web app</text>
+          <text x="808" y="277" font-size="14" fill="#5d5851">Routes render</text>
+          <text x="808" y="298" font-size="14" fill="#20677a">WITH FINDINGS</text>
+
+          <line x1="200" y1="80" x2="272" y2="80" stroke="#16745b" stroke-width="4" marker-end="url(#arrowGreen)"></line>
+          <line x1="462" y1="80" x2="528" y2="80" stroke="#a26300" stroke-width="4" stroke-dasharray="8 7" marker-end="url(#arrowAmber)"></line>
+          <line x1="718" y1="80" x2="786" y2="80" stroke="#a26300" stroke-width="4" stroke-dasharray="8 7" marker-end="url(#arrowAmber)"></line>
+          <line x1="956" y1="80" x2="1004" y2="80" stroke="#b3261e" stroke-width="4" stroke-dasharray="8 7" marker-end="url(#arrowRed)"></line>
+          <path d="M 110 126 C 125 204, 218 238, 272 266" fill="none" stroke="#20677a" stroke-width="4" marker-end="url(#arrowAmber)"></path>
+          <line x1="462" y1="266" x2="528" y2="266" stroke="#b3261e" stroke-width="4" stroke-dasharray="8 7" marker-end="url(#arrowRed)"></line>
+          <path d="M 718 266 C 748 264, 760 263, 786 263" fill="none" stroke="#20677a" stroke-width="4" marker-end="url(#arrowAmber)"></path>
+          <text x="52" y="178" font-size="13" fill="#5d5851">Canary created</text>
+          <text x="302" y="183" font-size="13" fill="#5d5851">Native file, not backup proof</text>
+          <text x="536" y="184" font-size="13" fill="#5d5851">Reconciliation gap</text>
+          <text x="818" y="184" font-size="13" fill="#5d5851">No object-level R2 proof</text>
+        </svg>
+        </div>
+
+        <div class="legend" aria-label="Diagram legend">
+          <span><i style="background: var(--green)"></i> exercised and passed</span>
+          <span><i style="background: var(--blue)"></i> partial or local-only proof</span>
+          <span><i style="background: var(--amber)"></i> blocked by access or route</span>
+          <span><i style="background: var(--red)"></i> failed or unproven critical chain</span>
+        </div>
+      </section>
+
+      <div class="grid cols-3" style="margin-top: 18px;">
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <p class="label">Subsystems</p>
+              <h2>Executive status</h2>
+            </div>
+          </div>
+          <div class="status-grid">
+            <div class="status-card ok">
+              <span class="dot"></span>
+              <h3>Grok creation</h3>
+              <p>Image and image-to-video canaries were created.</p>
+            </div>
+            <div class="status-card ok">
+              <span class="dot"></span>
+              <h3>Worker health</h3>
+              <p>Local Worker responds at <code>/health</code>.</p>
+            </div>
+            <div class="status-card unknown">
+              <span class="dot"></span>
+              <h3>Web app</h3>
+              <p>Routes render, but auth session and lint fail.</p>
+            </div>
+            <div class="status-card unknown">
+              <span class="dot"></span>
+              <h3>Extension overlay</h3>
+              <p>Overlay visible; popup storage inaccessible.</p>
+            </div>
+            <div class="status-card bad">
+              <span class="dot"></span>
+              <h3>Prompted Batch</h3>
+              <p>One-item safe run failed after retries.</p>
+            </div>
+            <div class="status-card bad">
+              <span class="dot"></span>
+              <h3>Vault canary</h3>
+              <p>Vault count stayed unchanged after canaries.</p>
+            </div>
+            <div class="status-card warn">
+              <span class="dot"></span>
+              <h3>R2</h3>
+              <p>Cloudflare account/auth state blocks listing.</p>
+            </div>
+            <div class="status-card warn">
+              <span class="dot"></span>
+              <h3>Backfill/retry</h3>
+              <p>Controls are popup-only and not exercisable.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <p class="label">Vault composition</p>
+              <h2>Local evidence is real but incomplete</h2>
+            </div>
+          </div>
+          <div class="vault-wrap">
+            <div class="donut" aria-label="Vault file type donut: 1077 PNG, 774 MP4, 1 JPEG, 1 no extension"></div>
+            <div class="bar-list">
+              <div class="bar-row">
+                <strong>PNG</strong>
+                <div class="bar-track"><div class="bar-fill" style="width: 58.12%; background: var(--blue);"></div></div>
+                <span>1,077</span>
+              </div>
+              <div class="bar-row">
+                <strong>MP4</strong>
+                <div class="bar-track"><div class="bar-fill" style="width: 41.77%; background: var(--green);"></div></div>
+                <span>774</span>
+              </div>
+              <div class="bar-row">
+                <strong>JPEG</strong>
+                <div class="bar-track"><div class="bar-fill" style="width: 0.06%; min-width: 2px; background: var(--amber);"></div></div>
+                <span>1</span>
+              </div>
+              <div class="bar-row">
+                <strong>No ext</strong>
+                <div class="bar-track"><div class="bar-fill" style="width: 0.06%; min-width: 2px; background: var(--red);"></div></div>
+                <span>1</span>
+              </div>
+              <div class="bar-row">
+                <strong>Bytes</strong>
+                <div class="bar-track"><div class="bar-fill" style="width: 100%; background: var(--violet);"></div></div>
+                <span>1.77 GB</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <p class="label">Live flow outcomes</p>
+              <h2>What happened when exercised</h2>
+            </div>
+          </div>
+          <div class="flow-table">
+            <div class="flow-row">
+              <strong>Image canary</strong>
+              <p>Grok produced a 960x960 image post.</p>
+              <span class="badge ok">pass</span>
+            </div>
+            <div class="flow-row">
+              <strong>Video canary</strong>
+              <p>Image-to-video produced a 10s, 480p video.</p>
+              <span class="badge ok">pass</span>
+            </div>
+            <div class="flow-row">
+              <strong>Download</strong>
+              <p>Native video file landed outside GrokVault.</p>
+              <span class="badge mixed">partial</span>
+            </div>
+            <div class="flow-row">
+              <strong>Gallery stop</strong>
+              <p>Overlay stopped, but not before navigation began.</p>
+              <span class="badge mixed">partial</span>
+            </div>
+            <div class="flow-row">
+              <strong>Batch</strong>
+              <p>Safe one-item Prompted Batch exhausted retries.</p>
+              <span class="badge fail">fail</span>
+            </div>
+            <div class="flow-row">
+              <strong>R2 sync</strong>
+              <p>Config and object evidence unavailable.</p>
+              <span class="badge blocked">blocked</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="grid cols-2" style="margin-top: 18px;">
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <p class="label">Proof boundary</p>
+              <h2>Do not blur these two columns</h2>
+            </div>
+          </div>
+          <div class="proof-grid">
+            <div class="proof-card good">
+              <h3>Proven in this run</h3>
+              <p>Local app and Worker can run, Grok can generate, the overlay injects, the local Vault can be inventoried, and Quality Repeat works on audit-owned content.</p>
+            </div>
+            <div class="proof-card gap">
+              <h3>Not proven in this run</h3>
+              <p>Every Grok Saved item backed up to Vault and R2, live extension cloud config, unsynced queue state, R2 object keys, and reliable Prompted Batch completion.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <p class="label">Date folders</p>
+              <h2>Vault concentration by capture day</h2>
+            </div>
+          </div>
+          <div class="bar-list">
+            <div class="bar-row">
+              <strong>2025-12-20</strong>
+              <div class="bar-track"><div class="bar-fill" style="width: 60.23%; background: var(--blue);"></div></div>
+              <span>1,116</span>
+            </div>
+            <div class="bar-row">
+              <strong>2025-12-21</strong>
+              <div class="bar-track"><div class="bar-fill" style="width: 37.45%; background: var(--green);"></div></div>
+              <span>694</span>
+            </div>
+            <div class="bar-row">
+              <strong>2025-12-19</strong>
+              <div class="bar-track"><div class="bar-fill" style="width: 2.27%; background: var(--amber);"></div></div>
+              <span>42</span>
+            </div>
+            <div class="bar-row">
+              <strong>Root</strong>
+              <div class="bar-track"><div class="bar-fill" style="width: 0.06%; min-width: 2px; background: var(--red);"></div></div>
+              <span>1</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel" style="margin-top: 18px;">
+        <div class="section-head">
+          <div>
+            <p class="label">Visual evidence</p>
+            <h2>Audit-safe snapshots</h2>
+          </div>
+          <p>These images are intentionally narrow or redacted. They show UI state without exposing unrelated live Grok media or prompt history.</p>
+        </div>
+        <div class="screen-grid">
+          <figure>
+            <img src="screenshots/grok-image-canary-result.png" alt="Audit canary compass image result">
+            <figcaption>Audit-owned image canary generated successfully.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/extension-overlay-start.png" alt="Grok Power Tools overlay crop">
+            <figcaption>Extension overlay visible on the live Grok page.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/quality-repeat-result.png" alt="Quality Repeat completed result crop">
+            <figcaption>Quality Repeat completed one repeat with four images.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top: 18px;">
+        <div class="section-head">
+          <div>
+            <p class="label">UI / UX drift</p>
+            <h2>Current Grok is ahead of the product assumptions</h2>
+          </div>
+        </div>
+        <div class="drift-grid">
+          <div class="drift-item">
+            <strong>Route drift</strong>
+            <p>Requested <code>/imagine/saved</code>, observed <code>/imagine</code> with Saved-style controls.</p>
+          </div>
+          <div class="drift-item">
+            <strong>Control drift</strong>
+            <p>Video mode is visible as text/radio control, not the older ARIA selector path.</p>
+          </div>
+          <div class="drift-item">
+            <strong>Action drift</strong>
+            <p>Post-detail Download exists, but starting grid controls differ.</p>
+          </div>
+          <div class="drift-item">
+            <strong>Overlay friction</strong>
+            <p>The panel can hide Grok composer and pushes critical backup controls low.</p>
+          </div>
+          <div class="drift-item">
+            <strong>Recovery gap</strong>
+            <p>Backfill and Retry Unsynced are popup-only and cannot be audited through the page.</p>
+          </div>
+          <div class="drift-item">
+            <strong>Dashboard gap</strong>
+            <p>The web app renders, but does not yet act as a live Grok/Vault/R2 operations console.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top: 18px;">
+        <div class="section-head">
+          <div>
+            <p class="label">Priorities</p>
+            <h2>Next work by risk</h2>
+          </div>
+        </div>
+        <div class="priority">
+          <div class="next-card">
+            <h3><span class="badge fail">P0</span> Reliability</h3>
+            <ul>
+              <li>Fix E2E shim for <code>chrome.runtime.getURL</code>.</li>
+              <li>Restore object-level R2 verification.</li>
+              <li>Make canaries land in Vault and R2.</li>
+              <li>Cancel in-flight scraper navigation on Stop.</li>
+              <li>Fix Prompted Batch retry/completion detection.</li>
+            </ul>
+          </div>
+          <div class="next-card">
+            <h3><span class="badge blocked">P1</span> Functionality</h3>
+            <ul>
+              <li>Fix web lint and Auth.js session 500.</li>
+              <li>Ignore or clean generated Wrangler lint artifacts.</li>
+              <li>Add Grok selector fallbacks for route and control drift.</li>
+              <li>Expose cloud recovery outside the popup.</li>
+            </ul>
+          </div>
+          <div class="next-card">
+            <h3><span class="badge mixed">P2</span> Product / UX</h3>
+            <ul>
+              <li>Compact or reposition overlay during creation.</li>
+              <li>Add high-count batch preflight.</li>
+              <li>Build non-secret cloud diagnostics.</li>
+              <li>Turn web app into an operations dashboard if that is the product direction.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel footer-strip">
+        <p>Source artifacts: <a class="file-link" href="report.md">report.md</a>, <a class="file-link" href="manifest.json">manifest.json</a>, <a class="file-link" href="reconciliations/final-reconciliation.json">final-reconciliation.json</a>, and <a class="file-link" href="reconciliations/final-vault-summary.json">final-vault-summary.json</a>.</p>
+        <span class="stamp">Visual synthesis, no new audit claims</span>
+      </section>
+    </main>
+  </body>
+</html>
