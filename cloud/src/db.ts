@@ -144,6 +144,9 @@ export async function upsertMetadataSnapshotIndex(
          user_id, kind, content_hash, object_key, first_written_at, last_seen_at
        )
        VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+       ON CONFLICT(object_key) DO UPDATE SET
+         content_hash = excluded.content_hash,
+         last_seen_at = excluded.last_seen_at
        ON CONFLICT(user_id, kind, content_hash) DO UPDATE SET
          object_key = excluded.object_key,
          last_seen_at = excluded.last_seen_at`

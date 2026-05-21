@@ -73,11 +73,44 @@ function sanitizeKeyPrefix(keyPrefix: string | undefined): string {
     return normalized || 'grok-powertools/v1';
 }
 
+function sanitizeMetadataRecord(metadata: Record<string, string> | undefined): Record<string, string> {
+    const clean: Record<string, string> = {};
+    for (const [rawKey, rawValue] of Object.entries(metadata || {})) {
+        const key = rawKey
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 64);
+        const value = String(rawValue ?? '').slice(0, 1024);
+        if (!key || !value) continue;
+        clean[key] = value;
+    }
+    return clean;
+}
+
+function metadataUploadHeaders(metadata: Record<string, string>): Record<string, string> {
+    return Object.fromEntries(
+        Object.entries(metadata).map(([key, value]) => [`x-amz-meta-${key}`, value])
+    );
+}
+
 function isValidObjectKey(objectKey: string, keyPrefix: string): boolean {
     if (!objectKey || objectKey.length > 1024) return false;
     if (objectKey.includes('..')) return false;
     if (objectKey.startsWith('/')) return false;
     return objectKey.startsWith(`${keyPrefix}/users/`);
+}
+
+function isPresignableObjectKey(objectKey: string, keyPrefix: string): boolean {
+    if (!isValidObjectKey(objectKey, keyPrefix)) return false;
+    if (objectKey === `${keyPrefix}/users/_system/upload-test.txt`) return true;
+
+    const isCanonicalMedia = objectKey.includes('/media/by-asset/');
+    const isConflictMedia = objectKey.includes('/media/conflicts/');
+    const isPromptSidecar = objectKey.endsWith('.prompt.json');
+
+    return (isCanonicalMedia || isConflictMedia) && (!isPromptSidecar || objectKey.includes('/media/'));
 }
 
 function metadataObjectKey(keyPrefix: string, userId: string, kind: MetadataKind): string {
@@ -175,7 +208,7 @@ async function handlePresign(request: Request, env: Env): Promise<Response> {
     }
 
     const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
-    if (!isValidObjectKey(payload.objectKey, keyPrefix)) {
+    if (!isPresignableObjectKey(payload.objectKey, keyPrefix)) {
         return errorResponse('Invalid object key.', 400);
     }
 
@@ -191,16 +224,19 @@ async function handlePresign(request: Request, env: Env): Promise<Response> {
 
     try {
         const client = buildS3Client(env);
+        const metadata = sanitizeMetadataRecord(payload.metadata);
 
         const command = new PutObjectCommand({
             Bucket: env.R2_BUCKET_NAME,
             Key: payload.objectKey,
             ContentType: contentType,
             ContentLength: contentLength,
-            Metadata: payload.metadata || undefined
+            Metadata: Object.keys(metadata).length ? metadata : undefined
         });
 
+        const metadataHeaders = metadataUploadHeaders(metadata);
         const uploadUrl = await getSignedUrl(client, command, {
+            unhoistableHeaders: new Set(Object.keys(metadataHeaders)),
             expiresIn: PRESIGN_EXPIRY_SECONDS
         });
 
@@ -208,7 +244,8 @@ async function handlePresign(request: Request, env: Env): Promise<Response> {
             uploadUrl,
             method: 'PUT',
             headers: {
-                'Content-Type': contentType
+                'Content-Type': contentType,
+                ...metadataHeaders
             },
             expiresAt: new Date(Date.now() + PRESIGN_EXPIRY_SECONDS * 1000).toISOString()
         };
