@@ -60,6 +60,7 @@
         <li><strong>Task 12 final inventory isolation:</strong> The final Vault inventory script was run from a temporary working directory so its side-effect inventory writes did not overwrite the earlier redacted inventory artifacts in the repo.</li>
         <li><strong>Plan self-review timing:</strong> The written plan's self-review task was run after execution rather than before it, because it was discovered during final wrap-up. The useful checks still ran: spec-section coverage, placeholder scan, and audit-path consistency.</li>
         <li><strong>Visual one-pager synthesis:</strong> The one-pager uses diagrams, status tiles, CSS charts, and audit-safe screenshots to communicate the audit's complexity without introducing new claims beyond the committed report, manifest, and final reconciliation files.</li>
+        <li><strong>Full reliability rebuild spec:</strong> The 2026-05-21 rebuild spec interprets "everything running perfectly" as a complete proof chain across Grok, extension state, local Vault, R2, and the web operations console. It intentionally does not frame the work as an MVP.</li>
       </ul>
     </section>
 
@@ -77,6 +78,7 @@
         <li><strong>Task 10 blocker class:</strong> The backfill/retry blocker is an approved-automation access blocker, not an R2/config error. The audit does not claim backfill or retry reached the cloud pipeline.</li>
         <li><strong>Quality repeat setup:</strong> Task 11 creates a fresh safe image canary before running Quality Repeat because <code>Generate More</code> was visible in another existing tab but was not attached to audit-owned content.</li>
         <li><strong>Final status vocabulary:</strong> The final reconciliation uses the plan's closest available status labels, but the notes preserve the exact blocker classes where the status enum is too coarse: Chrome popup policy for extension storage and Cloudflare account/auth state for R2.</li>
+        <li><strong>Live Grok spec refresh:</strong> The 2026-05-21 live Computer Use spot-check records only control-level facts from <code>grok.com/imagine/saved</code>. Sensitive live prompt/media content observed in Chrome is intentionally omitted from the spec.</li>
       </ul>
     </section>
 
