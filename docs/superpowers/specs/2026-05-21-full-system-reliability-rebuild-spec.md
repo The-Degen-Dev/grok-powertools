@@ -86,6 +86,7 @@ The system is considered "running perfectly" only when all of these are true:
 10. The web app exposes operational health and reconciliation state in addition to collection/editor/movie/share functions.
 11. All dangerous counts and bulk actions require preflight confirmation.
 12. Privacy-safe audit export can be produced without leaking user prompt text, media content, API keys, cookies, or bearer tokens.
+13. R2 writes are idempotent: rerunning Saved/backfill/full-media backup must not create a second copy of the same old media or an unbounded daily copy of the same saved-list metadata.
 
 ## 4. Product Surface Map
 
@@ -216,6 +217,11 @@ type MediaAsset = {
   assetId: string;
   postId?: string;
   sourceUrl: string;
+  sourceUrlHash: string;
+  canonicalIdentity:
+    | { kind: "grok_post_media"; postId: string; mediaIndex: number; mediaType: "image" | "video" }
+    | { kind: "source_url_hash"; sourceUrlHash: string; mediaType: "image" | "video" | "unknown" }
+    | { kind: "content_hash"; sha256: string; mediaType: "image" | "video" | "unknown" };
   sourceHost: "imagine-public.x.ai" | "assets.grok.com" | "grok.com" | "unknown";
   mediaType: "image" | "video" | "unknown";
   width?: number;
@@ -253,6 +259,9 @@ type VaultFile = {
 type R2Object = {
   objectKey: string;
   assetId?: string;
+  canonicalKey: boolean;
+  supersedesObjectKey?: string;
+  duplicateOfObjectKey?: string;
   contentType: string;
   sizeBytes?: number;
   sha256?: string;
@@ -261,6 +270,23 @@ type R2Object = {
   lastHeadAt?: string;
   lastVerifiedAt?: string;
   verificationStatus: "verified" | "missing" | "blocked" | "stale";
+};
+```
+
+#### `r2_dedupe_index`
+
+```ts
+type R2DedupeIndex = {
+  userId: string;
+  assetId: string;
+  canonicalObjectKey: string;
+  sourceUrlHashes: string[];
+  contentSha256?: string;
+  grokPostIds: string[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  uploadStatus: "not_uploaded" | "uploaded" | "verified" | "blocked" | "failed";
+  duplicateObjectKeys: string[];
 };
 ```
 
@@ -695,7 +721,74 @@ Sidecar prompt metadata must be separate and redactable:
 - `{objectKey}.prompt.json`
 - `{objectKey}.reconciliation.json`
 
-### 8.4 Cloud Auth
+### 8.4 R2 Deduplication, Idempotency, And Retention
+
+R2 must be treated as an idempotent content store, not as a daily append-only dump of whatever the extension sees that day. The current codebase has enough date-based media-key behavior that the rebuild must explicitly prevent rerunning an old Saved scan from producing a second copy of the same already-backed-up media.
+
+Requirements:
+
+- No R2 media write may be keyed only by the current run date when the object represents an already-known Grok asset.
+- Compute canonical asset identity before upload, using this priority:
+  1. Grok post ID plus media index plus media type, when available.
+  2. Stable media UUID parsed from the media URL or filename, when available.
+  3. SHA-256 content hash after download or fetch.
+  4. Source URL hash only as a temporary pending identity until a stronger identity is available.
+- Canonical media objects should use:
+
+```txt
+grok-powertools/v1/users/{userId}/media/by-asset/{assetId}.{ext}
+```
+
+- If legacy date folders are preserved, the date folder must mean asset first-seen date, not the current backup run date.
+- Date, Saved, and prompt-history views should be manifest or pointer objects, not duplicate media blobs:
+
+```txt
+grok-powertools/v1/users/{userId}/manifests/dates/{yyyy-mm-dd}.json
+grok-powertools/v1/users/{userId}/manifests/saved/latest.json
+```
+
+- Before uploading a media blob, the extension or Worker must verify the canonical key with a `HEAD` request or verify endpoint:
+  - If the object exists and size/hash match, skip upload and mark the job as `already_present`.
+  - If the object exists but metadata is incomplete, update sidecar/index metadata only.
+  - If the object exists and hash differs, write a conflict object under `conflicts/{assetId}/{timestamp}.{ext}` and surface an operator-visible conflict.
+- Queue dedupe keys must be canonical asset IDs or canonical object keys, not raw source URLs or date-derived paths.
+- The D1 or metadata index must enforce uniqueness:
+  - unique `(user_id, asset_id)`
+  - unique canonical object key
+  - optional unique `(user_id, content_sha256, media_type)` for cross-post duplicate detection
+  - unique `(user_id, kind, content_hash)` for versioned metadata snapshots if history is retained
+- Full media backup must be resumable and idempotent:
+  - Verified existing R2 objects are never uploaded again.
+  - Matching local Vault files are reused by hash.
+  - Daily scans of the same old Saved list update `lastSeenAt` and references, not duplicate blobs.
+
+Metadata snapshot policy:
+
+- `savedPrompts`, `promptHistory`, and `processedIds` continue to overwrite `*.latest.json`.
+- Before writing metadata, compute stable canonical JSON and SHA-256. If unchanged from the latest hash, skip the write.
+- `backfillManifest` must not create unbounded daily timestamped objects.
+- Always write/update `backfill-manifest.latest.json`.
+- Write versioned backfill history only when the canonical content hash changes.
+- Default retention for versioned manifests is the last 30 changed manifests or 90 days, whichever keeps fewer objects, unless the operator opts into a longer policy.
+- Saved-list exports follow the same pattern: `saved-list.latest.json`, with optional `saved-list.{hash}.json` history only on content change.
+
+Required metrics:
+
+- `r2BytesVerifiedExisting`
+- `r2BytesUploadedNew`
+- `r2DuplicateUploadsSkipped`
+- `r2MetadataSnapshotsSkippedUnchanged`
+- `r2ConflictsDetected`
+
+Acceptance tests:
+
+- Run the same Saved backup twice on the same day: the second run uploads 0 duplicate media bytes.
+- Run the same Saved backup on a later day: it uploads 0 duplicate media bytes and creates no duplicate saved-list metadata when content is unchanged.
+- Clear local `processedIds` and retry: R2 dedupe still prevents duplicate media objects.
+- Observe the same media under two Grok cards: one canonical object is retained with two source references.
+- Change the prompt list: latest metadata updates, and versioned history is written only when the canonical hash changes.
+
+### 8.5 Cloud Auth
 
 Keep extension-to-Worker media backup using `x-gpt-api-key` unless a stronger auth scheme is added. Web-to-Worker sync should continue using JWT with `WORKER_SYNC_SECRET`, but local unauthenticated smoke should not 500 when auth env vars are absent.
 
@@ -998,12 +1091,17 @@ Deliverables:
 - Redacted diagnostics endpoint.
 - Canary reconcile endpoint.
 - R2 object metadata and sidecars.
+- Canonical media object keys and R2 dedupe index.
+- Verify-before-PUT path for existing canonical objects.
+- Metadata snapshot hashing, unchanged-write skipping, and retention policy.
 - Better Cloudflare account/config error reporting.
 
 Acceptance:
 
 - One canary object can be proven by R2 key and metadata.
 - Worker `/health` is no longer treated as backup proof.
+- Rerunning the same Saved backup uploads 0 duplicate media bytes.
+- Unchanged saved-list and backfill metadata does not create daily duplicate objects.
 
 ### Track F: Web Operations Console
 
@@ -1152,10 +1250,12 @@ The audit found account/auth mismatch:
 - accounts `ae55f67eccbee0bca65247faea6d5024` and `ba5339fd86e87c226bdc306347636042` returned auth error code `10000`
 - `cloud/wrangler.toml` points at account `ba5339fd86e87c226bdc306347636042`
 
+Current implementation status: the user-confirmed Greymaker Cloudflare account is authoritative for `grok-gallery-001`. The exact login email is intentionally omitted from this repo artifact. The implementation pass switched Wrangler OAuth to account `ba5339fd86e87c226bdc306347636042`, verified bucket `grok-gallery-001`, verified D1 database `grok-powertools-db`, deployed the Worker, and wrote/read a prefixed `_system` R2 smoke object. Authenticated extension endpoint proof still requires the extension-configured API key value or a user-approved secret rotation.
+
 Required remediation:
 
-1. Decide the authoritative Cloudflare account for `grok-gallery-001`.
-2. Refresh or switch Wrangler OAuth to that account.
+1. Verify the active Chrome Cloudflare session maps to the authoritative Greymaker account for `grok-gallery-001`.
+2. Refresh or switch Wrangler OAuth to that account if CLI state does not match Chrome/account reality.
 3. Verify `wrangler r2 bucket list` against the exact account.
 4. Verify Worker deploy target.
 5. Verify Worker secrets exist.
@@ -1174,6 +1274,7 @@ Required remediation:
 | Video canary | reconciliation row | Grok, extension, Vault, R2, metadata complete |
 | Vault | inventory + hash | File exists, size > 0, hash recorded |
 | R2 | verify endpoint | Object exists with expected key and metadata |
+| R2 dedupe | repeat backup proof | Same Saved set run twice uploads 0 duplicate media bytes and creates no unchanged daily saved-list snapshot |
 | Prompted Batch | live one-item run | Complete or precise structured failure |
 | Quality Repeat | live safe run | Completes and stop works |
 | Gallery Stop | live controlled run | No post-stop navigation/click/download starts |
@@ -1192,6 +1293,8 @@ Required remediation:
 6. What is the canonical `activeGrokUserId` when the Grok UI does not expose a stable account identifier?
 7. Should existing duplicate Vault files be normalized later, or only reported?
 8. What is the maximum safe default for batch and gallery limits?
+9. Should legacy date-folder R2 media objects remain as alias/manifests only, or should existing objects be migrated into canonical by-asset keys over time?
+10. Should the versioned metadata/backfill retention window stay at the proposed last 30 changed manifests or 90 days cap, or does the operator need a longer audit-history policy?
 
 ## 19. First Build Recommendation
 

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>R2 Dedupe Reliability Implementation Notes</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+        margin: 32px;
+        color: #171717;
+      }
+      h1, h2 {
+        margin-bottom: 8px;
+      }
+      section {
+        border-top: 1px solid #ddd;
+        padding-top: 16px;
+        margin-top: 24px;
+      }
+      li {
+        margin: 8px 0;
+      }
+      code {
+        background: #f4f4f5;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      .meta {
+        color: #555;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>R2 Dedupe Reliability Implementation Notes</h1>
+    <p class="meta">Created 2026-05-21 for the full reliability implementation pass. This file records implementation decisions, deviations, tradeoffs, and open questions for the R2 dedupe and proof-chain work.</p>
+
+    <section>
+      <h2>Design Decisions</h2>
+      <ul>
+        <li><strong>Job-specific notes:</strong> This run uses a separate implementation notes file at <code>docs/audits/2026-05-21-r2-dedupe-reliability-implementation/implementation-notes-r2-dedupe-reliability.html</code> so R2 dedupe execution decisions do not get mixed into the earlier full-system audit notes.</li>
+        <li><strong>Subagent split:</strong> Exploration is split by ownership area: extension/cloud queue, Cloudflare Worker, and web operations console. Integration decisions remain in the main rollout so cross-boundary behavior stays coherent.</li>
+        <li><strong>Cloudflare authority:</strong> The user confirmed the Greymaker Cloudflare account currently logged into Chrome is authoritative for <code>grok-gallery-001</code>. The exact login email is intentionally not copied into this durable artifact. Wrangler OAuth was switched to that account, and the configured account ID, R2 bucket, D1 database, and Worker deploy target now align.</li>
+        <li><strong>No destructive R2 action:</strong> Existing R2 media is treated as preserve-only during this pass. The implementation may add verification and reporting, but object deletion, bulk migration, or destructive normalization requires a separate explicit approval.</li>
+        <li><strong>Canonical upload helpers:</strong> Cloud upload code now keeps the legacy date-folder helper for local/Vault compatibility but routes R2 upload candidates through canonical <code>media/by-asset/{assetId}.{ext}</code> keys.</li>
+        <li><strong>Verify-before-upload:</strong> All media upload paths are being consolidated through a shared helper that hashes the blob, verifies the canonical R2 key, skips matching existing objects, and writes conflicts under a separate conflict path if a canonical key already exists with different evidence.</li>
+        <li><strong>Metadata hash policy:</strong> Worker metadata snapshots now hash canonical <code>schemaVersion + data</code> content rather than enqueue timestamps, so unchanged prompt/history/backfill data can be skipped instead of rewritten daily.</li>
+        <li><strong>Local auth fallback:</strong> The web app now supplies a non-production Auth.js secret fallback and omits Google provider setup when local Google OAuth env vars are absent, so <code>/api/auth/session</code> returns an unauthenticated <code>null</code> session instead of a 500.</li>
+        <li><strong>Ops console scope:</strong> The first web operations console pass uses Worker health/config status plus redacted diagnostic import data. It does not try to scan the local Vault directly from the browser.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Deviations</h2>
+      <ul>
+        <li><strong>Worker-mediated upload not adopted yet:</strong> The current implementation keeps the existing presigned direct-to-R2 PUT path and adds Worker verify before and after upload. A fully atomic Worker-mediated upload would be stronger for multi-writer races, but it would be a larger architectural change and is not required for the single-operator extension path.</li>
+        <li><strong>Schema file replay:</strong> Applying the complete schema file to remote D1 failed because the original tables already existed. The dedupe implementation then applied only the new <code>r2_dedupe_index</code>, <code>metadata_snapshot_index</code>, and unique index with <code>IF NOT EXISTS</code>.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Tradeoffs</h2>
+      <ul>
+        <li><strong>Forward dedupe before migration:</strong> The default path is to stop new duplicate writes first, then produce inventory evidence for the existing 30GB. This avoids rewriting or deleting unknown historical objects before canonical identity matching is proven.</li>
+        <li><strong>Canonical blobs plus manifests:</strong> R2 date/Saved organization should be represented through manifests or pointer records instead of duplicate media blobs. This keeps browsing and audit views while preventing daily re-uploads of the same old Saved media.</li>
+        <li><strong>Presigned PUT plus verification:</strong> Keeping presigned PUT preserves the current browser-to-R2 upload architecture and avoids pushing large videos through the Worker. The tradeoff is that dedupe is deterministic and verified, but not a database-locked atomic write.</li>
+        <li><strong>Ops import before native scanning:</strong> A redacted JSON import path gives operators immediate reconciliation visibility without a native companion process. The tradeoff is that automatic Vault scanning remains outside the web app until a trusted local bridge exists.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Open Questions</h2>
+      <ul>
+        <li><strong>R2 retention window:</strong> The current default is last 30 changed manifests or 90 days, whichever keeps fewer versioned metadata objects. Confirm only if a longer compliance/audit history is needed.</li>
+        <li><strong>Existing R2 migration:</strong> The current default is report-only for existing duplicate objects. A migration/delete pass should be separately approved after the inventory and canonical match report are available.</li>
+        <li><strong>Extension API-key value:</strong> Worker secrets exist, including <code>CLIENT_API_KEY</code>, but the secret value is not readable from Wrangler. Authenticated endpoint proof through the extension requires the extension-configured API key or a user-approved secret rotation.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Verification</h2>
+      <ul>
+        <li><strong>Root tests:</strong> <code>npm test</code> passes, including 116 unit tests and 2 Playwright extension e2e tests.</li>
+        <li><strong>Root lint:</strong> <code>npm run lint</code> exits 0 with existing warnings only.</li>
+        <li><strong>Worker typecheck:</strong> <code>cd cloud &amp;&amp; npm run typecheck</code> exits 0.</li>
+        <li><strong>Web build:</strong> <code>cd web &amp;&amp; npm run build</code> exits 0 and includes the new <code>/ops</code> and <code>/api/ops/health</code> routes.</li>
+        <li><strong>Web lint:</strong> <code>cd web &amp;&amp; npm run lint</code> exits 0 with warnings only after fixing the React compiler errors.</li>
+        <li><strong>Browser smoke:</strong> A Chrome-channel Playwright smoke verified <code>http://localhost:3001/ops</code>, <code>/api/auth/session</code> returning <code>200 null</code>, and <code>/api/ops/health</code> returning a structured blocked status when <code>WORKER_URL</code> is absent. Screenshot: <code>ops-page-smoke.png</code>.</li>
+        <li><strong>Cloudflare account:</strong> <code>npx wrangler whoami</code> now reports the Greymaker account with account ID <code>ba5339fd86e87c226bdc306347636042</code>, matching <code>cloud/wrangler.toml</code>.</li>
+        <li><strong>Cloud resources:</strong> <code>npx wrangler r2 bucket list</code> confirms <code>grok-gallery-001</code>; <code>npx wrangler d1 list</code> confirms <code>grok-powertools-db</code>.</li>
+        <li><strong>D1 schema:</strong> Remote D1 contains <code>r2_dedupe_index</code>, <code>metadata_snapshot_index</code>, and <code>idx_r2_dedupe_user_content_type</code>.</li>
+        <li><strong>Worker deploy:</strong> <code>npx wrangler deploy</code> deployed Worker version <code>a86d9c60-b7fd-42f0-94d6-e495399dd731</code> to <code>https://grok-r2-backup-worker.greymakerxyz-grok.workers.dev</code>.</li>
+        <li><strong>R2 smoke:</strong> A prefixed system object was written and read back at <code>grok-powertools/v1/users/_system/upload-test.txt</code> in <code>grok-gallery-001</code>.</li>
+      </ul>
+    </section>
+  </body>
+</html>

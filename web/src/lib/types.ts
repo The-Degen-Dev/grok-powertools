@@ -110,3 +110,53 @@ export interface SyncMeta {
   lastPushAt: string;
   deviceId: string;
 }
+
+export type OpsStatus = "verified" | "degraded" | "blocked" | "unproven";
+
+export interface WorkerDiagnostics {
+  status: OpsStatus;
+  workerUrlConfigured: boolean;
+  workerReachable: boolean;
+  workerService?: string;
+  checkedAt: string;
+  message?: string;
+}
+
+export interface R2DedupeMetrics {
+  bytesVerifiedExisting: number;
+  bytesUploadedNew: number;
+  duplicateUploadsSkipped: number;
+  metadataSnapshotsSkippedUnchanged: number;
+  conflictsDetected: number;
+}
+
+export interface ReconciliationRow {
+  id: string;
+  status: OpsStatus;
+  assetId: string;
+  mediaType: "image" | "video" | "unknown";
+  sourceUrlHash?: string;
+  vaultPath?: string;
+  r2ObjectKey?: string;
+  sha256?: string;
+  sizeBytes?: number;
+  lastVerifiedAt?: string;
+  blockerCode?: string;
+}
+
+export interface DiagnosticEvent {
+  id: string;
+  level: "info" | "warning" | "error";
+  code: string;
+  message: string;
+  at: string;
+}
+
+export interface OpsSnapshot {
+  schemaVersion: 1;
+  importedAt: string;
+  worker: WorkerDiagnostics;
+  r2: R2DedupeMetrics;
+  rows: ReconciliationRow[];
+  events: DiagnosticEvent[];
+}

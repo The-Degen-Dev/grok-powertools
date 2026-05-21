@@ -129,11 +129,14 @@ export default function ClipEditor() {
 
   // Clear exported result when settings change
   useEffect(() => {
-    if (exportedBlobUrl) {
-      URL.revokeObjectURL(exportedBlobUrl);
-      setExportedBlobUrl(null);
-    }
-    setExportError(null);
+    const id = window.setTimeout(() => {
+      if (exportedBlobUrl) {
+        URL.revokeObjectURL(exportedBlobUrl);
+        setExportedBlobUrl(null);
+      }
+      setExportError(null);
+    }, 0);
+    return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trimStart, trimEnd, crop, exportFormat]);
 
