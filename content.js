@@ -2949,10 +2949,14 @@ class GrokScraper {
                     skipLocalDownload: alreadyLocal
                 }, resolve);
             });
-            if (response?.status === 'queued') {
+            const successfulStatuses = new Set(['queued', 'uploaded', 'already_present', 'conflict_uploaded']);
+            if (successfulStatuses.has(response?.status)) {
                 this.backupStats.uploaded++;
-                this.log(`Queued for R2: ...${src.slice(-20)}`, 'success');
-                // Mark as processed only after successful queue
+                const actionLabel = response.status === 'queued'
+                    ? 'Queued for R2'
+                    : (response.status === 'already_present' ? 'Already in R2' : 'Uploaded to R2');
+                this.log(`${actionLabel}: ...${src.slice(-20)}`, response.status === 'conflict_uploaded' ? 'warning' : 'success');
+                // Mark as processed only after a successful queue or direct upload.
                 const cleanId = this.getCleanId(src);
                 if (cleanId) {
                     this.processedIds.add(cleanId);

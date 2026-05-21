@@ -300,12 +300,22 @@ async function testCloudConnection(configOverride) {
     // Stage 2: Presign test
     const testObjectKey = CloudSync.buildTestUploadObjectKey(baseConfig.keyPrefix);
     const testBlob = new Blob(['upload-pipeline-test'], { type: 'text/plain' });
+    const testSha256 = await sha256Blob(testBlob);
+    const testDescriptor = {
+        objectKey: testObjectKey,
+        contentType: 'text/plain',
+        assetId: 'system_upload_test',
+        sourceUrlHash: 'system_upload_test',
+        r2Metadata: sanitizeR2Metadata({
+            sha256: testSha256,
+            'asset-id': 'system_upload_test',
+            'source-url-hash': 'system_upload_test',
+            'asset-identity-kind': 'system-test'
+        })
+    };
     let presigned;
     try {
-        presigned = await requestPresignedUrl(baseConfig, {
-            objectKey: testObjectKey,
-            contentType: 'text/plain'
-        }, testBlob.size);
+        presigned = await requestPresignedUrl(baseConfig, testDescriptor, testBlob.size);
     } catch (e) {
         throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
     }
@@ -327,9 +337,26 @@ async function testCloudConnection(configOverride) {
         throw new Error(`[${CloudSync.UPLOAD_STAGES.testUpload}] ${e.message}`);
     }
 
+    // Stage 4: Worker/R2 verify test
+    let verifyResult;
+    try {
+        verifyResult = await verifyR2Object(baseConfig, testDescriptor, {
+            sizeBytes: testBlob.size,
+            sha256: testSha256,
+            contentType: 'text/plain'
+        });
+        if (!verifyResult.exists || !verifyResult.verified) {
+            throw new Error(`Object verification failed: ${JSON.stringify(verifyResult.mismatches || [])}`);
+        }
+    } catch (e) {
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Verify}] ${e.message}`);
+    }
+
     return {
         ok: true,
         testUpload: true,
+        testVerify: true,
+        objectKey: testObjectKey,
         service: healthData.service,
         now: healthData.now
     };
@@ -625,7 +652,7 @@ async function uploadPromptSidecar(config, descriptor) {
         const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, new Blob([sidecar]).size);
         await fetch(sidecarPresigned.uploadUrl, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { ...(sidecarPresigned.headers || {}), 'Content-Type': 'application/json' },
             body: sidecar
         });
         console.log('[CloudQueue] Prompt sidecar uploaded:', sidecarKey);
@@ -1378,7 +1405,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 if (result.ok) {
                     clearCloudError();
                     const successMsg = result.testUpload
-                        ? 'Full pipeline OK (health + presign + R2 upload)'
+                        ? 'Full pipeline OK (health + presign + R2 upload + verify)'
                         : 'Cloud connection OK';
                     setCloudTestTelemetry('success', successMsg);
                 } else if (result.error) {

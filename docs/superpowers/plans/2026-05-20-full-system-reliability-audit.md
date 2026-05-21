@@ -826,7 +826,7 @@ Append to `logs/r2-access.md`:
 - Evidence screenshot:
 ```
 
-Expected: success says `Full pipeline OK (health + presign + R2 upload)` or an exact error prefix such as `[health-check]`, `[presign]`, `[r2-put]`, or validation error.
+Expected: success says `Full pipeline OK (health + presign + R2 upload + verify)` or an exact error prefix such as `[health-check]`, `[presign]`, `[r2-put]`, `[r2-verify]`, or validation error.
 
 - [ ] **Step 3: Create `r2-evidence.json`**
 

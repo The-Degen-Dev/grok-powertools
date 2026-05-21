@@ -217,7 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (response && response.ok && response.result && response.result.ok) {
                 const msg = response.result.testUpload
-                    ? 'Full pipeline OK (health + presign + R2 upload)'
+                    ? 'Full pipeline OK (health + presign + R2 upload + verify)'
                     : 'Cloud connection OK';
                 addLog(msg, 'success');
             } else {

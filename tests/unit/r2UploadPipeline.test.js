@@ -573,8 +573,8 @@ describe('end-to-end: source URL to R2 storage', () => {
     test('worker presign request body has all required fields', () => {
         const sourceUrl = 'https://imagine-public.x.ai/images/test.png';
         const finalPath = `GrokVault/${userId}/2026-03-01_Auto/test.png`;
-        const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(finalPath, { keyPrefix, fallbackUserId: userId });
         const contentType = CloudSync.detectContentTypeFromUrl(sourceUrl);
+        const objectKey = CloudSync.buildMediaObjectKeyForUpload({ keyPrefix, userId, sourceUrl, finalPath, contentType });
         const contentLength = 1024 * 100; // 100KB
 
         // This is what requestPresignedUrl sends to the worker
@@ -582,6 +582,8 @@ describe('end-to-end: source URL to R2 storage', () => {
 
         expect(typeof presignBody.objectKey).toBe('string');
         expect(presignBody.objectKey.startsWith(`${keyPrefix}/users/`)).toBe(true);
+        expect(presignBody.objectKey).toContain('/media/by-asset/');
+        expect(presignBody.objectKey).not.toContain('/2026-03-01_Auto/');
         expect(typeof presignBody.contentType).toBe('string');
         expect(presignBody.contentType).not.toBe('');
         expect(typeof presignBody.contentLength).toBe('number');
@@ -686,6 +688,7 @@ describe('upload stage error wrapping', () => {
         expect(CloudSync.UPLOAD_STAGES.mediaFetch).toBe('media-fetch');
         expect(CloudSync.UPLOAD_STAGES.presign).toBe('presign');
         expect(CloudSync.UPLOAD_STAGES.r2Put).toBe('r2-put');
+        expect(CloudSync.UPLOAD_STAGES.r2Verify).toBe('r2-verify');
         expect(CloudSync.UPLOAD_STAGES.healthCheck).toBe('health-check');
         expect(CloudSync.UPLOAD_STAGES.testUpload).toBe('test-upload');
     });
