@@ -84,6 +84,7 @@ describe('cloudSyncUtils', () => {
             mediaFetch: 'media-fetch',
             presign: 'presign',
             r2Put: 'r2-put',
+            r2Verify: 'r2-verify',
             healthCheck: 'health-check',
             testUpload: 'test-upload'
         });
@@ -165,6 +166,18 @@ describe('cloudSyncUtils', () => {
         expect(identity.kind).toBe('content_hash');
         expect(identity.assetId).toBe(`sha256_${'a'.repeat(64)}`);
         expect(identity.sourceUrlHash).toMatch(/^url_[a-f0-9]{8}$/);
+    });
+
+    test('uses the media UUID, not the user UUID, for assets.grok.com generated video URLs', () => {
+        const identity = CloudSyncUtils.resolveMediaAssetIdentity({
+            sourceUrl: 'https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/22222222-2222-4222-8222-222222222222/generated_video.mp4?token=secret',
+            finalPath: 'GrokVault/user_1/2026-03-01_Auto/generated_video.mp4',
+            contentType: 'video/mp4',
+            contentSha256: 'b'.repeat(64)
+        });
+
+        expect(identity.kind).toBe('stable_media_id');
+        expect(identity.assetId).toBe('media_22222222-2222-4222-8222-222222222222');
     });
 
     test('media dedupe key is stable across date-folder reruns for same media UUID', () => {

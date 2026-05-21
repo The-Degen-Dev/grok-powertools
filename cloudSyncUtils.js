@@ -5,6 +5,7 @@
     const WORKERS_DEV_SUFFIX = '.workers.dev';
     const WORKERS_DEV_LABEL_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
     const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    const UUID_GLOBAL_REGEX = new RegExp(UUID_REGEX.source, 'gi');
     const GENERIC_MEDIA_STEMS = new Set([
         'generated',
         'generated_image',
@@ -222,10 +223,12 @@
 
     function extractStableMediaId(value) {
         const segments = getPathSegments(value);
+        const matches = [];
         for (const segment of segments) {
-            const match = segment.match(UUID_REGEX);
-            if (match) return match[0].toLowerCase();
+            const segmentMatches = segment.match(UUID_GLOBAL_REGEX);
+            if (segmentMatches) matches.push(...segmentMatches);
         }
+        if (matches.length > 0) return matches[matches.length - 1].toLowerCase();
 
         const { stem } = getFilePartsFromPath(value);
         const safeStem = sanitizeFileStem(stem || '');
@@ -365,6 +368,7 @@
         mediaFetch: 'media-fetch',
         presign: 'presign',
         r2Put: 'r2-put',
+        r2Verify: 'r2-verify',
         healthCheck: 'health-check',
         testUpload: 'test-upload'
     };
