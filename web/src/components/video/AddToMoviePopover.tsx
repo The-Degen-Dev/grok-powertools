@@ -24,9 +24,13 @@ export default function AddToMoviePopover({ open, onClose, item }: AddToMoviePop
   useEffect(() => {
     if (open) {
       getAllMovies().then(setMovies);
-      setShowNewInput(false);
-      setNewMovieName("");
+      const id = window.setTimeout(() => {
+        setShowNewInput(false);
+        setNewMovieName("");
+      }, 0);
+      return () => window.clearTimeout(id);
     }
+    return undefined;
   }, [open]);
 
   async function addToMovie(movieId: string, movieName: string) {

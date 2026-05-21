@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { Download, Loader2, Square, CheckCircle } from "lucide-react";
+import { Download, Square, CheckCircle } from "lucide-react";
 import Button from "@/components/ui/Button";
 
 interface ExportMovieButtonProps {
@@ -25,6 +25,14 @@ export default function ExportMovieButton({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  const stopRecording = useCallback(() => {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
+    }
+    onStopPlayback();
+    clearInterval(progressIntervalRef.current);
+  }, [onStopPlayback]);
 
   const startRecording = useCallback(() => {
     const canvas = canvasRef.current;
@@ -80,15 +88,7 @@ export default function ExportMovieButton({
 
     // Start movie playback from beginning
     onStartPlayback();
-  }, [canvasRef, totalDuration, onStartPlayback, blobUrl]);
-
-  const stopRecording = useCallback(() => {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
-    }
-    onStopPlayback();
-    clearInterval(progressIntervalRef.current);
-  }, [onStopPlayback]);
+  }, [canvasRef, totalDuration, onStartPlayback, blobUrl, stopRecording]);
 
   const handleDownload = useCallback(() => {
     if (!blobUrl) return;

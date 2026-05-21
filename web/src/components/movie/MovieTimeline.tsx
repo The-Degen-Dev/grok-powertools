@@ -30,15 +30,19 @@ export default function MovieTimeline({
     onSeek(ratio * totalDuration);
   }
 
-  // Build simple clip blocks (proportional width)
-  let accumulated = 0;
-  const blocks = clips.map((clip) => {
+  const timeline = clips.reduce(
+    (acc, clip) => {
     const dur = clip.type === "title" ? (clip.titleDuration ?? 3) : 5; // approximate for video
-    const start = accumulated;
-    accumulated += dur;
-    return { clip, start, dur };
-  });
-  const total = accumulated || 1;
+      const start = acc.total;
+      return {
+        total: acc.total + dur,
+        blocks: [...acc.blocks, { clip, start, dur }],
+      };
+    },
+    { total: 0, blocks: [] as Array<{ clip: MovieClip; start: number; dur: number }> }
+  );
+  const blocks = timeline.blocks;
+  const total = timeline.total || 1;
 
   const playheadPct = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
 

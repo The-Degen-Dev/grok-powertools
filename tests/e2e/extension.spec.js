@@ -14,6 +14,7 @@ test.describe('Grok Power Tools E2E', () => {
         await page.addInitScript(() => {
             window.chrome = {
                 runtime: {
+                    getURL: (resourcePath) => resourcePath,
                     sendMessage: () => { },
                     onMessage: { addListener: () => { } }
                 },

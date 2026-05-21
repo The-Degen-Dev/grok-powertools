@@ -35,7 +35,8 @@ export default function PromptLibrary({ open, onClose }: PromptLibraryProps) {
   }, [query, toast]);
 
   useEffect(() => {
-    if (open) loadPrompts();
+    if (!open) return;
+    void Promise.resolve().then(loadPrompts);
   }, [open, loadPrompts]);
 
   async function handleAdd() {

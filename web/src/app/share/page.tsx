@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Suspense } from "react";
 import { Play, ExternalLink, Download, Info, Copy, X } from "lucide-react";
 import { decodeShareData } from "@/lib/share";
@@ -10,25 +11,20 @@ import FullscreenViewer from "@/components/video/FullscreenViewer";
 
 function SharePageContent() {
   const searchParams = useSearchParams();
-  const [name, setName] = useState<string>("");
-  const [items, setItems] = useState<VideoItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
-  useEffect(() => {
+  const share = useMemo(() => {
     const data = searchParams.get("d");
     if (!data) {
-      setError("No share data found in URL.");
-      return;
+      return { name: "", items: [] as VideoItem[], error: "No share data found in URL." };
     }
     const decoded = decodeShareData(data);
     if (!decoded) {
-      setError("Invalid or corrupted share link.");
-      return;
+      return { name: "", items: [] as VideoItem[], error: "Invalid or corrupted share link." };
     }
-    setName(decoded.name);
-    setItems(decoded.items);
+    return { name: decoded.name, items: decoded.items, error: null };
   }, [searchParams]);
+  const { name, items, error } = share;
 
   if (error) {
     return (
@@ -38,12 +34,12 @@ function SharePageContent() {
             Invalid Share Link
           </h1>
           <p className="mt-2 text-neutral-500">{error}</p>
-          <a
+          <Link
             href="/"
             className="mt-4 inline-block rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
           >
             Go to Collections
-          </a>
+          </Link>
         </div>
       </div>
     );

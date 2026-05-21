@@ -4,13 +4,15 @@ import type {
     Env,
     MetadataKind,
     MetadataSnapshotRequest,
+    ObjectVerifyRequest,
+    ObjectVerifyResponse,
     PresignRequest,
     PresignResponse,
     SyncPushRequest,
     SyncPullResponse
 } from './types';
 import { verifyJWT, extractBearerToken } from './auth';
-import { upsertEntity, getEntitiesSince, ensureUser } from './db';
+import { upsertEntity, getEntitiesSince, ensureUser, upsertR2DedupeIndex, upsertMetadataSnapshotIndex } from './db';
 
 const SERVICE_NAME = 'grok-r2-backup';
 const PRESIGN_EXPIRY_SECONDS = 3600;
@@ -31,7 +33,7 @@ const ALLOWED_METADATA_KINDS = new Set<MetadataKind>([
 function corsHeaders(): HeadersInit {
     return {
         'access-control-allow-origin': '*',
-        'access-control-allow-methods': 'GET,POST,OPTIONS',
+        'access-control-allow-methods': 'GET,HEAD,POST,OPTIONS',
         'access-control-allow-headers': 'Content-Type,x-gpt-api-key,Authorization'
     };
 }
@@ -78,14 +80,62 @@ function isValidObjectKey(objectKey: string, keyPrefix: string): boolean {
     return objectKey.startsWith(`${keyPrefix}/users/`);
 }
 
-function metadataObjectKey(keyPrefix: string, userId: string, kind: MetadataKind, timestamp: number): string {
+function metadataObjectKey(keyPrefix: string, userId: string, kind: MetadataKind): string {
     const safeUserId = sanitizePathSegment(userId);
 
     if (kind === 'backfillManifest') {
-        return `${keyPrefix}/users/${safeUserId}/metadata/backfill-manifest.${timestamp}.json`;
+        return `${keyPrefix}/users/${safeUserId}/metadata/backfill-manifest.latest.json`;
     }
 
     return `${keyPrefix}/users/${safeUserId}/metadata/${METADATA_FILENAMES[kind]}`;
+}
+
+function metadataVersionObjectKey(keyPrefix: string, userId: string, kind: MetadataKind, contentHash: string): string | null {
+    if (kind !== 'backfillManifest') return null;
+    const safeUserId = sanitizePathSegment(userId);
+    return `${keyPrefix}/users/${safeUserId}/metadata/backfill-manifest.${contentHash}.json`;
+}
+
+function stableJson(value: unknown): string {
+    return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(sortJson);
+    if (!value || typeof value !== 'object') return value;
+    const record = value as Record<string, unknown>;
+    return Object.keys(record)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, key) => {
+            acc[key] = sortJson(record[key]);
+            return acc;
+        }, {});
+}
+
+async function sha256Hex(value: string): Promise<string> {
+    const bytes = new TextEncoder().encode(value);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+function getCustomMetadataValue(object: R2Object | null, keys: string[]): string | undefined {
+    if (!object) return undefined;
+    const metadata = object.customMetadata || {};
+    for (const key of keys) {
+        if (metadata[key] !== undefined) return metadata[key];
+        const lowerKey = key.toLowerCase();
+        if (metadata[lowerKey] !== undefined) return metadata[lowerKey];
+    }
+    return undefined;
+}
+
+function userIdFromObjectKey(objectKey: string): string {
+    const parts = objectKey.split('/');
+    const usersIndex = parts.indexOf('users');
+    if (usersIndex >= 0 && parts[usersIndex + 1]) return sanitizePathSegment(parts[usersIndex + 1]);
+    return 'unknown';
 }
 
 async function parseJson<T>(request: Request): Promise<T> {
@@ -170,6 +220,139 @@ async function handlePresign(request: Request, env: Env): Promise<Response> {
     }
 }
 
+function compareExpectedObject(object: R2Object | null, payload: ObjectVerifyRequest): ObjectVerifyResponse {
+    const sha256 = getCustomMetadataValue(object, ['sha256', 'content-sha256', 'contentSha256']);
+    const assetId = getCustomMetadataValue(object, ['asset-id', 'assetId']);
+    const sourceUrlHash = getCustomMetadataValue(object, ['source-url-hash', 'sourceUrlHash']);
+    const contentType = object?.httpMetadata?.contentType;
+    const sizeBytes = object?.size;
+    const mismatches: string[] = [];
+    const expectedSize = Number(payload.expectedSizeBytes);
+    const hasExpectedSize = Number.isFinite(expectedSize) && expectedSize >= 0;
+    const expectedSha256 = String(payload.expectedSha256 || '').trim().toLowerCase();
+    const expectedContentType = String(payload.expectedContentType || '').trim().toLowerCase();
+
+    const matches = {
+        sizeBytes: hasExpectedSize && object ? sizeBytes === expectedSize : null,
+        sha256: expectedSha256 && object ? sha256 === expectedSha256 : null,
+        contentType: expectedContentType && object && contentType ? contentType.toLowerCase() === expectedContentType : null
+    };
+
+    if (matches.sizeBytes === false) mismatches.push('sizeBytes');
+    if (matches.sha256 === false) mismatches.push('sha256');
+    if (matches.contentType === false) mismatches.push('contentType');
+
+    const requiredMatches = [matches.sizeBytes, matches.sha256].filter((value): value is boolean => value !== null);
+    const verified = !!object && requiredMatches.length > 0 && requiredMatches.every(Boolean) && mismatches.length === 0;
+
+    return {
+        ok: true,
+        exists: !!object,
+        verified,
+        objectKey: payload.objectKey,
+        object: object
+            ? {
+                sizeBytes,
+                etag: object.etag,
+                uploadedAt: object.uploaded?.toISOString(),
+                contentType,
+                sha256,
+                assetId,
+                sourceUrlHash
+            }
+            : undefined,
+        matches,
+        mismatches
+    };
+}
+
+async function handleObjectVerify(request: Request, env: Env): Promise<Response> {
+    let payload: ObjectVerifyRequest;
+    try {
+        payload = await parseJson<ObjectVerifyRequest>(request);
+    } catch (e) {
+        return errorResponse('Invalid JSON payload.', 400);
+    }
+
+    const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+    if (!isValidObjectKey(payload.objectKey, keyPrefix)) {
+        return errorResponse('Invalid object key.', 400);
+    }
+
+    try {
+        const object = await env.R2_BUCKET.head(payload.objectKey);
+        const result = compareExpectedObject(object, payload);
+        if (object && payload.assetId) {
+            try {
+                await upsertR2DedupeIndex(env.DB, {
+                    userId: userIdFromObjectKey(payload.objectKey),
+                    assetId: payload.assetId,
+                    canonicalObjectKey: payload.objectKey,
+                    sourceUrlHash: payload.sourceUrlHash,
+                    contentSha256: result.object?.sha256 || payload.expectedSha256,
+                    mediaType: result.object?.contentType?.startsWith('video/') ? 'video' : (result.object?.contentType?.startsWith('image/') ? 'image' : undefined),
+                    uploadStatus: result.verified ? 'verified' : 'uploaded'
+                });
+            } catch (e) {
+                console.warn('Failed to update R2 dedupe index', e);
+            }
+        }
+        return jsonResponse(result, 200);
+    } catch (e) {
+        const message = e instanceof Error ? e.message : 'Failed to verify object';
+        return errorResponse(message, 500);
+    }
+}
+
+async function handleObjectHead(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const objectKey = url.searchParams.get('objectKey') || '';
+    const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+
+    if (!isValidObjectKey(objectKey, keyPrefix)) {
+        return new Response(null, { status: 400, headers: corsHeaders() });
+    }
+
+    try {
+        const object = await env.R2_BUCKET.head(objectKey);
+        if (!object) return new Response(null, { status: 404, headers: corsHeaders() });
+        const headers = new Headers(corsHeaders());
+        if (object.httpMetadata?.contentType) headers.set('content-type', object.httpMetadata.contentType);
+        headers.set('x-r2-size-bytes', String(object.size));
+        headers.set('x-r2-etag', object.etag);
+        const sha256 = getCustomMetadataValue(object, ['sha256', 'content-sha256', 'contentSha256']);
+        if (sha256) headers.set('x-r2-sha256', sha256);
+        return new Response(null, { status: 200, headers });
+    } catch (e) {
+        return new Response(null, { status: 500, headers: corsHeaders() });
+    }
+}
+
+async function handleDiagnostics(env: Env): Promise<Response> {
+    const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+    return jsonResponse({
+        ok: true,
+        service: SERVICE_NAME,
+        now: new Date().toISOString(),
+        keyPrefix,
+        r2: {
+            bucketConfigured: !!env.R2_BUCKET_NAME,
+            bindingPresent: !!env.R2_BUCKET
+        },
+        d1: {
+            bindingPresent: !!env.DB
+        },
+        endpoints: [
+            'GET /health',
+            'POST /v1/presign',
+            'POST /v1/objects/verify',
+            'HEAD /v1/objects/verify?objectKey=...',
+            'POST /v1/metadata/snapshot',
+            'GET /v1/diagnostics'
+        ]
+    });
+}
+
 async function handleMetadataSnapshot(request: Request, env: Env): Promise<Response> {
     let payload: MetadataSnapshotRequest;
     try {
@@ -197,16 +380,75 @@ async function handleMetadataSnapshot(request: Request, env: Env): Promise<Respo
     }
 
     const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
-    const objectKey = metadataObjectKey(keyPrefix, userId, kind, Date.now());
+    const objectKey = metadataObjectKey(keyPrefix, userId, kind);
+    const canonicalPayload = {
+        schemaVersion: payload.payload.schemaVersion,
+        data: payload.payload.data
+    };
+    const contentHash = await sha256Hex(stableJson(canonicalPayload));
+    const now = new Date().toISOString();
+    const snapshotPayload = {
+        ...payload.payload,
+        updatedAt: payload.payload.updatedAt || now,
+        contentHash
+    };
 
     try {
-        await env.R2_BUCKET.put(objectKey, JSON.stringify(payload.payload, null, 2), {
+        const latestObject = await env.R2_BUCKET.head(objectKey);
+        const latestHash = getCustomMetadataValue(latestObject, ['content-sha256', 'contentSha256']);
+        if (latestHash === contentHash) {
+            await upsertMetadataSnapshotIndex(env.DB, {
+                userId: sanitizePathSegment(userId),
+                kind,
+                contentHash,
+                objectKey
+            }).catch((e) => console.warn('Failed to update metadata snapshot index', e));
+            return jsonResponse({
+                ok: true,
+                objectKey,
+                contentHash,
+                skipped: true,
+                reason: 'unchanged'
+            }, 200);
+        }
+
+        const body = JSON.stringify(snapshotPayload, null, 2);
+        await env.R2_BUCKET.put(objectKey, body, {
             httpMetadata: {
                 contentType: 'application/json; charset=utf-8'
+            },
+            customMetadata: {
+                kind,
+                contentSha256: contentHash,
+                userId: sanitizePathSegment(userId)
             }
         });
+        await upsertMetadataSnapshotIndex(env.DB, {
+            userId: sanitizePathSegment(userId),
+            kind,
+            contentHash,
+            objectKey
+        }).catch((e) => console.warn('Failed to update metadata snapshot index', e));
 
-        return jsonResponse({ ok: true, objectKey }, 200);
+        const versionKey = metadataVersionObjectKey(keyPrefix, userId, kind, contentHash);
+        if (versionKey) {
+            const existingVersion = await env.R2_BUCKET.head(versionKey);
+            if (!existingVersion) {
+                await env.R2_BUCKET.put(versionKey, body, {
+                    httpMetadata: {
+                        contentType: 'application/json; charset=utf-8'
+                    },
+                    customMetadata: {
+                        kind,
+                        contentSha256: contentHash,
+                        userId: sanitizePathSegment(userId),
+                        versioned: 'true'
+                    }
+                });
+            }
+        }
+
+        return jsonResponse({ ok: true, objectKey, versionObjectKey: versionKey, contentHash, skipped: false }, 200);
     } catch (e) {
         const message = e instanceof Error ? e.message : 'Failed to write snapshot';
         return errorResponse(message, 500);
@@ -338,6 +580,18 @@ export default {
 
         if (request.method === 'POST' && url.pathname === '/v1/presign') {
             return handlePresign(request, env);
+        }
+
+        if (request.method === 'HEAD' && url.pathname === '/v1/objects/verify') {
+            return handleObjectHead(request, env);
+        }
+
+        if (request.method === 'POST' && url.pathname === '/v1/objects/verify') {
+            return handleObjectVerify(request, env);
+        }
+
+        if (request.method === 'GET' && url.pathname === '/v1/diagnostics') {
+            return handleDiagnostics(env);
         }
 
         if (request.method === 'POST' && url.pathname === '/v1/metadata/snapshot') {

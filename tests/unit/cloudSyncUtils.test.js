@@ -124,11 +124,61 @@ describe('cloudSyncUtils', () => {
         const backfillKey = CloudSyncUtils.buildMetadataObjectKey({
             keyPrefix: 'grok-powertools/v1',
             userId: 'user_1',
-            kind: 'backfillManifest',
-            timestamp: 1234567890
+            kind: 'backfillManifest'
         });
 
         expect(latestKey).toBe('grok-powertools/v1/users/user_1/metadata/saved-prompts.latest.json');
-        expect(backfillKey).toBe('grok-powertools/v1/users/user_1/metadata/backfill-manifest.1234567890.json');
+        expect(backfillKey).toBe('grok-powertools/v1/users/user_1/metadata/backfill-manifest.latest.json');
+    });
+
+    test('builds versioned backfill manifest keys by content hash only when requested', () => {
+        const key = CloudSyncUtils.buildMetadataObjectKey({
+            keyPrefix: 'grok-powertools/v1',
+            userId: 'user_1',
+            kind: 'backfillManifest',
+            versionHash: 'abc123'
+        });
+
+        expect(key).toBe('grok-powertools/v1/users/user_1/metadata/backfill-manifest.abc123.json');
+    });
+
+    test('builds canonical by-asset media keys from Grok media UUIDs', () => {
+        const objectKey = CloudSyncUtils.buildMediaObjectKeyForUpload({
+            keyPrefix: 'grok-powertools/v1',
+            userId: 'user_1',
+            sourceUrl: 'https://imagine-public.x.ai/images/550e8400-e29b-41d4-a716-446655440000.png?token=secret',
+            finalPath: 'GrokVault/user_1/2026-03-01_Auto/550e8400-e29b-41d4-a716-446655440000.png',
+            contentType: 'image/png'
+        });
+
+        expect(objectKey).toBe('grok-powertools/v1/users/user_1/media/by-asset/media_550e8400-e29b-41d4-a716-446655440000.png');
+    });
+
+    test('uses content hash canonical identity when no stable media id exists', () => {
+        const identity = CloudSyncUtils.resolveMediaAssetIdentity({
+            sourceUrl: 'https://assets.grok.com/users/private/generated/generated_video.mp4?token=secret',
+            finalPath: 'GrokVault/user_1/2026-03-01_Auto/generated_video.mp4',
+            contentType: 'video/mp4',
+            contentSha256: 'a'.repeat(64)
+        });
+
+        expect(identity.kind).toBe('content_hash');
+        expect(identity.assetId).toBe(`sha256_${'a'.repeat(64)}`);
+        expect(identity.sourceUrlHash).toMatch(/^url_[a-f0-9]{8}$/);
+    });
+
+    test('media dedupe key is stable across date-folder reruns for same media UUID', () => {
+        const first = CloudSyncUtils.buildMediaDedupeKey({
+            userId: 'user_1',
+            sourceUrl: 'https://imagine-public.x.ai/images/550e8400-e29b-41d4-a716-446655440000.png',
+            finalPath: 'GrokVault/user_1/2026-03-01_Auto/550e8400-e29b-41d4-a716-446655440000.png'
+        });
+        const second = CloudSyncUtils.buildMediaDedupeKey({
+            userId: 'user_1',
+            sourceUrl: 'https://imagine-public.x.ai/images/550e8400-e29b-41d4-a716-446655440000.png?cache=tomorrow',
+            finalPath: 'GrokVault/user_1/2026-03-02_Auto/550e8400-e29b-41d4-a716-446655440000.png'
+        });
+
+        expect(second).toBe(first);
     });
 });

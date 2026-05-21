@@ -70,3 +70,34 @@ export interface MetadataSnapshotRequest {
         updatedAt?: string;
     };
 }
+
+export interface ObjectVerifyRequest {
+    objectKey: string;
+    expectedSizeBytes?: number;
+    expectedSha256?: string;
+    expectedContentType?: string;
+    assetId?: string;
+    sourceUrlHash?: string;
+}
+
+export interface ObjectVerifyResponse {
+    ok: true;
+    exists: boolean;
+    verified: boolean;
+    objectKey: string;
+    object?: {
+        sizeBytes?: number;
+        etag?: string;
+        uploadedAt?: string;
+        contentType?: string;
+        sha256?: string;
+        assetId?: string;
+        sourceUrlHash?: string;
+    };
+    matches: {
+        sizeBytes: boolean | null;
+        sha256: boolean | null;
+        contentType: boolean | null;
+    };
+    mismatches: string[];
+}

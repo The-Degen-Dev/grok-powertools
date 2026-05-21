@@ -61,6 +61,8 @@
         <li><strong>Plan self-review timing:</strong> The written plan's self-review task was run after execution rather than before it, because it was discovered during final wrap-up. The useful checks still ran: spec-section coverage, placeholder scan, and audit-path consistency.</li>
         <li><strong>Visual one-pager synthesis:</strong> The one-pager uses diagrams, status tiles, CSS charts, and audit-safe screenshots to communicate the audit's complexity without introducing new claims beyond the committed report, manifest, and final reconciliation files.</li>
         <li><strong>Full reliability rebuild spec:</strong> The 2026-05-21 rebuild spec interprets "everything running perfectly" as a complete proof chain across Grok, extension state, local Vault, R2, and the web operations console. It intentionally does not frame the work as an MVP.</li>
+        <li><strong>R2 dedupe as a release gate:</strong> The rebuild spec treats R2 idempotency as a first-class acceptance criterion because current media key generation can be date/run based and the backup path can bypass the local processed-ID duplicate guard.</li>
+        <li><strong>Cloudflare account authority:</strong> The user confirmed the Greymaker Cloudflare account currently logged into Chrome is the authority for <code>grok-gallery-001</code>. The exact login email is not copied into this durable artifact. The follow-up implementation pass switched Wrangler OAuth to that account and verified the account ID, bucket, D1 database, Worker deploy target, and R2 system-object write/read path.</li>
       </ul>
     </section>
 
@@ -87,6 +89,7 @@
       <ul>
         <li><strong>Commit strategy:</strong> The plan and this notes file are safe to commit. Raw screenshots and logs may contain private Grok/account/media data, so the execution plan treats final staging of audit evidence as a review decision rather than an automatic bulk commit.</li>
         <li><strong>R2 verification path:</strong> Direct Wrangler R2 listing is currently blocked by account/auth state, so the plan prioritizes extension-configured Worker/API-key evidence and records a precise blocker if no valid R2 path is available.</li>
+        <li><strong>Canonical objects versus date folders:</strong> The spec recommends canonical by-asset media blobs with manifest/date views instead of storing duplicate media under each run date. This keeps Saved browsing possible without letting repeated scans inflate R2 storage.</li>
         <li><strong>Baseline interpretation:</strong> Automated checks are treated as audit evidence, not blockers to live testing, unless they reveal a failure that prevents extension, web app, or Worker runtime from launching.</li>
         <li><strong>Worker health boundary:</strong> The local Worker <code>/health</code> endpoint passing is enough to continue browser and integration audit work, but it is not treated as proof that R2 backup objects exist or are complete.</li>
         <li><strong>Screenshot completeness versus privacy:</strong> Task 5 preserves UI structure while obscuring media/prompt content. This sacrifices visual proof of the exact generated items in exchange for keeping audit artifacts commit-safe.</li>
@@ -110,12 +113,12 @@
         <li><strong>Evidence privacy:</strong> After the audit, confirm which screenshots/logs should be committed versus kept local only.</li>
         <li><strong>Cloud status access:</strong> Confirm whether a non-secret overlay status/export should be added so future audits can verify cloud mode, Worker host, queue count, and last test result without opening the extension popup.</li>
         <li><strong>Grok saved route:</strong> Confirm whether the product should target <code>/imagine</code> with observed Saved controls, <code>/imagine/saved</code>, or both as valid current Grok Saved entrypoints.</li>
-        <li><strong>Cloudflare account mapping:</strong> Confirm which Cloudflare account should own <code>grok-gallery-001</code> and whether the active Wrangler OAuth token should be refreshed or switched before object-level R2 verification.</li>
         <li><strong>Web product scope:</strong> Confirm whether the web app should remain a collection/editor companion or become the operating dashboard for Vault/R2/Grok audit health and live generation status.</li>
         <li><strong>Direct text-to-video scope:</strong> Confirm whether a separate direct text-to-video canary should be exercised in addition to the observed image-to-video flow.</li>
         <li><strong>Video control expectations:</strong> Confirm whether the product should surface duration/quality expectations when Grok turns a static image into a 10 second 480p result without a prompt entry step.</li>
         <li><strong>Download root expectation:</strong> Confirm whether native Grok downloads should be considered valid evidence when they land in the parent media folder, or whether every successful backup must land under <code>GrokVault</code>.</li>
         <li><strong>Cloud recovery controls:</strong> Confirm whether <code>Run Backfill</code> and <code>Retry Unsynced</code> should move into the page overlay or a web dashboard so operators can run them without the Chrome extension popup.</li>
+        <li><strong>R2 retention and migration:</strong> Confirm the retention window for versioned backfill/saved-list manifests, and whether the existing 30GB should be migrated into canonical by-asset keys or only deduped going forward.</li>
         <li><strong>Batch retry behavior:</strong> Confirm whether Prompted Batch should treat post-detail URL changes during retries as success candidates, hard failures, or a state that requires operator review.</li>
         <li><strong>Authoritative Saved source:</strong> Confirm whether Grok Saved should be reconciled through a stable export/API, a durable extension index, or visual scraping plus media URL identity.</li>
       </ul>
