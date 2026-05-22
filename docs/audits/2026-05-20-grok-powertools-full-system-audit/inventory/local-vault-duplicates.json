@@ -1,0 +1,64 @@
+{
+  "duplicateFileNames": [
+    {
+      "fileName": "de7b50f1-69d5-4f99-a048-780b0be72a2f.png",
+      "paths": [
+        "2025-12-19_Auto/de7b50f1-69d5-4f99-a048-780b0be72a2f.png",
+        "2025-12-20_Auto/de7b50f1-69d5-4f99-a048-780b0be72a2f.png"
+      ]
+    }
+  ],
+  "duplicateHashes": [
+    {
+      "sha256": "cdf859173138c1973b2ca6fe6c53aa3ca6c4675aee2ee7f78a11ac6c9455e92a",
+      "paths": [
+        "2025-12-19_Auto/de7b50f1-69d5-4f99-a048-780b0be72a2f.png",
+        "2025-12-20_Auto/de7b50f1-69d5-4f99-a048-780b0be72a2f.png"
+      ]
+    },
+    {
+      "sha256": "7089bd56b1b387cc3dfd9182d59fde6e90d0227add87b6363b8672fbe1e4a3f1",
+      "paths": [
+        "2025-12-19_Auto/e6427d2c-f4a8-48b1-a5b6-408f7285f53f_hd (1).mp4",
+        "2025-12-19_Auto/e6427d2c-f4a8-48b1-a5b6-408f7285f53f_hd.mp4"
+      ]
+    },
+    {
+      "sha256": "c2dd7837e147945c403b7f8e282c1ad396ce4f9cd9f20074d6c83cc4137f1cf0",
+      "paths": [
+        "2025-12-20_Auto/0d66aea3-2884-401f-9e1a-e28c2197eec8.mp4",
+        "2025-12-20_Auto/572ea0e4-760b-475d-be9f-ca26698115f7.mp4"
+      ]
+    },
+    {
+      "sha256": "3fc31d1454453d8b061f8095c3914ea3da3d61c02ac86cbd2ab81d1cb10a22a6",
+      "paths": [
+        "2025-12-20_Auto/1aca74f9-0ee8-48be-8659-835c02731f48.mp4",
+        "2025-12-20_Auto/58e53c6e-30eb-4549-9012-d0e921f47c34.mp4",
+        "2025-12-20_Auto/af6b47e7-ca5e-429c-9974-8577d036dd07.mp4",
+        "2025-12-20_Auto/cf7db0b4-f04d-46bc-bba8-5ff0133e3bd9.mp4"
+      ]
+    },
+    {
+      "sha256": "861a9e92cfb42648582da3d2c8d5eb3545eafb1b196ed01c2ba8e674758d7a03",
+      "paths": [
+        "2025-12-20_Auto/5e889fee-17bb-4ae6-b025-f05dc2fe9c52.mp4",
+        "2025-12-20_Auto/61ed2f96-f7a6-47dd-83f1-34445935b0cc.mp4"
+      ]
+    },
+    {
+      "sha256": "e2a99109787e1aebfeeb13b7e41747ee3289bb3c71f457eb87bb1ec28e847948",
+      "paths": [
+        "2025-12-20_Auto/6d4d4e07-bcf6-4f92-b2f0-a61ddf4b7ad3.mp4",
+        "2025-12-20_Auto/a83964fb-e00f-451f-85db-5557a88e562f.mp4"
+      ]
+    },
+    {
+      "sha256": "93a8099b7024dbd014a133b655d57f22c3b6916f83ea07d4a33982249c92273e",
+      "paths": [
+        "2025-12-21_Auto/d41cbddf-6c32-4014-9be4-8db06e554fde.png",
+        "2025-12-21_Auto/fc195315-8e87-4411-81f3-e4fe9b18b270.png"
+      ]
+    }
+  ]
+}

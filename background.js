@@ -54,7 +54,7 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
 
             try {
                 return new URL(trimmed).origin;
-            } catch (e) {
+            } catch {
                 return trimmed.replace(/\/+$/, '');
             }
         },
@@ -72,7 +72,7 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
 
                 const labels = prefix.split('.');
                 return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
-            } catch (e) {
+            } catch {
                 return false;
             }
         },
@@ -90,6 +90,53 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             if (clean.endsWith('.jpg') || clean.endsWith('.jpeg')) return 'image/jpeg';
             if (clean.endsWith('.webp')) return 'image/webp';
             return 'image/png';
+        },
+        normalizeSourceUrlForIdentity(value) {
+            return String(value || '').split('#')[0].split('?')[0];
+        },
+        buildSourceUrlHash(value) {
+            let hash = 0x811c9dc5;
+            const text = this.normalizeSourceUrlForIdentity(value);
+            for (let i = 0; i < text.length; i++) {
+                hash ^= text.charCodeAt(i);
+                hash = Math.imul(hash, 0x01000193);
+            }
+            return `url_${(hash >>> 0).toString(16).padStart(8, '0')}`;
+        },
+        resolveMediaExtension(params) {
+            const contentType = String((params && params.contentType) || '').toLowerCase();
+            if (contentType.includes('mp4')) return 'mp4';
+            const source = String((params && (params.sourceUrl || params.finalPath)) || '').split('?')[0].toLowerCase();
+            if (source.endsWith('.mp4')) return 'mp4';
+            if (source.endsWith('.jpg') || source.endsWith('.jpeg')) return 'jpg';
+            if (source.endsWith('.webp')) return 'webp';
+            return 'png';
+        },
+        resolveMediaAssetIdentity(params) {
+            const sourceUrlHash = this.buildSourceUrlHash(params && params.sourceUrl);
+            const source = `${(params && params.sourceUrl) || ''}/${(params && params.finalPath) || ''}`;
+            const uuidMatch = source.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+            const contentSha256 = String((params && params.contentSha256) || '').toLowerCase();
+            const assetId = uuidMatch
+                ? `media_${uuidMatch[0].toLowerCase()}`
+                : (/^[a-f0-9]{64}$/.test(contentSha256) ? `sha256_${contentSha256}` : sourceUrlHash);
+            return {
+                kind: uuidMatch ? 'stable_media_id' : (/^[a-f0-9]{64}$/.test(contentSha256) ? 'content_hash' : 'source_url_hash'),
+                assetId,
+                sourceUrlHash,
+                mediaType: this.detectContentTypeFromUrl(source).startsWith('video/') ? 'video' : 'image'
+            };
+        },
+        buildMediaObjectKeyForUpload(params) {
+            const keyPrefix = String((params && params.keyPrefix) || 'grok-powertools/v1').replace(/^\/+/, '').replace(/\/+$/, '');
+            const userId = String((params && (params.userId || params.fallbackUserId)) || 'Shared_Account').replace(/[^a-zA-Z0-9._-]/g, '_');
+            const identity = this.resolveMediaAssetIdentity(params || {});
+            const extension = this.resolveMediaExtension(params || {});
+            return `${keyPrefix}/users/${userId}/media/by-asset/${identity.assetId}.${extension}`;
+        },
+        buildMediaDedupeKey(params) {
+            const userId = String((params && (params.userId || params.fallbackUserId)) || 'Shared_Account').replace(/[^a-zA-Z0-9._-]/g, '_');
+            return `media:${userId}:${this.resolveMediaAssetIdentity(params || {}).assetId}`;
         },
         getRetryDelayMinutes(attemptNumber) {
             const index = Math.min(this.RETRY_SCHEDULE_MINUTES.length - 1, Math.max(1, attemptNumber) - 1);
@@ -127,7 +174,12 @@ let cloudSyncState = {
     processing: false,
     lastTestAt: null,
     lastTestResult: null,
-    lastTestMessage: null
+    lastTestMessage: null,
+    r2BytesVerifiedExisting: 0,
+    r2BytesUploadedNew: 0,
+    r2DuplicateUploadsSkipped: 0,
+    r2ConflictsDetected: 0,
+    r2MetadataSnapshotsSkippedUnchanged: 0
 };
 let cloudMetadataTimer = null;
 let pendingMetadataKinds = new Set();
@@ -248,12 +300,22 @@ async function testCloudConnection(configOverride) {
     // Stage 2: Presign test
     const testObjectKey = CloudSync.buildTestUploadObjectKey(baseConfig.keyPrefix);
     const testBlob = new Blob(['upload-pipeline-test'], { type: 'text/plain' });
+    const testSha256 = await sha256Blob(testBlob);
+    const testDescriptor = {
+        objectKey: testObjectKey,
+        contentType: 'text/plain',
+        assetId: 'system_upload_test',
+        sourceUrlHash: 'system_upload_test',
+        r2Metadata: sanitizeR2Metadata({
+            sha256: testSha256,
+            'asset-id': 'system_upload_test',
+            'source-url-hash': 'system_upload_test',
+            'asset-identity-kind': 'system-test'
+        })
+    };
     let presigned;
     try {
-        presigned = await requestPresignedUrl(baseConfig, {
-            objectKey: testObjectKey,
-            contentType: 'text/plain'
-        }, testBlob.size);
+        presigned = await requestPresignedUrl(baseConfig, testDescriptor, testBlob.size);
     } catch (e) {
         throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
     }
@@ -275,9 +337,26 @@ async function testCloudConnection(configOverride) {
         throw new Error(`[${CloudSync.UPLOAD_STAGES.testUpload}] ${e.message}`);
     }
 
+    // Stage 4: Worker/R2 verify test
+    let verifyResult;
+    try {
+        verifyResult = await verifyR2Object(baseConfig, testDescriptor, {
+            sizeBytes: testBlob.size,
+            sha256: testSha256,
+            contentType: 'text/plain'
+        });
+        if (!verifyResult.exists || !verifyResult.verified) {
+            throw new Error(`Object verification failed: ${JSON.stringify(verifyResult.mismatches || [])}`);
+        }
+    } catch (e) {
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Verify}] ${e.message}`);
+    }
+
     return {
         ok: true,
         testUpload: true,
+        testVerify: true,
+        objectKey: testObjectKey,
         service: healthData.service,
         now: healthData.now
     };
@@ -343,6 +422,18 @@ async function enqueueCloudItem(queueItem, dedupeKey) {
             existing.updatedAt = Date.now();
             existing.attempts = 0;
             existing.lastError = null;
+        } else if (queueItem.type === 'media') {
+            existing.sourceUrl = queueItem.sourceUrl || existing.sourceUrl;
+            existing.finalPath = queueItem.finalPath || existing.finalPath;
+            existing.objectKey = queueItem.objectKey || existing.objectKey;
+            existing.assetId = queueItem.assetId || existing.assetId;
+            existing.sourceUrlHash = queueItem.sourceUrlHash || existing.sourceUrlHash;
+            existing.assetIdentityKind = queueItem.assetIdentityKind || existing.assetIdentityKind;
+            existing.contentType = queueItem.contentType || existing.contentType;
+            existing.promptText = queueItem.promptText || existing.promptText || '';
+            existing.updatedAt = Date.now();
+            existing.attempts = 0;
+            existing.lastError = null;
         }
     } else {
         cloudSyncQueue.push({
@@ -363,9 +454,17 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
     const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
     const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
 
-    const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(finalPath, {
+    const objectKey = CloudSync.buildMediaObjectKeyForUpload({
         keyPrefix: config.keyPrefix,
-        fallbackUserId: activeUserId
+        fallbackUserId: activeUserId,
+        sourceUrl,
+        finalPath,
+        contentType: CloudSync.detectContentTypeFromUrl(sourceUrl)
+    });
+    const identity = CloudSync.resolveMediaAssetIdentity({
+        sourceUrl,
+        finalPath,
+        contentType: CloudSync.detectContentTypeFromUrl(sourceUrl)
     });
 
     const queueItem = {
@@ -374,13 +473,19 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
         sourceUrl,
         finalPath,
         objectKey,
+        assetId: identity.assetId,
+        sourceUrlHash: identity.sourceUrlHash,
+        assetIdentityKind: identity.kind,
         contentType: CloudSync.detectContentTypeFromUrl(sourceUrl),
         promptText: promptText || ''
     };
 
-    // Dedup by source URL (not objectKey which includes date folder)
-    const cleanSource = sourceUrl.split('?')[0];
-    await enqueueCloudItem(queueItem, `media:${cleanSource}`);
+    await enqueueCloudItem(queueItem, CloudSync.buildMediaDedupeKey({
+        fallbackUserId: activeUserId,
+        sourceUrl,
+        finalPath,
+        contentType: queueItem.contentType
+    }));
     try {
         await processCloudQueue('media-enqueued');
     } catch (e) {
@@ -410,16 +515,104 @@ async function enqueueMetadataSnapshot(kind, userId, payload) {
     await enqueueCloudItem(queueItem, `metadata:${userId}:${kind}`);
 }
 
+function toHex(buffer) {
+    return Array.from(new Uint8Array(buffer))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+async function sha256Blob(blob) {
+    const buffer = await blob.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return toHex(digest);
+}
+
+function sanitizeR2Metadata(metadata = {}) {
+    const clean = {};
+    for (const [key, value] of Object.entries(metadata)) {
+        if (value === undefined || value === null || value === '') continue;
+        const safeKey = String(key).toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 64);
+        if (!safeKey) continue;
+        clean[safeKey] = String(value).slice(0, 1024);
+    }
+    return clean;
+}
+
+function buildUploadDescriptor(config, params) {
+    const identity = CloudSync.resolveMediaAssetIdentity(params);
+    const objectKey = CloudSync.buildMediaObjectKeyForUpload({
+        ...params,
+        keyPrefix: config.keyPrefix,
+        userId: params.userId
+    });
+    const extension = CloudSync.resolveMediaExtension(params);
+    const extensionVersion = chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : 'unknown';
+
+    return {
+        ...params,
+        objectKey,
+        assetId: identity.assetId,
+        assetIdentityKind: identity.kind,
+        sourceUrlHash: identity.sourceUrlHash,
+        mediaType: identity.mediaType,
+        extension,
+        r2Metadata: sanitizeR2Metadata({
+            'asset-id': identity.assetId,
+            'asset-identity-kind': identity.kind,
+            'source-url-hash': identity.sourceUrlHash,
+            sha256: params.contentSha256,
+            'media-type': identity.mediaType,
+            'extension-version': extensionVersion,
+            'captured-at': new Date().toISOString()
+        })
+    };
+}
+
+function buildConflictObjectKey(config, descriptor) {
+    const keyPrefix = CloudSync.sanitizeKeyPrefix ? CloudSync.sanitizeKeyPrefix(config.keyPrefix) : (config.keyPrefix || 'grok-powertools/v1');
+    const userId = String(descriptor.userId || 'Shared_Account').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const assetId = String(descriptor.assetId || 'unknown_asset').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const timestamp = new Date().toISOString().replace(/[^0-9TZ]/g, '');
+    return `${keyPrefix}/users/${userId}/media/conflicts/${assetId}/${timestamp}.${descriptor.extension || 'bin'}`;
+}
+
+async function verifyR2Object(config, descriptor, expected = {}) {
+    const response = await fetch(`${config.workerUrl}/v1/objects/verify`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-gpt-api-key': config.apiKey
+        },
+        body: JSON.stringify({
+            objectKey: descriptor.objectKey,
+            expectedSizeBytes: expected.sizeBytes,
+            expectedSha256: expected.sha256,
+            expectedContentType: expected.contentType,
+            assetId: descriptor.assetId,
+            sourceUrlHash: descriptor.sourceUrlHash
+        })
+    });
+
+    if (!response.ok) {
+        const detail = await response.text().catch(() => 'Unknown verify failure');
+        throw new Error(`R2 verify failed (${response.status}): ${detail}`);
+    }
+
+    return response.json();
+}
+
 async function requestPresignedUrl(config, queueItem, contentLength) {
     const body = {
         objectKey: queueItem.objectKey,
         contentType: queueItem.contentType || 'application/octet-stream',
         contentLength
     };
-    // Attach prompt as R2 custom metadata (max 1KB)
-    if (queueItem.promptText) {
-        body.metadata = { prompt: queueItem.promptText.substring(0, 1024) };
+
+    const metadata = sanitizeR2Metadata(queueItem.r2Metadata || {});
+    if (Object.keys(metadata).length > 0) {
+        body.metadata = metadata;
     }
+
     const response = await fetch(`${config.workerUrl}/v1/presign`, {
         method: 'POST',
         headers: {
@@ -437,16 +630,146 @@ async function requestPresignedUrl(config, queueItem, contentLength) {
     return response.json();
 }
 
+async function uploadPromptSidecar(config, descriptor) {
+    if (!descriptor.promptText) return;
+
+    try {
+        const sidecarKey = descriptor.objectKey + '.prompt.json';
+        const sidecar = JSON.stringify({
+            prompt: descriptor.promptText,
+            mediaKey: descriptor.objectKey,
+            assetId: descriptor.assetId,
+            uploadedAt: new Date().toISOString()
+        });
+        const sidecarItem = {
+            objectKey: sidecarKey,
+            contentType: 'application/json',
+            r2Metadata: sanitizeR2Metadata({
+                'asset-id': descriptor.assetId,
+                'sidecar-kind': 'prompt'
+            })
+        };
+        const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, new Blob([sidecar]).size);
+        await fetch(sidecarPresigned.uploadUrl, {
+            method: 'PUT',
+            headers: { ...(sidecarPresigned.headers || {}), 'Content-Type': 'application/json' },
+            body: sidecar
+        });
+        console.log('[CloudQueue] Prompt sidecar uploaded:', sidecarKey);
+    } catch (e) {
+        console.warn('[CloudQueue] Sidecar prompt upload failed (non-fatal):', e.message);
+    }
+}
+
+async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
+    const contentType = uploadCandidate.contentType || blob.type || 'application/octet-stream';
+    const contentSha256 = await sha256Blob(blob);
+    let descriptor = buildUploadDescriptor(config, {
+        ...uploadCandidate,
+        contentType,
+        contentSha256
+    });
+
+    let preflight;
+    try {
+        preflight = await verifyR2Object(config, descriptor, {
+            sizeBytes: blob.size,
+            sha256: contentSha256,
+            contentType
+        });
+    } catch (e) {
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
+    }
+
+    if (preflight.exists && preflight.verified) {
+        cloudSyncState.r2BytesVerifiedExisting += blob.size;
+        cloudSyncState.r2DuplicateUploadsSkipped += 1;
+        await persistCloudState();
+        log(`Cloud upload skipped, already present: ${descriptor.objectKey}`, 'success');
+        return {
+            status: 'already_present',
+            objectKey: descriptor.objectKey,
+            assetId: descriptor.assetId,
+            contentSha256,
+            bytes: blob.size
+        };
+    }
+
+    if (preflight.exists && !preflight.verified) {
+        const canonicalKey = descriptor.objectKey;
+        descriptor = {
+            ...descriptor,
+            objectKey: buildConflictObjectKey(config, descriptor),
+            conflictOfObjectKey: canonicalKey,
+            r2Metadata: sanitizeR2Metadata({
+                ...descriptor.r2Metadata,
+                'conflict-of': canonicalKey
+            })
+        };
+        cloudSyncState.r2ConflictsDetected += 1;
+        await persistCloudState();
+        log(`R2 canonical object conflict detected; writing conflict object for ${canonicalKey}`, 'warning');
+    }
+
+    let presigned;
+    try {
+        presigned = await requestPresignedUrl(config, descriptor, blob.size);
+    } catch (e) {
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
+    }
+
+    try {
+        const uploadHeaders = { ...(presigned.headers || {}) };
+        if (!uploadHeaders['Content-Type'] && !uploadHeaders['content-type']) {
+            uploadHeaders['Content-Type'] = contentType;
+        }
+
+        const uploadResponse = await fetch(presigned.uploadUrl, {
+            method: presigned.method || 'PUT',
+            headers: uploadHeaders,
+            body: blob
+        });
+
+        if (!uploadResponse.ok) {
+            const detail = await uploadResponse.text().catch(() => 'Unknown upload error');
+            throw new Error(`HTTP ${uploadResponse.status}: ${detail}`);
+        }
+    } catch (e) {
+        if (e.message.startsWith(`[${CloudSync.UPLOAD_STAGES.r2Put}]`)) throw e;
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] ${e.message}`);
+    }
+
+    const postUpload = await verifyR2Object(config, descriptor, {
+        sizeBytes: blob.size,
+        sha256: contentSha256,
+        contentType
+    });
+    if (!postUpload.exists || !postUpload.verified) {
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] R2 post-upload verification failed for ${descriptor.objectKey}`);
+    }
+
+    cloudSyncState.r2BytesUploadedNew += blob.size;
+    await persistCloudState();
+    await uploadPromptSidecar(config, descriptor);
+
+    return {
+        status: descriptor.conflictOfObjectKey ? 'conflict_uploaded' : 'uploaded',
+        objectKey: descriptor.objectKey,
+        assetId: descriptor.assetId,
+        contentSha256,
+        bytes: blob.size,
+        conflictOfObjectKey: descriptor.conflictOfObjectKey
+    };
+}
+
 async function uploadMediaQueueItem(config, queueItem) {
     let blob;
     let contentType;
 
-    // Stage 1: Fetch media blob from source URL
     try {
         console.log('[CloudQueue] Fetching media blob from:', queueItem.sourceUrl.slice(0, 100));
         const fetchOpts = { method: 'GET' };
 
-        // For assets.grok.com URLs, manually attach cookies (service worker has no cookie jar)
         if (queueItem.sourceUrl.includes('assets.grok.com')) {
             try {
                 const cookies = await chrome.cookies.getAll({ domain: '.grok.com' });
@@ -474,57 +797,10 @@ async function uploadMediaQueueItem(config, queueItem) {
         throw new Error(`[${CloudSync.UPLOAD_STAGES.mediaFetch}] ${e.message}${hint}`);
     }
 
-    // Stage 2: Get presigned upload URL from worker
-    let presigned;
-    try {
-        presigned = await requestPresignedUrl(config, queueItem, blob.size);
-    } catch (e) {
-        throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
-    }
-
-    // Stage 3: Upload blob to R2
-    try {
-        const uploadHeaders = { ...(presigned.headers || {}) };
-        if (!uploadHeaders['Content-Type'] && !uploadHeaders['content-type']) {
-            uploadHeaders['Content-Type'] = contentType;
-        }
-
-        const uploadResponse = await fetch(presigned.uploadUrl, {
-            method: presigned.method || 'PUT',
-            headers: uploadHeaders,
-            body: blob
-        });
-
-        if (!uploadResponse.ok) {
-            const detail = await uploadResponse.text().catch(() => 'Unknown upload error');
-            throw new Error(`HTTP ${uploadResponse.status}: ${detail}`);
-        }
-    } catch (e) {
-        if (e.message.startsWith(`[${CloudSync.UPLOAD_STAGES.r2Put}]`)) throw e;
-        throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] ${e.message}`);
-    }
-
-    // Stage 4: Upload sidecar prompt JSON (non-blocking)
-    if (queueItem.promptText) {
-        try {
-            const sidecarKey = queueItem.objectKey + '.prompt.json';
-            const sidecar = JSON.stringify({
-                prompt: queueItem.promptText,
-                mediaKey: queueItem.objectKey,
-                uploadedAt: new Date().toISOString()
-            });
-            const sidecarItem = { objectKey: sidecarKey, contentType: 'application/json' };
-            const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, new Blob([sidecar]).size);
-            await fetch(sidecarPresigned.uploadUrl, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: sidecar
-            });
-            console.log('[CloudQueue] Prompt sidecar uploaded:', sidecarKey);
-        } catch (e) {
-            console.warn('[CloudQueue] Sidecar prompt upload failed (non-fatal):', e.message);
-        }
-    }
+    return uploadBlobWithR2Dedupe(config, {
+        ...queueItem,
+        contentType
+    }, blob);
 }
 
 async function uploadMetadataQueueItem(config, queueItem) {
@@ -545,6 +821,8 @@ async function uploadMetadataQueueItem(config, queueItem) {
         const detail = await response.text().catch(() => 'Unknown metadata snapshot error');
         throw new Error(`Metadata snapshot failed (${response.status}): ${detail}`);
     }
+
+    return response.json();
 }
 
 async function processCloudQueue(reason = 'auto', options = {}) {
@@ -587,11 +865,20 @@ async function processCloudQueue(reason = 'auto', options = {}) {
             try {
                 if (item.type === 'media') {
                     console.log('[CloudQueue] Processing media item:', item.objectKey, '| sourceUrl:', item.sourceUrl?.slice(0, 80));
-                    await uploadMediaQueueItem(config, item);
-                    log(`Cloud upload complete: ${item.objectKey}`, 'success');
+                    const result = await uploadMediaQueueItem(config, item);
+                    if (result.status === 'already_present') {
+                        log(`Cloud upload already present: ${result.objectKey}`, 'success');
+                    } else {
+                        log(`Cloud upload complete: ${result.objectKey}`, result.status === 'conflict_uploaded' ? 'warning' : 'success');
+                    }
                 } else if (item.type === 'metadata') {
-                    await uploadMetadataQueueItem(config, item);
-                    log(`Cloud metadata synced: ${item.kind}`, 'success');
+                    const result = await uploadMetadataQueueItem(config, item);
+                    if (result && result.skipped) {
+                        cloudSyncState.r2MetadataSnapshotsSkippedUnchanged += 1;
+                        log(`Cloud metadata unchanged: ${item.kind}`, 'info');
+                    } else {
+                        log(`Cloud metadata synced: ${item.kind}`, 'success');
+                    }
                 } else {
                     throw new Error(`Unknown queue item type: ${item.type}`);
                 }
@@ -974,44 +1261,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
 
                 try {
-                    const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
-                    const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
-                    const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(finalPath, {
-                        keyPrefix: config.keyPrefix,
-                        fallbackUserId: activeUserId
-                    });
-
                     // Convert data URL back to blob
                     const resp = await fetch(request.blobDataUrl);
                     const blob = await resp.blob();
                     const contentType = blob.type || (extHint === 'mp4' ? 'video/mp4' : 'image/png');
+                    const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
+                    const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
 
-                    console.log('[CloudQueue] Direct blob upload:', objectKey, blob.size, 'bytes');
+                    const result = await uploadBlobWithR2Dedupe(config, {
+                        sourceUrl: request.url,
+                        finalPath,
+                        userId: activeUserId,
+                        contentType,
+                        promptText: request.promptText || ''
+                    }, blob);
 
-                    // Get presigned URL and upload
-                    const queueItem = { objectKey, contentType, promptText: request.promptText || '' };
-                    const presigned = await requestPresignedUrl(config, queueItem, blob.size);
-                    const uploadResp = await fetch(presigned.uploadUrl, {
-                        method: presigned.method || 'PUT',
-                        headers: { 'Content-Type': contentType },
-                        body: blob
+                    console.log('[CloudQueue] Direct blob upload result:', result.status, result.objectKey, blob.size, 'bytes');
+
+                    sendResponse({
+                        status: result.status === 'already_present' ? 'already_present' : 'uploaded',
+                        objectKey: result.objectKey,
+                        assetId: result.assetId
                     });
-
-                    if (!uploadResp.ok) throw new Error(`R2 PUT failed: ${uploadResp.status}`);
-                    log(`Cloud upload complete: ${objectKey}`, 'success');
-
-                    // Upload sidecar prompt if available
-                    if (request.promptText) {
-                        try {
-                            const sidecarKey = objectKey + '.prompt.json';
-                            const sidecar = JSON.stringify({ prompt: request.promptText, mediaKey: objectKey, uploadedAt: new Date().toISOString() });
-                            const sidecarItem = { objectKey: sidecarKey, contentType: 'application/json' };
-                            const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, new Blob([sidecar]).size);
-                            await fetch(sidecarPresigned.uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: sidecar });
-                        } catch (e) { console.warn('[CloudQueue] Sidecar failed:', e.message); }
-                    }
-
-                    sendResponse({ status: 'queued' });
                 } catch (e) {
                     console.error('[CloudQueue] Direct blob upload failed:', e.message);
                     sendResponse({ status: 'error', error: e.message });
@@ -1134,7 +1405,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 if (result.ok) {
                     clearCloudError();
                     const successMsg = result.testUpload
-                        ? 'Full pipeline OK (health + presign + R2 upload)'
+                        ? 'Full pipeline OK (health + presign + R2 upload + verify)'
                         : 'Cloud connection OK';
                     setCloudTestTelemetry('success', successMsg);
                 } else if (result.error) {
@@ -1352,13 +1623,8 @@ chrome.downloads.onChanged.addListener(async (delta) => {
 
         console.log('[CloudQueue] File read:', fileData.size, 'bytes, uploading to R2...');
 
-        // Build R2 object key
         const config = await getCloudConfig();
         const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
-        const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(pending.finalPath, {
-            keyPrefix: config.keyPrefix,
-            fallbackUserId: userInfo.activeGrokUserId || 'Shared_Account'
-        });
 
         // Convert base64 back to blob
         const binaryStr = atob(fileData.base64);
@@ -1366,16 +1632,18 @@ chrome.downloads.onChanged.addListener(async (delta) => {
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
         const blob = new Blob([bytes], { type: fileData.type });
 
-        // Get presigned URL and upload
-        const presigned = await requestPresignedUrl(config, { objectKey, contentType: fileData.type }, blob.size);
-        const uploadResp = await fetch(presigned.uploadUrl, {
-            method: presigned.method || 'PUT',
-            headers: { 'Content-Type': fileData.type },
-            body: blob
-        });
-        if (!uploadResp.ok) throw new Error(`R2 PUT failed: ${uploadResp.status}`);
+        const result = await uploadBlobWithR2Dedupe(config, {
+            sourceUrl: pending.url,
+            finalPath: pending.finalPath,
+            userId: userInfo.activeGrokUserId || 'Shared_Account',
+            contentType: fileData.type
+        }, blob);
 
-        log(`Cloud upload complete: ${objectKey}`, 'success');
+        log(`Cloud upload ${result.status === 'already_present' ? 'already present' : 'complete'}: ${result.objectKey}`, result.status === 'conflict_uploaded' ? 'warning' : 'success');
+
+        if (pending.deleteAfter && result.status === 'already_present') {
+            console.log('[CloudQueue] Existing R2 object verified before local cleanup:', result.objectKey);
+        }
 
         // Delete local file if Cloud Only mode
         if (pending.deleteAfter) {

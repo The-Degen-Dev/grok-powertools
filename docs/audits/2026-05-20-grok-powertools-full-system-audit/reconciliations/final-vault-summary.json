@@ -1,0 +1,49 @@
+{
+  "vaultPath": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault",
+  "generatedAt": "2026-05-20T02:57:55.252Z",
+  "totalFiles": 1853,
+  "totalBytes": 1767268127,
+  "byExtension": {
+    "[noext]": 1,
+    "mp4": 774,
+    "png": 1077,
+    "jpeg": 1
+  },
+  "byDateFolder": {
+    "[root]": {
+      "count": 1,
+      "bytes": 10244,
+      "byExtension": {
+        "[noext]": 1
+      }
+    },
+    "2025-12-19_Auto": {
+      "count": 42,
+      "bytes": 24279133,
+      "byExtension": {
+        "mp4": 3,
+        "png": 39
+      }
+    },
+    "2025-12-20_Auto": {
+      "count": 1116,
+      "bytes": 1072088103,
+      "byExtension": {
+        "mp4": 500,
+        "png": 615,
+        "jpeg": 1
+      }
+    },
+    "2025-12-21_Auto": {
+      "count": 694,
+      "bytes": 670890647,
+      "byExtension": {
+        "png": 423,
+        "mp4": 271
+      }
+    }
+  },
+  "zeroByteFiles": [],
+  "duplicateFileNameCount": 1,
+  "duplicateHashCount": 7
+}

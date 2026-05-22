@@ -4,6 +4,17 @@
     const DEFAULT_KEY_PREFIX = 'grok-powertools/v1';
     const WORKERS_DEV_SUFFIX = '.workers.dev';
     const WORKERS_DEV_LABEL_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+    const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    const UUID_GLOBAL_REGEX = new RegExp(UUID_REGEX.source, 'gi');
+    const GENERIC_MEDIA_STEMS = new Set([
+        'generated',
+        'generated_image',
+        'generated_video',
+        'image',
+        'video',
+        'download',
+        'file'
+    ]);
     const CLOUD_MODES = {
         localOnly: 'local_only',
         cloudOnly: 'cloud_only',
@@ -48,7 +59,7 @@
         try {
             const parsed = new URL(trimmed);
             return parsed.origin;
-        } catch (e) {
+        } catch {
             return trimmed.replace(/\/+$/, '');
         }
     }
@@ -60,7 +71,7 @@
         let parsed;
         try {
             parsed = new URL(normalized);
-        } catch (e) {
+        } catch {
             return false;
         }
 
@@ -129,14 +140,187 @@
         });
     }
 
+    function normalizeSourceUrlForIdentity(sourceUrl) {
+        if (typeof sourceUrl !== 'string' || !sourceUrl.trim()) return '';
+        try {
+            const parsed = new URL(sourceUrl.trim());
+            parsed.hash = '';
+            parsed.search = '';
+            parsed.hostname = parsed.hostname.toLowerCase();
+            return parsed.toString();
+        } catch {
+            return sourceUrl.trim().split('#')[0].split('?')[0];
+        }
+    }
+
+    function stableStringHash(value) {
+        const text = String(value || '');
+        let hash = 0x811c9dc5;
+        for (let i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = Math.imul(hash, 0x01000193);
+        }
+        return (hash >>> 0).toString(16).padStart(8, '0');
+    }
+
+    function buildSourceUrlHash(sourceUrl) {
+        const normalized = normalizeSourceUrlForIdentity(sourceUrl);
+        return `url_${stableStringHash(normalized)}`;
+    }
+
+    function getPathSegments(value) {
+        if (typeof value !== 'string') return [];
+        let path = value;
+        try {
+            path = new URL(value).pathname;
+        } catch {
+            path = value.split('?')[0].split('#')[0];
+        }
+
+        return path
+            .split('/')
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+    }
+
+    function getFilePartsFromPath(value) {
+        const segments = getPathSegments(value);
+        const baseName = segments.length ? segments[segments.length - 1] : '';
+        const dotIndex = baseName.lastIndexOf('.');
+        const stem = dotIndex > 0 ? baseName.slice(0, dotIndex) : baseName;
+        const extension = dotIndex > 0 ? baseName.slice(dotIndex + 1) : '';
+        return {
+            baseName,
+            stem,
+            extension: sanitizeExtension(extension || 'png')
+        };
+    }
+
+    function extensionFromContentType(contentType) {
+        const value = String(contentType || '').toLowerCase();
+        if (value.includes('mp4')) return 'mp4';
+        if (value.includes('webm')) return 'webm';
+        if (value.includes('jpeg')) return 'jpg';
+        if (value.includes('jpg')) return 'jpg';
+        if (value.includes('webp')) return 'webp';
+        if (value.includes('gif')) return 'gif';
+        if (value.includes('png')) return 'png';
+        return '';
+    }
+
+    function resolveMediaExtension(params) {
+        const fromContentType = extensionFromContentType(params && params.contentType);
+        if (fromContentType) return fromContentType;
+
+        const sourceParts = getFilePartsFromPath(params && params.sourceUrl);
+        if (sourceParts.extension) return sourceParts.extension;
+
+        const finalParts = getFilePartsFromPath(params && params.finalPath);
+        if (finalParts.extension) return finalParts.extension;
+
+        return 'png';
+    }
+
+    function extractStableMediaId(value) {
+        const segments = getPathSegments(value);
+        const matches = [];
+        for (const segment of segments) {
+            const segmentMatches = segment.match(UUID_GLOBAL_REGEX);
+            if (segmentMatches) matches.push(...segmentMatches);
+        }
+        if (matches.length > 0) return matches[matches.length - 1].toLowerCase();
+
+        const { stem } = getFilePartsFromPath(value);
+        const safeStem = sanitizeFileStem(stem || '');
+        if (safeStem && safeStem.length >= 10 && !GENERIC_MEDIA_STEMS.has(safeStem.toLowerCase())) {
+            return safeStem;
+        }
+
+        return '';
+    }
+
+    function resolveMediaAssetIdentity(params) {
+        const sourceUrl = params && params.sourceUrl;
+        const finalPath = params && params.finalPath;
+        const mediaType = params && params.mediaType ? params.mediaType : detectMediaType(params && params.contentType, sourceUrl, finalPath);
+        const postId = params && params.postId;
+        const mediaIndex = Number.isFinite(params && params.mediaIndex) ? Math.max(0, Math.floor(params.mediaIndex)) : null;
+        const sourceUrlHash = buildSourceUrlHash(sourceUrl);
+
+        if (postId && mediaIndex !== null) {
+            return {
+                kind: 'grok_post_media',
+                assetId: sanitizeFileStem(`post_${postId}_${mediaIndex}_${mediaType}`),
+                sourceUrlHash,
+                mediaType
+            };
+        }
+
+        const stableMediaId = extractStableMediaId(sourceUrl) || extractStableMediaId(finalPath);
+        if (stableMediaId) {
+            return {
+                kind: 'stable_media_id',
+                assetId: sanitizeFileStem(`media_${stableMediaId}`),
+                sourceUrlHash,
+                mediaType
+            };
+        }
+
+        const contentSha256 = String((params && params.contentSha256) || '').trim().toLowerCase();
+        if (/^[a-f0-9]{64}$/.test(contentSha256)) {
+            return {
+                kind: 'content_hash',
+                assetId: `sha256_${contentSha256}`,
+                sourceUrlHash,
+                mediaType
+            };
+        }
+
+        return {
+            kind: 'source_url_hash',
+            assetId: sourceUrlHash,
+            sourceUrlHash,
+            mediaType
+        };
+    }
+
+    function buildCanonicalMediaObjectKey(params) {
+        const keyPrefix = sanitizeKeyPrefix(params && params.keyPrefix);
+        const userId = sanitizeUserId((params && params.userId) || 'Shared_Account');
+        const assetId = sanitizeFileStem((params && params.assetId) || 'unknown_asset');
+        const extension = sanitizeExtension((params && params.extension) || 'png');
+        return `${keyPrefix}/users/${userId}/media/by-asset/${assetId}.${extension}`;
+    }
+
+    function buildMediaObjectKeyForUpload(params) {
+        const userId = sanitizeUserId((params && (params.userId || params.fallbackUserId)) || 'Shared_Account');
+        const identity = resolveMediaAssetIdentity(params || {});
+        const extension = resolveMediaExtension(params || {});
+        return buildCanonicalMediaObjectKey({
+            keyPrefix: params && params.keyPrefix,
+            userId,
+            assetId: identity.assetId,
+            extension
+        });
+    }
+
+    function buildMediaDedupeKey(params) {
+        const userId = sanitizeUserId((params && (params.userId || params.fallbackUserId)) || 'Shared_Account');
+        const identity = resolveMediaAssetIdentity(params || {});
+        return `media:${userId}:${identity.assetId}`;
+    }
+
     function buildMetadataObjectKey(params) {
         const keyPrefix = sanitizeKeyPrefix(params.keyPrefix);
         const userId = sanitizeUserId(params.userId || 'Shared_Account');
         const kind = params.kind;
 
         if (kind === 'backfillManifest') {
-            const timestamp = typeof params.timestamp === 'number' ? params.timestamp : Date.now();
-            return `${keyPrefix}/users/${userId}/metadata/backfill-manifest.${timestamp}.json`;
+            if (params.versionHash) {
+                const versionHash = sanitizeFileStem(params.versionHash);
+                return `${keyPrefix}/users/${userId}/metadata/backfill-manifest.${versionHash}.json`;
+            }
+            return `${keyPrefix}/users/${userId}/metadata/backfill-manifest.latest.json`;
         }
 
         const filename = METADATA_KIND_TO_FILENAME[kind];
@@ -145,6 +329,13 @@
         }
 
         return `${keyPrefix}/users/${userId}/metadata/${filename}`;
+    }
+
+    function detectMediaType(contentType, sourceUrl, finalPath) {
+        const value = `${contentType || ''} ${sourceUrl || ''} ${finalPath || ''}`.toLowerCase();
+        if (value.includes('video/') || value.includes('.mp4') || value.includes('.webm')) return 'video';
+        if (value.includes('image/') || value.includes('.png') || value.includes('.jpg') || value.includes('.jpeg') || value.includes('.webp') || value.includes('.gif')) return 'image';
+        return 'unknown';
     }
 
     function getRetryDelayMinutes(attemptNumber) {
@@ -177,6 +368,7 @@
         mediaFetch: 'media-fetch',
         presign: 'presign',
         r2Put: 'r2-put',
+        r2Verify: 'r2-verify',
         healthCheck: 'health-check',
         testUpload: 'test-upload'
     };
@@ -189,7 +381,7 @@
             const parsed = new URL(url);
             if (parsed.protocol !== 'https:') return false;
             return KNOWN_MEDIA_HOSTS.includes(parsed.hostname.toLowerCase());
-        } catch (e) {
+        } catch {
             return false;
         }
     }
@@ -240,7 +432,16 @@
         normalizeCloudConfig,
         buildMediaObjectKey,
         buildMediaObjectKeyFromFinalPath,
+        buildCanonicalMediaObjectKey,
+        buildMediaObjectKeyForUpload,
+        buildMediaDedupeKey,
         buildMetadataObjectKey,
+        normalizeSourceUrlForIdentity,
+        buildSourceUrlHash,
+        extractStableMediaId,
+        resolveMediaAssetIdentity,
+        resolveMediaExtension,
+        detectMediaType,
         getRetryDelayMinutes,
         detectContentTypeFromUrl,
         isCloudEnabled,

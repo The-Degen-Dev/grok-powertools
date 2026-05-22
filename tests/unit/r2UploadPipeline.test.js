@@ -206,13 +206,12 @@ describe('buildMetadataObjectKey', () => {
         expect(key).toBe('grok-powertools/v1/users/user_abc/metadata/processed-ids.latest.json');
     });
 
-    test('backfillManifest uses timestamp in filename', () => {
+    test('backfillManifest uses latest filename by default', () => {
         const key = CloudSync.buildMetadataObjectKey({
             ...baseParams,
-            kind: 'backfillManifest',
-            timestamp: 1709300000000
+            kind: 'backfillManifest'
         });
-        expect(key).toBe('grok-powertools/v1/users/user_abc/metadata/backfill-manifest.1709300000000.json');
+        expect(key).toBe('grok-powertools/v1/users/user_abc/metadata/backfill-manifest.latest.json');
     });
 
     test('throws on unsupported kind', () => {
@@ -235,9 +234,9 @@ describe('buildMetadataObjectKey', () => {
         expect(key1).toBe(key2);
     });
 
-    test('backfillManifest keys differ by timestamp', () => {
-        const key1 = CloudSync.buildMetadataObjectKey({ ...baseParams, kind: 'backfillManifest', timestamp: 100 });
-        const key2 = CloudSync.buildMetadataObjectKey({ ...baseParams, kind: 'backfillManifest', timestamp: 200 });
+    test('backfillManifest version keys differ by content hash only when requested', () => {
+        const key1 = CloudSync.buildMetadataObjectKey({ ...baseParams, kind: 'backfillManifest', versionHash: 'hash_a' });
+        const key2 = CloudSync.buildMetadataObjectKey({ ...baseParams, kind: 'backfillManifest', versionHash: 'hash_b' });
         expect(key1).not.toBe(key2);
     });
 });
@@ -463,10 +462,10 @@ describe('end-to-end: source URL to R2 storage', () => {
         const sourceUrl = 'https://imagine-public.x.ai/images/550e8400-e29b-41d4-a716-446655440000.png?cache=1709300000';
         const finalPath = `GrokVault/${userId}/2026-03-01_Auto/550e8400-e29b-41d4-a716-446655440000.png`;
 
-        const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(finalPath, { keyPrefix, fallbackUserId: userId });
+        const objectKey = CloudSync.buildMediaObjectKeyForUpload({ keyPrefix, userId, sourceUrl, finalPath, contentType: 'image/png' });
         const contentType = CloudSync.detectContentTypeFromUrl(sourceUrl);
 
-        expect(objectKey).toBe(`${keyPrefix}/users/${userId}/media/2026-03-01_Auto/550e8400-e29b-41d4-a716-446655440000.png`);
+        expect(objectKey).toBe(`${keyPrefix}/users/${userId}/media/by-asset/media_550e8400-e29b-41d4-a716-446655440000.png`);
         expect(contentType).toBe('image/png');
 
         // Worker-side validation: key starts with keyPrefix/users/
@@ -480,10 +479,10 @@ describe('end-to-end: source URL to R2 storage', () => {
         const sourceUrl = 'https://imagine-public.x.ai/videos/abc12345-6789-0abc-def0-123456789012.mp4';
         const finalPath = `GrokVault/${userId}/2026-03-01_Auto/abc12345-6789-0abc-def0-123456789012.mp4`;
 
-        const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(finalPath, { keyPrefix, fallbackUserId: userId });
+        const objectKey = CloudSync.buildMediaObjectKeyForUpload({ keyPrefix, userId, sourceUrl, finalPath, contentType: 'video/mp4' });
         const contentType = CloudSync.detectContentTypeFromUrl(sourceUrl);
 
-        expect(objectKey).toBe(`${keyPrefix}/users/${userId}/media/2026-03-01_Auto/abc12345-6789-0abc-def0-123456789012.mp4`);
+        expect(objectKey).toBe(`${keyPrefix}/users/${userId}/media/by-asset/media_abc12345-6789-0abc-def0-123456789012.mp4`);
         expect(contentType).toBe('video/mp4');
     });
 
@@ -493,10 +492,13 @@ describe('end-to-end: source URL to R2 storage', () => {
         expect(contentType).toBe('image/jpeg');
     });
 
-    test('dedupeKey for media items uses media: prefix + full objectKey', () => {
-        const objectKey = `${keyPrefix}/users/${userId}/media/2026-03-01_Auto/file.png`;
-        const dedupeKey = `media:${objectKey}`;
-        expect(dedupeKey).toBe(`media:${keyPrefix}/users/${userId}/media/2026-03-01_Auto/file.png`);
+    test('dedupeKey for media items uses canonical asset identity, not date folder', () => {
+        const dedupeKey = CloudSync.buildMediaDedupeKey({
+            userId,
+            sourceUrl: 'https://imagine-public.x.ai/images/550e8400-e29b-41d4-a716-446655440000.png',
+            finalPath: `${userId}/2026-03-01_Auto/550e8400-e29b-41d4-a716-446655440000.png`
+        });
+        expect(dedupeKey).toBe(`media:${userId}:media_550e8400-e29b-41d4-a716-446655440000`);
     });
 
     test('dedupeKey for metadata items uses metadata: prefix + userId + kind', () => {
@@ -507,8 +509,9 @@ describe('end-to-end: source URL to R2 storage', () => {
     test('queue item for media has all required fields', () => {
         const sourceUrl = 'https://imagine-public.x.ai/images/test.png';
         const finalPath = `GrokVault/${userId}/2026-03-01_Auto/test.png`;
-        const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(finalPath, { keyPrefix, fallbackUserId: userId });
         const contentType = CloudSync.detectContentTypeFromUrl(sourceUrl);
+        const objectKey = CloudSync.buildMediaObjectKeyForUpload({ keyPrefix, userId, sourceUrl, finalPath, contentType });
+        const identity = CloudSync.resolveMediaAssetIdentity({ sourceUrl, finalPath, contentType });
 
         // This is the shape enqueueCloudMediaUpload creates
         const queueItem = {
@@ -517,6 +520,8 @@ describe('end-to-end: source URL to R2 storage', () => {
             sourceUrl,
             finalPath,
             objectKey,
+            assetId: identity.assetId,
+            sourceUrlHash: identity.sourceUrlHash,
             contentType
         };
 
@@ -532,7 +537,7 @@ describe('end-to-end: source URL to R2 storage', () => {
         // Fields added by enqueueCloudItem
         const enqueued = {
             ...queueItem,
-            dedupeKey: `media:${objectKey}`,
+            dedupeKey: CloudSync.buildMediaDedupeKey({ userId, sourceUrl, finalPath, contentType }),
             attempts: 0,
             createdAt: Date.now()
         };
@@ -568,8 +573,8 @@ describe('end-to-end: source URL to R2 storage', () => {
     test('worker presign request body has all required fields', () => {
         const sourceUrl = 'https://imagine-public.x.ai/images/test.png';
         const finalPath = `GrokVault/${userId}/2026-03-01_Auto/test.png`;
-        const objectKey = CloudSync.buildMediaObjectKeyFromFinalPath(finalPath, { keyPrefix, fallbackUserId: userId });
         const contentType = CloudSync.detectContentTypeFromUrl(sourceUrl);
+        const objectKey = CloudSync.buildMediaObjectKeyForUpload({ keyPrefix, userId, sourceUrl, finalPath, contentType });
         const contentLength = 1024 * 100; // 100KB
 
         // This is what requestPresignedUrl sends to the worker
@@ -577,6 +582,8 @@ describe('end-to-end: source URL to R2 storage', () => {
 
         expect(typeof presignBody.objectKey).toBe('string');
         expect(presignBody.objectKey.startsWith(`${keyPrefix}/users/`)).toBe(true);
+        expect(presignBody.objectKey).toContain('/media/by-asset/');
+        expect(presignBody.objectKey).not.toContain('/2026-03-01_Auto/');
         expect(typeof presignBody.contentType).toBe('string');
         expect(presignBody.contentType).not.toBe('');
         expect(typeof presignBody.contentLength).toBe('number');
@@ -681,6 +688,7 @@ describe('upload stage error wrapping', () => {
         expect(CloudSync.UPLOAD_STAGES.mediaFetch).toBe('media-fetch');
         expect(CloudSync.UPLOAD_STAGES.presign).toBe('presign');
         expect(CloudSync.UPLOAD_STAGES.r2Put).toBe('r2-put');
+        expect(CloudSync.UPLOAD_STAGES.r2Verify).toBe('r2-verify');
         expect(CloudSync.UPLOAD_STAGES.healthCheck).toBe('health-check');
         expect(CloudSync.UPLOAD_STAGES.testUpload).toBe('test-upload');
     });
@@ -778,8 +786,7 @@ describe('R2 key format matches worker isValidObjectKey requirements', () => {
         const key = CloudSync.buildMetadataObjectKey({
             keyPrefix,
             userId: 'user1',
-            kind: 'backfillManifest',
-            timestamp: Date.now()
+            kind: 'backfillManifest'
         });
         expect(isValidObjectKey(key)).toBe(true);
     });

@@ -1,0 +1,18 @@
+## git status --short --branch
+## HEAD (no branch)
+?? .superpowers/
+?? docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/baseline-git.txt
+
+## git rev-parse HEAD
+a4a50ccd300217d0c8409c8369b89fb842d7cdf8
+
+## git log --oneline --decorate -8
+a4a50cc (HEAD) docs: scaffold full system audit artifacts
+9b893a3 docs: add full system audit implementation plan
+0ad68f1 docs: add full system audit design
+4fd7671 docs: add quality repeat planning docs
+965cf7f (upstream/main, upstream/HEAD) fix(ext): stop button reliably halts R2 backup scraper
+42495b4 docs(ext): contributor readiness — HACKING.md, jest+lint fixes
+9e3c9c7 fix(ext): Prompted Batch uses correct Video mode + submit buttons
+b137313 fix(ext): activate video mode before submitting prompted batch
+## exit status: 0

@@ -1,0 +1,47 @@
+
+> chrome-extension-powertools@0.2.0 test:e2e
+> playwright test tests/e2e
+
+
+Running 2 tests using 2 workers
+
+  ✘  1 [chromium] › tests/e2e/extension.spec.js:56:5 › Grok Power Tools E2E › Overlay should render on the page (238ms)
+  ✘  2 [chromium] › tests/e2e/extension.spec.js:69:5 › Grok Power Tools E2E › Minimize button should work (239ms)
+
+
+  1) [chromium] › tests/e2e/extension.spec.js:56:5 › Grok Power Tools E2E › Overlay should render on the page 
+
+    Error: page.evaluate: TypeError: chrome.runtime.getURL is not a function
+        at injectPageWorldBridge (eval at evaluate (:302:30), <anonymous>:8:33)
+        at eval (eval at evaluate (:302:30), <anonymous>:16:3)
+        at eval (<anonymous>)
+        at UtilityScript.evaluate (<anonymous>:302:30)
+        at UtilityScript.<anonymous> (<anonymous>:1:44)
+        at injectPageWorldBridge (eval at evaluate (:302:30), <anonymous>:8:33)
+        at eval (eval at evaluate (:302:30), <anonymous>:16:3)
+        at UtilityScript.evaluate (<anonymous>:302:30)
+        at UtilityScript.<anonymous> (<anonymous>:1:44)
+        at /Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/tests/e2e/extension.spec.js:59:20
+
+    Error Context: test-results/extension-Grok-Power-Tools-31e22-y-should-render-on-the-page-chromium/error-context.md
+
+  2) [chromium] › tests/e2e/extension.spec.js:69:5 › Grok Power Tools E2E › Minimize button should work 
+
+    Error: page.evaluate: TypeError: chrome.runtime.getURL is not a function
+        at injectPageWorldBridge (eval at evaluate (:302:30), <anonymous>:8:33)
+        at eval (eval at evaluate (:302:30), <anonymous>:16:3)
+        at eval (<anonymous>)
+        at UtilityScript.evaluate (<anonymous>:302:30)
+        at UtilityScript.<anonymous> (<anonymous>:1:44)
+        at injectPageWorldBridge (eval at evaluate (:302:30), <anonymous>:8:33)
+        at eval (eval at evaluate (:302:30), <anonymous>:16:3)
+        at UtilityScript.evaluate (<anonymous>:302:30)
+        at UtilityScript.<anonymous> (<anonymous>:1:44)
+        at /Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/tests/e2e/extension.spec.js:70:20
+
+    Error Context: test-results/extension-Grok-Power-Tools-E2E-Minimize-button-should-work-chromium/error-context.md
+
+  2 failed
+    [chromium] › tests/e2e/extension.spec.js:56:5 › Grok Power Tools E2E › Overlay should render on the page 
+    [chromium] › tests/e2e/extension.spec.js:69:5 › Grok Power Tools E2E › Minimize button should work 
+## exit status: 1

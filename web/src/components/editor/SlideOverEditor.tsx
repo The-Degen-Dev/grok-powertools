@@ -28,11 +28,14 @@ export default function SlideOverEditor({
 
   // Reset state when video changes
   useEffect(() => {
-    setDuration(0);
-    setCurrentTime(0);
-    setTrimStart(0);
-    setTrimEnd(0);
-    setIsPlaying(false);
+    const id = window.setTimeout(() => {
+      setDuration(0);
+      setCurrentTime(0);
+      setTrimStart(0);
+      setTrimEnd(0);
+      setIsPlaying(false);
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [videoUrl]);
 
   const handleLoadedMetadata = useCallback(() => {

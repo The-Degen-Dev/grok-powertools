@@ -151,7 +151,7 @@ Metadata sync is debounced (~2 seconds) on local changes. Ensure backup mode is 
 Expected sequence in popup/log:
 
 - `Testing upload pipeline...`
-- `Full pipeline OK (health + presign + R2 upload)`
+- `Full pipeline OK (health + presign + R2 upload + verify)`
 - `Last Test: OK at ...`
 
 If you just reloaded the unpacked extension and still have existing `grok.com` tabs open, old content-script contexts may emit warnings like "Extension context refreshed/skipped ...". That warning is expected after reloads and does not indicate cloud auth failure. Close old Grok tabs and open a fresh `https://grok.com/imagine` tab.

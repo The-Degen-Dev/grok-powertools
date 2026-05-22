@@ -1,0 +1,350 @@
+{
+  "auditName": "Grok Power Tools full system reliability and functionality audit",
+  "auditDate": "2026-05-20",
+  "status": "complete",
+  "repo": {
+    "path": "/Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools",
+    "baselineCommit": "a4a50ccd300217d0c8409c8369b89fb842d7cdf8",
+    "evidenceGeneratedAfterCommit": "4dd1757a24804beada88c3fe02330c41d8801851",
+    "gitStatusShort": "Detached HEAD at 4dd1757 when Task 12 final reconciliation evidence was generated; pre-existing untracked .superpowers/ left untouched."
+  },
+  "targets": {
+    "localWebUrl": "http://localhost:3001",
+    "localWorkerUrl": "http://localhost:8787",
+    "chromeGrokUrl": "https://grok.com/imagine/saved",
+    "localVaultPath": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault"
+  },
+  "canaries": [
+    {
+      "type": "image",
+      "prompt": "AUDIT CANARY 2026-05-20 image: a clean product-style tabletop photo of a small chrome compass on a white desk, no text, square composition, neutral lighting.",
+      "status": "created",
+      "grokUrl": "https://grok.com/imagine/post/8f02896a-552f-4825-8803-670f09024a43",
+      "localPath": "",
+      "r2ObjectKey": ""
+    },
+    {
+      "type": "video",
+      "prompt": "AUDIT CANARY 2026-05-20 video: a five-second gentle camera push toward the small chrome compass on a white desk, no text, minimal motion, neutral lighting.",
+      "status": "created",
+      "grokUrl": "https://grok.com/imagine/post/595cb61b-d261-45ef-888f-bc4bd1fdb833",
+      "localPath": "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8f02896a-552f-4825-8803-670f09024a43.mp4",
+      "r2ObjectKey": ""
+    }
+  ],
+  "subsystems": {
+    "repo": "working_with_findings",
+    "extension": "overlay_visible_popup_live_blocked_static_source_preview",
+    "chromeGrok": "imagine_loaded_creation_canaries_created",
+    "localVault": "final_inventory_verified_no_canary_delta",
+    "cloudWorkerR2": "local_worker_running_direct_r2_blocked_auth_extension_test_not_exercised",
+    "grokSavedReconciliation": "not_proven_no_authoritative_saved_count",
+    "scraperRecovery": "scraper_start_stop_exercised_backfill_retry_blocked",
+    "batchQualityRepeat": "prompted_batch_failed_quality_repeat_passed",
+    "webApp": "routes_render_with_findings"
+  },
+  "blockers": [
+    {
+      "scope": "extension_popup_live_storage",
+      "status": "blocked",
+      "details": "Chrome automation blocked navigation to the live chrome-extension:// popup page by URL policy. Task 5 used source UI preview only and did not inspect live popup storage values."
+    },
+    {
+      "scope": "direct_wrangler_r2_access",
+      "status": "blocked",
+      "details": "Wrangler R2 listing is blocked by current Cloudflare OAuth/account state: account e8d3925cac56cc5a4927c16024531994 reports R2 disabled with code 10042; accounts ae55f67eccbee0bca65247faea6d5024 and ba5339fd86e87c226bdc306347636042 report authentication error code 10000."
+    },
+    {
+      "scope": "canary_r2_sync",
+      "status": "blocked",
+      "details": "Canary R2 sync was not run because live extension popup config access is still policy-blocked, so Worker URL/API key presence could not be verified without bypassing the browser policy."
+    },
+    {
+      "scope": "backfill_and_retry_unsynced",
+      "status": "blocked",
+      "details": "Run Backfill and Retry Unsynced were not run because those controls live only in the policy-blocked extension popup; the page overlay does not expose equivalent cloud recovery controls. This is an approved-automation access blocker, not an observed R2/config failure."
+    },
+    {
+      "scope": "prompted_batch_one_item",
+      "status": "failed",
+      "details": "A one-item safe Prompted Batch started in detail mode but stopped at 0/1 after 3/3 retries while navigating through post-detail states."
+    },
+    {
+      "scope": "final_saved_vault_r2_reconciliation",
+      "status": "blocked",
+      "details": "Final reconciliation cannot prove every Grok Saved item is present in local Vault and R2 because no authoritative Grok Saved export/count, live extension storage, or R2 object-level listing was available."
+    }
+  ],
+  "evidenceIndex": [
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/baseline-git.txt",
+      "command": "git status --short --branch; git rev-parse HEAD; git log --oneline --decorate -8",
+      "outcome": "exit 0; captured detached HEAD a4a50cc and pre-existing untracked .superpowers/."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/baseline-node.txt",
+      "command": "node -v; npm -v; cd cloud && npx wrangler --version",
+      "outcome": "exit 0; Node v20.18.1, npm 10.8.2, Wrangler 4.67.0."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-test-unit.txt",
+      "command": "npm run test:unit",
+      "outcome": "exit 0; 4 passed suites and 112 passed tests."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-lint.txt",
+      "command": "npm run lint",
+      "outcome": "exit 1; 2 parse errors in cloud/.wrangler/tmp generated files and 22 warnings elsewhere."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/root-test-e2e.txt",
+      "command": "npm run test:e2e",
+      "outcome": "exit 1; 2 Playwright tests failed because chrome.runtime.getURL is not a function."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/cloud-typecheck.txt",
+      "command": "cd cloud && npm run typecheck",
+      "outcome": "exit 0; tsc --noEmit passed."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-lint.txt",
+      "command": "cd web && npm run lint",
+      "outcome": "exit 1; 33 problems: 9 errors and 24 warnings."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-build.txt",
+      "command": "cd web && npm run build",
+      "outcome": "exit 0; Next build completed with the expected multiple-lockfile workspace-root warning."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-services.txt",
+      "command": "lsof -nP -iTCP:3001 -sTCP:LISTEN; lsof -nP -iTCP:8787 -sTCP:LISTEN; curl -sS -I http://localhost:3001; curl -sS http://localhost:8787/health",
+      "outcome": "exit 0 for captured probes; existing localhost listeners were present on ports 3001 and 8787, web HEAD returned HTTP/1.1 200 OK, and Worker /health returned ok:true."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/scripts/inventory-vault.mjs",
+      "command": "n/a",
+      "outcome": "Audit-local helper script that walks the local Vault, computes SHA-256 hashes, writes inventory artifacts, and summarizes prompt-root JSON files excluding node_modules."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-vault-inventory.txt",
+      "command": "node docs/audits/2026-05-20-grok-powertools-full-system-audit/scripts/inventory-vault.mjs 2>&1 | tee docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/local-vault-inventory.txt",
+      "outcome": "exit 0; printed summary for 1,853 local Vault files totaling 1,767,268,127 bytes."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/local-vault-summary.json",
+      "command": "generated by scripts/inventory-vault.mjs; validated with jq .",
+      "outcome": "Valid JSON summary: 1,077 png, 774 mp4, 1 jpeg, 1 no-extension root file, no zero-byte files, 1 duplicate filename group, and 7 duplicate hash groups."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/local-vault-files.csv",
+      "command": "generated by scripts/inventory-vault.mjs; validated with head -5",
+      "outcome": "CSV has one header and 1,853 file rows with relative path, filename, folder, extension, bytes, mtime, and SHA-256."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/local-vault-duplicates.json",
+      "command": "generated by scripts/inventory-vault.mjs; validated with jq .",
+      "outcome": "Valid JSON duplicate report with 1 duplicate filename group and 7 duplicate SHA-256 hash groups."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/prompt-json-summary.json",
+      "command": "generated by scripts/inventory-vault.mjs; validated with jq .",
+      "outcome": "Valid JSON prompt-root inventory: 36 JSON files excluding node_modules, 35 parseable and 1 unparseable. Credential-like filenames/paths and credential-key field names were redacted after review."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/chrome-grok-starting-state.md",
+      "command": "Chrome browser-client inspection of existing Grok Imagine tab plus static popup source preview",
+      "outcome": "Grok Imagine loaded with no login prompt at https://grok.com/imagine with saved/discovery controls, extension overlay present, and selector confidence recorded without writing prompt text or API key values. Authenticated state was not independently verified."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/chrome-grok-saved-start.png",
+      "command": "tab.screenshot followed by ImageMagick redaction of media and prompt regions",
+      "outcome": "Redacted Grok Imagine starting-state screenshot; live media and prompt text are intentionally obscured."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-overlay-start.png",
+      "command": "Chrome tab screenshot clipped to #grok-powertools-overlay",
+      "outcome": "Overlay crop shows Grok Power Tools controls with Prompted Batch queue exhausted status."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-popup-cloud-settings.png",
+      "command": "npx playwright screenshot --viewport-size=420,980 file:///Users/philipbankier/.codex/worktrees/0657/chrome-extension-powertools/popup.html",
+      "outcome": "Static source preview of popup cloud controls; not live extension storage evidence because chrome-extension:// popup access was policy-blocked."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/r2-access.md",
+      "command": "cd cloud && npx wrangler r2 bucket list with implicit account plus explicit account IDs e8d3925cac56cc5a4927c16024531994, ae55f67eccbee0bca65247faea6d5024, and ba5339fd86e87c226bdc306347636042",
+      "outcome": "Direct R2 bucket listing is blocked: implicit/default and explicit ae55f67eccbee0bca65247faea6d5024 return authentication error code 10000, explicit e8d3925cac56cc5a4927c16024531994 returns R2 disabled code 10042, and cloud/wrangler.toml account ba5339fd86e87c226bdc306347636042 returns authentication error code 10000. Local Cloudflare email/account labels were redacted."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/r2-evidence.json",
+      "command": "jq . docs/audits/2026-05-20-grok-powertools-full-system-audit/inventory/r2-evidence.json",
+      "outcome": "Structured R2 evidence records direct Wrangler access as blocked, extension cloud test as not exercised, and objectLevelEvidence as empty."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-cloud-test-result.png",
+      "command": "ImageMagick-generated blocker card",
+      "outcome": "Not a live screenshot; records that extension cloud test was not run because live popup config access was policy-blocked."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/web-smoke.md",
+      "command": "/usr/bin/curl -sS -I for /, /collections, /edit, /movie, /share plus Playwright Chromium route screenshots and runtime notes",
+      "outcome": "Routes render nonblank UI. /collections returns a 307 redirect to /. Browser capture found repeated /api/auth/session 500 errors and a jsdelivr Satoshi font 404."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-dashboard.png",
+      "command": "Playwright Chromium screenshot after dismissing first-run onboarding",
+      "outcome": "Dashboard empty state renders with New Collection and Load Examples actions."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-dashboard-onboarding.png",
+      "command": "Playwright Chromium screenshot before dismissing first-run onboarding",
+      "outcome": "First-run onboarding modal is visible and blocks the dashboard until skipped or completed."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-collections.png",
+      "command": "Playwright Chromium screenshot for /collections",
+      "outcome": "/collections redirects to / and shows the dashboard empty state."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-edit.png",
+      "command": "Playwright Chromium screenshot for /edit",
+      "outcome": "Clip Editor empty/no-video shell renders."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-movie.png",
+      "command": "Playwright Chromium screenshot for /movie",
+      "outcome": "Movie Maker empty state renders."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/web-share.png",
+      "command": "Playwright Chromium screenshot for /share",
+      "outcome": "Share route renders Invalid Share Link for a URL without share data."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/pre-canary-vault-count.txt",
+      "command": "find '/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault' -type f | wc -l",
+      "outcome": "Pre-canary local Vault count was 1,853 files before live creation/download work."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/grok-canaries.md",
+      "command": "Chrome browser-client live Grok image and image-to-video creation canaries",
+      "outcome": "Image canary created at https://grok.com/imagine/post/8f02896a-552f-4825-8803-670f09024a43; video canary created at https://grok.com/imagine/post/595cb61b-d261-45ef-888f-bc4bd1fdb833."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-image-canary-submitted.png",
+      "command": "Chrome screenshot crop of the live Grok image canary composer/submission state",
+      "outcome": "Submission crop records the canary image flow after Grok accepted the prompt and cleared the composer."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-image-canary-result.png",
+      "command": "Chrome screenshot crop of live Grok canary image post",
+      "outcome": "Clean result crop shows the generated chrome compass image; source image was 960x960."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-video-canary-submitted.png",
+      "command": "Chrome screenshot crop during live Grok image-to-video generation",
+      "outcome": "Submission/progress crop shows Grok generating the canary video with a progress indicator and Cancel control."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/grok-video-canary-result.png",
+      "command": "Chrome screenshot crop of live Grok canary video post",
+      "outcome": "Clean result crop shows the generated compass video at 480p with a 10 second duration."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/download-backup-flow.md",
+      "command": "Chrome browser-client live Grok post-detail Download clicks plus local filesystem search",
+      "outcome": "Native video download succeeded outside GrokVault; image download produced no observed file; GrokVault count did not change."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/pre-download-vault-summary.json",
+      "command": "node docs/audits/2026-05-20-grok-powertools-full-system-audit/scripts/inventory-vault.mjs",
+      "outcome": "Pre-download GrokVault snapshot: 1,853 files and 1,767,268,127 bytes."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/post-download-vault-summary.json",
+      "command": "node docs/audits/2026-05-20-grok-powertools-full-system-audit/scripts/inventory-vault.mjs",
+      "outcome": "Post-download GrokVault snapshot remained 1,853 files and 1,767,268,127 bytes."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/canary-local-delta.json",
+      "command": "Diff pre/post GrokVault summaries and filesystem-search native canary download",
+      "outcome": "GrokVault delta is zero; one canary video file exists outside GrokVault at the configured parent media folder."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/canary-r2-delta.json",
+      "command": "Structured R2 canary status",
+      "outcome": "R2 canary sync status is blocked with no object keys because live extension config access and direct Wrangler listing are unavailable."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-download-flow.png",
+      "command": "Chrome screenshot crop of live Grok post-detail Download controls",
+      "outcome": "Shows the visible Download side action used for the native canary download attempt."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/extension-r2-sync-result.png",
+      "command": "ImageMagick-generated blocker card",
+      "outcome": "Not a live screenshot; records that canary R2 sync was not run because extension config access is still policy-blocked."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/stress-paths.md",
+      "command": "Chrome browser-client live Gallery Download start/stop plus popup-blocker reconciliation",
+      "outcome": "Overlay scraper start/stop was exercised on /imagine/saved; backfill and retry are blocked by popup-only control placement."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/scraper-running.png",
+      "command": "Chrome screenshot crop of live overlay Gallery Download running state",
+      "outcome": "Shows Stop visible and status text at scraper start without exposing live Grok media."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/scraper-stopped.png",
+      "command": "Chrome screenshot crop of live overlay Gallery Download stopped state",
+      "outcome": "Shows Download Gallery restored and status text Stopped after the stop action."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/backfill-result.png",
+      "command": "ImageMagick-generated blocker card",
+      "outcome": "Not a live screenshot; records that Run Backfill was not run because it is only available in the policy-blocked extension popup."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/retry-unsynced-result.png",
+      "command": "ImageMagick-generated blocker card",
+      "outcome": "Not a live screenshot; records that Retry Unsynced was not run because it is only available in the policy-blocked extension popup."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/logs/batch-quality-repeat.md",
+      "command": "Chrome browser-client live Prompted Batch and Quality Repeat exercises",
+      "outcome": "Prompted Batch failed 0/1 after retries; Quality Repeat completed one repeat with four images on a fresh safe audit canary."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/batch-controls.png",
+      "command": "Chrome screenshot crop of overlay batch controls",
+      "outcome": "Shows visible batch controls and high persisted counts before reduction."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/batch-result.png",
+      "command": "Chrome screenshot crop after one-item Prompted Batch run",
+      "outcome": "Shows Prompted Batch stopped at 0/1 with 3/3 retries used."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/quality-repeat-controls.png",
+      "command": "Chrome screenshot crop of overlay Quality Repeat controls",
+      "outcome": "Shows repeat count 1 and Start Quality Repeat on audit-owned safe content with Generate More available."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/screenshots/quality-repeat-result.png",
+      "command": "Chrome screenshot crop after one Quality Repeat run",
+      "outcome": "Shows Quality Repeat completed with Done: 4 images (1/1 repeats)."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/final-vault-summary.json",
+      "command": "node scripts/inventory-vault.mjs from a temporary working directory with stdout redirected to final-vault-summary.json",
+      "outcome": "Final local Vault snapshot remained 1,853 files and 1,767,268,127 bytes without rewriting committed inventory artifacts."
+    },
+    {
+      "path": "docs/audits/2026-05-20-grok-powertools-full-system-audit/reconciliations/final-reconciliation.json",
+      "command": "Structured final reconciliation summary",
+      "outcome": "Final truth table records local Vault verified with no canary delta, Grok Saved full reconciliation not proven, extension storage blocked, and R2 blocked."
+    }
+  ]
+}

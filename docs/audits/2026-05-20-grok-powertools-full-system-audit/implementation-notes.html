@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Grok Power Tools Audit Implementation Notes</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+        margin: 32px;
+        color: #171717;
+      }
+      h1, h2 {
+        margin-bottom: 8px;
+      }
+      section {
+        border-top: 1px solid #ddd;
+        padding-top: 16px;
+        margin-top: 24px;
+      }
+      li {
+        margin: 8px 0;
+      }
+      code {
+        background: #f4f4f5;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      .meta {
+        color: #555;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Grok Power Tools Full System Audit - Implementation Notes</h1>
+    <p class="meta">Created during planning on 2026-05-20. This file is maintained as the audit work proceeds.</p>
+
+    <section>
+      <h2>Design Decisions</h2>
+      <ul>
+        <li><strong>Integrated plan:</strong> The audit plan remains one cross-system plan instead of separate subsystem plans because the central risk is reconciliation across Grok, Chrome extension state, local Vault, R2, and the web app.</li>
+        <li><strong>Notes location:</strong> This file lives inside <code>docs/audits/2026-05-20-grok-powertools-full-system-audit/</code> so implementation decisions stay beside the evidence and final report.</li>
+        <li><strong>Audit artifacts over product edits:</strong> Helper scripts and evidence files should live in the audit folder unless a product-code fix is explicitly approved or required to unblock the audit.</li>
+        <li><strong>Audit scaffold:</strong> The audit uses a timestamped folder with separate inventory, logs, screenshots, reconciliations, and scripts directories so raw evidence is easy to inspect without mixing it into product code.</li>
+        <li><strong>Local service reuse:</strong> Task 3 reused existing localhost listeners on ports <code>3001</code> and <code>8787</code> instead of starting duplicate web or Worker processes; the listener and health evidence is in <code>logs/local-services.txt</code>.</li>
+        <li><strong>Prompt JSON scope:</strong> Task 4's prompt-root JSON inventory excludes files inside <code>node_modules</code> so dependency metadata does not drown out user/export prompt evidence. This matches the approved Task 4 script and is recorded in <code>inventory/prompt-json-summary.json</code>.</li>
+        <li><strong>Privacy-safe Grok evidence:</strong> Task 5 treats Grok page titles, prompts, tab titles, media thumbnails, and generated content as sensitive. The saved-start screenshot is redacted before being saved, and the log records selector/status facts instead of prompt text.</li>
+        <li><strong>Popup source preview:</strong> Because live <code>chrome-extension://</code> popup navigation is blocked by Chrome automation policy, Task 5 uses a static <code>popup.html</code> screenshot only to document the Cloud Backup UI shape. It is not interpreted as live storage/config evidence.</li>
+        <li><strong>R2 log sanitization:</strong> Task 6 preserves Cloudflare account IDs and exact Wrangler error codes, but redacts local email and account display-name text because those details are not needed to diagnose the R2 blocker.</li>
+        <li><strong>Credential metadata redaction:</strong> After evidence review, <code>inventory/prompt-json-summary.json</code> redacts credential-like filenames/paths and credential-key field names while preserving file counts, parseability, byte sizes, and non-sensitive inventory shape.</li>
+        <li><strong>Web smoke classification:</strong> Task 7 classifies the web app as locally rendering with findings, not fully functional, because browser smoke exposed <code>/api/auth/session</code> 500 errors, a missing remote font, and no live R2/Grok reconciliation surface.</li>
+        <li><strong>Canary evidence scoping:</strong> Task 8 keeps Grok creation evidence focused on harmless compass canaries and narrow screenshots so unrelated live Grok media and prompt text do not enter the audit artifacts.</li>
+        <li><strong>Image-to-video path:</strong> Task 8 uses the visible <code>Make video</code> action from the confirmed canary image result for video creation, because that is the current direct post-detail flow Grok exposes for a safe generated image.</li>
+        <li><strong>Screenshot write path:</strong> Chrome screenshot calls returned bytes even when a path option was provided, so Task 8 writes returned screenshot bytes to disk explicitly for the final image/video result crops.</li>
+        <li><strong>Screenshot format normalization:</strong> Task 8 normalizes canary screenshot files to actual PNG bitstreams after capture so file content matches the planned <code>.png</code> artifact names.</li>
+        <li><strong>Task 9 download classification:</strong> The native Grok Download button is recorded separately from a successful Vault backup because it produced a local video file outside <code>GrokVault</code>.</li>
+        <li><strong>Task 9 R2 blocker card:</strong> The R2 sync result image is a clearly labeled blocker card, not a live popup screenshot, because live popup config access remains policy-blocked.</li>
+        <li><strong>Task 10 stress screenshots:</strong> Scraper start/stop evidence is cropped to the overlay Gallery Download section so live Grok media and prompt text stay out of the committed screenshots.</li>
+        <li><strong>Task 11 safe-generation scope:</strong> Batch and quality-repeat tests use audit-owned compass canaries and cropped overlay screenshots so the exercise does not operate on unrelated Grok content.</li>
+        <li><strong>Task 12 final inventory isolation:</strong> The final Vault inventory script was run from a temporary working directory so its side-effect inventory writes did not overwrite the earlier redacted inventory artifacts in the repo.</li>
+        <li><strong>Plan self-review timing:</strong> The written plan's self-review task was run after execution rather than before it, because it was discovered during final wrap-up. The useful checks still ran: spec-section coverage, placeholder scan, and audit-path consistency.</li>
+        <li><strong>Visual one-pager synthesis:</strong> The one-pager uses diagrams, status tiles, CSS charts, and audit-safe screenshots to communicate the audit's complexity without introducing new claims beyond the committed report, manifest, and final reconciliation files.</li>
+        <li><strong>Full reliability rebuild spec:</strong> The 2026-05-21 rebuild spec interprets "everything running perfectly" as a complete proof chain across Grok, extension state, local Vault, R2, and the web operations console. It intentionally does not frame the work as an MVP.</li>
+        <li><strong>R2 dedupe as a release gate:</strong> The rebuild spec treats R2 idempotency as a first-class acceptance criterion because current media key generation can be date/run based and the backup path can bypass the local processed-ID duplicate guard.</li>
+        <li><strong>Cloudflare account authority:</strong> The user confirmed the Greymaker Cloudflare account currently logged into Chrome is the authority for <code>grok-gallery-001</code>. The exact login email is not copied into this durable artifact. The follow-up implementation pass switched Wrangler OAuth to that account and verified the account ID, bucket, D1 database, Worker deploy target, and R2 system-object write/read path.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Deviations</h2>
+      <ul>
+        <li><strong>Live extension popup not inspected:</strong> The original Task 5 plan called for live popup cloud settings. Browser automation blocked <code>chrome-extension://.../popup.html</code>, so the audit recorded the blocker and used source preview for UI shape only. This avoids reading Chrome profile internals or routing around the browser security policy.</li>
+        <li><strong>Observed Grok URL differs from requested URL:</strong> The user requested the existing Chrome tab at <code>grok.com/imagine/saved</code>, but Chrome reported and loaded <code>https://grok.com/imagine</code>. The page still exposed Saved/discovery controls, so Task 5 records route drift instead of forcing navigation.</li>
+        <li><strong>Extension cloud test not exercised:</strong> Task 6 could not safely confirm Worker URL/API key presence because live popup access was already policy-blocked. The audit therefore records extension cloud testing as not exercised instead of trying to bypass the browser policy.</li>
+        <li><strong>Collections route interpretation:</strong> Task 7 treats <code>/collections</code> as a redirect to the dashboard because the current app intentionally redirects it to <code>/</code>. The route is therefore rendered but not counted as a separate collections workspace view.</li>
+        <li><strong>Video prompt not entered:</strong> The Task 8 plan allowed video creation from the image result or a new video prompt. The observed <code>Make video</code> flow immediately started generation and disabled the composer, so the intended video prompt is recorded as the test intent while the actual flow is documented as image-to-video.</li>
+        <li><strong>Video duration differed from intent:</strong> Grok produced a 10 second canary video even though the intended audit prompt described five seconds. This is recorded as current Grok product behavior rather than an extension failure.</li>
+        <li><strong>Canary R2 sync not run:</strong> Task 9 records canary R2 sync as blocked instead of running it, because the audit still cannot verify live Worker URL/API key presence without opening the blocked extension popup or using Chrome profile internals.</li>
+        <li><strong>Backfill and retry not run:</strong> Task 10 records <code>Run Backfill</code> and <code>Retry Unsynced</code> as blocked because those controls live only in the policy-blocked extension popup; the page overlay does not expose equivalent controls, and the content page cannot send extension runtime messages.</li>
+        <li><strong>Task 10 blocker class:</strong> The backfill/retry blocker is an approved-automation access blocker, not an R2/config error. The audit does not claim backfill or retry reached the cloud pipeline.</li>
+        <li><strong>Quality repeat setup:</strong> Task 11 creates a fresh safe image canary before running Quality Repeat because <code>Generate More</code> was visible in another existing tab but was not attached to audit-owned content.</li>
+        <li><strong>Final status vocabulary:</strong> The final reconciliation uses the plan's closest available status labels, but the notes preserve the exact blocker classes where the status enum is too coarse: Chrome popup policy for extension storage and Cloudflare account/auth state for R2.</li>
+        <li><strong>Live Grok spec refresh:</strong> The 2026-05-21 live Computer Use spot-check records only control-level facts from <code>grok.com/imagine/saved</code>. Sensitive live prompt/media content observed in Chrome is intentionally omitted from the spec.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Tradeoffs</h2>
+      <ul>
+        <li><strong>Commit strategy:</strong> The plan and this notes file are safe to commit. Raw screenshots and logs may contain private Grok/account/media data, so the execution plan treats final staging of audit evidence as a review decision rather than an automatic bulk commit.</li>
+        <li><strong>R2 verification path:</strong> Direct Wrangler R2 listing is currently blocked by account/auth state, so the plan prioritizes extension-configured Worker/API-key evidence and records a precise blocker if no valid R2 path is available.</li>
+        <li><strong>Canonical objects versus date folders:</strong> The spec recommends canonical by-asset media blobs with manifest/date views instead of storing duplicate media under each run date. This keeps Saved browsing possible without letting repeated scans inflate R2 storage.</li>
+        <li><strong>Baseline interpretation:</strong> Automated checks are treated as audit evidence, not blockers to live testing, unless they reveal a failure that prevents extension, web app, or Worker runtime from launching.</li>
+        <li><strong>Worker health boundary:</strong> The local Worker <code>/health</code> endpoint passing is enough to continue browser and integration audit work, but it is not treated as proof that R2 backup objects exist or are complete.</li>
+        <li><strong>Screenshot completeness versus privacy:</strong> Task 5 preserves UI structure while obscuring media/prompt content. This sacrifices visual proof of the exact generated items in exchange for keeping audit artifacts commit-safe.</li>
+        <li><strong>Selector evidence over raw DOM dumps:</strong> The audit records boolean selector confidence instead of saving broad DOM text because the live Grok page includes prompt and generated-content text in titles, buttons, and accessible nodes.</li>
+        <li><strong>Blocker image versus live screenshot:</strong> Task 6 creates <code>screenshots/extension-cloud-test-result.png</code> as a clearly labeled blocker card, not as a live browser screenshot, so downstream audit readers do not mistake a missing cloud test for an omitted artifact.</li>
+        <li><strong>Visual evidence after redaction:</strong> The Grok starting screenshot now preserves only the left navigation/sidebar context. This is intentionally less visually complete than the first capture, but it removes edge-case prompt text fragments from the committed artifact.</li>
+        <li><strong>Local identifiers in audit artifacts:</strong> The audit keeps local filesystem paths, Cloudflare account IDs, and bucket names where they are needed for reproducible troubleshooting. These are not secret values, but the final artifact set should be treated as local/private unless explicitly redacted for public sharing.</li>
+        <li><strong>Canary URL retention:</strong> The public image post URL and public image media URL are retained because they are needed for later reconciliation. The raw video asset URL is omitted from logs because it includes a user-scoped path; the Grok post URL and post ID are enough for audit continuity.</li>
+        <li><strong>Submission evidence versus privacy:</strong> Task 8 prioritizes clean result crops and sanitized metadata over broad full-page screenshots, because the live Grok tab still contains unrelated non-canary media and hidden extension history content.</li>
+        <li><strong>Native download versus extension path:</strong> Task 9 did not move the native downloaded video into <code>GrokVault</code> manually. The zero Vault delta is preserved because manually relocating the file would hide the product behavior the audit is meant to expose.</li>
+        <li><strong>Controlled scraper run versus exhaustive scrape:</strong> Task 10 starts and stops the gallery scraper quickly instead of allowing a bulk scrape to run through the full Saved surface, because the control being audited is reliability of start/stop and the current UI exposes no true gallery item limit.</li>
+        <li><strong>Batch count minimization:</strong> Task 11 reduces persisted batch counters from <code>200</code> to <code>1</code> before exercising Prompted Batch. This limits spend and avoids bulk generation while still testing the flow.</li>
+        <li><strong>Final completeness boundary:</strong> Task 12 marks the audit complete only in the sense that every planned flow was either exercised or precisely blocked. It does not mark the product backup system complete, because Grok Saved-to-Vault-to-R2 reconciliation remains unproven.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Open Questions</h2>
+      <ul>
+        <li><strong>R2 credentials:</strong> If the extension popup does not already contain a valid Worker URL and API key, the audit will need either corrected Cloudflare access or user-provided Worker credentials to verify object-level R2 backup state.</li>
+        <li><strong>Evidence privacy:</strong> After the audit, confirm which screenshots/logs should be committed versus kept local only.</li>
+        <li><strong>Cloud status access:</strong> Confirm whether a non-secret overlay status/export should be added so future audits can verify cloud mode, Worker host, queue count, and last test result without opening the extension popup.</li>
+        <li><strong>Grok saved route:</strong> Confirm whether the product should target <code>/imagine</code> with observed Saved controls, <code>/imagine/saved</code>, or both as valid current Grok Saved entrypoints.</li>
+        <li><strong>Web product scope:</strong> Confirm whether the web app should remain a collection/editor companion or become the operating dashboard for Vault/R2/Grok audit health and live generation status.</li>
+        <li><strong>Direct text-to-video scope:</strong> Confirm whether a separate direct text-to-video canary should be exercised in addition to the observed image-to-video flow.</li>
+        <li><strong>Video control expectations:</strong> Confirm whether the product should surface duration/quality expectations when Grok turns a static image into a 10 second 480p result without a prompt entry step.</li>
+        <li><strong>Download root expectation:</strong> Confirm whether native Grok downloads should be considered valid evidence when they land in the parent media folder, or whether every successful backup must land under <code>GrokVault</code>.</li>
+        <li><strong>Cloud recovery controls:</strong> Confirm whether <code>Run Backfill</code> and <code>Retry Unsynced</code> should move into the page overlay or a web dashboard so operators can run them without the Chrome extension popup.</li>
+        <li><strong>R2 retention and migration:</strong> Confirm the retention window for versioned backfill/saved-list manifests, and whether the existing 30GB should be migrated into canonical by-asset keys or only deduped going forward.</li>
+        <li><strong>Batch retry behavior:</strong> Confirm whether Prompted Batch should treat post-detail URL changes during retries as success candidates, hard failures, or a state that requires operator review.</li>
+        <li><strong>Authoritative Saved source:</strong> Confirm whether Grok Saved should be reconciled through a stable export/API, a durable extension index, or visual scraping plus media URL identity.</li>
+      </ul>
+    </section>
+  </body>
+</html>

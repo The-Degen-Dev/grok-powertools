@@ -1,0 +1,23 @@
+## lsof port 3001
+COMMAND   PID          USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+node    47439 philipbankier   13u  IPv6 0xd8ffcc1705c78d1f      0t0  TCP *:3001 (LISTEN)
+
+## lsof port 8787
+COMMAND   PID          USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+workerd 47460 philipbankier   14u  IPv4 0xb631f6c98e92edd4      0t0  TCP 127.0.0.1:8787 (LISTEN)
+workerd 47460 philipbankier   15u  IPv6 0xeb55da8e8b94effa      0t0  TCP [::1]:8787 (LISTEN)
+
+## web HEAD
+HTTP/1.1 200 OK
+Vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding
+link: </_next/static/media/797e433ab948586e-s.p.479bea2b.woff2>; rel=preload; as="font"; crossorigin=""; type="font/woff2", </_next/static/media/caa3a2e1cccd8315-s.p.3b6cae6d.woff2>; rel=preload; as="font"; crossorigin=""; type="font/woff2"
+Cache-Control: no-store, must-revalidate
+X-Powered-By: Next.js
+Content-Type: text/html; charset=utf-8
+Date: Wed, 20 May 2026 00:58:13 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+
+## worker health
+{"ok":true,"service":"grok-r2-backup","now":"2026-05-20T00:58:13.232Z"}

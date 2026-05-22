@@ -1,0 +1,9 @@
+## node -v
+v20.18.1
+
+## npm -v
+10.8.2
+
+## npx wrangler --version
+4.67.0
+## exit status: 0
