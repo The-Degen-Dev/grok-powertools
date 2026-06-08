@@ -259,6 +259,16 @@ function shouldPersistBackupProcessedId(status) {
     return status === 'uploaded' || status === 'already_present' || status === 'conflict_uploaded';
 }
 
+function getR2BackupCanaryStopReason(options = {}, stats = {}) {
+    if (options.mode !== 'canary') return null;
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : 1;
+    const r2PresentCount = (stats.uploaded || 0) + (stats.alreadyPresent || 0);
+    if (r2PresentCount >= limit) return 'canary_complete';
+    const attemptedCount = r2PresentCount + (stats.queued || 0) + (stats.errors || 0);
+    if (attemptedCount >= limit) return 'canary_incomplete';
+    return null;
+}
+
 function mergeBackupProcessedIdsForStorage(existingIds, inMemoryIds, nextId, responseBackupProcessedId = null) {
     const merged = new Set(Array.isArray(existingIds) ? existingIds : []);
     for (const id of (inMemoryIds || [])) {
@@ -2595,6 +2605,7 @@ class GrokScraper {
         this.processedIds = new Set();
         this.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         this.backupMode = false;
+        this.backupOptions = { mode: 'full', limit: null, options: {} };
         this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
         this._backupVisited = new Set();
         this.Config = { actionWait: 600, navWait: 800 };
@@ -2647,7 +2658,7 @@ class GrokScraper {
                 this.stop();
                 sendResponse({ status: 'stopped' });
             } else if (request.action === 'INIT_R2_BACKUP') {
-                this.startBackupMode();
+                this.startBackupMode(request);
                 sendResponse({ status: 'started' });
             } else if (request.action === 'ABORT_R2_BACKUP') {
                 this.stopBackupMode();
@@ -2681,7 +2692,7 @@ class GrokScraper {
         // (useful for browser automation tools that run in the page context)
         document.addEventListener('grok-powertools-command', (e) => {
             const action = e.detail?.action;
-            if (action === 'INIT_R2_BACKUP') this.startBackupMode();
+            if (action === 'INIT_R2_BACKUP') this.startBackupMode(e.detail);
             else if (action === 'ABORT_R2_BACKUP') this.stopBackupMode();
             else if (action === 'INIT_SCRAPE') this.start();
             else if (action === 'ABORT_SCRAPE') this.stop();
@@ -2737,7 +2748,7 @@ class GrokScraper {
         this.state.isRunning = false;
     }
 
-    async startBackupMode() {
+    async startBackupMode(options = {}) {
         // Validate cloud config before starting R2 backup
         try {
             const validation = await new Promise((resolve) => {
@@ -2754,6 +2765,11 @@ class GrokScraper {
         }
 
         this.backupMode = true;
+        this.backupOptions = {
+            mode: options.mode === 'canary' ? 'canary' : 'full',
+            limit: Number.isFinite(options.limit) && options.limit > 0 ? options.limit : null,
+            options: options.options && typeof options.options === 'object' ? options.options : {}
+        };
         this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0, startedAt: Date.now() };
         this._backupVisited = new Set();
         this.state.isRunning = true;
@@ -2763,7 +2779,7 @@ class GrokScraper {
             currentIndex: 0,
             r2BackupState: { isRunning: true, ...this.backupStats }
         });
-        this.log('R2 Full Media Backup started.', 'success');
+        this.log(this.backupOptions.mode === 'canary' ? 'R2 Canary Backup started.' : 'R2 Full Media Backup started.', 'success');
         this.determineModeAndExecute();
     }
 
@@ -3016,12 +3032,22 @@ class GrokScraper {
                 await this.sleep(500);
 
                 await this.performDownload();
+                const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
+                if (this.backupMode && canaryStopReason) {
+                    await this.stopBackupMode(canaryStopReason);
+                    return;
+                }
             }
         } else {
             // Fallback: No thumbnails found? Maybe it's a single video without thumbnails?
             // Or maybe our selector missed. Check if there's just a generated video/image.
             console.log('No thumbnails found. Assuming single item.');
             await this.performDownload();
+            const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
+            if (this.backupMode && canaryStopReason) {
+                await this.stopBackupMode(canaryStopReason);
+                return;
+            }
         }
 
         if (!this.state.isRunning) return;
@@ -3223,6 +3249,7 @@ if (typeof module === 'undefined') {
         resolveBackupScrollAttempt,
         selectBackupMediaElement,
         mergeBackupProcessedIdsForStorage,
+        getR2BackupCanaryStopReason,
         shouldPersistBackupProcessedId
     };
 }

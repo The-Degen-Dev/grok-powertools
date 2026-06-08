@@ -107,8 +107,13 @@
       </tr>
       <tr>
         <td>Task 8</td>
+        <td class="done">Done</td>
+        <td>Pushed <code>codex/main-cleanup-github-sync</code>, opened PR #1, and verified GitHub Actions run <code>27168946229</code>. Extension, web, and cloud jobs passed.</td>
+      </tr>
+      <tr>
+        <td>Task 9</td>
         <td class="pending">In progress</td>
-        <td>Pushed <code>codex/main-cleanup-github-sync</code> and opened PR #1. First PR CI was cancelled because the extension job hung in Playwright browser installation; workflow is being revised to use the GitHub runner's Chrome channel.</td>
+        <td><code>agent-browser</code> and <code>plwr</code> are not installed locally. Full Media Backup is unsafe for live validation because it has no hard one-item limit, so a separate one-media R2 canary path is being added first.</td>
       </tr>
     </tbody>
   </table>
@@ -122,6 +127,8 @@
     <li>Run Task 6 validation through <code>mise exec node@24</code> instead of activating Node globally. This matches CI's Node 24 target without changing the user's shell defaults.</li>
     <li>Create a pull request for Task 8 CI verification because the workflow's push trigger is limited to <code>main</code>/<code>master</code>; branch validation runs through the <code>pull_request</code> trigger.</li>
     <li>Use Playwright's supported Chrome channel in CI for extension smoke tests. The PR runner provides Google Chrome, and this avoids a hung <code>npx playwright install --with-deps chromium</code> step while keeping Chromium-family coverage.</li>
+    <li>Defer committing the post-CI Task 8 note update until the next natural commit boundary so notes do not trigger a new PR CI run by themselves.</li>
+    <li>Add a separate one-media R2 canary control instead of overloading Full Media Backup. The canary uses <code>START_R2_BACKUP</code> options carried to <code>INIT_R2_BACKUP</code>, stops after the first completed media attempt, and does not reset processed IDs.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -132,6 +139,8 @@
     <li>Task 6 added one extra commit, <code>b8f9b80 fix: satisfy fullscreen viewer lint</code>, because the web app could not pass local lint until <code>togglePlay</code> was declared before the keyboard effect that calls it.</li>
     <li>Task 8 departs from the plan's assumption that <code>gh run list --branch codex/main-cleanup-github-sync</code> would show a push run. It did not, so a PR is created to exercise CI.</li>
     <li>Task 8 departs from the original CI workflow plan by replacing the Playwright Chromium install step with <code>google-chrome --version</code> plus <code>channel: "chrome"</code> under <code>process.env.CI</code>. The original install step hung without producing logs.</li>
+    <li>Task 9 cannot use <code>agent-browser</code> or <code>plwr</code> because neither CLI is installed. The fallback is the existing Chrome session and Peekaboo for native UI state only.</li>
+    <li>Task 9 cannot safely validate against the existing Full Media Backup entrypoint because queued uploads and gallery traversal have no hard one-item live limit. The implementation adds a bounded canary path before live validation.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -145,6 +154,7 @@
     <li>Task 5 needs a fourth TDD loop because direct upload still has two competing storage writers, and video candidate filtering became too strict for valid <code>assets.grok.com/videos/...</code> URLs.</li>
     <li>Task 5 needs a fifth TDD loop because background queue-success persistence still writes from stale in-memory IDs and does not await storage durability before dropping the queue item.</li>
     <li>The Task 6 lint repair was committed separately instead of amending CI or backup commits so validation-driven web cleanup stays reviewable and isolated.</li>
+    <li>The canary marks success only on <code>uploaded</code>, <code>already_present</code>, or <code>conflict_uploaded</code>. A first <code>queued</code> or failed media attempt stops as <code>canary_incomplete</code>; that may require a rerun after queue repair, but it prevents the canary from turning into a broader backup.</li>
   </ul>
 
   <h2>Open Questions</h2>
