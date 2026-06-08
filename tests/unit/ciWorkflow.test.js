@@ -58,7 +58,7 @@ describe('GitHub Actions CI workflow', () => {
         expect(commands).toContain('npm ci');
         expect(commands).toContain('npm run lint');
         expect(commands).toContain('npm run test:unit');
-        expect(commands).toContain('npx playwright install --with-deps chromium');
+        expect(commands).toContain('google-chrome --version');
         expect(commands).toContain('npm run test:e2e');
     });
 
