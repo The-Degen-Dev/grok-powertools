@@ -3,6 +3,7 @@ const {
     recordBackupUploadStatus,
     resolveBackupScrollAttempt,
     getR2BackupCanaryStopReason,
+    getR2BackupPageCommandOptions,
     GrokScraper,
     selectBackupMediaElement,
     shouldPersistBackupProcessedId
@@ -444,6 +445,106 @@ describe('Grok backup canary flow', () => {
     afterEach(() => {
         delete global.chrome;
         document.body.textContent = '';
+    });
+
+    test('builds hard-capped canary options for page-origin canary commands', () => {
+        expect(getR2BackupPageCommandOptions({ action: 'INIT_R2_CANARY' })).toEqual({
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true }
+        });
+
+        expect(getR2BackupPageCommandOptions({
+            action: 'INIT_R2_BACKUP',
+            mode: 'canary',
+            limit: 999,
+            options: { source: 'test' }
+        })).toEqual({
+            mode: 'canary',
+            limit: 1,
+            options: { source: 'test', stopAfterMediaAttempt: true }
+        });
+    });
+
+    test('rejects page-origin full backup commands', () => {
+        expect(getR2BackupPageCommandOptions(null)).toBeNull();
+        expect(getR2BackupPageCommandOptions({})).toBeNull();
+        expect(getR2BackupPageCommandOptions({ action: 'INIT_R2_BACKUP' })).toBeNull();
+        expect(getR2BackupPageCommandOptions({ action: 'INIT_R2_BACKUP', mode: 'full' })).toBeNull();
+    });
+
+    test('does not start backup from unsafe page-origin full backup commands', () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const scraper = Object.create(GrokScraper.prototype);
+        scraper.startBackupMode = jest.fn();
+        scraper.stopBackupMode = jest.fn();
+        scraper.start = jest.fn();
+        scraper.stop = jest.fn();
+        scraper.processedIds = new Set(['existing-id']);
+
+        scraper.handlePageCommand({ action: 'INIT_R2_BACKUP' });
+        scraper.handlePageCommand({ action: 'INIT_R2_BACKUP', mode: 'full' });
+
+        expect(scraper.startBackupMode).not.toHaveBeenCalled();
+        expect(scraper.stopBackupMode).not.toHaveBeenCalled();
+        expect(scraper.start).not.toHaveBeenCalled();
+        expect(scraper.stop).not.toHaveBeenCalled();
+        expect(scraper.processedIds).toEqual(new Set(['existing-id']));
+        expect(warnSpy).toHaveBeenCalledTimes(2);
+        warnSpy.mockRestore();
+    });
+
+    test('does not start duplicate R2 backup while config validation is pending', async () => {
+        let resolveValidation;
+        const validationPromise = new Promise((resolve) => {
+            resolveValidation = resolve;
+        });
+        global.chrome = {
+            runtime: {
+                sendMessage: jest.fn((message, callback) => {
+                    if (message.action === 'VALIDATE_CLOUD_CONFIG') {
+                        validationPromise.then(callback);
+                    }
+                    return Promise.resolve();
+                })
+            },
+            storage: {
+                local: {
+                    set: jest.fn(() => Promise.resolve())
+                }
+            }
+        };
+        const scraper = Object.create(GrokScraper.prototype);
+        scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
+        scraper.log = jest.fn();
+        scraper.determineModeAndExecute = jest.fn();
+
+        const firstStart = scraper.startBackupMode({ mode: 'canary', limit: 1 });
+        const secondStart = scraper.startBackupMode({ mode: 'canary', limit: 1 });
+
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+        expect(scraper.log).toHaveBeenCalledWith('R2 Backup already running or starting.', 'warning');
+
+        resolveValidation({ valid: true });
+        await firstStart;
+        await secondStart;
+
+        expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+        expect(scraper.determineModeAndExecute).toHaveBeenCalledTimes(1);
+        expect(scraper.state.isRunning).toBe(true);
+    });
+
+    test('starts hard-capped canary from page-origin canary command', () => {
+        const scraper = Object.create(GrokScraper.prototype);
+        scraper.startBackupMode = jest.fn();
+
+        scraper.handlePageCommand({ action: 'INIT_R2_CANARY' });
+
+        expect(scraper.startBackupMode).toHaveBeenCalledWith({
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true }
+        });
     });
 
     test('stops before navigating back after one successful canary media attempt', async () => {

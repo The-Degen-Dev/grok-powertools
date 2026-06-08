@@ -269,6 +269,26 @@ function getR2BackupCanaryStopReason(options = {}, stats = {}) {
     return null;
 }
 
+function getR2BackupPageCommandOptions(detail = {}) {
+    const command = detail && typeof detail === 'object' ? detail : {};
+    if (command.action === 'INIT_R2_CANARY') {
+        return {
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true }
+        };
+    }
+
+    if (command.action !== 'INIT_R2_BACKUP' || command.mode !== 'canary') return null;
+
+    const options = command.options && typeof command.options === 'object' ? command.options : {};
+    return {
+        mode: 'canary',
+        limit: 1,
+        options: { ...options, stopAfterMediaAttempt: true }
+    };
+}
+
 function mergeBackupProcessedIdsForStorage(existingIds, inMemoryIds, nextId, responseBackupProcessedId = null) {
     const merged = new Set(Array.isArray(existingIds) ? existingIds : []);
     for (const id of (inMemoryIds || [])) {
@@ -2691,17 +2711,30 @@ class GrokScraper {
         // Page-world bridge: allows triggering actions via DOM CustomEvents
         // (useful for browser automation tools that run in the page context)
         document.addEventListener('grok-powertools-command', (e) => {
-            const action = e.detail?.action;
-            if (action === 'INIT_R2_BACKUP') this.startBackupMode(e.detail);
-            else if (action === 'ABORT_R2_BACKUP') this.stopBackupMode();
-            else if (action === 'INIT_SCRAPE') this.start();
-            else if (action === 'ABORT_SCRAPE') this.stop();
-            else if (action === 'RESET_PROCESSED_IDS') {
-                this.processedIds = new Set();
-                chrome.storage.local.set({ processedIds: [] });
-                console.log('[GrokScraper] processedIds cleared via custom event');
-            }
+            this.handlePageCommand(e.detail);
         });
+    }
+
+    handlePageCommand(detail = {}) {
+        const command = detail && typeof detail === 'object' ? detail : {};
+        const action = command.action;
+        const backupOptions = getR2BackupPageCommandOptions(command);
+
+        if (backupOptions) {
+            this.startBackupMode(backupOptions);
+        } else if (action === 'INIT_R2_BACKUP') {
+            console.warn('[GrokScraper] ignored page-origin R2 backup command without canary mode');
+        } else if (action === 'ABORT_R2_BACKUP') {
+            this.stopBackupMode();
+        } else if (action === 'INIT_SCRAPE') {
+            this.start();
+        } else if (action === 'ABORT_SCRAPE') {
+            this.stop();
+        } else if (action === 'RESET_PROCESSED_IDS') {
+            this.processedIds = new Set();
+            chrome.storage.local.set({ processedIds: [] });
+            console.log('[GrokScraper] processedIds cleared via custom event');
+        }
     }
 
     getCleanId(url) { if (!url) return null; try { return url.split('?')[0]; } catch (e) { return url; } }
@@ -2749,6 +2782,12 @@ class GrokScraper {
     }
 
     async startBackupMode(options = {}) {
+        if (this._backupStartPending || this.state.isRunning) {
+            this.log('R2 Backup already running or starting.', 'warning');
+            return;
+        }
+
+        this._backupStartPending = true;
         // Validate cloud config before starting R2 backup
         try {
             const validation = await new Promise((resolve) => {
@@ -2762,6 +2801,8 @@ class GrokScraper {
         } catch (e) {
             this.log('R2 Backup aborted: Could not validate cloud config.', 'error');
             return;
+        } finally {
+            this._backupStartPending = false;
         }
 
         this.backupMode = true;
@@ -3250,6 +3291,7 @@ if (typeof module === 'undefined') {
         selectBackupMediaElement,
         mergeBackupProcessedIdsForStorage,
         getR2BackupCanaryStopReason,
+        getR2BackupPageCommandOptions,
         shouldPersistBackupProcessedId
     };
 }

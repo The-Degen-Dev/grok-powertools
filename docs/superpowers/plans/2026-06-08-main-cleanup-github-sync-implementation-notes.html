@@ -103,7 +103,7 @@
       <tr>
         <td>Task 7</td>
         <td class="done">Done</td>
-        <td>Replaced dead <code>origin</code> with <code>git@github.com:The-Degen-Dev/grok-powertools.git</code>. Local <code>main</code> tracks <code>origin/main</code> and is 25 commits ahead.</td>
+        <td>Replaced dead <code>origin</code> with <code>git@github.com:The-Degen-Dev/grok-powertools.git</code>. Local <code>main</code> tracks <code>origin/main</code> and is ahead of GitHub.</td>
       </tr>
       <tr>
         <td>Task 8</td>
@@ -112,8 +112,13 @@
       </tr>
       <tr>
         <td>Task 9</td>
-        <td class="pending">In progress</td>
-        <td><code>agent-browser</code> and <code>plwr</code> are not installed locally. Full Media Backup is unsafe for live validation because it has no hard one-item limit, so a separate one-media R2 canary path is being added first.</td>
+        <td class="done">Done</td>
+        <td><code>agent-browser</code> and <code>plwr</code> are not installed locally. The direct popup shows the one-media canary control, the cloud test upload pipeline passed at 6:14:43 PM, and the live Grok saved canary completed at 6:29:03 PM with 1 uploaded / 0 already present / 0 queued / 0 errors.</td>
+      </tr>
+      <tr>
+        <td>Task 10</td>
+        <td class="done">Done</td>
+        <td>Page-origin backup commands are canary-only and fail closed. Unit tests, browser e2e coverage, and the live unsafe-command check prove page-origin full backup does not start.</td>
       </tr>
     </tbody>
   </table>
@@ -129,6 +134,9 @@
     <li>Use Playwright's supported Chrome channel in CI for extension smoke tests. The PR runner provides Google Chrome, and this avoids a hung <code>npx playwright install --with-deps chromium</code> step while keeping Chromium-family coverage.</li>
     <li>Defer committing the post-CI Task 8 note update until the next natural commit boundary so notes do not trigger a new PR CI run by themselves.</li>
     <li>Add a separate one-media R2 canary control instead of overloading Full Media Backup. The canary uses <code>START_R2_BACKUP</code> options carried to <code>INIT_R2_BACKUP</code>, stops after the first completed media attempt, and does not reset processed IDs.</li>
+    <li>Treat page-origin browser automation commands as canary-only for R2 backup. Runtime extension messages can still start Full Media Backup, but DOM <code>grok-powertools-command</code> events now need canary mode or the dedicated <code>INIT_R2_CANARY</code> action.</li>
+    <li>Hard-cap page-origin R2 canary commands to one media item even if the caller supplies a larger <code>limit</code>. This intentionally differs from trusted runtime messages, where popup/background can still pass options through.</li>
+    <li>Add a synchronous backup start guard so duplicate starts cannot both pass through async cloud-config validation before <code>state.isRunning</code> flips to true.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -141,6 +149,9 @@
     <li>Task 8 departs from the original CI workflow plan by replacing the Playwright Chromium install step with <code>google-chrome --version</code> plus <code>channel: "chrome"</code> under <code>process.env.CI</code>. The original install step hung without producing logs.</li>
     <li>Task 9 cannot use <code>agent-browser</code> or <code>plwr</code> because neither CLI is installed. The fallback is the existing Chrome session and Peekaboo for native UI state only.</li>
     <li>Task 9 cannot safely validate against the existing Full Media Backup entrypoint because queued uploads and gallery traversal have no hard one-item live limit. The implementation adds a bounded canary path before live validation.</li>
+    <li>Task 9 live validation initially paused because dispatching <code>INIT_R2_BACKUP</code> with canary-looking detail still produced <code>R2 Full Media Backup started.</code> in the live extension and uploaded multiple extra R2 objects before the run was stopped.</li>
+    <li>Task 10 adds browser e2e coverage rather than relying only on helper tests. The mocked browser test dispatches a page-origin full-backup CustomEvent and asserts the content script never asks for cloud-config validation.</li>
+    <li>After Task 10, live validation uses <code>INIT_R2_CANARY</code> for browser automation instead of overloading <code>INIT_R2_BACKUP</code>.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -155,12 +166,15 @@
     <li>Task 5 needs a fifth TDD loop because background queue-success persistence still writes from stale in-memory IDs and does not await storage durability before dropping the queue item.</li>
     <li>The Task 6 lint repair was committed separately instead of amending CI or backup commits so validation-driven web cleanup stays reviewable and isolated.</li>
     <li>The canary marks success only on <code>uploaded</code>, <code>already_present</code>, or <code>conflict_uploaded</code>. A first <code>queued</code> or failed media attempt stops as <code>canary_incomplete</code>; that may require a rerun after queue repair, but it prevents the canary from turning into a broader backup.</li>
+    <li>Adding a dedicated <code>INIT_R2_CANARY</code> page command creates a second automation trigger, but it is less risky than relying on a generic <code>INIT_R2_BACKUP</code> page event whose detail can be lost, stale, or interpreted incorrectly across extension/page contexts.</li>
+    <li>The duplicate-start guard applies to all backup starts, not only page-origin starts. This could reject a rapid double-click on the trusted popup path, but that is the safer behavior because the second run would overlap the first.</li>
   </ul>
 
   <h2>Open Questions</h2>
   <ul>
     <li>Consider a separate dependency-audit task for the 6 dev-only transitive npm findings. They did not block Task 4 because <code>npm audit --omit=dev</code> was clean and the findings were not introduced by <code>js-yaml@4.2.0</code>.</li>
     <li>Next.js build warns about multiple lockfiles and inferred workspace root. Build passes, but setting <code>turbopack.root</code> in <code>web/next.config.ts</code> could silence it in a separate cleanup.</li>
+    <li>Decide whether the extra R2 objects uploaded during the failed live validation should be left as legitimate backups or audited and removed after identifying their keys.</li>
   </ul>
 </body>
 </html>
