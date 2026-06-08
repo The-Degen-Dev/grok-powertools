@@ -151,6 +151,124 @@ function appendSnippetAtCursor(currentText, snippetText, start, end, delimiter =
     return { text: nextText, caret };
 }
 
+function getBackupMediaElementSrc(el) {
+    if (!el) return '';
+    if (el.tagName && el.tagName.toLowerCase() === 'video') {
+        return el.src || el.currentSrc || el.querySelector?.('source')?.src || '';
+    }
+    return el.currentSrc || el.src || '';
+}
+
+function getBackupElementBox(el) {
+    const rect = el.getBoundingClientRect?.() || { width: 0, height: 0, top: 0, bottom: 0 };
+    return {
+        width: rect.width || 0,
+        height: rect.height || 0,
+        top: rect.top || 0,
+        bottom: rect.bottom || 0,
+        area: (rect.width || 0) * (rect.height || 0)
+    };
+}
+
+function isBackupMediaHost(src) {
+    return src.includes('imagine-public.x.ai')
+        || src.includes('assets.grok.com/users/')
+        || src.includes('assets.grok.com/videos/');
+}
+
+function isVisibleBackupMediaCandidate(el) {
+    const box = getBackupElementBox(el);
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight || 0 : 0;
+    const verticallyVisible = !viewportHeight || (box.bottom >= 0 && box.top <= viewportHeight);
+    return verticallyVisible && box.width >= 100 && box.height >= 100;
+}
+
+function isGeneratedDetailImageCandidate(img) {
+    const src = getBackupMediaElementSrc(img);
+    if (!src) return false;
+    const alt = String(img.alt || '').toLowerCase();
+    const cleanSrc = src.split('?')[0].toLowerCase();
+    if (alt === 'pfp' || cleanSrc.includes('profile-picture')) return false;
+    if (alt.includes('most recent favorite')) return false;
+    if (!isBackupMediaHost(src)) return false;
+
+    return isVisibleBackupMediaCandidate(img);
+}
+
+function isGeneratedDetailVideoCandidate(video) {
+    const src = getBackupMediaElementSrc(video);
+    if (!src || !isBackupMediaHost(src)) return false;
+    return isVisibleBackupMediaCandidate(video);
+}
+
+function selectBackupMediaElement(root = document) {
+    const videos = Array.from(root.querySelectorAll('video'));
+    const videoCandidate = videos.find(isGeneratedDetailVideoCandidate);
+    if (videoCandidate) return videoCandidate;
+
+    const candidates = Array.from(root.querySelectorAll('img[src*="imagine-public.x.ai"], img[src*="assets.grok.com/users/"]'))
+        .filter(isGeneratedDetailImageCandidate)
+        .map((img) => ({
+            img,
+            area: getBackupElementBox(img).area,
+            naturalArea: (img.naturalWidth || 0) * (img.naturalHeight || 0)
+        }))
+        .sort((a, b) => (b.area - a.area) || (b.naturalArea - a.naturalArea));
+
+    return candidates[0]?.img || null;
+}
+
+function isBackupScrollerAtBottom(state) {
+    return (state.scrollTop || 0) + (state.clientHeight || 0) >= (state.scrollHeight || 0) - 8;
+}
+
+function resolveBackupScrollAttempt({ before, after, beforeSignature, afterSignature, staleRetries = 0, maxStaleRetries = 30 }) {
+    const scrollMoved = Math.abs((after.scrollTop || 0) - (before.scrollTop || 0)) > 1;
+    const heightChanged = Math.abs((after.scrollHeight || 0) - (before.scrollHeight || 0)) > 1;
+    const signatureChanged = beforeSignature !== afterSignature;
+    const progressed = scrollMoved || heightChanged || signatureChanged;
+    const atBottom = isBackupScrollerAtBottom(after);
+    const nextStaleRetries = atBottom && !progressed ? staleRetries + 1 : 0;
+
+    return {
+        progressed,
+        atBottom,
+        nextStaleRetries,
+        exhausted: nextStaleRetries >= maxStaleRetries
+    };
+}
+
+function recordBackupUploadStatus(stats, status) {
+    if (!stats) return false;
+    if (status === 'uploaded' || status === 'conflict_uploaded') {
+        stats.uploaded = (stats.uploaded || 0) + 1;
+        return true;
+    }
+    if (status === 'already_present') {
+        stats.alreadyPresent = (stats.alreadyPresent || 0) + 1;
+        return true;
+    }
+    if (status === 'queued') {
+        stats.queued = (stats.queued || 0) + 1;
+        return true;
+    }
+    return false;
+}
+
+function shouldPersistBackupProcessedId(status) {
+    return status === 'uploaded' || status === 'already_present' || status === 'conflict_uploaded';
+}
+
+function mergeBackupProcessedIdsForStorage(existingIds, inMemoryIds, nextId, responseBackupProcessedId = null) {
+    const merged = new Set(Array.isArray(existingIds) ? existingIds : []);
+    for (const id of (inMemoryIds || [])) {
+        if (id) merged.add(id);
+    }
+    if (nextId) merged.add(nextId);
+    if (responseBackupProcessedId) merged.add(responseBackupProcessedId);
+    return Array.from(merged);
+}
+
 // --- UTILS ---
 class ToastManager {
     constructor() {
@@ -2477,7 +2595,7 @@ class GrokScraper {
         this.processedIds = new Set();
         this.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         this.backupMode = false;
-        this.backupStats = { totalSeen: 0, uploaded: 0, errors: 0 };
+        this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
         this._backupVisited = new Set();
         this.Config = { actionWait: 600, navWait: 800 };
         this.init();
@@ -2577,6 +2695,33 @@ class GrokScraper {
 
     getCleanId(url) { if (!url) return null; try { return url.split('?')[0]; } catch (e) { return url; } }
 
+    getGalleryScroller() {
+        return document.querySelector('.overflow-scroll') || document.querySelector('[role="list"]')?.parentElement || window;
+    }
+
+    getScrollerSnapshot(scroller) {
+        if (scroller === window) {
+            return {
+                scrollTop: Math.round(window.scrollY || document.documentElement.scrollTop || 0),
+                scrollHeight: document.documentElement.scrollHeight || 0,
+                clientHeight: document.documentElement.clientHeight || window.innerHeight || 0
+            };
+        }
+        return {
+            scrollTop: Math.round(scroller.scrollTop || 0),
+            scrollHeight: scroller.scrollHeight || 0,
+            clientHeight: scroller.clientHeight || 0
+        };
+    }
+
+    getGalleryCardSignature(cardSelector) {
+        return Array.from(document.querySelectorAll(cardSelector))
+            .filter(img => img.naturalWidth > 50)
+            .map(img => this.getCleanId(img.currentSrc || img.src))
+            .filter(Boolean)
+            .join('|');
+    }
+
     async start() {
         this.log('Scraping initialized.', 'success');
         await chrome.storage.local.set({ scraperState: 'running', currentIndex: 0 });
@@ -2609,7 +2754,7 @@ class GrokScraper {
         }
 
         this.backupMode = true;
-        this.backupStats = { totalSeen: 0, uploaded: 0, errors: 0, startedAt: Date.now() };
+        this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0, startedAt: Date.now() };
         this._backupVisited = new Set();
         this.state.isRunning = true;
         this.state.currentIndex = 0;
@@ -2622,15 +2767,16 @@ class GrokScraper {
         this.determineModeAndExecute();
     }
 
-    async stopBackupMode() {
+    async stopBackupMode(stopReason = 'stopped') {
         this.backupMode = false;
         this.state.isRunning = false;
+        const finalStats = { ...this.backupStats, stopReason };
         await chrome.storage.local.set({
             scraperState: 'idle',
-            r2BackupState: { isRunning: false, ...this.backupStats }
+            r2BackupState: { isRunning: false, ...finalStats }
         });
-        this.log(`R2 Backup stopped. Uploaded: ${this.backupStats.uploaded}, Errors: ${this.backupStats.errors}`, 'neutral');
-        chrome.runtime.sendMessage({ action: 'R2_BACKUP_COMPLETE', stats: this.backupStats }).catch(() => {});
+        this.log(`R2 Backup stopped. Uploaded: ${this.backupStats.uploaded}, Already present: ${this.backupStats.alreadyPresent || 0}, Queued: ${this.backupStats.queued || 0}, Errors: ${this.backupStats.errors}`, 'neutral');
+        chrome.runtime.sendMessage({ action: 'R2_BACKUP_COMPLETE', stats: finalStats }).catch(() => {});
     }
 
     async determineModeAndExecute() {
@@ -2696,19 +2842,22 @@ class GrokScraper {
         }
 
         const cardSelector = 'img[alt="Generated image"], [role="listitem"] img';
-        let retries = 0;
-        const MAX_RETRIES = this.backupMode ? 100 : 50;
+        let staleRetries = 0;
+        let scrollAttempts = 0;
+        const MAX_STALE_RETRIES = this.backupMode ? 30 : 15;
+        const MAX_SCROLL_ATTEMPTS = this.backupMode ? 1000 : 50;
+        let exhausted = false;
 
         await this.sleep(300);
 
-        while (this.state.isRunning && retries < MAX_RETRIES) {
+        while (this.state.isRunning && scrollAttempts < MAX_SCROLL_ATTEMPTS) {
             const items = Array.from(document.querySelectorAll(cardSelector));
             const uniqueItems = items.filter((img, index, self) =>
                 index === self.findIndex((t) => t === img) && img.naturalWidth > 50
             );
 
             console.log(`Scanning ${uniqueItems.length} items...`);
-            if (retries % 5 === 0) this.log(`Scanning... (${uniqueItems.length} items visible)`);
+            if (scrollAttempts % 5 === 0) this.log(`Scanning... (${uniqueItems.length} items visible)`);
 
             // Visual Sort
             let visualItems = uniqueItems.map(img => {
@@ -2747,18 +2896,40 @@ class GrokScraper {
 
             // Scroll if no action
             console.log('No new items visible. Scrolling...');
-            const scroller = document.querySelector('.overflow-scroll') || document.querySelector('[role="list"]')?.parentElement || window;
+            const scroller = this.getGalleryScroller();
+            const before = this.getScrollerSnapshot(scroller);
+            const beforeSignature = this.getGalleryCardSignature(cardSelector);
             scroller.scrollBy(0, window.innerHeight);
-            await this.sleep(400);
+            await this.sleep(600);
             if (!this.state.isRunning) return;
-            retries++;
+            const after = this.getScrollerSnapshot(scroller);
+            const afterSignature = this.getGalleryCardSignature(cardSelector);
+            const outcome = resolveBackupScrollAttempt({
+                before,
+                after,
+                beforeSignature,
+                afterSignature,
+                staleRetries,
+                maxStaleRetries: MAX_STALE_RETRIES
+            });
+            staleRetries = outcome.nextStaleRetries;
+            scrollAttempts++;
+            if (outcome.exhausted) {
+                exhausted = true;
+                break;
+            }
         }
 
-        if (retries >= MAX_RETRIES) {
+        if (exhausted || scrollAttempts >= MAX_SCROLL_ATTEMPTS) {
             if (!this.state.isRunning) return;
             if (this.backupMode) {
-                this.log(`Backup complete. ${this.backupStats.uploaded} uploaded, ${this.backupStats.errors} errors.`, 'success');
-                this.stopBackupMode();
+                if (exhausted) {
+                    this.log(`Backup complete. ${this.backupStats.uploaded} uploaded, ${this.backupStats.alreadyPresent || 0} already present, ${this.backupStats.queued || 0} queued, ${this.backupStats.errors} errors.`, 'success');
+                    this.stopBackupMode('complete');
+                } else {
+                    this.log('Backup paused: scan safety limit reached before confirming the gallery end.', 'warning');
+                    this.stopBackupMode('scan_limit');
+                }
             } else {
                 this.log('Stopped: No new items found.', 'warning');
                 this.stop();
@@ -2784,11 +2955,9 @@ class GrokScraper {
         const storedState = await chrome.storage.local.get(['currentItemId']);
         let currentId = storedState.currentItemId;
         if (!currentId) {
-            const mediaEl = document.querySelector('img[src*="imagine-public.x.ai"]')
-                || document.querySelector('img[src*="assets.grok.com/users/"]')
-                || document.querySelector('video[src]') || document.querySelector('video');
+            const mediaEl = selectBackupMediaElement(document);
             if (mediaEl) {
-                const src = mediaEl.src || mediaEl.currentSrc;
+                const src = getBackupMediaElementSrc(mediaEl);
                 currentId = this.getCleanId(src);
             }
         }
@@ -2877,21 +3046,16 @@ class GrokScraper {
     async performBackupUpload() {
         if (!this.state.isRunning) return;
 
-        // Wait for video element to get its src (lazy-loaded on Grok detail pages)
-        let videoEl = null;
-        let videoSrc = null;
-        const videoStart = Date.now();
-        while (Date.now() - videoStart < 3000) {
-            videoEl = document.querySelector('video');
-            videoSrc = this._getVideoSrc(videoEl);
-            if (videoSrc) break;
+        let mediaEl = null;
+        const mediaStart = Date.now();
+        while (Date.now() - mediaStart < 3000) {
+            mediaEl = selectBackupMediaElement(document);
+            if (mediaEl && getBackupMediaElementSrc(mediaEl)) break;
             await this.sleep(200);
         }
 
-        const imgEl = document.querySelector('img[src*="imagine-public.x.ai"]')
-            || document.querySelector('img[src*="assets.grok.com/users/"]');
-        const isVideo = !!videoSrc;
-        const src = isVideo ? videoSrc : imgEl?.src;
+        const src = getBackupMediaElementSrc(mediaEl);
+        const isVideo = mediaEl?.tagName?.toLowerCase() === 'video';
 
         console.log('[BackupUpload]', isVideo ? 'VIDEO' : 'IMAGE', 'src:', (src || 'NONE').slice(0, 80));
 
@@ -2949,24 +3113,29 @@ class GrokScraper {
                     skipLocalDownload: alreadyLocal
                 }, resolve);
             });
-            const successfulStatuses = new Set(['queued', 'uploaded', 'already_present', 'conflict_uploaded']);
-            if (successfulStatuses.has(response?.status)) {
-                this.backupStats.uploaded++;
+            if (recordBackupUploadStatus(this.backupStats, response?.status)) {
                 const actionLabel = response.status === 'queued'
                     ? 'Queued for R2'
                     : (response.status === 'already_present' ? 'Already in R2' : 'Uploaded to R2');
                 this.log(`${actionLabel}: ...${src.slice(-20)}`, response.status === 'conflict_uploaded' ? 'warning' : 'success');
-                // Mark as processed only after a successful queue or direct upload.
+                // Mark as processed only after R2 says the asset is present.
                 const cleanId = this.getCleanId(src);
-                if (cleanId) {
-                    this.processedIds.add(cleanId);
-                    chrome.storage.local.set({ processedIds: Array.from(this.processedIds) });
+                if (cleanId && shouldPersistBackupProcessedId(response.status)) {
+                    const latest = await chrome.storage.local.get(['processedIds']);
+                    const processedIds = mergeBackupProcessedIdsForStorage(
+                        latest.processedIds,
+                        this.processedIds,
+                        cleanId,
+                        response.backupProcessedId
+                    );
+                    this.processedIds = new Set(processedIds);
+                    await chrome.storage.local.set({ processedIds });
                 }
             } else {
                 this.backupStats.errors++;
                 this.log(`Backup error: ${response?.error || 'unknown'}`, 'error');
             }
-        } catch (e) {
+        } catch {
             this.backupStats.errors++;
         }
 
@@ -3048,6 +3217,12 @@ if (typeof module === 'undefined') {
         filterSavedPrompts,
         promptContainsToken,
         mergePromptTextForAppend,
-        appendSnippetAtCursor
+        appendSnippetAtCursor,
+        getBackupMediaElementSrc,
+        recordBackupUploadStatus,
+        resolveBackupScrollAttempt,
+        selectBackupMediaElement,
+        mergeBackupProcessedIdsForStorage,
+        shouldPersistBackupProcessedId
     };
 }

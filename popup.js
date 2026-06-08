@@ -1,3 +1,13 @@
+function getR2BackupDoneStatusLabel(stats = {}) {
+    if (stats.stopReason === 'complete') return 'Complete';
+    if (stats.stopReason === 'scan_limit' || stats.stopReason === 'stalled') return 'Paused';
+    return stats.stopReason ? 'Stopped' : 'Complete';
+}
+
+function formatR2BackupDetails(stats = {}) {
+    return `${stats.uploaded || 0} uploaded / ${stats.alreadyPresent || 0} already present / ${stats.queued || 0} queued / ${stats.errors || 0} errors`;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -96,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
             r2BackupStopBtn.style.display = 'inline-block';
             if (result.r2BackupState) {
                 const s = result.r2BackupState;
-                r2BackupDetails.textContent = `${s.uploaded || 0} uploaded / ${s.errors || 0} errors`;
+                r2BackupDetails.textContent = formatR2BackupDetails(s);
             }
         }
 
@@ -339,14 +349,14 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (message.action === 'UPDATE_R2_BACKUP_PROGRESS') {
             const s = message.stats || {};
             r2BackupStatus.textContent = `Running... (${s.totalSeen || 0} seen)`;
-            r2BackupDetails.textContent = `${s.uploaded || 0} uploaded / ${s.errors || 0} errors`;
+            r2BackupDetails.textContent = formatR2BackupDetails(s);
         } else if (message.action === 'R2_BACKUP_DONE') {
             cloudMediaBackupBtn.disabled = false;
             r2BackupStopBtn.style.display = 'none';
-            r2BackupStatus.textContent = 'Complete';
             const s = message.stats || {};
-            r2BackupDetails.textContent = `${s.uploaded || 0} uploaded / ${s.errors || 0} errors`;
-            addLog(`Backup complete: ${s.uploaded || 0} uploaded`, 'success');
+            r2BackupStatus.textContent = getR2BackupDoneStatusLabel(s);
+            r2BackupDetails.textContent = formatR2BackupDetails(s);
+            addLog(`Backup ${s.stopReason === 'complete' ? 'complete' : 'stopped'}: ${formatR2BackupDetails(s)}`, s.stopReason === 'complete' ? 'success' : 'warning');
         }
     });
 
@@ -535,3 +545,10 @@ document.addEventListener('DOMContentLoaded', () => {
         cloudLastTestMessage.className = '';
     }
 });
+
+if (typeof module !== 'undefined') {
+    module.exports = {
+        formatR2BackupDetails,
+        getR2BackupDoneStatusLabel
+    };
+}

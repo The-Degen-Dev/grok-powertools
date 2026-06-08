@@ -209,6 +209,48 @@ function saveHistory() {
     chrome.storage.local.set({ processedIds: Array.from(processedUUIDs) });
 }
 
+function shouldPersistBackupProcessedId(status) {
+    return status === 'uploaded' || status === 'already_present' || status === 'conflict_uploaded';
+}
+
+function applyBackupProcessedIdPersistence(processedIds, id, status, persist) {
+    if (!id || !shouldPersistBackupProcessedId(status)) return false;
+    if (!processedIds.has(id)) {
+        processedIds.add(id);
+        persist();
+    }
+    return true;
+}
+
+function persistQueuedBackupProcessedId(item, result, processedIds, persist) {
+    return applyBackupProcessedIdPersistence(processedIds, item?.backupProcessedId, result?.status, persist);
+}
+
+async function persistQueuedBackupProcessedIdAfterSuccess(item, result) {
+    const id = item?.backupProcessedId;
+    if (!id || !shouldPersistBackupProcessedId(result?.status)) return false;
+
+    const stored = await chrome.storage.local.get(['processedIds']);
+    const merged = new Set(Array.isArray(stored.processedIds) ? stored.processedIds : []);
+    for (const processedId of processedUUIDs) {
+        if (processedId) merged.add(processedId);
+    }
+    merged.add(id);
+
+    processedUUIDs = merged;
+    await chrome.storage.local.set({ processedIds: Array.from(processedUUIDs) });
+    return true;
+}
+
+function buildDirectBackupUploadResponse(result, sourceUrl) {
+    return {
+        status: result.status,
+        objectKey: result.objectKey,
+        assetId: result.assetId,
+        backupProcessedId: parseFilenameInfo(sourceUrl).uuid
+    };
+}
+
 function makeQueueId(prefix = 'queue') {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 }
@@ -431,6 +473,7 @@ async function enqueueCloudItem(queueItem, dedupeKey) {
             existing.assetIdentityKind = queueItem.assetIdentityKind || existing.assetIdentityKind;
             existing.contentType = queueItem.contentType || existing.contentType;
             existing.promptText = queueItem.promptText || existing.promptText || '';
+            existing.backupProcessedId = queueItem.backupProcessedId || existing.backupProcessedId;
             existing.updatedAt = Date.now();
             existing.attempts = 0;
             existing.lastError = null;
@@ -477,7 +520,8 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
         sourceUrlHash: identity.sourceUrlHash,
         assetIdentityKind: identity.kind,
         contentType: CloudSync.detectContentTypeFromUrl(sourceUrl),
-        promptText: promptText || ''
+        promptText: promptText || '',
+        backupProcessedId: parseFilenameInfo(sourceUrl).uuid
     };
 
     await enqueueCloudItem(queueItem, CloudSync.buildMediaDedupeKey({
@@ -866,6 +910,7 @@ async function processCloudQueue(reason = 'auto', options = {}) {
                 if (item.type === 'media') {
                     console.log('[CloudQueue] Processing media item:', item.objectKey, '| sourceUrl:', item.sourceUrl?.slice(0, 80));
                     const result = await uploadMediaQueueItem(config, item);
+                    await persistQueuedBackupProcessedIdAfterSuccess(item, result);
                     if (result.status === 'already_present') {
                         log(`Cloud upload already present: ${result.objectKey}`, 'success');
                     } else {
@@ -1075,13 +1120,6 @@ async function generateFilename(url, suggestedFilename, extHint) {
 async function generateFilenameForBackup(url, extHint) {
     const parsed = parseFilenameInfo(url);
 
-    // No dedup check — always generate path for backup
-    // Still mark as processed so future normal scrapes skip these
-    if (parsed.uuid && !processedUUIDs.has(parsed.uuid)) {
-        processedUUIDs.add(parsed.uuid);
-        saveHistory();
-    }
-
     const dateStr = new Date().toISOString().split('T')[0];
     const ext = await detectExtension(url, extHint);
 
@@ -1277,12 +1315,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     }, blob);
 
                     console.log('[CloudQueue] Direct blob upload result:', result.status, result.objectKey, blob.size, 'bytes');
-
-                    sendResponse({
-                        status: result.status === 'already_present' ? 'already_present' : 'uploaded',
-                        objectKey: result.objectKey,
-                        assetId: result.assetId
-                    });
+                    sendResponse(buildDirectBackupUploadResponse(result, request.url));
                 } catch (e) {
                     console.error('[CloudQueue] Direct blob upload failed:', e.message);
                     sendResponse({ status: 'error', error: e.message });
@@ -1324,7 +1357,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         isScraping = false;
         chrome.storage.local.set({ isScraping: false, isR2Backup: false });
         const stats = request.stats || {};
-        log(`R2 Backup complete. Uploaded: ${stats.uploaded || 0}, Errors: ${stats.errors || 0}`, 'success');
+        const completed = stats.stopReason === 'complete' || !stats.stopReason;
+        const statusLabel = completed ? 'complete' : `stopped (${stats.stopReason})`;
+        log(`R2 Backup ${statusLabel}. Uploaded: ${stats.uploaded || 0}, Already present: ${stats.alreadyPresent || 0}, Queued: ${stats.queued || 0}, Errors: ${stats.errors || 0}`, completed ? 'success' : 'warning');
         chrome.runtime.sendMessage({
             action: 'R2_BACKUP_DONE',
             stats: stats
@@ -1536,6 +1571,17 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         }
     }
 });
+
+if (typeof module !== 'undefined') {
+    module.exports = {
+        applyBackupProcessedIdPersistence,
+        buildDirectBackupUploadResponse,
+        getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
+        persistQueuedBackupProcessedId,
+        persistQueuedBackupProcessedIdAfterSuccess,
+        setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); }
+    };
+}
 
 // --- STANDARD DOWNLOAD LISTENER ---
 const _pendingR2Downloads = new Map();
