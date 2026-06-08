@@ -108,7 +108,7 @@
       <tr>
         <td>Task 8</td>
         <td class="pending">In progress</td>
-        <td>Pushed <code>codex/main-cleanup-github-sync</code>. A PR is needed to trigger CI because branch pushes only run on <code>main</code>/<code>master</code>.</td>
+        <td>Pushed <code>codex/main-cleanup-github-sync</code> and opened PR #1. First PR CI was cancelled because the extension job hung in Playwright browser installation; workflow is being revised to use the GitHub runner's Chrome channel.</td>
       </tr>
     </tbody>
   </table>
@@ -121,6 +121,7 @@
     <li>Strengthen Task 3's CI contract test to parse workflow YAML with <code>js-yaml</code> instead of raw string matching. Add <code>js-yaml@4.2.0</code> as a direct root dev dependency in the CI commit task so the final test does not rely on ESLint's transitive dependency.</li>
     <li>Run Task 6 validation through <code>mise exec node@24</code> instead of activating Node globally. This matches CI's Node 24 target without changing the user's shell defaults.</li>
     <li>Create a pull request for Task 8 CI verification because the workflow's push trigger is limited to <code>main</code>/<code>master</code>; branch validation runs through the <code>pull_request</code> trigger.</li>
+    <li>Use Playwright's supported Chrome channel in CI for extension smoke tests. The PR runner provides Google Chrome, and this avoids a hung <code>npx playwright install --with-deps chromium</code> step while keeping Chromium-family coverage.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -130,6 +131,7 @@
     <li>Task 3 will not keep the plan's exact raw-string CI workflow test because the code-quality reviewer found that comments or misplaced commands could make it pass falsely.</li>
     <li>Task 6 added one extra commit, <code>b8f9b80 fix: satisfy fullscreen viewer lint</code>, because the web app could not pass local lint until <code>togglePlay</code> was declared before the keyboard effect that calls it.</li>
     <li>Task 8 departs from the plan's assumption that <code>gh run list --branch codex/main-cleanup-github-sync</code> would show a push run. It did not, so a PR is created to exercise CI.</li>
+    <li>Task 8 departs from the original CI workflow plan by replacing the Playwright Chromium install step with <code>google-chrome --version</code> plus <code>channel: "chrome"</code> under <code>process.env.CI</code>. The original install step hung without producing logs.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
