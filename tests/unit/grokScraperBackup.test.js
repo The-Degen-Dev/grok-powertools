@@ -2,6 +2,8 @@ const {
     mergeBackupProcessedIdsForStorage,
     recordBackupUploadStatus,
     resolveBackupScrollAttempt,
+    getR2BackupCanaryStopReason,
+    GrokScraper,
     selectBackupMediaElement,
     shouldPersistBackupProcessedId
 } = require('../../content.js');
@@ -280,6 +282,44 @@ describe('Grok backup background processed ID persistence', () => {
             processedIds: expect.any(Array)
         }));
     });
+
+    test('builds full backup init options by default', () => {
+        const { buildR2BackupInitMessage } = loadBackgroundForTest();
+
+        expect(buildR2BackupInitMessage({ action: 'START_R2_BACKUP' })).toEqual({
+            action: 'INIT_R2_BACKUP',
+            mode: 'full',
+            limit: null,
+            options: {}
+        });
+    });
+
+    test('carries requested canary mode, limit, and options to content init', () => {
+        const { buildR2BackupInitMessage } = loadBackgroundForTest();
+
+        expect(buildR2BackupInitMessage({
+            action: 'START_R2_BACKUP',
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true }
+        })).toEqual({
+            action: 'INIT_R2_BACKUP',
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true }
+        });
+    });
+
+    test('treats canary completion as a successful R2 backup completion', () => {
+        const {
+            getR2BackupCompletionStatusLabel,
+            isR2BackupCompletionSuccessful
+        } = loadBackgroundForTest();
+
+        expect(isR2BackupCompletionSuccessful({ stopReason: 'canary_complete' })).toBe(true);
+        expect(getR2BackupCompletionStatusLabel({ stopReason: 'canary_complete' })).toBe('canary complete');
+        expect(isR2BackupCompletionSuccessful({ stopReason: 'canary_incomplete' })).toBe(false);
+    });
 });
 
 describe('Grok backup scan exhaustion', () => {
@@ -379,6 +419,72 @@ describe('Grok backup upload stats', () => {
             'response-backup-uuid'
         ]);
     });
+
+    test('completes canary only after the first R2-present media status', () => {
+        const canaryOptions = { mode: 'canary', limit: 1 };
+        const conflictStats = { uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        recordBackupUploadStatus(conflictStats, 'conflict_uploaded');
+
+        expect(getR2BackupCanaryStopReason(canaryOptions, { uploaded: 1, alreadyPresent: 0, queued: 0 })).toBe('canary_complete');
+        expect(getR2BackupCanaryStopReason(canaryOptions, { uploaded: 0, alreadyPresent: 1, queued: 0 })).toBe('canary_complete');
+        expect(getR2BackupCanaryStopReason(canaryOptions, conflictStats)).toBe('canary_complete');
+        expect(getR2BackupCanaryStopReason({ mode: 'full', limit: null }, { uploaded: 1, alreadyPresent: 0, queued: 0 })).toBeNull();
+    });
+
+    test('stops canary as incomplete after one queued or failed media attempt', () => {
+        const canaryOptions = { mode: 'canary', limit: 1 };
+
+        expect(getR2BackupCanaryStopReason(canaryOptions, { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0 })).toBe('canary_incomplete');
+        expect(getR2BackupCanaryStopReason(canaryOptions, { uploaded: 0, alreadyPresent: 0, queued: 0, errors: 1 })).toBe('canary_incomplete');
+        expect(getR2BackupCanaryStopReason(canaryOptions, { uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 })).toBeNull();
+    });
+});
+
+describe('Grok backup canary flow', () => {
+    afterEach(() => {
+        delete global.chrome;
+        document.body.textContent = '';
+    });
+
+    test('stops before navigating back after one successful canary media attempt', async () => {
+        global.chrome = {
+            runtime: {
+                sendMessage: jest.fn(() => Promise.resolve())
+            },
+            storage: {
+                local: {
+                    get: jest.fn(() => Promise.resolve({ currentItemId: 'media-clean-id' }))
+                }
+            }
+        };
+        const scraper = Object.create(GrokScraper.prototype);
+        scraper.state = { isRunning: true, currentIndex: 0, mode: 'DETAIL' };
+        scraper.backupMode = true;
+        scraper.backupOptions = { mode: 'canary', limit: 1, options: { stopAfterMediaAttempt: true } };
+        scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        scraper.processedIds = new Set();
+        scraper._backupVisited = new Set();
+        scraper.Config = { actionWait: 0, navWait: 0 };
+        scraper.sleep = jest.fn(() => Promise.resolve());
+        scraper.performDownload = jest.fn(async () => {
+            recordBackupUploadStatus(scraper.backupStats, 'uploaded');
+        });
+        scraper.stopBackupMode = jest.fn(async (stopReason) => {
+            scraper.state.isRunning = false;
+            scraper.backupMode = false;
+            scraper.stopReason = stopReason;
+        });
+        scraper.waitForSelector = jest.fn();
+        scraper.determineModeAndExecute = jest.fn();
+
+        await scraper.executeDetailView();
+
+        expect(scraper.backupStats.totalSeen).toBe(1);
+        expect(scraper.performDownload).toHaveBeenCalledTimes(1);
+        expect(scraper.stopBackupMode).toHaveBeenCalledWith('canary_complete');
+        expect(scraper.waitForSelector).not.toHaveBeenCalled();
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+    });
 });
 
 describe('Grok backup popup status text', () => {
@@ -393,5 +499,13 @@ describe('Grok backup popup status text', () => {
             queued: 4,
             errors: 1
         })).toBe('2 uploaded / 3 already present / 4 queued / 1 errors');
+    });
+
+    test('labels canary completion distinctly', () => {
+        expect(getR2BackupDoneStatusLabel({ stopReason: 'canary_complete' })).toBe('Canary complete');
+    });
+
+    test('labels incomplete canary distinctly', () => {
+        expect(getR2BackupDoneStatusLabel({ stopReason: 'canary_incomplete' })).toBe('Canary incomplete');
     });
 });

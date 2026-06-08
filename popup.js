@@ -1,4 +1,6 @@
 function getR2BackupDoneStatusLabel(stats = {}) {
+    if (stats.stopReason === 'canary_complete') return 'Canary complete';
+    if (stats.stopReason === 'canary_incomplete') return 'Canary incomplete';
     if (stats.stopReason === 'complete') return 'Complete';
     if (stats.stopReason === 'scan_limit' || stats.stopReason === 'stalled') return 'Paused';
     return stats.stopReason ? 'Stopped' : 'Complete';
@@ -34,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const cloudRetryBtn = document.getElementById('cloudRetryBtn');
     const cloudBackfillBtn = document.getElementById('cloudBackfillBtn');
     const cloudClearBtn = document.getElementById('cloudClearBtn');
+    const cloudMediaCanaryBtn = document.getElementById('cloudMediaCanaryBtn');
     const cloudMediaBackupBtn = document.getElementById('cloudMediaBackupBtn');
     const r2BackupProgress = document.getElementById('r2BackupProgress');
     const r2BackupStatus = document.getElementById('r2BackupStatus');
@@ -100,6 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCloudState(result.cloudSyncState || {});
 
         if (result.isR2Backup) {
+            cloudMediaCanaryBtn.disabled = true;
             cloudMediaBackupBtn.disabled = true;
             r2BackupProgress.style.display = 'block';
             r2BackupStatus.textContent = 'Running...';
@@ -307,6 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        cloudMediaCanaryBtn.disabled = true;
         cloudMediaBackupBtn.disabled = true;
         r2BackupProgress.style.display = 'block';
         r2BackupStatus.textContent = 'Starting...';
@@ -317,6 +322,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 r2BackupStatus.textContent = 'Running...';
                 addLog('Full Media Backup started', 'success');
             } else {
+                cloudMediaCanaryBtn.disabled = false;
                 cloudMediaBackupBtn.disabled = false;
                 r2BackupStopBtn.style.display = 'none';
                 r2BackupStatus.textContent = 'Failed';
@@ -325,8 +331,41 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    cloudMediaCanaryBtn.addEventListener('click', () => {
+        const validationError = validateCloudConfig(cloudConfig);
+        if (validationError) {
+            addLog(validationError, 'error');
+            return;
+        }
+
+        cloudMediaCanaryBtn.disabled = true;
+        cloudMediaBackupBtn.disabled = true;
+        r2BackupProgress.style.display = 'block';
+        r2BackupStatus.textContent = 'Starting canary...';
+        r2BackupStopBtn.style.display = 'inline-block';
+
+        chrome.runtime.sendMessage({
+            action: 'START_R2_BACKUP',
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true }
+        }, (response) => {
+            if (response?.status === 'started') {
+                r2BackupStatus.textContent = 'Running canary...';
+                addLog('One Media R2 Canary started', 'success');
+            } else {
+                cloudMediaCanaryBtn.disabled = false;
+                cloudMediaBackupBtn.disabled = false;
+                r2BackupStopBtn.style.display = 'none';
+                r2BackupStatus.textContent = 'Failed';
+                addLog(response?.error || 'Failed to start canary', 'error');
+            }
+        });
+    });
+
     r2BackupStopBtn.addEventListener('click', () => {
         chrome.runtime.sendMessage({ action: 'STOP_R2_BACKUP' }, () => {
+            cloudMediaCanaryBtn.disabled = false;
             cloudMediaBackupBtn.disabled = false;
             r2BackupStopBtn.style.display = 'none';
             r2BackupStatus.textContent = 'Stopped';
@@ -351,12 +390,15 @@ document.addEventListener('DOMContentLoaded', () => {
             r2BackupStatus.textContent = `Running... (${s.totalSeen || 0} seen)`;
             r2BackupDetails.textContent = formatR2BackupDetails(s);
         } else if (message.action === 'R2_BACKUP_DONE') {
+            cloudMediaCanaryBtn.disabled = false;
             cloudMediaBackupBtn.disabled = false;
             r2BackupStopBtn.style.display = 'none';
             const s = message.stats || {};
             r2BackupStatus.textContent = getR2BackupDoneStatusLabel(s);
             r2BackupDetails.textContent = formatR2BackupDetails(s);
-            addLog(`Backup ${s.stopReason === 'complete' ? 'complete' : 'stopped'}: ${formatR2BackupDetails(s)}`, s.stopReason === 'complete' ? 'success' : 'warning');
+            const completed = s.stopReason === 'complete' || s.stopReason === 'canary_complete';
+            const logLabel = s.stopReason === 'canary_incomplete' ? 'incomplete' : (completed ? 'complete' : 'stopped');
+            addLog(`Backup ${logLabel}: ${formatR2BackupDetails(s)}`, completed ? 'success' : 'warning');
         }
     });
 

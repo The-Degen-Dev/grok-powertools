@@ -251,6 +251,28 @@ function buildDirectBackupUploadResponse(result, sourceUrl) {
     };
 }
 
+function buildR2BackupInitMessage(request = {}) {
+    const mode = request.mode === 'canary' ? 'canary' : 'full';
+    const limit = Number.isFinite(request.limit) && request.limit > 0 ? request.limit : null;
+    const options = request.options && typeof request.options === 'object' ? request.options : {};
+    return {
+        action: 'INIT_R2_BACKUP',
+        mode,
+        limit,
+        options
+    };
+}
+
+function isR2BackupCompletionSuccessful(stats = {}) {
+    return stats.stopReason === 'complete' || stats.stopReason === 'canary_complete' || !stats.stopReason;
+}
+
+function getR2BackupCompletionStatusLabel(stats = {}) {
+    if (stats.stopReason === 'canary_complete') return 'canary complete';
+    if (isR2BackupCompletionSuccessful(stats)) return 'complete';
+    return `stopped (${stats.stopReason})`;
+}
+
 function makeQueueId(prefix = 'queue') {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 }
@@ -1245,20 +1267,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ status: 'busy', error: 'Scraper is already running.' });
             return false;
         }
-        log('Starting Full R2 Media Backup...');
+        const initMessage = buildR2BackupInitMessage(request);
+        log(initMessage.mode === 'canary' ? 'Starting R2 Canary Backup...' : 'Starting Full R2 Media Backup...');
         isR2Backup = true;
         isScraping = true;
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (tabs[0] && (tabs[0].url.includes('x.com') || tabs[0].url.includes('grok.com'))) {
                 currentTabId = tabs[0].id;
-                chrome.tabs.sendMessage(currentTabId, { action: 'INIT_R2_BACKUP' }, (response) => {
+                chrome.tabs.sendMessage(currentTabId, initMessage, (response) => {
                     if (chrome.runtime.lastError) {
                         chrome.scripting.executeScript({
                             target: { tabId: currentTabId },
                             files: ['content.js']
                         }, () => {
                             setTimeout(() => {
-                                chrome.tabs.sendMessage(currentTabId, { action: 'INIT_R2_BACKUP' });
+                                chrome.tabs.sendMessage(currentTabId, initMessage);
                                 chrome.storage.local.set({ isScraping: true, isR2Backup: true });
                             }, 500);
                         });
@@ -1357,8 +1380,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         isScraping = false;
         chrome.storage.local.set({ isScraping: false, isR2Backup: false });
         const stats = request.stats || {};
-        const completed = stats.stopReason === 'complete' || !stats.stopReason;
-        const statusLabel = completed ? 'complete' : `stopped (${stats.stopReason})`;
+        const completed = isR2BackupCompletionSuccessful(stats);
+        const statusLabel = getR2BackupCompletionStatusLabel(stats);
         log(`R2 Backup ${statusLabel}. Uploaded: ${stats.uploaded || 0}, Already present: ${stats.alreadyPresent || 0}, Queued: ${stats.queued || 0}, Errors: ${stats.errors || 0}`, completed ? 'success' : 'warning');
         chrome.runtime.sendMessage({
             action: 'R2_BACKUP_DONE',
@@ -1576,7 +1599,10 @@ if (typeof module !== 'undefined') {
     module.exports = {
         applyBackupProcessedIdPersistence,
         buildDirectBackupUploadResponse,
+        buildR2BackupInitMessage,
+        getR2BackupCompletionStatusLabel,
         getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
+        isR2BackupCompletionSuccessful,
         persistQueuedBackupProcessedId,
         persistQueuedBackupProcessedIdAfterSuccess,
         setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); }
