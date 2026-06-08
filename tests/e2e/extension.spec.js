@@ -12,10 +12,17 @@ test.describe('Grok Power Tools E2E', () => {
     test.beforeEach(async ({ page }) => {
         // Mock Chrome API in the browser context
         await page.addInitScript(() => {
+            window.__chromeRuntimeMessages = [];
             window.chrome = {
                 runtime: {
                     getURL: (resourcePath) => resourcePath,
-                    sendMessage: () => { },
+                    sendMessage: (message, callback) => {
+                        window.__chromeRuntimeMessages.push(message);
+                        if (message?.action === 'VALIDATE_CLOUD_CONFIG' && callback) {
+                            callback({ valid: true });
+                        }
+                        return Promise.resolve({ ok: true });
+                    },
                     onMessage: { addListener: () => { } }
                 },
                 storage: {
@@ -87,5 +94,19 @@ test.describe('Grok Power Tools E2E', () => {
 
         // Should be restored
         await expect(overlay).not.toHaveClass(/minimized/);
+    });
+
+    test('Page-origin full R2 backup command should fail closed', async ({ page }) => {
+        await page.evaluate(contentJs);
+
+        await page.evaluate(() => {
+            document.dispatchEvent(new CustomEvent('grok-powertools-command', {
+                detail: { action: 'INIT_R2_BACKUP', mode: 'full' }
+            }));
+        });
+        await page.waitForTimeout(50);
+
+        const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
+        expect(runtimeMessages).not.toContainEqual({ action: 'VALIDATE_CLOUD_CONFIG' });
     });
 });
