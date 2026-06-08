@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Main Cleanup GitHub Sync Implementation Notes</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      margin: 40px auto;
+      max-width: 980px;
+      color: #1f2328;
+    }
+    h1, h2 {
+      line-height: 1.2;
+    }
+    code {
+      background: #f6f8fa;
+      border-radius: 4px;
+      padding: 0.1em 0.3em;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid #d0d7de;
+      padding: 8px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #f6f8fa;
+    }
+    .pending {
+      color: #8250df;
+      font-weight: 600;
+    }
+    .done {
+      color: #1a7f37;
+      font-weight: 600;
+    }
+    .blocked {
+      color: #cf222e;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>Main Cleanup GitHub Sync Implementation Notes</h1>
+  <p>
+    Running notes for executing
+    <code>docs/superpowers/plans/2026-06-08-main-cleanup-github-sync.md</code>.
+    This file records decisions, deviations, tradeoffs, and open questions that affect
+    how the implementation interprets the plan.
+  </p>
+
+  <h2>Status</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Task</th>
+        <th>Status</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Execution setup</td>
+        <td class="done">Done</td>
+        <td>Subagent-driven execution selected. Notes file created before product edits.</td>
+      </tr>
+      <tr>
+        <td>Task 1</td>
+        <td class="done">Done</td>
+        <td>Red contract test created, strengthened after quality review, and approved by scoped spec and quality reviews.</td>
+      </tr>
+      <tr>
+        <td>Task 2</td>
+        <td class="done">Done</td>
+        <td>Committed <code>debb565 chore: track npm lockfiles</code>. Targeted test and install dry-runs passed. Scoped spec and quality reviews approved.</td>
+      </tr>
+      <tr>
+        <td>Task 3</td>
+        <td class="done">Done</td>
+        <td>Red CI workflow contract test created, strengthened to parse YAML and assert per-job structure, then approved by scoped spec and quality reviews.</td>
+      </tr>
+      <tr>
+        <td>Task 4</td>
+        <td class="done">Done</td>
+        <td>Committed <code>9d1bbe0 ci: validate all local surfaces</code>. Spec and quality reviews approved. Production audit was clean; remaining audit findings are dev-only transitive tooling.</td>
+      </tr>
+      <tr>
+        <td>Task 5</td>
+        <td class="done">Done</td>
+        <td>Approved at <code>059706f fix: harden grok saved r2 backup scan</code>. Queue-success persistence now merges latest storage, background memory, and queued ID, then awaits storage before dropping the item.</td>
+      </tr>
+      <tr>
+        <td>Task 6</td>
+        <td class="done">Done</td>
+        <td>Full validation passed under <code>mise exec node@24</code>. Added <code>b8f9b80 fix: satisfy fullscreen viewer lint</code> after web lint exposed a React hooks lint error.</td>
+      </tr>
+      <tr>
+        <td>Task 7</td>
+        <td class="done">Done</td>
+        <td>Replaced dead <code>origin</code> with <code>git@github.com:The-Degen-Dev/grok-powertools.git</code>. Local <code>main</code> tracks <code>origin/main</code> and is 25 commits ahead.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Design Decisions</h2>
+  <ul>
+    <li>Use this HTML file beside the saved plan so implementation notes stay tied to the plan artifact.</li>
+    <li>Strengthen Task 1's ignore assertion from literal <code>.gitignore</code> line checks to <code>git check-ignore --no-index</code> so equivalent ignore patterns are caught.</li>
+    <li>Replace a long-running Task 2 spec reviewer with a narrower reviewer that did not repeat install dry-runs. The install dry-runs were already performed by the implementer and will run again in the full validation task.</li>
+    <li>Strengthen Task 3's CI contract test to parse workflow YAML with <code>js-yaml</code> instead of raw string matching. Add <code>js-yaml@4.2.0</code> as a direct root dev dependency in the CI commit task so the final test does not rely on ESLint's transitive dependency.</li>
+    <li>Run Task 6 validation through <code>mise exec node@24</code> instead of activating Node globally. This matches CI's Node 24 target without changing the user's shell defaults.</li>
+  </ul>
+
+  <h2>Deviations</h2>
+  <ul>
+    <li>Task 1 will not keep the plan's exact literal <code>.gitignore</code> assertion because the code-quality reviewer found that it under-proves the stated lockfile contract. The intent stays the same: lockfiles must not be ignored.</li>
+    <li>Task 2 review did not wait indefinitely on the first spec-review subagent. It was closed after timeout and replaced with a scoped reviewer to avoid blocking execution.</li>
+    <li>Task 3 will not keep the plan's exact raw-string CI workflow test because the code-quality reviewer found that comments or misplaced commands could make it pass falsely.</li>
+    <li>Task 6 added one extra commit, <code>b8f9b80 fix: satisfy fullscreen viewer lint</code>, because the web app could not pass local lint until <code>togglePlay</code> was declared before the keyboard effect that calls it.</li>
+  </ul>
+
+  <h2>Tradeoffs</h2>
+  <ul>
+    <li>The stronger <code>git check-ignore --no-index</code> assertion couples the test to Git behavior, but that is appropriate because the requirement itself is a Git tracking/ignore contract.</li>
+    <li>The replacement Task 2 reviewer avoided duplicate install dry-runs to keep the review bounded. Risk is low because Task 6 performs full local validation again.</li>
+    <li>Adding <code>js-yaml</code> creates one small test-only dependency, but it avoids a fragile hand-rolled workflow parser and matches the repository preference for structured parsers over ad hoc string checks.</li>
+    <li>Task 5 needs one more TDD loop after the initial commit because pure content-helper tests did not cover background's <code>R2_BACKUP_UPLOAD</code> persistence path.</li>
+    <li>Task 5 needed a second TDD loop for queued uploads: avoiding early persistence was not enough because processed IDs also need to persist after asynchronous queue success is proven.</li>
+    <li>Task 5 needed a third TDD loop because content could overwrite background's newly persisted UUID with a stale in-memory processed-ID set after direct upload success.</li>
+    <li>Task 5 needs a fourth TDD loop because direct upload still has two competing storage writers, and video candidate filtering became too strict for valid <code>assets.grok.com/videos/...</code> URLs.</li>
+    <li>Task 5 needs a fifth TDD loop because background queue-success persistence still writes from stale in-memory IDs and does not await storage durability before dropping the queue item.</li>
+    <li>The Task 6 lint repair was committed separately instead of amending CI or backup commits so validation-driven web cleanup stays reviewable and isolated.</li>
+  </ul>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li>Consider a separate dependency-audit task for the 6 dev-only transitive npm findings. They did not block Task 4 because <code>npm audit --omit=dev</code> was clean and the findings were not introduced by <code>js-yaml@4.2.0</code>.</li>
+    <li>Next.js build warns about multiple lockfiles and inferred workspace root. Build passes, but setting <code>turbopack.root</code> in <code>web/next.config.ts</code> could silence it in a separate cleanup.</li>
+  </ul>
+</body>
+</html>
