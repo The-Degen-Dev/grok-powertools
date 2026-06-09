@@ -53,7 +53,7 @@ Recommended resource shape:
 - Worker: acceptance-only deployment, separate from production Worker.
 - R2 bucket: acceptance-only bucket, never `grok-gallery-001`.
 - D1 database: acceptance-only database, never `grok-powertools-db`.
-- Prefix: `acceptance/<run_id>/...` or stricter, with the Worker refusing any write outside the configured acceptance prefix.
+- Prefix: `acceptance/$ACCEPTANCE_RUN_ID/...` or stricter, with the Worker refusing any write outside the configured acceptance prefix.
 - API key: acceptance-only secret, separate from the current production-like key.
 
 The Worker must reject:
