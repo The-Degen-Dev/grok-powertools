@@ -70,23 +70,31 @@
         <td class="done">Done</td>
         <td>Red test failed on missing <code>acceptance/lib/run-contract.js</code>; green test passed with 4 Jest assertions.</td>
       </tr>
+      <tr>
+        <td>Task 2</td>
+        <td class="done">Done</td>
+        <td>Subagent red test failed on missing <code>cloud/src/acceptance.ts</code>; main-session green acceptance test passed with 4 Node test assertions and cloud typecheck passed.</td>
+      </tr>
     </tbody>
   </table>
 
   <h2>Design Decisions</h2>
   <ul>
     <li>Keep acceptance artifacts under <code>acceptance/</code> and <code>docs/superpowers/plans/</code> so they are separate from product runtime files.</li>
+    <li>Add a small cloud TypeScript test harness instead of adding a broad Worker test framework. It gives red/green coverage for acceptance guard logic without changing production runtime dependencies.</li>
   </ul>
 
   <h2>Deviations</h2>
   <ul>
     <li>Task 1 was dispatched to a subagent, but the exposed toolset did not include a direct wait/read-result tool. A status sidecar later reported the worker was still active, so the main session completed Task 1 locally using the same red/green sequence rather than blocking execution.</li>
     <li>The plan's redaction test used sensitive-looking fixture strings. The implementation changed those to inert sample values and kept the same assertions so the staged sensitive-value scan stays clean.</li>
+    <li>Task 2 red evidence was captured by the subagent, while green acceptance test and typecheck were independently rerun in the main session before commit.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
   <ul>
     <li>Proceeding locally after dispatch kept the TDD evidence current in the authoritative worktree. The risk is duplicate sidecar work on the same files, so the main session rechecks the worktree before staging.</li>
+    <li>The staged sensitive-value scan for Task 2 can report AWS SDK provider package names in <code>cloud/package-lock.json</code>. Those are package identifiers, not credentials.</li>
   </ul>
 
   <h2>Open Questions</h2>

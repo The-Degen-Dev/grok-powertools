@@ -5,15 +5,17 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:acceptance": "rm -rf .tmp-test && tsc -p tsconfig.test.json && node --test .tmp-test/tests/*.test.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.922.0",
-    "@aws-sdk/s3-request-presigner": "^3.922.0"
+    "@aws-sdk/client-s3": "^3.1064.0",
+    "@aws-sdk/s3-request-presigner": "^3.1064.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260217.0",
+    "@cloudflare/workers-types": "^4.20260609.1",
+    "@types/node": "^24.13.1",
     "typescript": "^5.9.3",
-    "wrangler": "^4.45.3"
+    "wrangler": "^4.98.0"
   }
 }
