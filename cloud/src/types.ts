@@ -13,6 +13,11 @@ export interface Env {
     R2_ACCOUNT_ID: string;
     R2_BUCKET_NAME: string;
     KEY_PREFIX?: string;
+    ACCEPTANCE_MODE?: string;
+    ACCEPTANCE_RUN_ID?: string;
+    ACCEPTANCE_KEY_PREFIX?: string;
+    ACCEPTANCE_KILL_SWITCH?: string;
+    WORKER_VERSION?: string;
     SYNC_SECRET?: string;
 }
 

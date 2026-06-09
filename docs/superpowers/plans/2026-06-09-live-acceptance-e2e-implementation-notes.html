@@ -75,6 +75,11 @@
         <td class="done">Done</td>
         <td>Subagent red test failed on missing <code>cloud/src/acceptance.ts</code>; main-session green acceptance test passed with 4 Node test assertions and cloud typecheck passed.</td>
       </tr>
+      <tr>
+        <td>Task 3</td>
+        <td class="done">Done</td>
+        <td>Worker acceptance routing test failed red on missing identity routing and generic object-key rejection; green acceptance test passed with 7 Node test assertions and cloud typecheck passed.</td>
+      </tr>
     </tbody>
   </table>
 
@@ -82,6 +87,8 @@
   <ul>
     <li>Keep acceptance artifacts under <code>acceptance/</code> and <code>docs/superpowers/plans/</code> so they are separate from product runtime files.</li>
     <li>Add a small cloud TypeScript test harness instead of adding a broad Worker test framework. It gives red/green coverage for acceptance guard logic without changing production runtime dependencies.</li>
+    <li>Generate the acceptance Wrangler config from verified environment values and keep it ignored, instead of committing guessed resource IDs.</li>
+    <li>Add acceptance correlation headers to the Worker CORS allowlist when wiring the guarded endpoints, so browser-origin preflight checks can carry the same run and correlation IDs as direct Worker requests.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -89,12 +96,15 @@
     <li>Task 1 was dispatched to a subagent, but the exposed toolset did not include a direct wait/read-result tool. A status sidecar later reported the worker was still active, so the main session completed Task 1 locally using the same red/green sequence rather than blocking execution.</li>
     <li>The plan's redaction test used sensitive-looking fixture strings. The implementation changed those to inert sample values and kept the same assertions so the staged sensitive-value scan stays clean.</li>
     <li>Task 2 red evidence was captured by the subagent, while green acceptance test and typecheck were independently rerun in the main session before commit.</li>
+    <li>Task 3 keeps the generated config writer as <code>.mjs</code>, but uses native ESM imports instead of the plan's CommonJS <code>require</code> calls because <code>require</code> is not available in Node ESM modules.</li>
+    <li>Task 3 builds credential-shaped test header and env names from inert parts, instead of committing literal sample credential names and values from the plan. The route and redaction assertions are unchanged.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
   <ul>
     <li>Proceeding locally after dispatch kept the TDD evidence current in the authoritative worktree. The risk is duplicate sidecar work on the same files, so the main session rechecks the worktree before staging.</li>
     <li>The staged sensitive-value scan for Task 2 can report AWS SDK provider package names in <code>cloud/package-lock.json</code>. Those are package identifiers, not credentials.</li>
+    <li>The Task 3 Worker route test covers routing, auth, redaction, and prefix refusal without touching real R2 or D1 resources. Full cloud-resource proof remains blocked until acceptance Cloudflare resources can be created and verified.</li>
   </ul>
 
   <h2>Open Questions</h2>
