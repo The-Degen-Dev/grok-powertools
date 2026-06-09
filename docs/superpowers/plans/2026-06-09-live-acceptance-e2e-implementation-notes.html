@@ -93,7 +93,12 @@
       <tr>
         <td>Task 6</td>
         <td class="done">Done</td>
-        <td>Workbook red command passed immediately because <code>acceptance/lib/evidence-workbook.js</code> was already present as an untracked owned file; green workbook test passed with 2 assertions. Web lint exited 0 with existing warnings and web build passed.</td>
+        <td>Evidence workbook test failed red on missing <code>acceptance/lib/evidence-workbook.js</code>; green workbook test passed with 2 assertions. Web lint exited 0 with existing warnings and web build passed.</td>
+      </tr>
+      <tr>
+        <td>Task 7</td>
+        <td class="done">Done</td>
+        <td>Scoped extension e2e passed with 4 Playwright tests. Local gates exited 0 and wrote redacted evidence. Unarmed live canary exited 2 with the expected blocked verdict.</td>
       </tr>
     </tbody>
   </table>
@@ -119,7 +124,6 @@
     <li>Task 4 exposes <code>verifyR2Object</code>, <code>requestPresignedUrl</code>, and <code>uploadMetadataQueueItem</code> through the existing CommonJS test-only export block so acceptance headers are directly unit tested.</li>
     <li>Task 5 builds redaction fixture names and signed URL markers from inert parts instead of committing literal credential or signed URL samples. The redaction behavior under test is unchanged.</li>
     <li>Task 6 builds workbook test signed URL and credential-looking values from inert parts, instead of committing literal signed URL or sensitive samples. The redaction assertions are unchanged.</li>
-    <li>Task 6 could not capture the expected missing-module red failure because <code>acceptance/lib/evidence-workbook.js</code> existed before the red command ran.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -129,6 +133,8 @@
     <li>The Task 3 Worker route test covers routing, auth, redaction, and prefix refusal without touching real R2 or D1 resources. Full cloud-resource proof remains blocked until acceptance Cloudflare resources can be created and verified.</li>
     <li>Task 4 also carries acceptance metadata to prompt sidecar presign requests. The plan named media and metadata requests explicitly; sidecars reuse the same guarded presign endpoint and would otherwise fail under acceptance mode.</li>
     <li>The Task 6 web lint run reports 22 pre-existing warnings in unrelated web files. They were not changed because this slice only imports and displays acceptance workbook fields.</li>
+    <li>The live canary script only arms the run and records intent. It does not automate Chrome unless all preflight gates are already verified.</li>
+    <li>Task 7 redacts local gate stdout and stderr tails before writing evidence, even though the plan's baseline runner stored raw tails. This preserves the sensitive-output constraint.</li>
   </ul>
 
   <h2>Open Questions</h2>
