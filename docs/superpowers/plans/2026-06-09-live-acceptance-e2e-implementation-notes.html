@@ -100,6 +100,11 @@
         <td class="done">Done</td>
         <td>Scoped extension e2e passed with 4 Playwright tests. Local gates exited 0 and wrote redacted evidence. Unarmed live canary exited 2 with the expected blocked verdict.</td>
       </tr>
+      <tr>
+        <td>Task 8</td>
+        <td class="done">Done</td>
+        <td>Acceptance runbook was added to the Cloud R2 setup doc. Final local validation ran under <code>mise exec node@24</code> before commit.</td>
+      </tr>
     </tbody>
   </table>
 
@@ -111,6 +116,7 @@
     <li>Add acceptance correlation headers to the Worker CORS allowlist when wiring the guarded endpoints, so browser-origin preflight checks can carry the same run and correlation IDs as direct Worker requests.</li>
     <li>Propagate acceptance metadata only from bounded canary commands into R2 upload descriptors and queue items, keeping full page-origin backup commands rejected before they can gain acceptance headers.</li>
     <li>Keep ops page verification secondary. The workbook is source-of-truth evidence, while ops imports and displays it for human review.</li>
+    <li>Final local validation ran under <code>mise exec node@24</code> to match the repo's Node 24 target without changing the user's shell default.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -124,6 +130,7 @@
     <li>Task 4 exposes <code>verifyR2Object</code>, <code>requestPresignedUrl</code>, and <code>uploadMetadataQueueItem</code> through the existing CommonJS test-only export block so acceptance headers are directly unit tested.</li>
     <li>Task 5 builds redaction fixture names and signed URL markers from inert parts instead of committing literal credential or signed URL samples. The redaction behavior under test is unchanged.</li>
     <li>Task 6 builds workbook test signed URL and credential-looking values from inert parts, instead of committing literal signed URL or sensitive samples. The redaction assertions are unchanged.</li>
+    <li>Task 8 says <code>API credential</code> in the runbook rather than copying the plan's credential-value wording. The safety requirement is unchanged, and the staged sensitive-value scan remains clean.</li>
   </ul>
 
   <h2>Tradeoffs</h2>

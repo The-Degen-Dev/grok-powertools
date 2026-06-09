@@ -18,6 +18,41 @@ This guide configures optional dual-write backup:
 - Existing R2 bucket
 - This repo loaded as unpacked extension
 
+## Acceptance testing resources
+
+Live acceptance tests must not use production-shaped resources.
+
+Use separate acceptance resources:
+
+- Worker: acceptance-only Worker name
+- R2 bucket: acceptance-only bucket, never `grok-gallery-001`
+- D1 database: acceptance-only database, never `grok-powertools-db`
+- Prefix: `acceptance/$ACCEPTANCE_RUN_ID`
+- API credential: distinct acceptance-only value
+
+Before running a live canary:
+
+```bash
+mise exec node@24 -- node acceptance/scripts/preflight.mjs
+```
+
+If R2 returns Cloudflare authentication code `10000`, stop. Do not run a live cloud lane until R2 bucket list/create/verify works.
+
+Generate the ignored Wrangler config only after the acceptance bucket and D1 database exist:
+
+```bash
+test -n "$ACCEPTANCE_D1_DATABASE_ID"
+test -n "$CLOUDFLARE_ACCOUNT_ID"
+test -n "$ACCEPTANCE_RUN_ID"
+test -n "$ACCEPTANCE_KEY_PREFIX"
+ACCEPTANCE_WORKER_NAME=grok-powertools-acceptance \
+ACCEPTANCE_R2_BUCKET=grok-powertools-acceptance \
+ACCEPTANCE_D1_DATABASE=grok-powertools-acceptance-db \
+mise exec node@24 -- node acceptance/scripts/write-cloudflare-acceptance-config.mjs
+```
+
+Do not commit `cloud/wrangler.acceptance.generated.toml`.
+
 ## 1) Create and configure R2 bucket
 
 ```bash
