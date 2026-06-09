@@ -173,6 +173,7 @@ function loadBackgroundForTest() {
 describe('Grok backup background processed ID persistence', () => {
     afterEach(() => {
         delete global.chrome;
+        delete global.fetch;
         jest.resetModules();
     });
 
@@ -320,6 +321,79 @@ describe('Grok backup background processed ID persistence', () => {
         expect(isR2BackupCompletionSuccessful({ stopReason: 'canary_complete' })).toBe(true);
         expect(getR2BackupCompletionStatusLabel({ stopReason: 'canary_complete' })).toBe('canary complete');
         expect(isR2BackupCompletionSuccessful({ stopReason: 'canary_incomplete' })).toBe(false);
+    });
+
+    test('adds acceptance headers to presign requests', async () => {
+        const { requestPresignedUrl } = loadBackgroundForTest();
+        global.fetch = jest.fn(() => Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ uploadUrl: 'https://upload.example', method: 'PUT', headers: {} })
+        }));
+
+        await requestPresignedUrl({
+            workerUrl: 'https://worker.example',
+            apiKey: 'api-sample'
+        }, {
+            objectKey: 'acceptance/run-20260609-001/users/u/media/by-asset/media_1.png',
+            contentType: 'image/png',
+            acceptance: {
+                runId: 'run-20260609-001',
+                correlationId: 'corr-1',
+                keyPrefix: 'acceptance/run-20260609-001'
+            }
+        }, 123);
+
+        expect(global.fetch).toHaveBeenCalledWith('https://worker.example/v1/presign', expect.objectContaining({
+            method: 'POST',
+            headers: expect.objectContaining({
+                'x-acceptance-run-id': 'run-20260609-001',
+                'x-acceptance-correlation-id': 'corr-1'
+            })
+        }));
+    });
+
+    test('adds acceptance headers to verify and metadata snapshot requests', async () => {
+        const { uploadMetadataQueueItem, verifyR2Object } = loadBackgroundForTest();
+        global.fetch = jest.fn(() => Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true })
+        }));
+        const acceptance = {
+            runId: 'run-20260609-001',
+            correlationId: 'corr-1',
+            keyPrefix: 'acceptance/run-20260609-001'
+        };
+        const config = {
+            workerUrl: 'https://worker.example',
+            apiKey: 'api-sample'
+        };
+
+        await verifyR2Object(config, {
+            objectKey: 'acceptance/run-20260609-001/users/u/media/by-asset/media_1.png',
+            assetId: 'media_1',
+            sourceUrlHash: 'url_1',
+            acceptance
+        }, { sizeBytes: 123 });
+        await uploadMetadataQueueItem(config, {
+            kind: 'savedPrompts',
+            userId: 'u',
+            payload: { schemaVersion: 1, data: [] },
+            acceptance
+        });
+
+        const verifyCall = global.fetch.mock.calls[0];
+        const metadataCall = global.fetch.mock.calls[1];
+
+        expect(verifyCall[0]).toBe('https://worker.example/v1/objects/verify');
+        expect(verifyCall[1].headers).toMatchObject({
+            'x-acceptance-run-id': 'run-20260609-001',
+            'x-acceptance-correlation-id': 'corr-1'
+        });
+        expect(metadataCall[0]).toBe('https://worker.example/v1/metadata/snapshot');
+        expect(metadataCall[1].headers).toMatchObject({
+            'x-acceptance-run-id': 'run-20260609-001',
+            'x-acceptance-correlation-id': 'corr-1'
+        });
     });
 });
 
@@ -585,6 +659,37 @@ describe('Grok backup canary flow', () => {
         expect(scraper.stopBackupMode).toHaveBeenCalledWith('canary_complete');
         expect(scraper.waitForSelector).not.toHaveBeenCalled();
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+    });
+});
+
+describe('Grok backup acceptance context propagation', () => {
+    test('page command options preserve acceptance run metadata for canaries', () => {
+        const options = getR2BackupPageCommandOptions({
+            action: 'INIT_R2_CANARY',
+            runId: 'run-20260609-001',
+            correlationId: 'corr-1',
+            keyPrefix: 'acceptance/run-20260609-001'
+        });
+
+        expect(options).toMatchObject({
+            mode: 'canary',
+            limit: 1,
+            acceptance: {
+                runId: 'run-20260609-001',
+                correlationId: 'corr-1',
+                keyPrefix: 'acceptance/run-20260609-001'
+            }
+        });
+    });
+
+    test('page command ignores acceptance metadata for full backup commands', () => {
+        expect(getR2BackupPageCommandOptions({
+            action: 'INIT_R2_BACKUP',
+            mode: 'full',
+            runId: 'run-20260609-001',
+            correlationId: 'corr-1',
+            keyPrefix: 'acceptance/run-20260609-001'
+        })).toBeNull();
     });
 });
 

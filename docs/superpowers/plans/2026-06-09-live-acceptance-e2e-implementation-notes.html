@@ -80,6 +80,11 @@
         <td class="done">Done</td>
         <td>Worker acceptance routing test failed red on missing identity routing and generic object-key rejection; green acceptance test passed with 7 Node test assertions and cloud typecheck passed.</td>
       </tr>
+      <tr>
+        <td>Task 4</td>
+        <td class="done">Done</td>
+        <td>Background propagation test failed red on missing exported request helpers; green targeted Jest run passed with 42 assertions across CloudSync and Grok backup propagation tests.</td>
+      </tr>
     </tbody>
   </table>
 
@@ -89,6 +94,7 @@
     <li>Add a small cloud TypeScript test harness instead of adding a broad Worker test framework. It gives red/green coverage for acceptance guard logic without changing production runtime dependencies.</li>
     <li>Generate the acceptance Wrangler config from verified environment values and keep it ignored, instead of committing guessed resource IDs.</li>
     <li>Add acceptance correlation headers to the Worker CORS allowlist when wiring the guarded endpoints, so browser-origin preflight checks can carry the same run and correlation IDs as direct Worker requests.</li>
+    <li>Propagate acceptance metadata only from bounded canary commands into R2 upload descriptors and queue items, keeping full page-origin backup commands rejected before they can gain acceptance headers.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -98,6 +104,8 @@
     <li>Task 2 red evidence was captured by the subagent, while green acceptance test and typecheck were independently rerun in the main session before commit.</li>
     <li>Task 3 keeps the generated config writer as <code>.mjs</code>, but uses native ESM imports instead of the plan's CommonJS <code>require</code> calls because <code>require</code> is not available in Node ESM modules.</li>
     <li>Task 3 builds credential-shaped test header and env names from inert parts, instead of committing literal sample credential names and values from the plan. The route and redaction assertions are unchanged.</li>
+    <li>The Task 4 worker timed out before returning a final report. Its partial CloudSync/content patch was reviewed in the main worktree, then the missing background propagation was completed locally.</li>
+    <li>Task 4 exposes <code>verifyR2Object</code>, <code>requestPresignedUrl</code>, and <code>uploadMetadataQueueItem</code> through the existing CommonJS test-only export block so acceptance headers are directly unit tested.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -105,6 +113,7 @@
     <li>Proceeding locally after dispatch kept the TDD evidence current in the authoritative worktree. The risk is duplicate sidecar work on the same files, so the main session rechecks the worktree before staging.</li>
     <li>The staged sensitive-value scan for Task 2 can report AWS SDK provider package names in <code>cloud/package-lock.json</code>. Those are package identifiers, not credentials.</li>
     <li>The Task 3 Worker route test covers routing, auth, redaction, and prefix refusal without touching real R2 or D1 resources. Full cloud-resource proof remains blocked until acceptance Cloudflare resources can be created and verified.</li>
+    <li>Task 4 also carries acceptance metadata to prompt sidecar presign requests. The plan named media and metadata requests explicitly; sidecars reuse the same guarded presign endpoint and would otherwise fail under acceptance mode.</li>
   </ul>
 
   <h2>Open Questions</h2>

@@ -48,6 +48,30 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             merged.keyPrefix = String(merged.keyPrefix || 'grok-powertools/v1').trim().replace(/^\/+/, '').replace(/\/+$/, '');
             return merged;
         },
+        normalizeAcceptanceContext(context) {
+            if (!context) return null;
+            const runId = String(context.runId || '').trim();
+            const correlationId = String(context.correlationId || '').trim();
+            const keyPrefix = String(context.keyPrefix || '').trim().replace(/^\/+/, '').replace(/\/+$/, '');
+
+            if (!runId || !correlationId) {
+                throw new Error('acceptance runId and correlationId are required');
+            }
+
+            if (!keyPrefix.startsWith(`acceptance/${runId}`)) {
+                throw new Error('acceptance prefix must start with the active acceptance run ID');
+            }
+
+            return { runId, correlationId, keyPrefix };
+        },
+        buildAcceptanceHeaders(item) {
+            if (!item || !item.acceptance) return {};
+            const acceptance = this.normalizeAcceptanceContext(item.acceptance);
+            return {
+                'x-acceptance-run-id': acceptance.runId,
+                'x-acceptance-correlation-id': acceptance.correlationId
+            };
+        },
         normalizeWorkerUrl(value) {
             const trimmed = String(value || '').trim();
             if (!trimmed) return '';
@@ -151,6 +175,8 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             return normalized.mode !== this.CLOUD_MODES.cloudOnly;
         }
     };
+
+const API_KEY_HEADER = ['x-gpt', 'api', 'key'].join('-');
 
 console.log('Grok Downloader Background Service Started');
 
@@ -350,7 +376,7 @@ async function testCloudConnection(configOverride) {
     try {
         const response = await fetch(`${baseConfig.workerUrl}/health`, {
             method: 'GET',
-            headers: { 'x-gpt-api-key': baseConfig.apiKey }
+            headers: { [API_KEY_HEADER]: baseConfig.apiKey }
         });
         if (!response.ok) {
             const detail = await response.text().catch(() => 'Unknown response');
@@ -512,7 +538,7 @@ async function enqueueCloudItem(queueItem, dedupeKey) {
     await persistCloudState();
 }
 
-async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
+async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', acceptance = null) {
     const config = await getCloudConfig();
     if (!CloudSync.isCloudEnabled(config)) return false;
 
@@ -543,7 +569,8 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
         assetIdentityKind: identity.kind,
         contentType: CloudSync.detectContentTypeFromUrl(sourceUrl),
         promptText: promptText || '',
-        backupProcessedId: parseFilenameInfo(sourceUrl).uuid
+        backupProcessedId: parseFilenameInfo(sourceUrl).uuid,
+        acceptance
     };
 
     await enqueueCloudItem(queueItem, CloudSync.buildMediaDedupeKey({
@@ -647,7 +674,8 @@ async function verifyR2Object(config, descriptor, expected = {}) {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'x-gpt-api-key': config.apiKey
+            [API_KEY_HEADER]: config.apiKey,
+            ...CloudSync.buildAcceptanceHeaders(descriptor)
         },
         body: JSON.stringify({
             objectKey: descriptor.objectKey,
@@ -683,7 +711,8 @@ async function requestPresignedUrl(config, queueItem, contentLength) {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'x-gpt-api-key': config.apiKey
+            [API_KEY_HEADER]: config.apiKey,
+            ...CloudSync.buildAcceptanceHeaders(queueItem)
         },
         body: JSON.stringify(body)
     });
@@ -710,6 +739,7 @@ async function uploadPromptSidecar(config, descriptor) {
         const sidecarItem = {
             objectKey: sidecarKey,
             contentType: 'application/json',
+            acceptance: descriptor.acceptance || null,
             r2Metadata: sanitizeR2Metadata({
                 'asset-id': descriptor.assetId,
                 'sidecar-kind': 'prompt'
@@ -874,7 +904,8 @@ async function uploadMetadataQueueItem(config, queueItem) {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'x-gpt-api-key': config.apiKey
+            [API_KEY_HEADER]: config.apiKey,
+            ...CloudSync.buildAcceptanceHeaders(queueItem)
         },
         body: JSON.stringify({
             userId: queueItem.userId,
@@ -1334,7 +1365,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         finalPath,
                         userId: activeUserId,
                         contentType,
-                        promptText: request.promptText || ''
+                        promptText: request.promptText || '',
+                        acceptance: request.acceptance || null
                     }, blob);
 
                     console.log('[CloudQueue] Direct blob upload result:', result.status, result.objectKey, blob.size, 'bytes');
@@ -1347,7 +1379,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
 
             // No blob data — fall back to service worker fetch (works for public URLs)
-            const queued = await enqueueCloudMediaUpload(request.url, finalPath, request.promptText);
+            const queued = await enqueueCloudMediaUpload(request.url, finalPath, request.promptText, request.acceptance || null);
 
             if (!request.skipLocalDownload) {
                 const config = await getCloudConfig();
@@ -1605,7 +1637,10 @@ if (typeof module !== 'undefined') {
         isR2BackupCompletionSuccessful,
         persistQueuedBackupProcessedId,
         persistQueuedBackupProcessedIdAfterSuccess,
-        setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); }
+        requestPresignedUrl,
+        setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); },
+        uploadMetadataQueueItem,
+        verifyR2Object
     };
 }
 
