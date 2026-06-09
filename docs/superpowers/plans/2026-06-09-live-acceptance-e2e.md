@@ -42,6 +42,8 @@ Package registry checks on 2026-06-09:
 
 ## File Structure
 
+- Existing: `docs/superpowers/plans/2026-06-09-live-acceptance-e2e-implementation-planning-notes.html`
+  - Planning-time notes for design decisions, deviations, tradeoffs, and open questions while translating the spec into this implementation plan.
 - Create: `docs/superpowers/plans/2026-06-09-live-acceptance-e2e-implementation-notes.html`
   - Running execution notes for design decisions, deviations, tradeoffs, and open questions.
 - Create: `acceptance/lib/run-contract.js`
@@ -102,6 +104,12 @@ Package registry checks on 2026-06-09:
   - Manual-arm live canary driver that stops unless preflight is verified.
 - Modify: `docs/CLOUD_R2_SETUP.md`
   - Document acceptance resources, no-production-touch rules, and current acceptance runbook.
+
+## Planning Notes
+
+Implementation planning notes are saved in `docs/superpowers/plans/2026-06-09-live-acceptance-e2e-implementation-planning-notes.html`.
+
+That file records how this plan interprets the approved design spec. It is separate from the execution notes file created during Task 1, which will track implementation-time decisions and deviations.
 
 ## Task 1: Root Acceptance Contract And Notes
 
