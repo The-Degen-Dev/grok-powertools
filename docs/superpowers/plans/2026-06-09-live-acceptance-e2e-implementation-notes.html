@@ -85,6 +85,11 @@
         <td class="done">Done</td>
         <td>Background propagation test failed red on missing exported request helpers; green targeted Jest run passed with 42 assertions across CloudSync and Grok backup propagation tests.</td>
       </tr>
+      <tr>
+        <td>Task 5</td>
+        <td class="done">Done</td>
+        <td>Preflight classifier test failed red on missing <code>acceptance/lib/preflight.js</code>; green Jest run passed with 4 assertions. Preflight CLI exited 2 with R2 and port 3001 blocked.</td>
+      </tr>
     </tbody>
   </table>
 
@@ -106,6 +111,7 @@
     <li>Task 3 builds credential-shaped test header and env names from inert parts, instead of committing literal sample credential names and values from the plan. The route and redaction assertions are unchanged.</li>
     <li>The Task 4 worker timed out before returning a final report. Its partial CloudSync/content patch was reviewed in the main worktree, then the missing background propagation was completed locally.</li>
     <li>Task 4 exposes <code>verifyR2Object</code>, <code>requestPresignedUrl</code>, and <code>uploadMetadataQueueItem</code> through the existing CommonJS test-only export block so acceptance headers are directly unit tested.</li>
+    <li>Task 5 builds redaction fixture names and signed URL markers from inert parts instead of committing literal credential or signed URL samples. The redaction behavior under test is unchanged.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -119,6 +125,8 @@
   <h2>Open Questions</h2>
   <ul>
     <li>Cloudflare R2 access is blocked until the current account access can list or create acceptance buckets.</li>
+    <li>Acceptance cloud execution remains blocked until <code>acceptance/scripts/preflight.mjs</code> reports R2 as verified.</li>
+    <li>The latest preflight run reported port 3001 as owned by another workspace, so the web app acceptance lane needs a verified repo-owned port or a free alternate port.</li>
   </ul>
 </body>
 </html>
