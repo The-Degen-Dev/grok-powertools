@@ -112,6 +112,7 @@ export interface SyncMeta {
 }
 
 export type OpsStatus = "verified" | "degraded" | "blocked" | "unproven";
+export type AcceptanceVerdict = "verified" | "failed" | "blocked" | "contaminated" | "inconclusive";
 
 export interface WorkerDiagnostics {
   status: OpsStatus;
@@ -155,6 +156,9 @@ export interface DiagnosticEvent {
 export interface OpsSnapshot {
   schemaVersion: 1;
   importedAt: string;
+  runId?: string;
+  verdict?: AcceptanceVerdict;
+  laneId?: string;
   worker: WorkerDiagnostics;
   r2: R2DedupeMetrics;
   rows: ReconciliationRow[];
