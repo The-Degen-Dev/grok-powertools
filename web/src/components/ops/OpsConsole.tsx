@@ -42,6 +42,9 @@ function normalizeSnapshot(input: unknown, worker: WorkerDiagnostics): OpsSnapsh
     schemaVersion: 1,
     importedAt: new Date().toISOString(),
     worker: data.worker || worker,
+    runId: typeof data.runId === "string" ? data.runId : undefined,
+    verdict: typeof data.verdict === "string" ? data.verdict as OpsSnapshot["verdict"] : undefined,
+    laneId: typeof data.laneId === "string" ? data.laneId : undefined,
     r2: { ...empty.r2, ...(data.r2 || {}) },
     rows: Array.isArray(data.rows) ? data.rows : [],
     events: Array.isArray(data.events) ? data.events : [],
@@ -122,6 +125,11 @@ export default function OpsConsole() {
             <span className="text-sm text-(--color-surface-500)">
               {worker.message || "No status message"}
             </span>
+            {snapshot.runId && (
+              <span className="text-sm text-(--color-surface-500)">
+                Run {snapshot.runId}{snapshot.verdict ? `: ${snapshot.verdict}` : ""}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

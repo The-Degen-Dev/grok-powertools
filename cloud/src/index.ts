@@ -12,10 +12,14 @@ import type {
     SyncPullResponse
 } from './types';
 import { verifyJWT, extractBearerToken } from './auth';
+import { buildAcceptanceIdentity, validateAcceptanceWrite } from './acceptance';
 import { upsertEntity, getEntitiesSince, ensureUser, upsertR2DedupeIndex, upsertMetadataSnapshotIndex } from './db';
 
 const SERVICE_NAME = 'grok-r2-backup';
 const PRESIGN_EXPIRY_SECONDS = 3600;
+const API_KEY_HEADER = ['x-gpt', 'api', 'key'].join('-');
+const ACCEPTANCE_RUN_ID_HEADER = 'x-acceptance-run-id';
+const ACCEPTANCE_CORRELATION_ID_HEADER = 'x-acceptance-correlation-id';
 
 const METADATA_FILENAMES: Record<Exclude<MetadataKind, 'backfillManifest'>, string> = {
     savedPrompts: 'saved-prompts.latest.json',
@@ -34,7 +38,13 @@ function corsHeaders(): HeadersInit {
     return {
         'access-control-allow-origin': '*',
         'access-control-allow-methods': 'GET,HEAD,POST,OPTIONS',
-        'access-control-allow-headers': 'Content-Type,x-gpt-api-key,Authorization'
+        'access-control-allow-headers': [
+            'Content-Type',
+            API_KEY_HEADER,
+            'Authorization',
+            ACCEPTANCE_RUN_ID_HEADER,
+            ACCEPTANCE_CORRELATION_ID_HEADER
+        ].join(',')
     };
 }
 
@@ -50,6 +60,19 @@ function jsonResponse(data: unknown, status = 200): Response {
 
 function errorResponse(message: string, status = 400): Response {
     return jsonResponse({ ok: false, error: message }, status);
+}
+
+function acceptanceRunId(request: Request): string | null {
+    return request.headers.get(ACCEPTANCE_RUN_ID_HEADER);
+}
+
+function acceptanceCorrelationId(request: Request): string | null {
+    return request.headers.get(ACCEPTANCE_CORRELATION_ID_HEADER);
+}
+
+function acceptanceErrorResponse(result: ReturnType<typeof validateAcceptanceWrite>): Response | null {
+    if (result.ok) return null;
+    return errorResponse(result.error, result.status);
 }
 
 function sanitizePathSegment(value: string): string {
@@ -177,7 +200,7 @@ async function parseJson<T>(request: Request): Promise<T> {
 }
 
 function assertAuthorized(request: Request, env: Env): string | null {
-    const provided = request.headers.get('x-gpt-api-key') || '';
+    const provided = request.headers.get(API_KEY_HEADER) || '';
     if (!env.CLIENT_API_KEY || provided !== env.CLIENT_API_KEY) {
         return 'Unauthorized';
     }
@@ -208,6 +231,13 @@ async function handlePresign(request: Request, env: Env): Promise<Response> {
     }
 
     const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+    const acceptanceError = acceptanceErrorResponse(validateAcceptanceWrite(env, {
+        objectKey: payload.objectKey,
+        runId: acceptanceRunId(request),
+        correlationId: acceptanceCorrelationId(request)
+    }));
+    if (acceptanceError) return acceptanceError;
+
     if (!isPresignableObjectKey(payload.objectKey, keyPrefix)) {
         return errorResponse('Invalid object key.', 400);
     }
@@ -312,6 +342,13 @@ async function handleObjectVerify(request: Request, env: Env): Promise<Response>
     }
 
     const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+    const acceptanceError = acceptanceErrorResponse(validateAcceptanceWrite(env, {
+        objectKey: payload.objectKey,
+        runId: acceptanceRunId(request),
+        correlationId: acceptanceCorrelationId(request)
+    }));
+    if (acceptanceError) return acceptanceError;
+
     if (!isValidObjectKey(payload.objectKey, keyPrefix)) {
         return errorResponse('Invalid object key.', 400);
     }
@@ -418,6 +455,13 @@ async function handleMetadataSnapshot(request: Request, env: Env): Promise<Respo
 
     const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
     const objectKey = metadataObjectKey(keyPrefix, userId, kind);
+    const acceptanceError = acceptanceErrorResponse(validateAcceptanceWrite(env, {
+        objectKey,
+        runId: acceptanceRunId(request),
+        correlationId: acceptanceCorrelationId(request)
+    }));
+    if (acceptanceError) return acceptanceError;
+
     const canonicalPayload = {
         schemaVersion: payload.payload.schemaVersion,
         data: payload.payload.data
@@ -607,6 +651,14 @@ export default {
         // Health check — no auth required
         if (request.method === 'GET' && url.pathname === '/health') {
             return jsonResponse({ ok: true, service: SERVICE_NAME, now: new Date().toISOString() });
+        }
+
+        if (request.method === 'GET' && url.pathname === '/v1/acceptance/identity') {
+            const identityAuthError = assertAuthorized(request, env);
+            if (identityAuthError) {
+                return errorResponse(identityAuthError, 401);
+            }
+            return jsonResponse(buildAcceptanceIdentity(env), 200);
         }
 
         // Extension endpoints use API key auth

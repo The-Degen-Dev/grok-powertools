@@ -48,6 +48,30 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             merged.keyPrefix = String(merged.keyPrefix || 'grok-powertools/v1').trim().replace(/^\/+/, '').replace(/\/+$/, '');
             return merged;
         },
+        normalizeAcceptanceContext(context) {
+            if (!context) return null;
+            const runId = String(context.runId || '').trim();
+            const correlationId = String(context.correlationId || '').trim();
+            const keyPrefix = String(context.keyPrefix || '').trim().replace(/^\/+/, '').replace(/\/+$/, '');
+
+            if (!runId || !correlationId) {
+                throw new Error('acceptance runId and correlationId are required');
+            }
+
+            if (!keyPrefix.startsWith(`acceptance/${runId}`)) {
+                throw new Error('acceptance prefix must start with the active acceptance run ID');
+            }
+
+            return { runId, correlationId, keyPrefix };
+        },
+        buildAcceptanceHeaders(item) {
+            if (!item || !item.acceptance) return {};
+            const acceptance = this.normalizeAcceptanceContext(item.acceptance);
+            return {
+                'x-acceptance-run-id': acceptance.runId,
+                'x-acceptance-correlation-id': acceptance.correlationId
+            };
+        },
         normalizeWorkerUrl(value) {
             const trimmed = String(value || '').trim();
             if (!trimmed) return '';
@@ -138,6 +162,10 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             const userId = String((params && (params.userId || params.fallbackUserId)) || 'Shared_Account').replace(/[^a-zA-Z0-9._-]/g, '_');
             return `media:${userId}:${this.resolveMediaAssetIdentity(params || {}).assetId}`;
         },
+        buildTestUploadObjectKey(keyPrefix) {
+            const prefix = String(keyPrefix || 'grok-powertools/v1').trim().replace(/^\/+/, '').replace(/\/+$/, '') || 'grok-powertools/v1';
+            return `${prefix}/users/_system/test-uploads/upload-pipeline-test.txt`;
+        },
         getRetryDelayMinutes(attemptNumber) {
             const index = Math.min(this.RETRY_SCHEDULE_MINUTES.length - 1, Math.max(1, attemptNumber) - 1);
             return this.RETRY_SCHEDULE_MINUTES[index];
@@ -151,6 +179,8 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             return normalized.mode !== this.CLOUD_MODES.cloudOnly;
         }
     };
+
+const API_KEY_HEADER = ['x-gpt', 'api', 'key'].join('-');
 
 console.log('Grok Downloader Background Service Started');
 
@@ -255,12 +285,39 @@ function buildR2BackupInitMessage(request = {}) {
     const mode = request.mode === 'canary' ? 'canary' : 'full';
     const limit = Number.isFinite(request.limit) && request.limit > 0 ? request.limit : null;
     const options = request.options && typeof request.options === 'object' ? request.options : {};
+    const acceptance = request.acceptance ? CloudSync.normalizeAcceptanceContext(request.acceptance) : null;
     return {
         action: 'INIT_R2_BACKUP',
         mode,
         limit,
-        options
+        options,
+        ...(acceptance ? { acceptance } : {})
     };
+}
+
+function buildAcceptanceContextFromCloudConfig(config, source = 'extension') {
+    const keyPrefix = CloudSync.sanitizeKeyPrefix
+        ? CloudSync.sanitizeKeyPrefix(config?.keyPrefix || '')
+        : String(config?.keyPrefix || '').trim().replace(/^\/+/, '').replace(/\/+$/, '');
+    const match = keyPrefix.match(/^acceptance\/([^/]+)(?:\/|$)/);
+    if (!match) return null;
+
+    return {
+        runId: match[1],
+        correlationId: `${source}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        keyPrefix
+    };
+}
+
+function buildR2BackupInitMessageForConfig(request = {}, config = null) {
+    const mode = request.mode === 'canary' ? 'canary' : 'full';
+    const derivedAcceptance = mode === 'canary'
+        ? buildAcceptanceContextFromCloudConfig(config, 'popup-canary')
+        : null;
+    return buildR2BackupInitMessage({
+        ...request,
+        acceptance: request.acceptance || derivedAcceptance
+    });
 }
 
 function isR2BackupCompletionSuccessful(stats = {}) {
@@ -350,7 +407,7 @@ async function testCloudConnection(configOverride) {
     try {
         const response = await fetch(`${baseConfig.workerUrl}/health`, {
             method: 'GET',
-            headers: { 'x-gpt-api-key': baseConfig.apiKey }
+            headers: { [API_KEY_HEADER]: baseConfig.apiKey }
         });
         if (!response.ok) {
             const detail = await response.text().catch(() => 'Unknown response');
@@ -370,6 +427,7 @@ async function testCloudConnection(configOverride) {
         contentType: 'text/plain',
         assetId: 'system_upload_test',
         sourceUrlHash: 'system_upload_test',
+        acceptance: buildAcceptanceContextFromCloudConfig(baseConfig, 'cloud-test'),
         r2Metadata: sanitizeR2Metadata({
             sha256: testSha256,
             'asset-id': 'system_upload_test',
@@ -512,9 +570,10 @@ async function enqueueCloudItem(queueItem, dedupeKey) {
     await persistCloudState();
 }
 
-async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
+async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', acceptance = null) {
     const config = await getCloudConfig();
     if (!CloudSync.isCloudEnabled(config)) return false;
+    const acceptanceContext = acceptance || buildAcceptanceContextFromCloudConfig(config, 'queue-media');
 
     const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
     const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
@@ -543,7 +602,8 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
         assetIdentityKind: identity.kind,
         contentType: CloudSync.detectContentTypeFromUrl(sourceUrl),
         promptText: promptText || '',
-        backupProcessedId: parseFilenameInfo(sourceUrl).uuid
+        backupProcessedId: parseFilenameInfo(sourceUrl).uuid,
+        acceptance: acceptanceContext
     };
 
     await enqueueCloudItem(queueItem, CloudSync.buildMediaDedupeKey({
@@ -565,12 +625,14 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '') {
 async function enqueueMetadataSnapshot(kind, userId, payload) {
     const config = await getCloudConfig();
     if (!CloudSync.isCloudEnabled(config)) return;
+    const acceptance = buildAcceptanceContextFromCloudConfig(config, 'metadata');
 
     const queueItem = {
         id: makeQueueId('metadata'),
         type: 'metadata',
         kind,
         userId,
+        acceptance,
         payload: {
             schemaVersion: CLOUD_SCHEMA_VERSION,
             data: payload,
@@ -647,7 +709,8 @@ async function verifyR2Object(config, descriptor, expected = {}) {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'x-gpt-api-key': config.apiKey
+            [API_KEY_HEADER]: config.apiKey,
+            ...CloudSync.buildAcceptanceHeaders(descriptor)
         },
         body: JSON.stringify({
             objectKey: descriptor.objectKey,
@@ -683,7 +746,8 @@ async function requestPresignedUrl(config, queueItem, contentLength) {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'x-gpt-api-key': config.apiKey
+            [API_KEY_HEADER]: config.apiKey,
+            ...CloudSync.buildAcceptanceHeaders(queueItem)
         },
         body: JSON.stringify(body)
     });
@@ -710,6 +774,7 @@ async function uploadPromptSidecar(config, descriptor) {
         const sidecarItem = {
             objectKey: sidecarKey,
             contentType: 'application/json',
+            acceptance: descriptor.acceptance || null,
             r2Metadata: sanitizeR2Metadata({
                 'asset-id': descriptor.assetId,
                 'sidecar-kind': 'prompt'
@@ -874,7 +939,8 @@ async function uploadMetadataQueueItem(config, queueItem) {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'x-gpt-api-key': config.apiKey
+            [API_KEY_HEADER]: config.apiKey,
+            ...CloudSync.buildAcceptanceHeaders(queueItem)
         },
         body: JSON.stringify({
             userId: queueItem.userId,
@@ -1267,34 +1333,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ status: 'busy', error: 'Scraper is already running.' });
             return false;
         }
-        const initMessage = buildR2BackupInitMessage(request);
-        log(initMessage.mode === 'canary' ? 'Starting R2 Canary Backup...' : 'Starting Full R2 Media Backup...');
-        isR2Backup = true;
-        isScraping = true;
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0] && (tabs[0].url.includes('x.com') || tabs[0].url.includes('grok.com'))) {
-                currentTabId = tabs[0].id;
-                chrome.tabs.sendMessage(currentTabId, initMessage, (response) => {
-                    if (chrome.runtime.lastError) {
-                        chrome.scripting.executeScript({
-                            target: { tabId: currentTabId },
-                            files: ['content.js']
-                        }, () => {
-                            setTimeout(() => {
-                                chrome.tabs.sendMessage(currentTabId, initMessage);
-                                chrome.storage.local.set({ isScraping: true, isR2Backup: true });
-                            }, 500);
-                        });
-                    } else {
-                        chrome.storage.local.set({ isScraping: true, isR2Backup: true });
-                    }
-                });
-                sendResponse({ status: 'started' });
-            } else {
-                isScraping = false;
-                isR2Backup = false;
-                sendResponse({ status: 'no_tab', error: 'Navigate to Grok Favorites first.' });
-            }
+        (async () => {
+            const config = await getCloudConfig();
+            const initMessage = buildR2BackupInitMessageForConfig(request, config);
+            log(initMessage.mode === 'canary' ? 'Starting R2 Canary Backup...' : 'Starting Full R2 Media Backup...');
+            isR2Backup = true;
+            isScraping = true;
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0] && (tabs[0].url.includes('x.com') || tabs[0].url.includes('grok.com'))) {
+                    currentTabId = tabs[0].id;
+                    chrome.tabs.sendMessage(currentTabId, initMessage, (response) => {
+                        if (chrome.runtime.lastError) {
+                            chrome.scripting.executeScript({
+                                target: { tabId: currentTabId },
+                                files: ['content.js']
+                            }, () => {
+                                setTimeout(() => {
+                                    chrome.tabs.sendMessage(currentTabId, initMessage);
+                                    chrome.storage.local.set({ isScraping: true, isR2Backup: true });
+                                }, 500);
+                            });
+                        } else {
+                            chrome.storage.local.set({ isScraping: true, isR2Backup: true });
+                        }
+                    });
+                    sendResponse({ status: 'started' });
+                } else {
+                    isScraping = false;
+                    isR2Backup = false;
+                    sendResponse({ status: 'no_tab', error: 'Navigate to Grok Favorites first.' });
+                }
+            });
+        })().catch((e) => {
+            if (isR2Backup) isR2Backup = false;
+            if (isScraping) isScraping = false;
+            chrome.storage.local.set({ isScraping: false, isR2Backup: false }).catch(() => { });
+            sendResponse({ status: 'error', error: e.message });
         });
         return true;
     }
@@ -1328,13 +1402,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     const contentType = blob.type || (extHint === 'mp4' ? 'video/mp4' : 'image/png');
                     const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
                     const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
+                    const acceptance = request.acceptance || buildAcceptanceContextFromCloudConfig(config, 'direct-upload');
 
                     const result = await uploadBlobWithR2Dedupe(config, {
                         sourceUrl: request.url,
                         finalPath,
                         userId: activeUserId,
                         contentType,
-                        promptText: request.promptText || ''
+                        promptText: request.promptText || '',
+                        acceptance
                     }, blob);
 
                     console.log('[CloudQueue] Direct blob upload result:', result.status, result.objectKey, blob.size, 'bytes');
@@ -1347,7 +1423,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
 
             // No blob data — fall back to service worker fetch (works for public URLs)
-            const queued = await enqueueCloudMediaUpload(request.url, finalPath, request.promptText);
+            const queued = await enqueueCloudMediaUpload(request.url, finalPath, request.promptText, request.acceptance || null);
 
             if (!request.skipLocalDownload) {
                 const config = await getCloudConfig();
@@ -1358,6 +1434,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (queued) {
                 sendResponse({ status: 'queued' });
             } else {
+                isScraping = false;
+                isR2Backup = false;
                 sendResponse({ status: 'not_queued', error: 'Cloud sync is not enabled. Check Cloud R2 Settings.' });
             }
         })().catch((e) => {
@@ -1598,14 +1676,20 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 if (typeof module !== 'undefined') {
     module.exports = {
         applyBackupProcessedIdPersistence,
+        buildAcceptanceContextFromCloudConfig,
         buildDirectBackupUploadResponse,
         buildR2BackupInitMessage,
+        buildR2BackupInitMessageForConfig,
         getR2BackupCompletionStatusLabel,
         getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
         isR2BackupCompletionSuccessful,
         persistQueuedBackupProcessedId,
         persistQueuedBackupProcessedIdAfterSuccess,
-        setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); }
+        requestPresignedUrl,
+        setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); },
+        testCloudConnection,
+        uploadMetadataQueueItem,
+        verifyR2Object
     };
 }
 
@@ -1708,7 +1792,8 @@ chrome.downloads.onChanged.addListener(async (delta) => {
             sourceUrl: pending.url,
             finalPath: pending.finalPath,
             userId: userInfo.activeGrokUserId || 'Shared_Account',
-            contentType: fileData.type
+            contentType: fileData.type,
+            acceptance: buildAcceptanceContextFromCloudConfig(config, 'download-upload')
         }, blob);
 
         log(`Cloud upload ${result.status === 'already_present' ? 'already present' : 'complete'}: ${result.objectKey}`, result.status === 'conflict_uploaded' ? 'warning' : 'success');

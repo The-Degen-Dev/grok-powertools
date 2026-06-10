@@ -109,4 +109,25 @@ test.describe('Grok Power Tools E2E', () => {
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).not.toContainEqual({ action: 'VALIDATE_CLOUD_CONFIG' });
     });
+
+    test('Page-origin R2 canary command is bounded and carries acceptance metadata', async ({ page }) => {
+        await page.evaluate(contentJs);
+
+        await page.evaluate(() => {
+            document.dispatchEvent(new CustomEvent('grok-powertools-command', {
+                detail: {
+                    action: 'INIT_R2_CANARY',
+                    runId: 'run-20260609-001',
+                    correlationId: 'corr-1',
+                    keyPrefix: 'acceptance/run-20260609-001'
+                }
+            }));
+        });
+        await page.waitForTimeout(50);
+
+        const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
+        expect(runtimeMessages).toContainEqual(expect.objectContaining({
+            action: 'VALIDATE_CLOUD_CONFIG'
+        }));
+    });
 });

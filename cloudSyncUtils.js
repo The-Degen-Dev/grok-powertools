@@ -105,6 +105,32 @@
         };
     }
 
+    function normalizeAcceptanceContext(context) {
+        if (!context) return null;
+        const runId = String(context.runId || '').trim();
+        const correlationId = String(context.correlationId || '').trim();
+        const keyPrefix = sanitizeKeyPrefix(context.keyPrefix);
+
+        if (!runId || !correlationId) {
+            throw new Error('acceptance runId and correlationId are required');
+        }
+
+        if (!keyPrefix.startsWith(`acceptance/${runId}`)) {
+            throw new Error('acceptance prefix must start with the active acceptance run ID');
+        }
+
+        return { runId, correlationId, keyPrefix };
+    }
+
+    function buildAcceptanceHeaders(item) {
+        if (!item || !item.acceptance) return {};
+        const acceptance = normalizeAcceptanceContext(item.acceptance);
+        return {
+            'x-acceptance-run-id': acceptance.runId,
+            'x-acceptance-correlation-id': acceptance.correlationId
+        };
+    }
+
     function buildMediaObjectKey(params) {
         const keyPrefix = sanitizeKeyPrefix(params.keyPrefix);
         const userId = sanitizeUserId(params.userId || 'Shared_Account');
@@ -430,6 +456,8 @@
         normalizeWorkerUrl,
         validateWorkersDevUrl,
         normalizeCloudConfig,
+        normalizeAcceptanceContext,
+        buildAcceptanceHeaders,
         buildMediaObjectKey,
         buildMediaObjectKeyFromFinalPath,
         buildCanonicalMediaObjectKey,

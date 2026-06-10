@@ -271,11 +271,19 @@ function getR2BackupCanaryStopReason(options = {}, stats = {}) {
 
 function getR2BackupPageCommandOptions(detail = {}) {
     const command = detail && typeof detail === 'object' ? detail : {};
+    const acceptance = command.runId && command.correlationId && command.keyPrefix
+        ? {
+            runId: String(command.runId),
+            correlationId: String(command.correlationId),
+            keyPrefix: String(command.keyPrefix)
+        }
+        : null;
     if (command.action === 'INIT_R2_CANARY') {
         return {
             mode: 'canary',
             limit: 1,
-            options: { stopAfterMediaAttempt: true }
+            options: { stopAfterMediaAttempt: true },
+            ...(acceptance ? { acceptance } : {})
         };
     }
 
@@ -285,7 +293,8 @@ function getR2BackupPageCommandOptions(detail = {}) {
     return {
         mode: 'canary',
         limit: 1,
-        options: { ...options, stopAfterMediaAttempt: true }
+        options: { ...options, stopAfterMediaAttempt: true },
+        ...(acceptance ? { acceptance } : {})
     };
 }
 
@@ -2809,7 +2818,8 @@ class GrokScraper {
         this.backupOptions = {
             mode: options.mode === 'canary' ? 'canary' : 'full',
             limit: Number.isFinite(options.limit) && options.limit > 0 ? options.limit : null,
-            options: options.options && typeof options.options === 'object' ? options.options : {}
+            options: options.options && typeof options.options === 'object' ? options.options : {},
+            acceptance: options.acceptance || null
         };
         this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0, startedAt: Date.now() };
         this._backupVisited = new Set();
@@ -3177,7 +3187,8 @@ class GrokScraper {
                     isVideo,
                     promptText,
                     blobDataUrl: blobData,
-                    skipLocalDownload: alreadyLocal
+                    skipLocalDownload: alreadyLocal,
+                    acceptance: this.backupOptions && this.backupOptions.acceptance
                 }, resolve);
             });
             if (recordBackupUploadStatus(this.backupStats, response?.status)) {

@@ -14,14 +14,76 @@ This guide configures optional dual-write backup:
 ## Prerequisites
 
 - Cloudflare account
-- `wrangler` CLI installed (`npm i -g wrangler`)
+- `npx wrangler@latest` available through npm. A global install is not required.
 - Existing R2 bucket
 - This repo loaded as unpacked extension
+
+## Acceptance testing resources
+
+Live acceptance tests must not use production-shaped resources.
+
+Use separate acceptance resources:
+
+- Worker: acceptance-only Worker name
+- R2 bucket: acceptance-only bucket, never `grok-gallery-001`
+- D1 database: acceptance-only database, never `grok-powertools-db`
+- Prefix: `acceptance/$ACCEPTANCE_RUN_ID`
+- API credential: distinct acceptance-only value
+- R2 API token: Object Read & Write scoped to the acceptance bucket only
+
+Before running a live canary:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<account-id> \
+mise exec node@24 -- node acceptance/scripts/preflight.mjs
+```
+
+If port `3001` belongs to another workspace, use a free alternate port instead of stopping that server:
+
+```bash
+ACCEPTANCE_WEB_PORT=3011 \
+CLOUDFLARE_ACCOUNT_ID=<account-id> \
+mise exec node@24 -- node acceptance/scripts/preflight.mjs
+```
+
+If preflight reports `cloudflare_account_id_missing`, set `CLOUDFLARE_ACCOUNT_ID` explicitly and retry. If R2 returns Cloudflare authentication code `10000`, stop. Do not run a live cloud lane until R2 bucket list/create/verify works.
+
+Generate the ignored Wrangler config only after the acceptance bucket and D1 database exist:
+
+```bash
+test -n "$ACCEPTANCE_D1_DATABASE_ID"
+test -n "$CLOUDFLARE_ACCOUNT_ID"
+test -n "$ACCEPTANCE_RUN_ID"
+test -n "$ACCEPTANCE_KEY_PREFIX"
+ACCEPTANCE_WORKER_NAME=grok-powertools-acceptance \
+ACCEPTANCE_R2_BUCKET=grok-powertools-acceptance \
+ACCEPTANCE_D1_DATABASE=grok-powertools-acceptance-db \
+mise exec node@24 -- node acceptance/scripts/write-cloudflare-acceptance-config.mjs
+```
+
+Do not commit `cloud/wrangler.acceptance.generated.toml`.
+
+Deploy the acceptance Worker with the generated config:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<account-id> \
+npx wrangler@latest deploy --config cloud/wrangler.acceptance.generated.toml
+```
+
+Create acceptance-only secrets:
+
+```bash
+npx wrangler@latest secret put CLIENT_API_KEY --config cloud/wrangler.acceptance.generated.toml
+npx wrangler@latest secret put R2_ACCESS_KEY_ID --config cloud/wrangler.acceptance.generated.toml
+npx wrangler@latest secret put R2_SECRET_ACCESS_KEY --config cloud/wrangler.acceptance.generated.toml
+```
+
+Create the R2 API token from Cloudflare R2 API Tokens, scoped to the acceptance bucket. Cloudflare shows the Secret Access Key only once, so set `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` immediately.
 
 ## 1) Create and configure R2 bucket
 
 ```bash
-wrangler r2 bucket create YOUR_BUCKET_NAME --location=enam
+npx wrangler@latest r2 bucket create YOUR_BUCKET_NAME --location=enam
 ```
 
 ## 2) Deploy Worker from this repo
@@ -41,9 +103,9 @@ Edit `cloud/wrangler.toml`:
 Create secrets:
 
 ```bash
-wrangler secret put CLIENT_API_KEY
-wrangler secret put R2_ACCESS_KEY_ID
-wrangler secret put R2_SECRET_ACCESS_KEY
+npx wrangler@latest secret put CLIENT_API_KEY
+npx wrangler@latest secret put R2_ACCESS_KEY_ID
+npx wrangler@latest secret put R2_SECRET_ACCESS_KEY
 ```
 
 Deploy:

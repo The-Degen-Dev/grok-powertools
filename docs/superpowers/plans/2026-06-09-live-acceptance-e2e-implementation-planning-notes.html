@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Live Acceptance E2E Implementation Planning Notes</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      margin: 40px auto;
+      max-width: 980px;
+      color: #1f2328;
+    }
+    h1, h2 {
+      line-height: 1.2;
+    }
+    code {
+      background: #f6f8fa;
+      border-radius: 4px;
+      padding: 0.1em 0.3em;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid #d0d7de;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f6f8fa;
+    }
+    .done {
+      color: #1a7f37;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>Live Acceptance E2E Implementation Planning Notes</h1>
+  <p>
+    Running notes for planning
+    <code>docs/superpowers/plans/2026-06-09-live-acceptance-e2e.md</code>
+    from
+    <code>docs/superpowers/specs/2026-06-09-live-acceptance-e2e-design.md</code>.
+    This file records how planning interpreted the spec before implementation begins.
+  </p>
+
+  <h2>Status</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Planning item</th>
+        <th>Status</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Design spec translated into TDD plan</td>
+        <td class="done">Done</td>
+        <td>Plan saved as <code>docs/superpowers/plans/2026-06-09-live-acceptance-e2e.md</code>.</td>
+      </tr>
+      <tr>
+        <td>Tool and path readiness reflected in plan</td>
+        <td class="done">Done</td>
+        <td>Known blockers are explicit stop gates instead of hidden assumptions.</td>
+      </tr>
+      <tr>
+        <td>Planning notes artifact created</td>
+        <td class="done">Done</td>
+        <td>This file was added after the user clarified that planning notes should be separate from execution implementation notes.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Design Decisions</h2>
+  <ul>
+    <li>The implementation plan treats acceptance as one connected project instead of splitting cloud, extension, web, and harness into separate plans. The shared run ID, correlation ID, verdict model, and evidence workbook make these pieces interdependent.</li>
+    <li>The plan creates a separate execution notes file during Task 1 and this separate planning notes file now. Planning notes explain why the plan is shaped the way it is; execution notes will track what changes during implementation.</li>
+    <li>The plan keeps the existing <code>cloud/wrangler.toml</code> format and uses an ignored generated acceptance config instead of converting the repo to JSONC. The spec preferred JSONC for new Worker configs when appropriate, but the repo already uses TOML and avoiding format churn is safer.</li>
+    <li>The plan starts with pure local contracts before cloud or Chrome work: manifest validation, redaction, verdict classification, Worker acceptance helpers, and preflight classifiers. That keeps TDD possible before any live mutation.</li>
+    <li>The plan makes current tool blockers deterministic preflight output: R2 auth code <code>10000</code>, stale port <code>3001</code>, CDP not attached to the existing Chrome session, missing <code>agent-browser</code>/<code>plwr</code>, and unverified installed extension identity.</li>
+    <li>The plan updates Cloudflare and AWS SDK package versions because package registry checks showed newer versions on 2026-06-09. This is included as a planned TDD task, not done silently during planning.</li>
+  </ul>
+
+  <h2>Deviations</h2>
+  <ul>
+    <li>The spec says the Worker should have an arming record and write lease. The plan starts with request-level acceptance guards and an acceptance schema, then leaves full durable arming workflow to the implementation sequence. Reason: the first red/green tasks need a smaller surface that can be tested without a live D1 database.</li>
+    <li>The spec mentions ops import/display as a review surface. The plan keeps ops secondary and does not make it an independent verifier unless later tasks add object and D1 verification APIs. Reason: the spec explicitly says the harness plus direct Worker/R2/D1 verification is source of truth.</li>
+    <li>The spec allows live canary execution after safer lanes pass. The plan's live canary script only arms and blocks by default; actual Chrome driving remains a final reviewed step. Reason: existing Chrome is user state and should not be automated unless every gate is verified and manually armed.</li>
+    <li>The plan does not attempt to solve Cloudflare R2 auth during planning. Reason: R2 list/create/verify currently fails with auth code <code>10000</code>, so the correct planning behavior is a hard stop gate, not speculative dashboard or credential work.</li>
+  </ul>
+
+  <h2>Tradeoffs</h2>
+  <ul>
+    <li>Alternative considered: one large live E2E script first. Rejected because it would mix readiness checks, cloud mutation, browser control, and evidence generation before the safety primitives are tested.</li>
+    <li>Alternative considered: add a full Worker test framework. The plan instead uses TypeScript plus Node's built-in test runner for the first acceptance guard tests. This keeps dependencies small and fits the repo's current cloud setup.</li>
+    <li>Alternative considered: commit a checked-in acceptance Wrangler environment. The plan generates an ignored config from verified environment values. This avoids committing guessed account IDs, bucket names, or database IDs.</li>
+    <li>Alternative considered: treat the web ops page as acceptance proof. The plan treats the evidence workbook as proof and the ops page as display. This avoids a false pass if the UI imports stale or incomplete evidence.</li>
+    <li>Alternative considered: immediately use existing Chrome for validation. The plan defers it until after local gates, isolated browser behavior, cloud acceptance identity, and preflight checks pass. This protects the user's active Grok session and production backups.</li>
+  </ul>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li>Confirm whether the acceptance Worker should be a separate Worker name or an environment under the current Worker. The plan currently assumes a separate acceptance Worker name for clearer no-production-touch boundaries.</li>
+    <li>Confirm retention policy for acceptance R2/D1 artifacts after evidence is written. The plan records artifacts but does not decide automatic deletion.</li>
+    <li>Confirm whether final existing-Chrome lane should be manually armed every time. The plan currently requires manual arming for every live run.</li>
+    <li>Cloudflare R2 auth still needs to be fixed before live cloud acceptance can run. The plan blocks on this rather than working around it.</li>
+  </ul>
+</body>
+</html>

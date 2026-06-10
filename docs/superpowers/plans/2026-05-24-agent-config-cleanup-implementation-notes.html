@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Config Cleanup Implementation Notes</title>
+  <style>
+    body {
+      color: #1f2933;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      margin: 40px auto;
+      max-width: 980px;
+      padding: 0 24px;
+    }
+    h1, h2 {
+      line-height: 1.2;
+    }
+    h1 {
+      border-bottom: 1px solid #d9e2ec;
+      padding-bottom: 12px;
+    }
+    h2 {
+      margin-top: 32px;
+    }
+    code {
+      background: #f0f4f8;
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid #d9e2ec;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f0f4f8;
+    }
+    .status {
+      background: #f8fafc;
+      border: 1px solid #d9e2ec;
+      border-radius: 8px;
+      padding: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Agent Config Cleanup Implementation Notes</h1>
+
+  <div class="status">
+    <p><strong>Status:</strong> Complete.</p>
+    <p><strong>Workspace:</strong> <code>/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools</code></p>
+    <p><strong>Plan:</strong> <code>docs/superpowers/plans/2026-05-24-agent-config-cleanup.md</code></p>
+  </div>
+
+  <h2>Design Decisions</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Decision</th>
+        <th>Reasoning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Use <code>superpowers:subagent-driven-development</code> as the execution pattern.</td>
+        <td>The saved plan requires this or <code>superpowers:executing-plans</code>, and the user explicitly asked for subagent-driven execution.</td>
+      </tr>
+      <tr>
+        <td>Keep <code>/Users/philipbankier/AGENTS.md</code> unchanged.</td>
+        <td>Current Codex docs identify <code>/Users/philipbankier/.codex/AGENTS.md</code> as the global Codex target, while the home file contains separate gstack guidance.</td>
+      </tr>
+      <tr>
+        <td>Treat repo-local <code>.codex/hooks.json</code> as active configuration until archived and intentionally removed.</td>
+        <td>Current Codex docs list <code>&lt;repo&gt;/.codex/hooks.json</code> as a project-local hook source in trusted projects.</td>
+      </tr>
+      <tr>
+        <td>Clarify browser automation precedence in the plan and final global AGENTS text.</td>
+        <td>An independent reviewer found that preserving Browser/browser-use first and also preferring <code>agent-browser</code>/<code>plwr</code> could be read as contradictory. The revised wording makes <code>agent-browser</code>/<code>plwr</code> preferred when available, with Browser/browser-use as the fallback for browser-contained UI.</td>
+      </tr>
+      <tr>
+        <td>Add manifest and checksum gates immediately before deletion.</td>
+        <td>An independent reviewer noted that files could theoretically change between archive creation and deletion. The plan now verifies the current manifest and per-file checksums against the archive before any <code>rm</code>.</td>
+      </tr>
+      <tr>
+        <td>Use fail-fast shell behavior for critical command blocks.</td>
+        <td>A follow-up reviewer noted that a failing check could be masked by later successful commands. Critical plan command blocks now start with <code>set -euo pipefail</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Deviations</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Deviation</th>
+        <th>Why</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Adjusted the planned global Browser/Peekaboo routing wording before execution.</td>
+        <td>This is a plan correction prompted by subagent review. It preserves the user's <code>agent-browser</code>/<code>plwr</code> requirement and avoids a contradictory default.</td>
+      </tr>
+      <tr>
+        <td>Added pre-deletion manifest verification and pre-patch global AGENTS comparison to the plan.</td>
+        <td>This is an execution hardening deviation from the earlier plan. It reduces the chance of deleting or overwriting state that changed after archiving.</td>
+      </tr>
+      <tr>
+        <td>Added fail-fast behavior to critical shell snippets in the plan.</td>
+        <td>This is a plan hardening change, not a scope change. It prevents collision, checksum, or manifest failures from being hidden by later commands.</td>
+      </tr>
+      <tr>
+        <td>Create the archive parent directory before checking the timestamped archive path.</td>
+        <td>The first archive attempt proved <code>/Users/philipbankier/.codex/archives</code> did not exist. The plan now creates only the parent with <code>mkdir -p</code>, then keeps the timestamped archive directory collision-checked with <code>test ! -e</code> and <code>mkdir</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Tradeoffs</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Tradeoff</th>
+        <th>Choice</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Archive exact named files versus dynamically archiving every ignored file.</td>
+        <td>Use the plan's explicit named file list so cleanup scope stays bounded and avoids unrelated ignored state such as <code>temp_ref/</code>.</td>
+      </tr>
+      <tr>
+        <td>Direct Codex model verification versus prompt-input inspection.</td>
+        <td>Prefer <code>codex debug prompt-input</code> for final instruction-loading proof because it verifies the actual prompt context without asking a model to summarize it. Use <code>codex exec</code> only as fallback.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Open Questions</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Question</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Should <code>agent-browser</code> and <code>plwr</code> be installed now if missing?</td>
+        <td>Not part of the cleanup plan. The global guidance will keep them as preferred when available and require <code>command -v</code> checks before use.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Execution Log</h2>
+  <ul>
+    <li>Read the saved cleanup plan and current global/home AGENTS files before mutation.</li>
+    <li>Confirmed repo cleanup targets are not tracked by Git.</li>
+    <li>Confirmed <code>.codex/</code> is untracked and <code>.claude/</code>, <code>.agent/</code>, agent handoff files, and repo-local <code>CLAUDE.md</code> files are ignored/local-only state.</li>
+    <li>Updated the cleanup plan to resolve the subagent-identified browser precedence conflict before mutating global AGENTS.</li>
+    <li>Updated the cleanup plan to use a non-colliding archive directory, content secret scan, manifest checksums, pre-delete manifest comparison, pre-patch global AGENTS comparison, and <code>codex debug prompt-input</code> verification.</li>
+    <li>Updated critical shell snippets to use fail-fast behavior after follow-up review.</li>
+    <li>Extended fail-fast behavior to Task 1 preflight snippets after the second follow-up review.</li>
+    <li>First archive attempt stopped safely because the archive parent directory was missing; updated the plan to create the parent directory before the collision-checked archive folder.</li>
+    <li>Created and verified archive at <code>/Users/philipbankier/.codex/archives/chrome-extension-powertools-agent-config-cleanup-20260524T065134Z</code>. Verification covered the tar checksum, per-file checksums, and archived copies of <code>/Users/philipbankier/.codex/AGENTS.md</code> and <code>/Users/philipbankier/AGENTS.md</code>.</li>
+    <li>Before deletion, compared the current file manifest to the archived manifest and verified all per-file checksums again. Removed only archived repo-local agent runtime targets and confirmed no cleanup target remained.</li>
+    <li>Patched <code>/Users/philipbankier/.codex/AGENTS.md</code> with adapted zeke guidance, verified required local additions, verified <code>/Users/philipbankier/AGENTS.md</code> stayed unchanged, and confirmed <code>codex debug prompt-input</code> includes both global and repo AGENTS content.</li>
+    <li>Final independent subagent audit returned PASS. Repo status only shows this cleanup plan and implementation notes as untracked files; no tracked project files were changed.</li>
+  </ul>
+</body>
+</html>

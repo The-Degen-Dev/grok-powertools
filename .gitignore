@@ -11,6 +11,9 @@ yarn.lock
 *.log
 npm-debug.log*
 
+# Local environment and secrets
+.env*
+
 # Extension Artifacts
 *.crx
 *.pem
@@ -28,3 +31,8 @@ AGENT_STATE.md
 AGENT_HANDOFF.md
 .agent/delegate-reports/
 .gstack/
+
+# Acceptance test artifacts
+cloud/wrangler.acceptance.generated.toml
+cloud/.tmp-test/
+acceptance/runs/
