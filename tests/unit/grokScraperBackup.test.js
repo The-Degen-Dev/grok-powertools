@@ -312,6 +312,59 @@ describe('Grok backup background processed ID persistence', () => {
         });
     });
 
+    test('preserves acceptance metadata in R2 backup init messages', () => {
+        const { buildR2BackupInitMessage } = loadBackgroundForTest();
+
+        expect(buildR2BackupInitMessage({
+            action: 'START_R2_BACKUP',
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true },
+            acceptance: {
+                runId: 'run-20260609-001',
+                correlationId: 'corr-1',
+                keyPrefix: 'acceptance/run-20260609-001'
+            }
+        })).toEqual({
+            action: 'INIT_R2_BACKUP',
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true },
+            acceptance: {
+                runId: 'run-20260609-001',
+                correlationId: 'corr-1',
+                keyPrefix: 'acceptance/run-20260609-001'
+            }
+        });
+    });
+
+    test('derives acceptance metadata for popup canaries from acceptance config', () => {
+        const {
+            buildAcceptanceContextFromCloudConfig,
+            buildR2BackupInitMessageForConfig
+        } = loadBackgroundForTest();
+        const config = { keyPrefix: 'acceptance/run-20260609-001' };
+
+        expect(buildAcceptanceContextFromCloudConfig({ keyPrefix: 'grok-powertools/v1' })).toBeNull();
+
+        const initMessage = buildR2BackupInitMessageForConfig({
+            action: 'START_R2_BACKUP',
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true }
+        }, config);
+
+        expect(initMessage.acceptance).toMatchObject({
+            runId: 'run-20260609-001',
+            keyPrefix: 'acceptance/run-20260609-001'
+        });
+        expect(initMessage.acceptance.correlationId).toMatch(/^popup-canary-\d+-[0-9a-f]+$/);
+        expect(buildR2BackupInitMessageForConfig({
+            action: 'START_R2_BACKUP',
+            mode: 'full'
+        }, config)).not.toHaveProperty('acceptance');
+    });
+
     test('treats canary completion as a successful R2 backup completion', () => {
         const {
             getR2BackupCompletionStatusLabel,
@@ -394,6 +447,80 @@ describe('Grok backup background processed ID persistence', () => {
             'x-acceptance-run-id': 'run-20260609-001',
             'x-acceptance-correlation-id': 'corr-1'
         });
+    });
+
+    test('adds derived acceptance headers to cloud test presign and verify requests', async () => {
+        const { testCloudConnection } = loadBackgroundForTest();
+        const OriginalBlob = global.Blob;
+        const originalCrypto = global.crypto;
+        Object.defineProperty(global, 'crypto', {
+            configurable: true,
+            value: require('crypto').webcrypto
+        });
+        global.Blob = class TestBlob {
+            constructor(parts = [], options = {}) {
+                this.parts = parts;
+                this.type = options.type || '';
+                this.size = Buffer.byteLength(parts.map((part) => String(part)).join(''));
+            }
+            async arrayBuffer() {
+                const buffer = Buffer.from(this.parts.map((part) => String(part)).join(''));
+                return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+            }
+        };
+        const calls = [];
+        global.fetch = jest.fn((url, options = {}) => {
+            calls.push({ url, options });
+            if (String(url).endsWith('/health')) {
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ ok: true, service: 'test-worker', now: '2026-06-09T00:00:00.000Z' })
+                });
+            }
+            if (String(url).endsWith('/v1/presign')) {
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ uploadUrl: 'https://upload.example/test', method: 'PUT', headers: {} })
+                });
+            }
+            if (String(url) === 'https://upload.example/test') {
+                return Promise.resolve({ ok: true });
+            }
+            if (String(url).endsWith('/v1/objects/verify')) {
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ ok: true, exists: true, verified: true })
+                });
+            }
+            throw new Error(`unexpected fetch ${url}`);
+        });
+
+        try {
+            const result = await testCloudConnection({
+                mode: 'cloud_only',
+                workerUrl: 'https://worker.example.workers.dev',
+                apiKey: 'api-sample',
+                keyPrefix: 'acceptance/run-20260609-001'
+            });
+
+            expect(result.ok).toBe(true);
+            const presign = calls.find((call) => String(call.url).endsWith('/v1/presign'));
+            const verify = calls.find((call) => String(call.url).endsWith('/v1/objects/verify'));
+            expect(presign.options.headers).toMatchObject({
+                'x-acceptance-run-id': 'run-20260609-001',
+                'x-acceptance-correlation-id': expect.stringMatching(/^cloud-test-\d+-[0-9a-f]+$/)
+            });
+            expect(verify.options.headers).toMatchObject({
+                'x-acceptance-run-id': 'run-20260609-001',
+                'x-acceptance-correlation-id': expect.stringMatching(/^cloud-test-\d+-[0-9a-f]+$/)
+            });
+        } finally {
+            global.Blob = OriginalBlob;
+            Object.defineProperty(global, 'crypto', {
+                configurable: true,
+                value: originalCrypto
+            });
+        }
     });
 });
 

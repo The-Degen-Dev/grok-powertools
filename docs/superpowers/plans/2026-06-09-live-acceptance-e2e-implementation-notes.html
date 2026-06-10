@@ -112,8 +112,23 @@
       </tr>
       <tr>
         <td>Acceptance cloud setup</td>
-        <td class="done">Partial</td>
-        <td>Created isolated Cloudflare resources and deployed <code>grok-powertools-acceptance</code>. Metadata canary wrote to the acceptance R2 prefix. Presign remains blocked until acceptance R2 API token secrets are set.</td>
+        <td class="done">Done</td>
+        <td>Created isolated Cloudflare resources and deployed <code>grok-powertools-acceptance</code>. Metadata and media canaries both wrote to the acceptance R2 prefix after the scoped R2 token secrets were set.</td>
+      </tr>
+      <tr>
+        <td>Acceptance media canary</td>
+        <td class="done">Done</td>
+        <td>Acceptance R2 signing secrets were set on the isolated Worker. A 5-byte media canary passed presign, signed PUT, and <code>/v1/objects/verify</code> with size, SHA-256, and content type matches.</td>
+      </tr>
+      <tr>
+        <td>Existing-Chrome live extension lane</td>
+        <td class="done">Done</td>
+        <td>Reloaded the unpacked extension in the user's existing Chrome session, ran popup Test Upload Pipeline against the acceptance Worker, then ran a one-media page-origin canary from the live Grok tab and verified the resulting R2 object and D1 row.</td>
+      </tr>
+      <tr>
+        <td>Final validation</td>
+        <td class="done">Done</td>
+        <td>Root unit tests, root Playwright e2e, root lint, web build, web lint, and cloud typecheck all exited 0 under <code>mise exec node@24</code>.</td>
       </tr>
     </tbody>
   </table>
@@ -128,6 +143,7 @@
     <li>Keep ops page verification secondary. The workbook is source-of-truth evidence, while ops imports and displays it for human review.</li>
     <li>Final local validation ran under <code>mise exec node@24</code> to match the repo's Node 24 target without changing the user's shell default.</li>
     <li>Use <code>run-20260610-034700</code> as the first live acceptance run ID. Its Worker is <code>grok-powertools-acceptance</code>, bucket is <code>grok-powertools-acceptance</code>, D1 database is <code>grok-powertools-acceptance-db</code>, and prefix is <code>acceptance/run-20260610-034700</code>.</li>
+    <li>Derive acceptance context from an acceptance-prefixed cloud config for bounded canary, test-upload, metadata, queued media, direct media, and download-fallback upload descriptors. Full backup init messages still do not carry page-origin acceptance metadata from config alone.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -142,6 +158,8 @@
     <li>Task 5 builds redaction fixture names and signed URL markers from inert parts instead of committing literal credential or signed URL samples. The redaction behavior under test is unchanged.</li>
     <li>Task 6 builds workbook test signed URL and credential-looking values from inert parts, instead of committing literal signed URL or sensitive samples. The redaction assertions are unchanged.</li>
     <li>Task 8 says <code>API credential</code> in the runbook rather than copying the plan's credential-value wording. The safety requirement is unchanged, and the staged sensitive-value scan remains clean.</li>
+    <li>The live popup Test Upload Pipeline first exposed a bug not covered by the earlier unit tests: popup-initiated test uploads and canaries were using the acceptance Worker URL and prefix but were not sending the required acceptance headers. This was fixed in <code>background.js</code> and covered with new Jest tests before rerunning the live lane.</li>
+    <li>One early live canary ran against the production cloud config because the extension storage had not actually persisted the acceptance Worker settings. It uploaded one object to the existing production path for the currently open Grok post. The object was not deleted, because deleting user backup data is more risky than leaving the extra already-valid backup object in place.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -155,7 +173,11 @@
     <li>Task 7 redacts local gate stdout and stderr tails before writing evidence, even though the plan's baseline runner stored raw tails. This preserves the sensitive-output constraint.</li>
     <li>The acceptance preflight default remains port <code>3001</code>, but a free alternate such as <code>ACCEPTANCE_WEB_PORT=3011</code> is supported so this repo does not stop or interfere with another workspace's server.</li>
     <li>The Cloudflare Worker dev dependencies were updated to the current published versions observed during this run: <code>wrangler@4.99.0</code> and <code>@cloudflare/workers-types@4.20260610.1</code>.</li>
-    <li>Cloudflare R2 token creation was not automated after checking current Wrangler support and Cloudflare R2 docs. The Secret Access Key is shown once, so the safer handoff is to create an Object Read &amp; Write token scoped only to <code>grok-powertools-acceptance</code> and immediately set the Worker secrets.</li>
+    <li>Cloudflare R2 token creation was not automated after checking current Wrangler support and Cloudflare R2 docs. The Secret Access Key is shown once, so the safer handoff was to create an Object Read &amp; Write token scoped only to <code>grok-powertools-acceptance</code> and immediately set the Worker secrets.</li>
+    <li>Signed upload URLs and the temporary R2 secret JSON were kept under <code>/private/tmp/grok-powertools-acceptance</code> and deleted after use.</li>
+    <li>After the live lane, the extension cloud config was restored visibly to production mode, production Worker URL, production key prefix <code>grok-powertools/v1</code>, and an API key present. A temporary production-config backup and restore scripts were deleted from <code>/private/tmp</code> after restore.</li>
+    <li>The Download Folder field remained visible as the acceptance run path during cleanup. The original pre-test value was not captured. Attempts to reset it through Chrome scripting, Accessibility, and coordinate entry did not persist without risking broader live Chrome disruption, so it is recorded as a manual cleanup caveat.</li>
+    <li>Root lint exited 0 with 19 warnings, and web lint exited 0 with 22 warnings. These warnings were pre-existing style issues and were not part of this runtime fix.</li>
   </ul>
 
   <h2>Open Questions</h2>
@@ -163,7 +185,10 @@
     <li>Cloudflare CLI auth is fixed and <code>ACCEPTANCE_WEB_PORT=3011</code> preflight reports verified for R2 access, account ID, and port ownership.</li>
     <li>The acceptance Worker URL is <code>https://grok-powertools-acceptance.greymakerxyz-grok.workers.dev</code>. Unauthenticated acceptance identity returned <code>401</code>; authenticated identity returned acceptance mode, run ID, prefix, and binding diagnostics.</li>
     <li>The metadata canary wrote <code>acceptance/run-20260610-034700/users/acceptance-user/metadata/saved-prompts.latest.json</code> and the object was fetched back from <code>grok-powertools-acceptance</code>.</li>
-    <li>Presign still returns <code>500</code> with <code>Missing required R2 signing credentials in worker env.</code>. Set <code>R2_ACCESS_KEY_ID</code> and <code>R2_SECRET_ACCESS_KEY</code> for the acceptance Worker before running media upload canaries.</li>
+    <li>The acceptance media canary wrote <code>acceptance/run-20260610-034700/users/acceptance-user/media/by-asset/canary.txt</code>. Verify returned <code>exists: true</code>, <code>verified: true</code>, size <code>5</code>, content type <code>text/plain</code>, and no mismatches.</li>
+    <li>The popup Test Upload Pipeline reported <code>Full pipeline OK (health + presign + R2 upload + verify)</code> at 1:05:35 AM after the extension reload.</li>
+    <li>The live Grok page-origin canary uploaded one JPEG to <code>acceptance/run-20260610-034700/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/by-asset/media_f3032c22-dcd8-4d04-aefb-ae7ca01ff0f8.jpg</code>. Verify returned <code>exists: true</code>, <code>verified: true</code>, size <code>262732</code>, content type <code>image/jpeg</code>, SHA-256 <code>215df8a256253a65af55f6d747233f9da1bbeea3437e3dbdd65d4aa0854c811c</code>, and no mismatches.</li>
+    <li>D1 recorded the live canary row with upload status <code>verified</code> for asset <code>media_f3032c22-dcd8-4d04-aefb-ae7ca01ff0f8</code>.</li>
   </ul>
 </body>
 </html>
