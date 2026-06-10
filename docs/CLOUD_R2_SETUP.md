@@ -29,6 +29,7 @@ Use separate acceptance resources:
 - D1 database: acceptance-only database, never `grok-powertools-db`
 - Prefix: `acceptance/$ACCEPTANCE_RUN_ID`
 - API credential: distinct acceptance-only value
+- R2 API token: Object Read & Write scoped to the acceptance bucket only
 
 Before running a live canary:
 
@@ -61,6 +62,23 @@ mise exec node@24 -- node acceptance/scripts/write-cloudflare-acceptance-config.
 ```
 
 Do not commit `cloud/wrangler.acceptance.generated.toml`.
+
+Deploy the acceptance Worker with the generated config:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<account-id> \
+npx wrangler@latest deploy --config cloud/wrangler.acceptance.generated.toml
+```
+
+Create acceptance-only secrets:
+
+```bash
+npx wrangler@latest secret put CLIENT_API_KEY --config cloud/wrangler.acceptance.generated.toml
+npx wrangler@latest secret put R2_ACCESS_KEY_ID --config cloud/wrangler.acceptance.generated.toml
+npx wrangler@latest secret put R2_SECRET_ACCESS_KEY --config cloud/wrangler.acceptance.generated.toml
+```
+
+Create the R2 API token from Cloudflare R2 API Tokens, scoped to the acceptance bucket. Cloudflare shows the Secret Access Key only once, so set `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` immediately.
 
 ## 1) Create and configure R2 bucket
 

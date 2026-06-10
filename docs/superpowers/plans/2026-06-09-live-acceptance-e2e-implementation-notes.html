@@ -110,6 +110,11 @@
         <td class="done">Done</td>
         <td>Preflight now supports <code>ACCEPTANCE_WEB_PORT</code>, summarizes all hard blockers before exiting, and distinguishes missing <code>CLOUDFLARE_ACCOUNT_ID</code> from Cloudflare auth code <code>10000</code>.</td>
       </tr>
+      <tr>
+        <td>Acceptance cloud setup</td>
+        <td class="done">Partial</td>
+        <td>Created isolated Cloudflare resources and deployed <code>grok-powertools-acceptance</code>. Metadata canary wrote to the acceptance R2 prefix. Presign remains blocked until acceptance R2 API token secrets are set.</td>
+      </tr>
     </tbody>
   </table>
 
@@ -122,6 +127,7 @@
     <li>Propagate acceptance metadata only from bounded canary commands into R2 upload descriptors and queue items, keeping full page-origin backup commands rejected before they can gain acceptance headers.</li>
     <li>Keep ops page verification secondary. The workbook is source-of-truth evidence, while ops imports and displays it for human review.</li>
     <li>Final local validation ran under <code>mise exec node@24</code> to match the repo's Node 24 target without changing the user's shell default.</li>
+    <li>Use <code>run-20260610-034700</code> as the first live acceptance run ID. Its Worker is <code>grok-powertools-acceptance</code>, bucket is <code>grok-powertools-acceptance</code>, D1 database is <code>grok-powertools-acceptance-db</code>, and prefix is <code>acceptance/run-20260610-034700</code>.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -149,14 +155,15 @@
     <li>Task 7 redacts local gate stdout and stderr tails before writing evidence, even though the plan's baseline runner stored raw tails. This preserves the sensitive-output constraint.</li>
     <li>The acceptance preflight default remains port <code>3001</code>, but a free alternate such as <code>ACCEPTANCE_WEB_PORT=3011</code> is supported so this repo does not stop or interfere with another workspace's server.</li>
     <li>The Cloudflare Worker dev dependencies were updated to the current published versions observed during this run: <code>wrangler@4.99.0</code> and <code>@cloudflare/workers-types@4.20260610.1</code>.</li>
+    <li>Cloudflare R2 token creation was not automated after checking current Wrangler support and Cloudflare R2 docs. The Secret Access Key is shown once, so the safer handoff is to create an Object Read &amp; Write token scoped only to <code>grok-powertools-acceptance</code> and immediately set the Worker secrets.</li>
   </ul>
 
   <h2>Open Questions</h2>
   <ul>
-    <li>Cloudflare R2 access is blocked until the current account access can list or create acceptance buckets.</li>
-    <li>Acceptance cloud execution remains blocked until <code>acceptance/scripts/preflight.mjs</code> reports R2 as verified.</li>
-    <li>The latest default preflight run reported port 3001 as owned by another workspace. A follow-up preflight with <code>ACCEPTANCE_WEB_PORT=3011</code> cleared the port blocker without touching that server.</li>
-    <li>With the account ID supplied from the existing Worker config, Cloudflare R2 still returns authentication code <code>10000</code>. Live cloud canary remains blocked until Wrangler auth or token permissions are fixed.</li>
+    <li>Cloudflare CLI auth is fixed and <code>ACCEPTANCE_WEB_PORT=3011</code> preflight reports verified for R2 access, account ID, and port ownership.</li>
+    <li>The acceptance Worker URL is <code>https://grok-powertools-acceptance.greymakerxyz-grok.workers.dev</code>. Unauthenticated acceptance identity returned <code>401</code>; authenticated identity returned acceptance mode, run ID, prefix, and binding diagnostics.</li>
+    <li>The metadata canary wrote <code>acceptance/run-20260610-034700/users/acceptance-user/metadata/saved-prompts.latest.json</code> and the object was fetched back from <code>grok-powertools-acceptance</code>.</li>
+    <li>Presign still returns <code>500</code> with <code>Missing required R2 signing credentials in worker env.</code>. Set <code>R2_ACCESS_KEY_ID</code> and <code>R2_SECRET_ACCESS_KEY</code> for the acceptance Worker before running media upload canaries.</li>
   </ul>
 </body>
 </html>

@@ -11,6 +11,9 @@ yarn.lock
 *.log
 npm-debug.log*
 
+# Local environment and secrets
+.env*
+
 # Extension Artifacts
 *.crx
 *.pem
