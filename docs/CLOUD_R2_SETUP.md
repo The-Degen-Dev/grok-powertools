@@ -14,7 +14,7 @@ This guide configures optional dual-write backup:
 ## Prerequisites
 
 - Cloudflare account
-- `wrangler` CLI installed (`npm i -g wrangler`)
+- `npx wrangler@latest` available through npm. A global install is not required.
 - Existing R2 bucket
 - This repo loaded as unpacked extension
 
@@ -33,10 +33,19 @@ Use separate acceptance resources:
 Before running a live canary:
 
 ```bash
+CLOUDFLARE_ACCOUNT_ID=<account-id> \
 mise exec node@24 -- node acceptance/scripts/preflight.mjs
 ```
 
-If R2 returns Cloudflare authentication code `10000`, stop. Do not run a live cloud lane until R2 bucket list/create/verify works.
+If port `3001` belongs to another workspace, use a free alternate port instead of stopping that server:
+
+```bash
+ACCEPTANCE_WEB_PORT=3011 \
+CLOUDFLARE_ACCOUNT_ID=<account-id> \
+mise exec node@24 -- node acceptance/scripts/preflight.mjs
+```
+
+If preflight reports `cloudflare_account_id_missing`, set `CLOUDFLARE_ACCOUNT_ID` explicitly and retry. If R2 returns Cloudflare authentication code `10000`, stop. Do not run a live cloud lane until R2 bucket list/create/verify works.
 
 Generate the ignored Wrangler config only after the acceptance bucket and D1 database exist:
 
@@ -56,7 +65,7 @@ Do not commit `cloud/wrangler.acceptance.generated.toml`.
 ## 1) Create and configure R2 bucket
 
 ```bash
-wrangler r2 bucket create YOUR_BUCKET_NAME --location=enam
+npx wrangler@latest r2 bucket create YOUR_BUCKET_NAME --location=enam
 ```
 
 ## 2) Deploy Worker from this repo
@@ -76,9 +85,9 @@ Edit `cloud/wrangler.toml`:
 Create secrets:
 
 ```bash
-wrangler secret put CLIENT_API_KEY
-wrangler secret put R2_ACCESS_KEY_ID
-wrangler secret put R2_SECRET_ACCESS_KEY
+npx wrangler@latest secret put CLIENT_API_KEY
+npx wrangler@latest secret put R2_ACCESS_KEY_ID
+npx wrangler@latest secret put R2_SECRET_ACCESS_KEY
 ```
 
 Deploy:

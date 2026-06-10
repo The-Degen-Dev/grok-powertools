@@ -17,12 +17,58 @@ function classifyCloudflareR2({ exitCode, stderr }) {
     return { status: 'blocked', code: 'r2_unverified', message: 'Cloudflare R2 command failed' };
 }
 
+function classifyCloudflareAccountId(value) {
+    if (String(value || '').trim()) {
+        return {
+            status: 'verified',
+            code: 'cloudflare_account_id_set',
+            message: 'CLOUDFLARE_ACCOUNT_ID is set'
+        };
+    }
+
+    return {
+        status: 'blocked',
+        code: 'cloudflare_account_id_missing',
+        message: 'CLOUDFLARE_ACCOUNT_ID is required for R2 acceptance preflight'
+    };
+}
+
 function classifyChromeCdp({ chromeRunning, cdpConnected, existingSessionOnly }) {
     if (!chromeRunning) return { status: 'blocked', code: 'chrome_not_running', message: 'Chrome is not running' };
     if (existingSessionOnly && !cdpConnected) {
         return { status: 'blocked', code: 'cdp_not_connected', message: 'CDP is not connected to the existing Chrome session' };
     }
     return { status: 'verified', code: 'chrome_ready', message: 'Chrome automation target is ready' };
+}
+
+function resolveAcceptanceWebPort(value, defaultPort = 3001) {
+    const rawValue = value === undefined || value === null || value === '' ? String(defaultPort) : String(value);
+    const port = Number(rawValue);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        return {
+            status: 'blocked',
+            code: 'invalid_web_port',
+            message: 'ACCEPTANCE_WEB_PORT must be an integer from 1 to 65535'
+        };
+    }
+
+    return {
+        status: 'verified',
+        port,
+        code: rawValue === String(defaultPort) ? 'web_port_default' : 'web_port_configured',
+        message: `Using acceptance web port ${port}`
+    };
+}
+
+function summarizePreflight(result) {
+    const blockerCodes = [result.webPort, result.cloudflareAccountId, result.r2]
+        .filter((check) => check?.status === 'blocked')
+        .map((check) => check.code);
+
+    return {
+        status: blockerCodes.length > 0 ? 'blocked' : 'verified',
+        blockerCodes: [...new Set(blockerCodes)]
+    };
 }
 
 function redactCommandOutput(output) {
@@ -50,7 +96,10 @@ function redactCommandOutput(output) {
 
 module.exports = {
     classifyChromeCdp,
+    classifyCloudflareAccountId,
     classifyCloudflareR2,
     classifyPortOwner,
+    resolveAcceptanceWebPort,
+    summarizePreflight,
     redactCommandOutput
 };

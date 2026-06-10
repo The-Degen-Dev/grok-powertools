@@ -1,7 +1,10 @@
 const {
     classifyChromeCdp,
+    classifyCloudflareAccountId,
     classifyCloudflareR2,
     classifyPortOwner,
+    resolveAcceptanceWebPort,
+    summarizePreflight,
     redactCommandOutput
 } = require('../../acceptance/lib/preflight.js');
 
@@ -28,6 +31,43 @@ describe('acceptance preflight classifiers', () => {
 
         expect(result.status).toBe('blocked');
         expect(result.code).toBe('r2_auth_blocked');
+    });
+
+    test('blocks R2 preflight when Cloudflare account ID is missing', () => {
+        expect(classifyCloudflareAccountId('')).toEqual({
+            status: 'blocked',
+            code: 'cloudflare_account_id_missing',
+            message: 'CLOUDFLARE_ACCOUNT_ID is required for R2 acceptance preflight'
+        });
+    });
+
+    test('supports an alternate acceptance web port', () => {
+        expect(resolveAcceptanceWebPort('3011')).toEqual({
+            status: 'verified',
+            port: 3011,
+            code: 'web_port_configured',
+            message: 'Using acceptance web port 3011'
+        });
+    });
+
+    test('blocks invalid acceptance web ports', () => {
+        expect(resolveAcceptanceWebPort('not-a-port')).toMatchObject({
+            status: 'blocked',
+            code: 'invalid_web_port'
+        });
+    });
+
+    test('summarizes any preflight blocker as blocked', () => {
+        const result = summarizePreflight({
+            webPort: { status: 'blocked', code: 'wrong_web_server' },
+            cloudflareAccountId: { status: 'verified', code: 'cloudflare_account_id_set' },
+            r2: { status: 'verified', code: 'r2_ready' }
+        });
+
+        expect(result).toEqual({
+            status: 'blocked',
+            blockerCodes: ['wrong_web_server']
+        });
     });
 
     test('blocks CDP unless it is connected to the existing Chrome session', () => {
