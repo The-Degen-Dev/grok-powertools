@@ -276,14 +276,511 @@
         });
     }
 
+    function getEventTargetDocument(target) {
+        if (target && target.ownerDocument) return target.ownerDocument;
+        if (target && target.nodeType === 9) return target;
+        if (typeof document !== 'undefined') return document;
+        return null;
+    }
+
+    function createDomEvent(documentRef, type) {
+        const view = (documentRef && documentRef.defaultView) || root || {};
+        const EventConstructor = view.Event || Event;
+        return new EventConstructor(type, { bubbles: true });
+    }
+
+    function createDomCustomEvent(documentRef, type, detail) {
+        const view = (documentRef && documentRef.defaultView) || root || {};
+        const CustomEventConstructor = view.CustomEvent || CustomEvent;
+        return new CustomEventConstructor(type, { bubbles: true, detail });
+    }
+
+    function setFileInputFiles(input, file) {
+        if (!input || input.type !== 'file' || !file) throw fail('chat_upload_input_missing');
+
+        const documentRef = getEventTargetDocument(input);
+        const view = (documentRef && documentRef.defaultView) || root || {};
+        const DataTransferConstructor =
+            view.DataTransfer || (typeof DataTransfer !== 'undefined' ? DataTransfer : null);
+        let assigned = false;
+
+        if (DataTransferConstructor) {
+            try {
+                const dataTransfer = new DataTransferConstructor();
+                dataTransfer.items.add(file);
+                input.files = dataTransfer.files;
+                assigned = input.files && input.files.length === 1;
+            } catch {
+                assigned = false;
+            }
+        }
+
+        if (!assigned) {
+            Object.defineProperty(input, 'files', {
+                configurable: true,
+                value: {
+                    0: file,
+                    length: 1,
+                    item: (index) => (index === 0 ? file : null)
+                }
+            });
+        }
+
+        input.dispatchEvent(createDomEvent(documentRef, 'input'));
+        input.dispatchEvent(createDomEvent(documentRef, 'change'));
+    }
+
+    function isHiddenByStyle(element) {
+        const style = getElementStyle(element);
+        const opacity = style ? Number(style.opacity || 1) : 1;
+        return !!style && (style.display === 'none' || style.visibility === 'hidden' || opacity <= 0);
+    }
+
+    function isUsableEditor(element) {
+        if (!element || isHiddenByStyle(element) || !isVisibleElement(element)) return false;
+        if (element.matches('textarea')) {
+            return !element.disabled && !element.readOnly;
+        }
+
+        const editableState = String(element.getAttribute('contenteditable') || element.contentEditable || '').toLowerCase();
+        return editableState === 'true' || editableState === 'plaintext-only' || element.isContentEditable;
+    }
+
+    function getEditorContractText(element) {
+        return [
+            element.getAttribute('aria-label'),
+            element.getAttribute('placeholder'),
+            element.getAttribute('data-placeholder')
+        ]
+            .filter(Boolean)
+            .join(' ');
+    }
+
+    function matchesGrokEditorContract(element) {
+        const labelText = getEditorContractText(element);
+        return /ask\s+grok(?:\s+anything)?/i.test(labelText) || /(?:message|prompt)\s+grok/i.test(labelText);
+    }
+
+    function editorLabelScore(element) {
+        let score = 0;
+
+        if (element.matches('textarea[aria-required="true"]')) score += 4;
+        if (matchesGrokEditorContract(element)) score += 3;
+        if (element.matches('textarea')) score += 2;
+
+        return score;
+    }
+
+    function findEditor(documentRef = document) {
+        const editors = Array.from(
+            documentRef.querySelectorAll(
+                'textarea, [contenteditable], [role="textbox"], div[aria-label], div[data-placeholder]'
+            )
+        ).filter((element) => isUsableEditor(element) && matchesGrokEditorContract(element));
+        if (!editors.length) return null;
+
+        return editors
+            .map((element, index) => ({ element, index, score: editorLabelScore(element) }))
+            .sort((a, b) => b.score - a.score || a.index - b.index)[0].element;
+    }
+
+    function setTextareaValue(textarea, text) {
+        const documentRef = getEventTargetDocument(textarea);
+        const view = (documentRef && documentRef.defaultView) || root || {};
+        const prototype = view.HTMLTextAreaElement && view.HTMLTextAreaElement.prototype;
+        const descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, 'value');
+        const tracker = textarea._valueTracker;
+
+        if (tracker) tracker.setValue('');
+
+        if (descriptor && descriptor.set) {
+            descriptor.set.call(textarea, text);
+        } else {
+            textarea.value = text;
+        }
+
+        textarea.dispatchEvent(createDomEvent(documentRef, 'input'));
+        textarea.dispatchEvent(createDomEvent(documentRef, 'change'));
+    }
+
+    function injectEditorText(text, documentRef = document) {
+        const editor = findEditor(documentRef);
+        if (!editor) return false;
+
+        if (typeof editor.focus === 'function') editor.focus();
+
+        if (editor.matches('textarea')) {
+            setTextareaValue(editor, String(text || ''));
+            return true;
+        }
+
+        documentRef.dispatchEvent(createDomCustomEvent(documentRef, '__gpt_set_editor_content', { text: String(text || '') }));
+        return true;
+    }
+
+    function normalizeAriaLabel(value) {
+        return String(value || '')
+            .trim()
+            .toLowerCase();
+    }
+
+    function buttonMatchesLabel(button, labels) {
+        const ariaLabel = normalizeAriaLabel(button.getAttribute('aria-label'));
+        return labels.some((label) => ariaLabel === normalizeAriaLabel(label));
+    }
+
+    function isEnabledButton(button) {
+        return !button.disabled && button.getAttribute('aria-disabled') !== 'true';
+    }
+
+    function findVisibleButtonByLabels(labels, documentRef = document) {
+        return Array.from(documentRef.querySelectorAll('button[aria-label]')).find(
+            (button) => buttonMatchesLabel(button, labels) && isVisibleElement(button) && isEnabledButton(button)
+        );
+    }
+
+    function createPointerLikeEvent(button, type, coordinates) {
+        const documentRef = getEventTargetDocument(button);
+        const view = (documentRef && documentRef.defaultView) || root || {};
+        const isPointerEvent = type.startsWith('pointer');
+        const EventFallback = typeof Event !== 'undefined' ? Event : null;
+        const EventConstructor =
+            (isPointerEvent && view.PointerEvent) ||
+            view.MouseEvent ||
+            view.Event ||
+            (typeof MouseEvent !== 'undefined' ? MouseEvent : null) ||
+            EventFallback;
+        const eventOptions = {
+            bubbles: true,
+            cancelable: true,
+            view,
+            button: 0,
+            buttons: type.endsWith('down') ? 1 : 0,
+            clientX: coordinates.clientX,
+            clientY: coordinates.clientY,
+            screenX: coordinates.clientX,
+            screenY: coordinates.clientY,
+            pointerId: 1,
+            pointerType: 'mouse',
+            isPrimary: true
+        };
+
+        return new EventConstructor(type, eventOptions);
+    }
+
+    function safelyClickButton(button) {
+        try {
+            const rect = button.getBoundingClientRect();
+            const coordinates = {
+                clientX: Number(rect.left || 0) + Number(rect.width || 0) / 2,
+                clientY: Number(rect.top || 0) + Number(rect.height || 0) / 2
+            };
+
+            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+                button.dispatchEvent(createPointerLikeEvent(button, type, coordinates));
+            });
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    function submitVisibleButton(labels, documentRef = document) {
+        const button = findVisibleButtonByLabels(labels, documentRef);
+        if (!button) return false;
+
+        return safelyClickButton(button);
+    }
+
+    function buttonStateLooksActive(button) {
+        const activeValues = new Set(['true', 'checked', 'on', 'active', 'selected']);
+        return (
+            activeValues.has(normalizeAriaLabel(button.getAttribute('aria-pressed'))) ||
+            activeValues.has(normalizeAriaLabel(button.getAttribute('aria-checked'))) ||
+            activeValues.has(normalizeAriaLabel(button.getAttribute('aria-selected'))) ||
+            activeValues.has(normalizeAriaLabel(button.getAttribute('data-state'))) ||
+            activeValues.has(normalizeAriaLabel(button.getAttribute('data-active')))
+        );
+    }
+
+    function getRectMetrics(element) {
+        const rect = element.getBoundingClientRect();
+        return {
+            left: Number(rect.left || 0),
+            top: Number(rect.top || 0),
+            width: Number(rect.width || 0),
+            height: Number(rect.height || 0)
+        };
+    }
+
+    function isComposerRootCandidate(element, editor, documentRef) {
+        if (!element || element === documentRef.body || element === documentRef.documentElement) return false;
+        if (!isVisibleElement(element)) return false;
+
+        const rootRect = getRectMetrics(element);
+        const editorRect = getRectMetrics(editor);
+        const maxHeight = Math.max(360, editorRect.height * 8);
+        const maxWidth = Math.max(1280, editorRect.width * 4);
+
+        return rootRect.height <= maxHeight && rootRect.width <= maxWidth;
+    }
+
+    function findComposerRoot(editor, documentRef = document) {
+        let current = editor && editor.parentElement;
+
+        while (current && current !== documentRef.body && current !== documentRef.documentElement) {
+            if (
+                isComposerRootCandidate(current, editor, documentRef) &&
+                Array.from(current.querySelectorAll('button[aria-label]')).some(
+                    (button) => buttonMatchesLabel(button, ['Search']) && isVisibleElement(button) && isEnabledButton(button)
+                )
+            ) {
+                return current;
+            }
+
+            current = current.parentElement;
+        }
+
+        return null;
+    }
+
+    function findComposerSearchButton(documentRef = document) {
+        const editor = findEditor(documentRef);
+        if (!editor) return null;
+
+        const composerRoot = findComposerRoot(editor, documentRef);
+        if (!composerRoot) return null;
+
+        return (
+            Array.from(composerRoot.querySelectorAll('button[aria-label]')).find(
+                (button) => buttonMatchesLabel(button, ['Search']) && isVisibleElement(button) && isEnabledButton(button)
+            ) || null
+        );
+    }
+
+    function ensureGrokSearchEnabled(documentRef = document) {
+        const button = findComposerSearchButton(documentRef);
+        if (!button) throw fail('chat_search_unavailable');
+
+        if (!buttonStateLooksActive(button)) {
+            if (!safelyClickButton(button)) throw fail('chat_search_unavailable');
+        }
+
+        if (!buttonStateLooksActive(button)) throw fail('chat_search_unavailable');
+        return true;
+    }
+
+    function findUploadInput(documentRef = document) {
+        return (
+            Array.from(documentRef.querySelectorAll('input[type="file"]')).find((input) => {
+                const accept = String(input.getAttribute('accept') || '').toLowerCase();
+                return !accept || accept.includes('image') || input.multiple;
+            }) || null
+        );
+    }
+
+    function uploadReferenceFile(reference, documentRef = document) {
+        const input = findUploadInput(documentRef);
+        if (!input) throw fail('chat_upload_input_missing');
+
+        setFileInputFiles(input, dataUrlToFile(reference));
+        return true;
+    }
+
+    function getUploadPreviewSignature(img) {
+        const src = String(img.currentSrc || img.src || '');
+        const rect = img.getBoundingClientRect();
+        return [
+            src,
+            img.getAttribute('alt') || '',
+            img.naturalWidth || 0,
+            img.naturalHeight || 0,
+            rect.left || 0,
+            rect.top || 0,
+            rect.width || 0,
+            rect.height || 0
+        ].join('|');
+    }
+
+    function collectUploadPreviewCandidates(documentRef = document) {
+        return Array.from(documentRef.querySelectorAll('img')).filter((img) => {
+            const src = String(img.currentSrc || img.src || '');
+            const rect = img.getBoundingClientRect();
+            const maxVisibleSize = Math.max(img.naturalWidth || 0, img.naturalHeight || 0, rect.width || 0, rect.height || 0);
+            const looksLikeUpload =
+                src.startsWith('blob:') ||
+                src.startsWith('data:image/') ||
+                src.includes('assets.grok.com/users/') ||
+                /upload|attach|reference/i.test(img.getAttribute('alt') || '');
+
+            return isVisibleElement(img) && maxVisibleSize > 20 && looksLikeUpload;
+        });
+    }
+
+    function createUploadPreviewSnapshot(documentRef = document) {
+        const candidates = collectUploadPreviewCandidates(documentRef);
+        const elementSignatures = new WeakMap();
+        candidates.forEach((candidate) => {
+            elementSignatures.set(candidate, getUploadPreviewSignature(candidate));
+        });
+
+        return {
+            elements: new WeakSet(candidates),
+            elementSignatures,
+            signatures: new Set(candidates.map(getUploadPreviewSignature))
+        };
+    }
+
+    function hasUploadPreview(documentRef = document, previousSnapshot = null) {
+        return collectUploadPreviewCandidates(documentRef).some((img) => {
+            if (!previousSnapshot) return true;
+            const signature = getUploadPreviewSignature(img);
+            if (previousSnapshot.elementSignatures && previousSnapshot.elementSignatures.has(img)) {
+                return previousSnapshot.elementSignatures.get(img) !== signature;
+            }
+            if (previousSnapshot.elements && previousSnapshot.elements.has(img)) return false;
+            if (previousSnapshot.signatures && previousSnapshot.signatures.has(signature)) return false;
+            return true;
+        });
+    }
+
+    function textLooksLikeInstructionEcho(text) {
+        return /You are creating a Grok Imagine prompt/i.test(text) || /<one ready-to-paste Grok Imagine prompt>/i.test(text);
+    }
+
+    function extractAssistantPromptFromPage(documentRef = document) {
+        const workflowUtils = getUtils();
+        const containers = Array.from(
+            documentRef.querySelectorAll(
+                [
+                    '[data-testid="assistant-message"]',
+                    '[data-testid*="assistant"]',
+                    '[data-message-author-role="assistant"]',
+                    '[data-author="assistant"]',
+                    '[aria-label*="Assistant"]',
+                    '[class*="assistant"]',
+                    '[class*="response"]',
+                    '[class*="markdown"]',
+                    'article'
+                ].join(', ')
+            )
+        );
+        const texts = containers
+            .map((element) => element.innerText || element.textContent || '')
+            .filter((text) => text.includes(workflowUtils.FINAL_PROMPT_MARKER) && !textLooksLikeInstructionEcho(text));
+
+        if (!texts.length) throw fail('chat_prompt_marker_missing');
+        return workflowUtils.extractFinalImaginePrompt(texts[texts.length - 1]);
+    }
+
+    async function runChatPromptStep(request, options = {}) {
+        const workflowUtils = getUtils(options);
+        const documentRef = getDocumentRef(options);
+        const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 120000;
+        const intervalMs = Number.isFinite(options.intervalMs) ? options.intervalMs : 750;
+        const uploadPreviewTimeoutMs = Number.isFinite(options.uploadPreviewTimeoutMs)
+            ? options.uploadPreviewTimeoutMs
+            : 15000;
+        const submitTimeoutMs = Number.isFinite(options.submitTimeoutMs) ? options.submitTimeoutMs : 10000;
+        const reference = workflowUtils.normalizeRecreateReference(request.reference);
+
+        if (request.bestPracticesEnabled) {
+            ensureGrokSearchEnabled(documentRef);
+        }
+
+        const previewSnapshot = createUploadPreviewSnapshot(documentRef);
+        uploadReferenceFile(reference, documentRef);
+        await waitForCondition(() => hasUploadPreview(documentRef, previewSnapshot), {
+            timeoutMs: uploadPreviewTimeoutMs,
+            intervalMs,
+            timeoutError: 'chat_upload_preview_missing'
+        });
+
+        if (
+            !injectEditorText(
+                workflowUtils.buildRecreateChatInstruction({
+                    bestPracticesEnabled: !!request.bestPracticesEnabled
+                }),
+                documentRef
+            )
+        ) {
+            throw fail('chat_editor_missing');
+        }
+
+        await waitForCondition(() => submitVisibleButton(['Submit', 'Send'], documentRef), {
+            timeoutMs: submitTimeoutMs,
+            intervalMs,
+            timeoutError: 'chat_submit_missing'
+        });
+
+        const generatedPrompt = await waitForCondition(
+            () => {
+                try {
+                    return extractAssistantPromptFromPage(documentRef);
+                } catch (error) {
+                    if (error && error.message === 'chat_prompt_marker_missing') return null;
+                    throw error;
+                }
+            },
+            {
+                timeoutMs,
+                intervalMs,
+                timeoutError: 'chat_answer_timeout'
+            }
+        );
+
+        return {
+            ok: true,
+            runId: request.runId,
+            generatedPrompt
+        };
+    }
+
+    async function runImagineSubmitStep(request, options = {}) {
+        const documentRef = getDocumentRef(options);
+        const intervalMs = Number.isFinite(options.intervalMs) ? options.intervalMs : 250;
+        const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
+        const imageModeButton = Array.from(documentRef.querySelectorAll('button')).find(
+            (button) => isVisibleElement(button) && button.textContent.trim() === 'Image' && isEnabledButton(button)
+        );
+
+        if (imageModeButton) safelyClickButton(imageModeButton);
+        if (!injectEditorText(request.generatedPrompt, documentRef)) throw fail('imagine_editor_missing');
+
+        await waitForCondition(() => findVisibleButtonByLabels(['Submit'], documentRef), {
+            timeoutMs,
+            intervalMs,
+            timeoutError: 'imagine_submit_disabled'
+        });
+
+        if (!submitVisibleButton(['Submit'], documentRef)) throw fail('imagine_submit_failed');
+        return {
+            ok: true,
+            runId: request.runId,
+            submitted: true
+        };
+    }
+
     return {
         collectGeneratedImageCandidates,
         dataUrlToFile,
+        collectUploadPreviewCandidates,
+        createUploadPreviewSnapshot,
+        ensureGrokSearchEnabled,
+        extractAssistantPromptFromPage,
         fetchViaBridgeAsBlobUrl,
+        findEditor,
+        hasUploadPreview,
+        injectEditorText,
         readBlobAsDataUrl,
         readFileAsRecreateReference,
+        runChatPromptStep,
+        runImagineSubmitStep,
         selectCurrentGeneratedImage,
+        setFileInputFiles,
         sourceToDataUrl,
+        submitVisibleButton,
+        uploadReferenceFile,
         waitForCondition
     };
 });
