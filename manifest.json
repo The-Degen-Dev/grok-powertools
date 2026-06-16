@@ -6,6 +6,7 @@
   "permissions": [
     "storage",
     "activeTab",
+    "tabs",
     "scripting",
     "downloads",
     "alarms",
@@ -44,6 +45,8 @@
         "*://imagine-public.x.ai/*"
       ],
       "js": [
+        "recreateWorkflowUtils.js",
+        "recreateWorkflowContent.js",
         "content.js"
       ],
       "css": [

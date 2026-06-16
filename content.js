@@ -2627,6 +2627,96 @@ class TemplateBatchManager {
     }
 }
 
+class RecreateWorkflowContentBridge {
+    constructor(overlay, historyManager, options = {}) {
+        this.overlay = overlay;
+        this.historyManager = historyManager;
+        this.actions = options.actions || (typeof window !== 'undefined' ? window.GrokRecreateContentActions : null);
+        this.chromeRuntime = options.chromeRuntime || (typeof chrome !== 'undefined' ? chrome.runtime : null);
+        this.documentRef = options.documentRef || (typeof document !== 'undefined' ? document : null);
+        this.locationRef = options.locationRef || (typeof window !== 'undefined' ? window.location : null);
+    }
+
+    setupListeners() {
+        if (!this.chromeRuntime || !this.chromeRuntime.onMessage) return;
+
+        this.chromeRuntime.onMessage.addListener((request, _sender, sendResponse) => {
+            if (request.action === 'GPT_RECREATE_STATUS') {
+                this.handleStatus(request);
+                sendResponse({ ok: true, runId: request.runId });
+                return false;
+            }
+
+            if (request.action === 'GPT_RECREATE_CHAT_STEP') {
+                this.runAsyncStep(request, () => this.getAction('runChatPromptStep')(request), sendResponse);
+                return true;
+            }
+
+            if (request.action === 'GPT_RECREATE_IMAGINE_STEP') {
+                this.runAsyncStep(request, async () => {
+                    const response = await this.getAction('runImagineSubmitStep')(request);
+                    if (response && response.ok && request.generatedPrompt) {
+                        this.recordGeneratedPrompt(request.generatedPrompt);
+                    }
+                    return response;
+                }, sendResponse);
+                return true;
+            }
+
+            return false;
+        });
+    }
+
+    handleStatus(request) {
+        const message = request.message || request.error || '';
+        const type = request.type || 'info';
+
+        if (this.overlay && typeof this.overlay.setRecreateStatus === 'function') {
+            this.overlay.setRecreateStatus(message, type);
+        } else if (this.overlay && typeof this.overlay.setStatus === 'function') {
+            this.overlay.setStatus(message, type);
+        }
+    }
+
+    getAction(name) {
+        if (this.actions && typeof this.actions[name] === 'function') return this.actions[name];
+
+        const error = new Error('workflow_unavailable');
+        error.code = 'workflow_unavailable';
+        throw error;
+    }
+
+    recordGeneratedPrompt(prompt) {
+        if (this.historyManager && typeof this.historyManager.add === 'function') {
+            this.historyManager.add(prompt, 'image');
+        }
+    }
+
+    runAsyncStep(request, fn, sendResponse) {
+        (async () => {
+            try {
+                const response = await fn();
+                sendResponse(response && typeof response === 'object' ? response : { ok: true, runId: request.runId });
+            } catch (error) {
+                sendResponse(this.buildFailureResponse(request, error));
+            }
+        })();
+    }
+
+    buildFailureResponse(request, error) {
+        return {
+            ok: false,
+            runId: request.runId,
+            phase: error && error.phase ? error.phase : 'content',
+            error: error && error.code ? error.code : 'workflow_failed',
+            diagnostics: {
+                url: this.locationRef ? this.locationRef.href : '',
+                title: this.documentRef ? this.documentRef.title : ''
+            }
+        };
+    }
+}
+
 
 class GrokScraper {
     constructor() {
@@ -3278,6 +3368,8 @@ if (typeof module === 'undefined') {
     const scraper = new GrokScraper();
     const retry = new VideoRetryManager(null, settings, history);
     const overlay = new GrokOverlay(scraper, retry, settings, history);
+    const recreateBridge = new RecreateWorkflowContentBridge(overlay, history);
+    recreateBridge.setupListeners();
     retry.overlay = overlay;
     scraper.setOverlay(overlay);
 } else {
@@ -3287,6 +3379,7 @@ if (typeof module === 'undefined') {
         VideoRetryManager,
         GrokScraper,
         PromptHistoryManager,
+        RecreateWorkflowContentBridge,
         SAVED_PROMPT_TYPES,
         SAVED_PROMPT_DELIMITER,
         sanitizeSavedPromptText,

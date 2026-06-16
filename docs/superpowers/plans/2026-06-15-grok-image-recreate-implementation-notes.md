@@ -8,14 +8,18 @@
 - Task 2 keeps trusted Grok media capture on the existing `__gpt_fetch_media` / `__gpt_fetch_media_result` blob URL bridge contract. The later Task 7 bridge data-URL change is intentionally deferred.
 - Task 3 scopes Search activation to the visible composer/editor region. Live Grok inspection showed the only visible `button[aria-label="Search"]` on clean Grok root/Imagine was a left-nav/global control, not a composer search toggle, so best-practices mode now fails fast with `chat_search_unavailable` instead of clicking it.
 - Task 4 uses bounded receiver-not-ready retries and per-message timeouts for `chrome.tabs.sendMessage` because newly created MV3 tabs are not guaranteed to have content scripts ready when `tabs.create` returns.
+- Task 5 keeps wiring extension-only: `manifest.json` loads recreate utilities before `content.js`, `background.js` owns one controller instance for start/abort messages, and `content.js` owns only phase-message delegation to `GrokRecreateContentActions`.
+- Task 5 status handling calls `setRecreateStatus` when the Task 6 UI exists, with a fallback to the existing overlay status badge so background status messages are still observable during this wiring-only slice.
+- Task 5 production background wiring sets a 150 second controller message timeout so the chat tab can wait for Grok's live response. The controller default stays shorter for focused timeout unit tests.
 
 ## Deviations
 
-- None yet.
+- Task 5 E2E smoke tests mock `GrokRecreateContentActions` for chat and Imagine dispatch. This validates extension wiring and message contracts only, not live Grok DOM behavior.
 
 ## Tradeoffs
 
-- None yet.
+- Task 5 records the generated Imagine prompt through the existing prompt history helper only after a successful mocked or real Imagine step response. It does not add any new storage path.
+- Task 5 adds a narrow background wiring unit test for the production timeout option because mocked E2E actions return instantly and would not catch this live-path timeout regression.
 
 ## Open Questions
 
@@ -43,10 +47,15 @@
   - `npx eslint recreateWorkflowBackground.js tests/unit/recreateWorkflowBackground.test.js jest.setup.js` passed.
   - Spec review: approved after requiring non-empty generated prompts, explicit Imagine submission confirmation, and named tab failures.
   - Code-quality review: approved after bounded receiver-not-ready retry and per-message timeout handling.
+- Task 5:
+  - `npm run test:unit` passed with 241 tests.
+  - `npm run test:unit -- tests/unit/backgroundRecreateWorkflow.test.js tests/unit/recreateWorkflowBackground.test.js tests/unit/recreateWorkflowContent.test.js` passed with 48 tests.
+  - `npm run test:e2e` passed with 7 tests.
+  - `npm run lint` passed with warnings only. The warnings are existing unused-variable warnings outside the Task 5 changes.
 
 ## Live Grok Validation
 
-- Pending.
+- Pending. Task 5 did not run live Chrome validation against `grok.com/imagine`; mocked E2E coverage is intentionally limited to helper load order and message routing.
 
 ## Selector Notes
 

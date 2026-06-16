@@ -5,6 +5,11 @@ if (typeof importScripts === 'function') {
     } catch (e) {
         console.warn('CloudSyncUtils failed to load.', e);
     }
+    try {
+        importScripts('recreateWorkflowUtils.js', 'recreateWorkflowBackground.js');
+    } catch (e) {
+        console.warn('Grok recreate workflow helpers failed to load.', e);
+    }
 }
 
 const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
@@ -179,6 +184,21 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             return normalized.mode !== this.CLOUD_MODES.cloudOnly;
         }
     };
+
+const RecreateWorkflowUtils = (typeof self !== 'undefined' && self.GrokRecreateWorkflowUtils)
+    ? self.GrokRecreateWorkflowUtils
+    : (typeof require === 'function' ? require('./recreateWorkflowUtils.js') : null);
+const RecreateWorkflowBackground = (typeof self !== 'undefined' && self.GrokRecreateWorkflowBackground)
+    ? self.GrokRecreateWorkflowBackground
+    : (typeof require === 'function' ? require('./recreateWorkflowBackground.js') : null);
+const RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS = 150000;
+const recreateWorkflowController = RecreateWorkflowBackground
+    ? RecreateWorkflowBackground.createRecreateWorkflowController({
+        chromeApi: chrome,
+        utils: RecreateWorkflowUtils,
+        messageTimeoutMs: RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS
+    })
+    : null;
 
 const API_KEY_HEADER = ['x-gpt', 'api', 'key'].join('-');
 
@@ -1630,6 +1650,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
+    if (request.action === 'START_GPT_RECREATE') {
+        if (!recreateWorkflowController) {
+            sendResponse({ ok: false, error: 'workflow_unavailable' });
+            return false;
+        }
+
+        (async () => {
+            const sourceTab = sender && sender.tab ? sender.tab : {};
+            const response = await recreateWorkflowController.start(request, {
+                sourceTabId: sourceTab.id,
+                sourceTabUrl: sourceTab.url
+            });
+            sendResponse(response);
+        })();
+        return true;
+    }
+
+    if (request.action === 'ABORT_GPT_RECREATE') {
+        if (!recreateWorkflowController) {
+            sendResponse({ ok: false, error: 'workflow_unavailable' });
+            return false;
+        }
+
+        sendResponse(recreateWorkflowController.abort('user'));
+        return false;
+    }
+
     return false;
 });
 
@@ -1685,6 +1732,8 @@ if (typeof module !== 'undefined') {
         isR2BackupCompletionSuccessful,
         persistQueuedBackupProcessedId,
         persistQueuedBackupProcessedIdAfterSuccess,
+        recreateWorkflowController,
+        RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS,
         requestPresignedUrl,
         setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); },
         testCloudConnection,
