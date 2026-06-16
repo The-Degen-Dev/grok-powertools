@@ -42,6 +42,49 @@ document.addEventListener('__gpt_fetch_media', function(e) {
         });
 });
 
+document.addEventListener('__gpt_fetch_media_data_url', function(e) {
+    var url = e.detail && e.detail.url;
+    var requestId = e.detail && e.detail.requestId;
+    if (!url || !requestId) return;
+
+    fetch(url, { credentials: 'include' })
+        .then(function(resp) {
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.blob();
+        })
+        .then(function(blob) {
+            return new Promise(function(resolve, reject) {
+                var reader = new FileReader();
+                reader.onload = function() {
+                    resolve({
+                        dataUrl: String(reader.result || ''),
+                        size: blob.size,
+                        type: blob.type
+                    });
+                };
+                reader.onerror = function() {
+                    reject(new Error('FileReader failed'));
+                };
+                reader.readAsDataURL(blob);
+            });
+        })
+        .then(function(result) {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
+                detail: {
+                    requestId: requestId,
+                    dataUrl: result.dataUrl,
+                    size: result.size,
+                    type: result.type
+                }
+            }));
+        })
+        .catch(function(err) {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
+                detail: { requestId: requestId, error: err.message }
+            }));
+        });
+});
+
 // Intercept upload-file responses to capture image URLs for template batch
 (function() {
     var _origFetch = window.fetch;

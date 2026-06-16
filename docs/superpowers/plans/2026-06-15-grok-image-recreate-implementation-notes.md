@@ -5,7 +5,7 @@
 - Execution is on `codex/grok-image-recreate` because the goal explicitly forbids implementing on `main`.
 - Subagents implement bounded task slices, but the main thread owns integration, review, and commits to match the goal prompt.
 - Task 1 utility validation is stricter than the original plan skeleton where needed: malformed base64 is rejected with decode validation, oversized references are rejected before decode allocation, and diagnostic key scrubbing catches compound cookie/auth/token variants.
-- Task 2 keeps trusted Grok media capture on the existing `__gpt_fetch_media` / `__gpt_fetch_media_result` blob URL bridge contract. The later Task 7 bridge data-URL change is intentionally deferred.
+- Task 2 kept trusted Grok media capture on the existing `__gpt_fetch_media` / `__gpt_fetch_media_result` blob URL bridge contract. Task 7 preserves that old contract for existing media fetch users and moves Recreate's trusted Grok media path to `__gpt_fetch_media_data_url` / `__gpt_fetch_media_data_url_result`.
 - Task 3 scopes Search activation to the visible composer/editor region. Live Grok inspection showed the only visible `button[aria-label="Search"]` on clean Grok root/Imagine was a left-nav/global control, not a composer search toggle, so best-practices mode now fails fast with `chat_search_unavailable` instead of clicking it.
 - Task 4 uses bounded receiver-not-ready retries and per-message timeouts for `chrome.tabs.sendMessage` because newly created MV3 tabs are not guaranteed to have content scripts ready when `tabs.create` returns.
 - Task 5 keeps wiring extension-only: `manifest.json` loads recreate utilities before `content.js`, `background.js` owns one controller instance for start/abort messages, and `content.js` owns only phase-message delegation to `GrokRecreateContentActions`.
@@ -15,6 +15,8 @@
 - Task 6 uses `GrokRecreateContentActions` for local file and current-image reference capture, then sends `START_GPT_RECREATE` and `ABORT_GPT_RECREATE` through `chrome.runtime.sendMessage`.
 - Task 6 preflights selected, dropped, and pasted files against shared recreate MIME and byte limits before reading them as data URLs.
 - Task 6 clears the stored reference before any new file or current-image capture attempt so failed reselections cannot submit a stale previous image.
+- Task 7 returns data URLs directly from the MAIN-world bridge for trusted Grok media, avoiding a content-script blob URL refetch for Recreate Image current-media capture.
+- Task 7 rejects malformed bridge data URL results at the helper boundary before later reference normalization.
 
 ## Deviations
 
@@ -28,6 +30,7 @@
 - Task 6 leaves the Grok Search checkbox as a per-run UI control only. Persisting it would add settings surface area outside this task.
 - Task 6 keeps Start hidden while an abort is unwinding. The overlay shows a stopping state until the original start request settles so quick restarts do not collide with the active background workflow.
 - Task 6 only accepts image paste events when focus or the paste target is inside the Recreate Image section. This avoids stealing image pastes intended for the Grok composer.
+- Task 7 keeps `fetchViaBridgeAsBlobUrl` exported so existing blob URL bridge tests and non-Recreate media fetch callers remain covered.
 
 ## Open Questions
 
@@ -65,6 +68,11 @@
   - `npm run test:e2e -- tests/e2e/extension.spec.js` passed with 13 tests.
   - `npm run test:unit` passed with 241 tests.
   - `npx eslint content.js tests/e2e/extension.spec.js` passed with warnings and 0 errors. The warnings are unused-variable warnings outside the Task 6 additions.
+- Task 7:
+  - `npm run test:unit -- tests/unit/recreateWorkflowContent.test.js -t "sourceToDataUrl dispatches"` passed with 1 matching test.
+  - `npm run test:unit -- tests/unit/recreateWorkflowContent.test.js` passed with 38 tests.
+  - `npx eslint bridge.js recreateWorkflowContent.js tests/unit/recreateWorkflowContent.test.js` passed with 0 errors and 1 pre-existing warning in `bridge.js`.
+  - `git diff --check -- bridge.js recreateWorkflowContent.js tests/unit/recreateWorkflowContent.test.js docs/superpowers/plans/2026-06-15-grok-image-recreate-implementation-notes.md` passed.
 
 ## Live Grok Validation
 

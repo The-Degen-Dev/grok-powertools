@@ -4,6 +4,7 @@ const {
     dataUrlToFile,
     ensureGrokSearchEnabled,
     extractAssistantPromptFromPage,
+    fetchViaBridgeAsDataUrl,
     fetchViaBridgeAsBlobUrl,
     hasUploadPreview,
     injectEditorText,
@@ -188,24 +189,48 @@ describe('recreate content helpers', () => {
         }
     });
 
-    test('converts trusted Grok media sources to data URLs through the bridge', async () => {
+    test('fetches trusted Grok media data URLs through the data URL bridge event', async () => {
         const listener = jest.fn((event) => {
             document.dispatchEvent(
-                new CustomEvent('__gpt_fetch_media_result', {
+                new CustomEvent('__gpt_fetch_media_data_url_result', {
                     detail: {
                         requestId: event.detail.requestId,
-                        blobUrl: 'blob:test-reference'
+                        dataUrl: 'data:image/png;base64,aGVsbG8=',
+                        size: 5,
+                        type: 'image/png'
                     }
                 })
             );
         });
-        document.addEventListener('__gpt_fetch_media', listener);
-        global.fetch = jest.fn(() =>
-            Promise.resolve({
-                ok: true,
-                blob: () => Promise.resolve(new Blob(['hello'], { type: 'image/png' }))
-            })
-        );
+        document.addEventListener('__gpt_fetch_media_data_url', listener);
+
+        try {
+            await expect(
+                fetchViaBridgeAsDataUrl('https://assets.grok.com/users/test/image.png', {
+                    documentRef: document,
+                    timeoutMs: 100
+                })
+            ).resolves.toBe('data:image/png;base64,aGVsbG8=');
+            expect(listener).toHaveBeenCalledTimes(1);
+            expect(listener.mock.calls[0][0].detail.url).toBe('https://assets.grok.com/users/test/image.png');
+        } finally {
+            document.removeEventListener('__gpt_fetch_media_data_url', listener);
+        }
+    });
+
+    test('sourceToDataUrl dispatches __gpt_fetch_media_data_url and resolves the returned data URL', async () => {
+        const listener = jest.fn((event) => {
+            document.dispatchEvent(
+                new CustomEvent('__gpt_fetch_media_data_url_result', {
+                    detail: {
+                        requestId: event.detail.requestId,
+                        dataUrl: 'data:image/png;base64,aGVsbG8='
+                    }
+                })
+            );
+        });
+        document.addEventListener('__gpt_fetch_media_data_url', listener);
+        global.fetch = jest.fn();
 
         try {
             await expect(
@@ -215,28 +240,27 @@ describe('recreate content helpers', () => {
                     utils
                 })
             ).resolves.toBe('data:image/png;base64,aGVsbG8=');
-            expect(global.fetch).toHaveBeenCalledWith('blob:test-reference');
+            expect(listener).toHaveBeenCalledTimes(1);
+            expect(listener.mock.calls[0][0].type).toBe('__gpt_fetch_media_data_url');
+            expect(listener.mock.calls[0][0].detail.url).toBe('https://assets.grok.com/users/test/image.png');
+            expect(global.fetch).not.toHaveBeenCalled();
         } finally {
-            document.removeEventListener('__gpt_fetch_media', listener);
+            document.removeEventListener('__gpt_fetch_media_data_url', listener);
         }
     });
 
-    test('maps trusted media conversion failures to reference_capture_failed', async () => {
-        const originalRevokeObjectURL = URL.revokeObjectURL;
-        URL.revokeObjectURL = jest.fn();
-
+    test('maps trusted media bridge failures to reference_capture_failed', async () => {
         const listener = jest.fn((event) => {
             document.dispatchEvent(
-                new CustomEvent('__gpt_fetch_media_result', {
+                new CustomEvent('__gpt_fetch_media_data_url_result', {
                     detail: {
                         requestId: event.detail.requestId,
-                        blobUrl: 'blob:test-reference'
+                        error: 'network failed'
                     }
                 })
             );
         });
-        document.addEventListener('__gpt_fetch_media', listener);
-        global.fetch = jest.fn(() => Promise.reject(new Error('network failed')));
+        document.addEventListener('__gpt_fetch_media_data_url', listener);
 
         try {
             await expect(
@@ -249,11 +273,50 @@ describe('recreate content helpers', () => {
                 message: 'reference_capture_failed',
                 code: 'reference_capture_failed'
             });
-            expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test-reference');
+            expect(listener).toHaveBeenCalledTimes(1);
         } finally {
-            document.removeEventListener('__gpt_fetch_media', listener);
-            URL.revokeObjectURL = originalRevokeObjectURL;
+            document.removeEventListener('__gpt_fetch_media_data_url', listener);
         }
+    });
+
+    test('rejects malformed trusted media data URL bridge results', async () => {
+        const listener = jest.fn((event) => {
+            document.dispatchEvent(
+                new CustomEvent('__gpt_fetch_media_data_url_result', {
+                    detail: {
+                        requestId: event.detail.requestId,
+                        dataUrl: 'not-a-data-url'
+                    }
+                })
+            );
+        });
+        document.addEventListener('__gpt_fetch_media_data_url', listener);
+
+        try {
+            await expect(
+                fetchViaBridgeAsDataUrl('https://assets.grok.com/users/test/image.png', {
+                    documentRef: document,
+                    timeoutMs: 100
+                })
+            ).rejects.toMatchObject({
+                message: 'reference_capture_failed',
+                code: 'reference_capture_failed'
+            });
+        } finally {
+            document.removeEventListener('__gpt_fetch_media_data_url', listener);
+        }
+    });
+
+    test('times out trusted media data URL bridge fetches', async () => {
+        await expect(
+            fetchViaBridgeAsDataUrl('https://assets.grok.com/users/test/image.png', {
+                documentRef: document,
+                timeoutMs: 1
+            })
+        ).rejects.toMatchObject({
+            message: 'reference_capture_failed',
+            code: 'reference_capture_failed'
+        });
     });
 
     test('waitForCondition resolves when predicate becomes true', async () => {

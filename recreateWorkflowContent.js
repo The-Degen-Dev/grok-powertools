@@ -224,33 +224,80 @@
         });
     }
 
+    function fetchViaBridgeAsDataUrl(url, options = {}) {
+        if (!url) return Promise.reject(fail('reference_missing'));
+
+        const documentRef = getDocumentRef(options);
+        const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
+        const requestId = `recreate_fetch_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const timer = setTimeout(() => {
+                finish(null, fail('reference_capture_failed'));
+            }, timeoutMs);
+
+            function finish(dataUrl, error) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                documentRef.removeEventListener('__gpt_fetch_media_data_url_result', onResult);
+
+                if (error) {
+                    reject(error);
+                    return;
+                }
+
+                resolve(dataUrl);
+            }
+
+            function onResult(event) {
+                const detail = event.detail || {};
+                if (detail.requestId !== requestId) return;
+
+                if (detail.error || !String(detail.dataUrl || '').startsWith('data:image/')) {
+                    finish(null, fail('reference_capture_failed'));
+                    return;
+                }
+
+                finish(detail.dataUrl);
+            }
+
+            documentRef.addEventListener('__gpt_fetch_media_data_url_result', onResult);
+
+            try {
+                documentRef.dispatchEvent(
+                    new CustomEvent('__gpt_fetch_media_data_url', {
+                        detail: { url, requestId }
+                    })
+                );
+            } catch {
+                finish(null, fail('reference_capture_failed'));
+            }
+        });
+    }
+
     async function sourceToDataUrl(src, options = {}) {
         const value = String(src || '');
         if (!value) throw fail('reference_missing');
         if (value.startsWith('data:image/')) return value;
 
         const workflowUtils = getUtils(options);
-        const shouldUseBridge = workflowUtils.isTrustedGrokMediaUrl(value);
-        let fetchUrl = null;
+        if (workflowUtils.isTrustedGrokMediaUrl(value)) {
+            try {
+                return await fetchViaBridgeAsDataUrl(value, options);
+            } catch {
+                throw fail('reference_capture_failed');
+            }
+        }
 
         try {
-            fetchUrl = shouldUseBridge ? await fetchViaBridgeAsBlobUrl(value, options) : value;
-            const response = await fetch(fetchUrl);
+            const response = await fetch(value);
             if (!response || !response.ok) throw fail('reference_capture_failed');
 
             return await readBlobAsDataUrl(await response.blob());
         } catch {
             throw fail('reference_capture_failed');
-        } finally {
-            if (
-                shouldUseBridge &&
-                fetchUrl &&
-                fetchUrl.startsWith('blob:') &&
-                typeof URL !== 'undefined' &&
-                typeof URL.revokeObjectURL === 'function'
-            ) {
-                URL.revokeObjectURL(fetchUrl);
-            }
         }
     }
 
@@ -768,6 +815,7 @@
         createUploadPreviewSnapshot,
         ensureGrokSearchEnabled,
         extractAssistantPromptFromPage,
+        fetchViaBridgeAsDataUrl,
         fetchViaBridgeAsBlobUrl,
         findEditor,
         hasUploadPreview,
