@@ -600,6 +600,10 @@ class GrokOverlay {
         this.savedPrompts = [];
         this.savedPromptType = SAVED_PROMPT_TYPES.partial;
         this.savedPromptSearch = '';
+        this.recreateReference = null;
+        this.recreateRunning = false;
+        this.recreateAbortRequested = false;
+        this.recreatePasteHandler = null;
 
         if (typeof document !== 'undefined') {
             this.render();
@@ -672,6 +676,30 @@ class GrokOverlay {
                             <span style="font-size:12px; font-weight:600; color:#e7e9ea">STATUS</span>
                             <span id="gptStatusBadge" class="gpt-badge gpt-badge-success">Ready</span>
                         </div>
+                    </div>
+
+                    <div class="gpt-section" id="gptRecreateSection">
+                        <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Recreate Image</label>
+                        <div id="gptRecreateDropzone" tabindex="0" style="border:1px dashed rgba(255,255,255,0.25); border-radius:6px; padding:8px; font-size:11px; color:#c9d1d9; text-align:center;">
+                            Drop, paste, choose image, or use current Grok image
+                        </div>
+                        <input type="file" id="gptRecreateFileInput" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,image/bmp,image/tiff" style="display:none;">
+                        <div class="gpt-row" style="margin-top:6px; gap:4px;">
+                            <button id="gptRecreateChooseBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; font-size:11px;">Choose</button>
+                            <button id="gptRecreateCurrentBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; font-size:11px;">Current</button>
+                        </div>
+                        <div class="gpt-row" style="margin-top:6px; font-size:11px;">
+                            <span>Grok Search</span>
+                            <label class="gpt-toggle-switch">
+                                <input type="checkbox" id="gptRecreateBestPractices" checked>
+                                <span class="gpt-slider"></span>
+                            </label>
+                        </div>
+                        <div class="gpt-row" style="margin-top:6px; gap:4px;">
+                            <button id="gptRecreateStartBtn" class="gpt-btn gpt-btn-primary" style="flex:1; background:#0ea5e9; font-size:11px;">Start Recreate</button>
+                            <button id="gptRecreateStopBtn" class="gpt-btn" style="flex:1; background:#f4212e; display:none; font-size:11px;">Stop</button>
+                        </div>
+                        <div id="gptRecreateStatus" style="font-size:10px; color:#71767b; margin-top:4px;">No reference selected.</div>
                     </div>
 
                     <div class="gpt-section">
@@ -971,6 +999,78 @@ class GrokOverlay {
                 t.classList.add('active');
                 this.el.querySelector(`#tab-${t.dataset.tab}`).classList.add('active');
             });
+        });
+
+        const recreateFileInput = this.el.querySelector('#gptRecreateFileInput');
+        const recreateDropzone = this.el.querySelector('#gptRecreateDropzone');
+
+        this.el.querySelector('#gptRecreateChooseBtn').addEventListener('click', () => {
+            recreateFileInput.click();
+        });
+        recreateFileInput.addEventListener('change', async (event) => {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            try {
+                await this.setRecreateReferenceFromFile(file, 'local');
+            } catch (error) {
+                this.setRecreateStatus(error.message || 'reference_invalid', 'error');
+            }
+        });
+        recreateDropzone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+        });
+        recreateDropzone.addEventListener('drop', async (event) => {
+            event.preventDefault();
+            const file = event.dataTransfer?.files?.[0];
+            if (!file) return;
+            try {
+                await this.setRecreateReferenceFromFile(file, 'drop');
+            } catch (error) {
+                this.setRecreateStatus(error.message || 'reference_invalid', 'error');
+            }
+        });
+        if (this.recreatePasteHandler) {
+            document.removeEventListener('paste', this.recreatePasteHandler);
+        }
+        this.recreatePasteHandler = async (event) => {
+            if (!this.el || this.state.minimized || !this.isRecreatePasteTarget(event)) return;
+            const item = Array.from(event.clipboardData?.items || [])
+                .find((clipboardItem) => clipboardItem.type.startsWith('image/'));
+            if (!item) return;
+            try {
+                await this.setRecreateReferenceFromFile(item.getAsFile(), 'paste');
+            } catch (error) {
+                this.setRecreateStatus(error.message || 'reference_invalid', 'error');
+            }
+        };
+        document.addEventListener('paste', this.recreatePasteHandler);
+        this.el.querySelector('#gptRecreateCurrentBtn').addEventListener('click', async () => {
+            try {
+                await this.setRecreateReferenceFromCurrentImage();
+            } catch (error) {
+                this.setRecreateStatus(error.message || 'reference_missing', 'error');
+            }
+        });
+        this.el.querySelector('#gptRecreateStartBtn').addEventListener('click', () => {
+            this.startRecreateWorkflow();
+        });
+        this.el.querySelector('#gptRecreateStopBtn').addEventListener('click', async () => {
+            if (!this.recreateRunning) return;
+            const chromeRuntime = typeof chrome !== 'undefined' ? chrome.runtime : null;
+            if (!chromeRuntime || typeof chromeRuntime.sendMessage !== 'function') {
+                this.setRecreateStatus('workflow_unavailable', 'error');
+                return;
+            }
+            this.recreateAbortRequested = true;
+            this.setRecreateStopping(true);
+            this.setRecreateStatus('Stopping...', 'info');
+            try {
+                await chromeRuntime.sendMessage({ action: 'ABORT_GPT_RECREATE' });
+            } catch (error) {
+                this.recreateAbortRequested = false;
+                this.setRecreateStopping(false);
+                this.setRecreateStatus(error.message || 'Stop failed.', 'error');
+            }
         });
 
         this.el.querySelector('#gptRetryToggle').addEventListener('change', (e) => this.settingsManager.set('autoRetryEnabled', e.target.checked));
@@ -1402,6 +1502,148 @@ class GrokOverlay {
         // Method 2: Captured from intercepted upload-file response
         if (window._lastUploadedImageUrl) return window._lastUploadedImageUrl;
         return null;
+    }
+
+    getRecreateActions() {
+        const actions = typeof window !== 'undefined' ? window.GrokRecreateContentActions : null;
+        if (!actions) throw new Error('workflow_unavailable');
+        return actions;
+    }
+
+    getRecreateUtils() {
+        const utils = typeof window !== 'undefined' ? window.GrokRecreateWorkflowUtils : null;
+        if (!utils) throw new Error('workflow_unavailable');
+        return utils;
+    }
+
+    validateRecreateFile(file) {
+        if (!file) throw new Error('reference_missing');
+
+        const utils = this.getRecreateUtils();
+        const allowedTypes = Array.isArray(utils.ALLOWED_RECREATE_MIME_TYPES)
+            ? utils.ALLOWED_RECREATE_MIME_TYPES
+            : [];
+        const maxBytes = Number(utils.MAX_REFERENCE_BYTES) || 0;
+
+        if (!allowedTypes.includes(file.type) || file.size <= 0 || (maxBytes > 0 && file.size > maxBytes)) {
+            throw new Error('reference_invalid');
+        }
+    }
+
+    isRecreatePasteTarget(event) {
+        const section = this.el.querySelector('#gptRecreateSection');
+        if (!section) return false;
+
+        const target = event && event.target;
+        const activeElement = document.activeElement;
+        return (target && section.contains(target)) || (activeElement && section.contains(activeElement));
+    }
+
+    setRecreateStatus(text, type = 'neutral') {
+        const message = text || '';
+        const status = this.el.querySelector('#gptRecreateStatus');
+        const colors = {
+            error: '#f4212e',
+            success: '#22c55e',
+            info: '#1d9bf0',
+            neutral: '#71767b'
+        };
+        if (status) {
+            status.textContent = message;
+            status.style.color = colors[type] || colors.neutral;
+        }
+        if (type === 'error') this.toast.show(message, 'error');
+        else if (type === 'success') this.toast.show(message, 'success');
+    }
+
+    setRecreateRunning(running) {
+        this.recreateRunning = !!running;
+        const startBtn = this.el.querySelector('#gptRecreateStartBtn');
+        const stopBtn = this.el.querySelector('#gptRecreateStopBtn');
+        if (startBtn) startBtn.style.display = running ? 'none' : '';
+        if (stopBtn) {
+            stopBtn.style.display = running ? '' : 'none';
+            stopBtn.disabled = false;
+            stopBtn.textContent = 'Stop';
+        }
+    }
+
+    setRecreateStopping(stopping) {
+        const stopBtn = this.el.querySelector('#gptRecreateStopBtn');
+        if (!stopBtn) return;
+        stopBtn.disabled = !!stopping;
+        stopBtn.textContent = stopping ? 'Stopping...' : 'Stop';
+    }
+
+    async setRecreateReferenceFromFile(file, source) {
+        this.recreateReference = null;
+        this.validateRecreateFile(file);
+
+        const actions = this.getRecreateActions();
+        if (typeof actions.readFileAsRecreateReference !== 'function') throw new Error('workflow_unavailable');
+
+        this.recreateReference = await actions.readFileAsRecreateReference(file, source);
+        const byteLength = Number(this.recreateReference && this.recreateReference.byteLength) || 0;
+        const sizeText = byteLength > 0 ? ` (${Math.round(byteLength / 1024)} KB)` : '';
+        this.setRecreateStatus(`Selected ${this.recreateReference.name}${sizeText}`, 'success');
+    }
+
+    async setRecreateReferenceFromCurrentImage() {
+        this.recreateReference = null;
+        const actions = this.getRecreateActions();
+        if (typeof actions.selectCurrentGeneratedImage !== 'function') throw new Error('workflow_unavailable');
+
+        this.recreateReference = await actions.selectCurrentGeneratedImage();
+        this.setRecreateStatus('Selected current Grok image.', 'success');
+    }
+
+    async startRecreateWorkflow() {
+        if (this.recreateRunning) return;
+
+        if (!this.recreateReference) {
+            this.setRecreateStatus('Select a reference image first.', 'error');
+            return;
+        }
+
+        const chromeRuntime = typeof chrome !== 'undefined' ? chrome.runtime : null;
+        if (!chromeRuntime || typeof chromeRuntime.sendMessage !== 'function') {
+            this.setRecreateStatus('workflow_unavailable', 'error');
+            return;
+        }
+
+        this.recreateAbortRequested = false;
+        this.setRecreateRunning(true);
+        this.setRecreateStatus('Starting recreate workflow...', 'info');
+
+        try {
+            const bestPracticesEnabled = !!this.el.querySelector('#gptRecreateBestPractices')?.checked;
+            const response = await chromeRuntime.sendMessage({
+                action: 'START_GPT_RECREATE',
+                reference: this.recreateReference,
+                bestPracticesEnabled
+            });
+
+            if (this.recreateAbortRequested) {
+                return;
+            }
+
+            if (response && response.ok) {
+                this.setRecreateStatus('Submitted to Grok Imagine.', 'success');
+            } else {
+                this.setRecreateStatus((response && response.error) || 'Recreate workflow failed.', 'error');
+            }
+        } catch (error) {
+            if (!this.recreateAbortRequested) {
+                this.setRecreateStatus(error.message || 'Recreate workflow failed.', 'error');
+            }
+        } finally {
+            const wasAbortRequested = this.recreateAbortRequested;
+            this.recreateAbortRequested = false;
+            this.setRecreateRunning(false);
+            if (wasAbortRequested) {
+                this.setRecreateStatus('Stopped.', 'neutral');
+            }
+        }
     }
 
     injectPrompt(text, mode = 'replace') {

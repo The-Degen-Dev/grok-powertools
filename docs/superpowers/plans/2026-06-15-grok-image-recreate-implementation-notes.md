@@ -11,15 +11,23 @@
 - Task 5 keeps wiring extension-only: `manifest.json` loads recreate utilities before `content.js`, `background.js` owns one controller instance for start/abort messages, and `content.js` owns only phase-message delegation to `GrokRecreateContentActions`.
 - Task 5 status handling calls `setRecreateStatus` when the Task 6 UI exists, with a fallback to the existing overlay status badge so background status messages are still observable during this wiring-only slice.
 - Task 5 production background wiring sets a 150 second controller message timeout so the chat tab can wait for Grok's live response. The controller default stays shorter for focused timeout unit tests.
+- Task 6 keeps Recreate Image overlay state local to `GrokOverlay`: the selected reference payload, running flag, and paste handler. It does not add storage or settings persistence.
+- Task 6 uses `GrokRecreateContentActions` for local file and current-image reference capture, then sends `START_GPT_RECREATE` and `ABORT_GPT_RECREATE` through `chrome.runtime.sendMessage`.
+- Task 6 preflights selected, dropped, and pasted files against shared recreate MIME and byte limits before reading them as data URLs.
+- Task 6 clears the stored reference before any new file or current-image capture attempt so failed reselections cannot submit a stale previous image.
 
 ## Deviations
 
 - Task 5 E2E smoke tests mock `GrokRecreateContentActions` for chat and Imagine dispatch. This validates extension wiring and message contracts only, not live Grok DOM behavior.
+- Task 6 mocked E2E coverage validates overlay rendering, local file selection, and start-message wiring only. It does not validate live Grok DOM behavior, actual uploads, tab orchestration, or Grok Search activation.
 
 ## Tradeoffs
 
 - Task 5 records the generated Imagine prompt through the existing prompt history helper only after a successful mocked or real Imagine step response. It does not add any new storage path.
 - Task 5 adds a narrow background wiring unit test for the production timeout option because mocked E2E actions return instantly and would not catch this live-path timeout regression.
+- Task 6 leaves the Grok Search checkbox as a per-run UI control only. Persisting it would add settings surface area outside this task.
+- Task 6 keeps Start hidden while an abort is unwinding. The overlay shows a stopping state until the original start request settles so quick restarts do not collide with the active background workflow.
+- Task 6 only accepts image paste events when focus or the paste target is inside the Recreate Image section. This avoids stealing image pastes intended for the Grok composer.
 
 ## Open Questions
 
@@ -52,10 +60,15 @@
   - `npm run test:unit -- tests/unit/backgroundRecreateWorkflow.test.js tests/unit/recreateWorkflowBackground.test.js tests/unit/recreateWorkflowContent.test.js` passed with 48 tests.
   - `npm run test:e2e` passed with 7 tests.
   - `npm run lint` passed with warnings only. The warnings are existing unused-variable warnings outside the Task 5 changes.
+- Task 6:
+  - `npm run test:e2e -- tests/e2e/extension.spec.js -g "Recreate Image"` passed with 6 tests.
+  - `npm run test:e2e -- tests/e2e/extension.spec.js` passed with 13 tests.
+  - `npm run test:unit` passed with 241 tests.
+  - `npx eslint content.js tests/e2e/extension.spec.js` passed with warnings and 0 errors. The warnings are unused-variable warnings outside the Task 6 additions.
 
 ## Live Grok Validation
 
-- Pending. Task 5 did not run live Chrome validation against `grok.com/imagine`; mocked E2E coverage is intentionally limited to helper load order and message routing.
+- Pending. Task 6 did not run live Chrome validation against `grok.com/imagine`; mocked E2E coverage is intentionally limited to overlay wiring and message routing.
 
 ## Selector Notes
 
