@@ -4,6 +4,8 @@
 // Loads bridge.js in the page's MAIN world (bypasses CSP since it's a file, not inline).
 // bridge.js provides access to TipTap editor and Grok's fetch via custom DOM events.
 (function injectPageWorldBridge() {
+    if (typeof module !== 'undefined') return;
+
     const script = document.createElement('script');
     script.src = chrome.runtime.getURL('bridge.js');
     (document.head || document.documentElement).appendChild(script);
@@ -1539,6 +1541,12 @@ class GrokOverlay {
         return (target && section.contains(target)) || (activeElement && section.contains(activeElement));
     }
 
+    formatRecreateStatus(response, fallback = 'Recreate workflow failed.') {
+        if (!response || !response.error) return fallback;
+        if (response.phase && response.phase !== 'done') return `${response.phase}: ${response.error}`;
+        return response.error;
+    }
+
     setRecreateStatus(text, type = 'neutral') {
         const message = text || '';
         const status = this.el.querySelector('#gptRecreateStatus');
@@ -1630,7 +1638,7 @@ class GrokOverlay {
             if (response && response.ok) {
                 this.setRecreateStatus('Submitted to Grok Imagine.', 'success');
             } else {
-                this.setRecreateStatus((response && response.error) || 'Recreate workflow failed.', 'error');
+                this.setRecreateStatus(this.formatRecreateStatus(response), 'error');
             }
         } catch (error) {
             if (!this.recreateAbortRequested) {
@@ -2890,18 +2898,18 @@ class RecreateWorkflowContentBridge {
             }
 
             if (request.action === 'GPT_RECREATE_CHAT_STEP') {
-                this.runAsyncStep(request, () => this.getAction('runChatPromptStep')(request), sendResponse);
+                this.runAsyncStep(() => this.getAction('runChatPromptStep')(request), sendResponse, request.runId);
                 return true;
             }
 
             if (request.action === 'GPT_RECREATE_IMAGINE_STEP') {
-                this.runAsyncStep(request, async () => {
+                this.runAsyncStep(async () => {
                     const response = await this.getAction('runImagineSubmitStep')(request);
                     if (response && response.ok && request.generatedPrompt) {
                         this.recordGeneratedPrompt(request.generatedPrompt);
                     }
                     return response;
-                }, sendResponse);
+                }, sendResponse, request.runId);
                 return true;
             }
 
@@ -2910,7 +2918,9 @@ class RecreateWorkflowContentBridge {
     }
 
     handleStatus(request) {
-        const message = request.message || request.error || '';
+        const message = request.phase && request.phase !== 'done'
+            ? `${request.phase}: ${request.message || request.error || ''}`
+            : (request.message || request.error || '');
         const type = request.type || 'info';
 
         if (this.overlay && typeof this.overlay.setRecreateStatus === 'function') {
@@ -2934,28 +2944,24 @@ class RecreateWorkflowContentBridge {
         }
     }
 
-    runAsyncStep(request, fn, sendResponse) {
+    runAsyncStep(fn, sendResponse, runId) {
         (async () => {
             try {
                 const response = await fn();
-                sendResponse(response && typeof response === 'object' ? response : { ok: true, runId: request.runId });
+                sendResponse(response && typeof response === 'object' ? response : { ok: true, runId });
             } catch (error) {
-                sendResponse(this.buildFailureResponse(request, error));
+                sendResponse({
+                    ok: false,
+                    runId,
+                    phase: 'content',
+                    error: (error && error.code) || 'workflow_failed',
+                    diagnostics: {
+                        url: this.locationRef ? this.locationRef.href : '',
+                        title: this.documentRef ? this.documentRef.title : ''
+                    }
+                });
             }
         })();
-    }
-
-    buildFailureResponse(request, error) {
-        return {
-            ok: false,
-            runId: request.runId,
-            phase: error && error.phase ? error.phase : 'content',
-            error: error && error.code ? error.code : 'workflow_failed',
-            diagnostics: {
-                url: this.locationRef ? this.locationRef.href : '',
-                title: this.documentRef ? this.documentRef.title : ''
-            }
-        };
     }
 }
 

@@ -17,6 +17,10 @@
 - Task 6 clears the stored reference before any new file or current-image capture attempt so failed reselections cannot submit a stale previous image.
 - Task 7 returns data URLs directly from the MAIN-world bridge for trusted Grok media, avoiding a content-script blob URL refetch for Recreate Image current-media capture.
 - Task 7 rejects malformed bridge data URL results at the helper boundary before later reference normalization.
+- Task 8 keeps background chat-phase failures fail-fast and records the regression with `chat_upload_input_missing` so the workflow cannot continue to Imagine after a missing chat upload input.
+- Task 8 makes content bridge catch responses diagnostic-only: helper errors always return `phase: content`, preserve the run ID and trusted error code, and include only URL/title page diagnostics.
+- Task 8 status rendering now includes phase context, for example `chat: chat_upload_input_missing`, instead of showing only the raw error code.
+- Task 8 treats generic exception messages as `workflow_failed` in content bridge responses so arbitrary prompt or data URL text cannot leak through `error`.
 
 ## Deviations
 
@@ -73,6 +77,12 @@
   - `npm run test:unit -- tests/unit/recreateWorkflowContent.test.js` passed with 38 tests.
   - `npx eslint bridge.js recreateWorkflowContent.js tests/unit/recreateWorkflowContent.test.js` passed with 0 errors and 1 pre-existing warning in `bridge.js`.
   - `git diff --check -- bridge.js recreateWorkflowContent.js tests/unit/recreateWorkflowContent.test.js docs/superpowers/plans/2026-06-15-grok-image-recreate-implementation-notes.md` passed.
+- Task 8:
+  - `npm run test:unit -- tests/unit/recreateWorkflowBackground.test.js tests/unit/recreateWorkflowContent.test.js` passed with 54 tests.
+  - `npm run test:unit` passed with 248 tests.
+  - `npm run test:e2e -- tests/e2e/extension.spec.js -g "Recreate content bridge should handle status messages"` passed with 1 test.
+  - `npm run test:e2e -- tests/e2e/extension.spec.js` passed with 13 tests.
+  - `npx eslint recreateWorkflowBackground.js content.js tests/unit/recreateWorkflowBackground.test.js tests/unit/recreateWorkflowContent.test.js tests/e2e/extension.spec.js` passed with 0 errors and 7 pre-existing warnings in `content.js`.
 
 ## Live Grok Validation
 

@@ -253,13 +253,14 @@ test.describe('Grok Power Tools E2E', () => {
         const responses = await dispatchRuntimeMessage(page, {
             action: 'GPT_RECREATE_STATUS',
             runId: 'run-status',
+            phase: 'chat',
             message: 'Chat step ready',
             type: 'success'
         });
 
         expect(listenerCount).toBeGreaterThan(0);
         expect(responses).toContainEqual({ ok: true, runId: 'run-status' });
-        await expect(page.locator('#gptRecreateStatus')).toHaveText('Chat step ready');
+        await expect(page.locator('#gptRecreateStatus')).toHaveText('chat: Chat step ready');
     });
 
     test('Recreate Image controls should render', async ({ page }) => {

@@ -217,6 +217,92 @@ describe('recreate background controller', () => {
         );
     });
 
+    test('chat phase upload input failure is returned without continuing to Imagine', async () => {
+        const { chromeApi, messages } = createChromeHarness();
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, callback) => {
+            messages.push({ tabId, message });
+            if (message.action === 'GPT_RECREATE_CHAT_STEP') {
+                callback({
+                    ok: false,
+                    runId: message.runId,
+                    phase: 'chat',
+                    error: 'chat_upload_input_missing',
+                    diagnostics: { url: 'https://grok.com/' }
+                });
+                return;
+            }
+            callback({ ok: true });
+        });
+        const controller = createRecreateWorkflowController({ chromeApi, utils });
+
+        const result = await controller.start(createStartRequest(), {
+            sourceTabId: 1,
+            sourceTabUrl: 'https://grok.com/imagine'
+        });
+
+        const statuses = getStatusMessages(messages);
+        expect(result).toEqual(
+            expect.objectContaining({
+                ok: false,
+                phase: 'chat',
+                error: 'chat_upload_input_missing',
+                diagnostics: expect.objectContaining({ url: 'https://grok.com/' })
+            })
+        );
+        expect(messages.some((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP')).toBe(false);
+        expect(statuses[statuses.length - 1]).toEqual(
+            expect.objectContaining({
+                phase: 'chat',
+                message: 'chat_upload_input_missing',
+                type: 'error'
+            })
+        );
+        expect(controller.getActiveRunForTest()).toBeNull();
+    });
+
+    test('content phase chat failure is returned without continuing to Imagine', async () => {
+        const { chromeApi, messages } = createChromeHarness();
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, callback) => {
+            messages.push({ tabId, message });
+            if (message.action === 'GPT_RECREATE_CHAT_STEP') {
+                callback({
+                    ok: false,
+                    runId: message.runId,
+                    phase: 'content',
+                    error: 'chat_upload_input_missing',
+                    diagnostics: { url: 'https://grok.com/' }
+                });
+                return;
+            }
+            callback({ ok: true });
+        });
+        const controller = createRecreateWorkflowController({ chromeApi, utils });
+
+        const result = await controller.start(createStartRequest(), {
+            sourceTabId: 1,
+            sourceTabUrl: 'https://grok.com/imagine'
+        });
+
+        const statuses = getStatusMessages(messages);
+        expect(result).toEqual(
+            expect.objectContaining({
+                ok: false,
+                phase: 'content',
+                error: 'chat_upload_input_missing',
+                diagnostics: expect.objectContaining({ url: 'https://grok.com/' })
+            })
+        );
+        expect(messages.some((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP')).toBe(false);
+        expect(statuses[statuses.length - 1]).toEqual(
+            expect.objectContaining({
+                phase: 'content',
+                message: 'chat_upload_input_missing',
+                type: 'error'
+            })
+        );
+        expect(controller.getActiveRunForTest()).toBeNull();
+    });
+
     test('requires Imagine response to confirm submission', async () => {
         const { chromeApi, messages } = createChromeHarness();
         chromeApi.tabs.sendMessage = jest.fn((tabId, message, callback) => {

@@ -1,5 +1,8 @@
 const utils = require('../../recreateWorkflowUtils.js');
 const {
+    RecreateWorkflowContentBridge
+} = require('../../content.js');
+const {
     collectGeneratedImageCandidates,
     dataUrlToFile,
     ensureGrokSearchEnabled,
@@ -933,5 +936,121 @@ describe('recreate content DOM actions', () => {
                 { documentRef: document, timeoutMs: 100, intervalMs: 1 }
             )
         ).rejects.toThrow('imagine_submit_failed');
+    });
+});
+
+describe('recreate content bridge', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '';
+        jest.restoreAllMocks();
+    });
+
+    test('async catch responses use content phase and page diagnostics without payload leakage', async () => {
+        const listeners = [];
+        const error = new Error('chat_upload_input_missing');
+        error.code = 'chat_upload_input_missing';
+        error.phase = 'chat';
+        error.diagnostics = {
+            dataUrl: 'data:image/png;base64,bGVhaw=='
+        };
+        const request = {
+            action: 'GPT_RECREATE_CHAT_STEP',
+            runId: 'recreate_1',
+            reference: {
+                name: 'source.png',
+                mimeType: 'image/png',
+                dataUrl: 'data:image/png;base64,aGVsbG8=',
+                source: 'local'
+            }
+        };
+        const actions = {
+            runChatPromptStep: jest.fn(async () => {
+                throw error;
+            })
+        };
+        const chromeRuntime = {
+            onMessage: {
+                addListener: jest.fn((listener) => {
+                    listeners.push(listener);
+                })
+            }
+        };
+        const bridge = new RecreateWorkflowContentBridge(null, null, {
+            actions,
+            chromeRuntime,
+            documentRef: { title: 'Grok Chat' },
+            locationRef: { href: 'https://grok.com/' }
+        });
+
+        bridge.setupListeners();
+        const response = await new Promise((resolve) => {
+            const keepAlive = listeners[0](request, {}, resolve);
+            expect(keepAlive).toBe(true);
+        });
+
+        expect(actions.runChatPromptStep).toHaveBeenCalledWith(request);
+        expect(response).toEqual({
+            ok: false,
+            runId: 'recreate_1',
+            phase: 'content',
+            error: 'chat_upload_input_missing',
+            diagnostics: {
+                url: 'https://grok.com/',
+                title: 'Grok Chat'
+            }
+        });
+        expect(JSON.stringify(response)).not.toContain('data:image/png');
+        expect(JSON.stringify(response)).not.toContain('source.png');
+    });
+
+    test('async catch responses do not expose arbitrary generic error messages', async () => {
+        const listeners = [];
+        const request = {
+            action: 'GPT_RECREATE_CHAT_STEP',
+            runId: 'recreate_1',
+            reference: {
+                name: 'source.png',
+                mimeType: 'image/png',
+                dataUrl: 'data:image/png;base64,aGVsbG8=',
+                source: 'local'
+            }
+        };
+        const actions = {
+            runChatPromptStep: jest.fn(async () => {
+                throw new Error('raw prompt and data:image/png;base64,bGVhaw== leaked');
+            })
+        };
+        const chromeRuntime = {
+            onMessage: {
+                addListener: jest.fn((listener) => {
+                    listeners.push(listener);
+                })
+            }
+        };
+        const bridge = new RecreateWorkflowContentBridge(null, null, {
+            actions,
+            chromeRuntime,
+            documentRef: { title: 'Grok Chat' },
+            locationRef: { href: 'https://grok.com/' }
+        });
+
+        bridge.setupListeners();
+        const response = await new Promise((resolve) => {
+            const keepAlive = listeners[0](request, {}, resolve);
+            expect(keepAlive).toBe(true);
+        });
+
+        expect(response).toEqual({
+            ok: false,
+            runId: 'recreate_1',
+            phase: 'content',
+            error: 'workflow_failed',
+            diagnostics: {
+                url: 'https://grok.com/',
+                title: 'Grok Chat'
+            }
+        });
+        expect(JSON.stringify(response)).not.toContain('data:image/png');
+        expect(JSON.stringify(response)).not.toContain('raw prompt');
     });
 });
