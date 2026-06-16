@@ -7,6 +7,7 @@
 - Task 1 utility validation is stricter than the original plan skeleton where needed: malformed base64 is rejected with decode validation, oversized references are rejected before decode allocation, and diagnostic key scrubbing catches compound cookie/auth/token variants.
 - Task 2 keeps trusted Grok media capture on the existing `__gpt_fetch_media` / `__gpt_fetch_media_result` blob URL bridge contract. The later Task 7 bridge data-URL change is intentionally deferred.
 - Task 3 scopes Search activation to the visible composer/editor region. Live Grok inspection showed the only visible `button[aria-label="Search"]` on clean Grok root/Imagine was a left-nav/global control, not a composer search toggle, so best-practices mode now fails fast with `chat_search_unavailable` instead of clicking it.
+- Task 4 uses bounded receiver-not-ready retries and per-message timeouts for `chrome.tabs.sendMessage` because newly created MV3 tabs are not guaranteed to have content scripts ready when `tabs.create` returns.
 
 ## Deviations
 
@@ -37,6 +38,11 @@
   - `npx eslint recreateWorkflowContent.js tests/unit/recreateWorkflowContent.test.js` passed.
   - Spec review: approved after editor targeting required a visible Grok-labeled editor and Search was composer-scoped.
   - Code-quality review: approved after upload preview snapshotting and pointer/mouse click sequencing.
+- Task 4:
+  - `npm run test:unit -- tests/unit/recreateWorkflowBackground.test.js` passed with 12 tests.
+  - `npx eslint recreateWorkflowBackground.js tests/unit/recreateWorkflowBackground.test.js jest.setup.js` passed.
+  - Spec review: approved after requiring non-empty generated prompts, explicit Imagine submission confirmation, and named tab failures.
+  - Code-quality review: approved after bounded receiver-not-ready retry and per-message timeout handling.
 
 ## Live Grok Validation
 

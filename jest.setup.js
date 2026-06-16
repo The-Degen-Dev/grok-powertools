@@ -15,8 +15,17 @@ global.chrome = {
         lastError: null
     },
     tabs: {
+        create: jest.fn((options, callback) => {
+            if (typeof callback === 'function') callback({ id: 999, url: options.url });
+        }),
+        get: jest.fn((tabId, callback) => {
+            if (typeof callback === 'function') callback({ id: tabId, url: 'https://grok.com/' });
+        }),
         query: jest.fn(),
         sendMessage: jest.fn(),
+        update: jest.fn((tabId, options, callback) => {
+            if (typeof callback === 'function') callback({ id: tabId, ...options });
+        }),
         onUpdated: {
             addListener: jest.fn()
         },
