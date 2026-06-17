@@ -273,7 +273,7 @@ test.describe('Grok Power Tools E2E', () => {
         await expect(page.locator('#gptRecreateFileInput')).toHaveAttribute('accept', /image\/png/);
         await expect(page.locator('#gptRecreateChooseBtn')).toBeVisible();
         await expect(page.locator('#gptRecreateCurrentBtn')).toBeVisible();
-        await expect(page.locator('#gptRecreateBestPractices')).toBeChecked();
+        await expect(page.locator('#gptRecreateBestPractices')).not.toBeChecked();
         await expect(page.locator('#gptRecreateStartBtn')).toBeVisible();
         await expect(page.locator('#gptRecreateStopBtn')).toBeHidden();
         await expect(page.locator('#gptRecreateStatus')).toHaveText('No reference selected.');
@@ -295,7 +295,7 @@ test.describe('Grok Power Tools E2E', () => {
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).toContainEqual(expect.objectContaining({
             action: 'START_GPT_RECREATE',
-            bestPracticesEnabled: true,
+            bestPracticesEnabled: false,
             reference: expect.objectContaining({
                 name: 'sample.png',
                 source: 'local'
@@ -308,6 +308,31 @@ test.describe('Grok Power Tools E2E', () => {
             name: 'sample.png',
             source: 'local'
         });
+    });
+
+    test('Recreate Image controls should send explicit Grok Search opt-in', async ({ page }) => {
+        await evaluateExtensionContentWithMockedRecreateActions(page);
+
+        await page.locator('#gptRecreateFileInput').setInputFiles({
+            name: 'sample.png',
+            mimeType: 'image/png',
+            buffer: Buffer.from('sample-image')
+        });
+        await page.locator('#gptRecreateSection .gpt-toggle-switch').click();
+        await expect(page.locator('#gptRecreateBestPractices')).toBeChecked();
+
+        await page.locator('#gptRecreateStartBtn').click();
+        await expect(page.locator('#gptRecreateStatus')).toHaveText('Submitted to Grok Imagine.');
+
+        const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
+        expect(runtimeMessages).toContainEqual(expect.objectContaining({
+            action: 'START_GPT_RECREATE',
+            bestPracticesEnabled: true,
+            reference: expect.objectContaining({
+                name: 'sample.png',
+                source: 'local'
+            })
+        }));
     });
 
     test('Recreate Image controls should reject oversized files before reading', async ({ page }) => {

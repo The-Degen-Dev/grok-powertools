@@ -21,11 +21,13 @@
 - Task 8 makes content bridge catch responses diagnostic-only: helper errors always return `phase: content`, preserve the run ID and trusted error code, and include only URL/title page diagnostics.
 - Task 8 status rendering now includes phase context, for example `chat: chat_upload_input_missing`, instead of showing only the raw error code.
 - Task 8 treats generic exception messages as `workflow_failed` in content bridge responses so arbitrary prompt or data URL text cannot leak through `error`.
+- Final review changed the Recreate Grok Search toggle to default off. Live Grok currently exposes only a left-nav/global Search button, so default-on Search makes the default workflow fail before submission. Explicit Search opt-in still uses the composer-scoped verification path and fails fast with `chat_search_unavailable` when Grok does not expose a verifiable composer Search control.
 
 ## Deviations
 
 - Task 5 E2E smoke tests mock `GrokRecreateContentActions` for chat and Imagine dispatch. This validates extension wiring and message contracts only, not live Grok DOM behavior.
 - Task 6 mocked E2E coverage validates overlay rendering, local file selection, and start-message wiring only. It does not validate live Grok DOM behavior, actual uploads, tab orchestration, or Grok Search activation.
+- The initial plan asked to keep Grok Search enabled for the final live run. Current live Grok made that impossible without clicking an unrelated left-nav Search control, so the usable default is now no-search and Search remains an explicit fail-fast opt-in.
 
 ## Tradeoffs
 
@@ -85,12 +87,31 @@
   - `npx eslint recreateWorkflowBackground.js content.js tests/unit/recreateWorkflowBackground.test.js tests/unit/recreateWorkflowContent.test.js tests/e2e/extension.spec.js` passed with 0 errors and 7 pre-existing warnings in `content.js`.
 - Task 9:
   - `npm run test:unit` passed with 248 tests.
-  - `npm run test:e2e` passed with 13 tests.
+  - `npm run test:e2e` passed with 14 tests after adding explicit Grok Search opt-in coverage.
   - `npm run lint` passed with 0 errors and 19 pre-existing warnings.
 
 ## Live Grok Validation
 
-- Pending. Task 6 did not run live Chrome validation against `grok.com/imagine`; mocked E2E coverage is intentionally limited to overlay wiring and message routing.
+- 2026-06-16 live Chrome validation against `https://grok.com/imagine` passed for the no-search path after the unpacked extension was manually reloaded.
+- Source intake:
+  - The supported Chrome file chooser upload path failed with the Chrome runtime error `Not allowed`. Per Chrome file-management guidance, this points to the Codex Chrome extension needing "Allow access to file URLs" before local file chooser uploads can be automated.
+  - Recreate paste intake succeeded with the harmless local PNG `/tmp/grok-recreate-reference.png`; overlay status changed to `Selected clipboard.png (0 KB)`.
+- Search-enabled fail-fast:
+  - With Grok Search enabled, the live run stopped at `content: chat_search_unavailable`.
+  - Live chat inspection showed only the left-nav/global `button[aria-label="Search"]` at `data-active="false"`, not a composer-scoped Search control. This validates the intentional Task 3 fail-fast behavior.
+- No-search workflow:
+  - Grok Search was disabled in the overlay for the validation run. A final review fix changed this to the UI default so the default workflow matches current live Grok.
+  - Overlay status moved from `chat: Opening Grok chat tab...` to `Submitted to Grok Imagine.` in about 12 seconds.
+  - The chat tab created a new Grok conversation URL under `/c/...`, retained visible uploaded image content, and contained the exact `FINAL_IMAGINE_PROMPT:` marker. The generated prompt text was not copied into notes.
+  - The Imagine tab remained on `https://grok.com/imagine`; after submission the editor was empty, Submit was disabled, Upload was visible, and the overlay showed `Submitted to Grok Imagine.`. This is consistent with a successful auto-submit.
+- 2026-06-16 final live Chrome validation after reloading the updated extension:
+  - Actual Computer Use verified Chrome was focused on `https://grok.com/imagine` and the Grok Downloader extension had access to the site.
+  - DOM inspection confirmed the Recreate Grok Search checkbox was unchecked by default and no longer had a `checked` attribute.
+  - Paste intake succeeded again with the harmless local PNG; overlay status changed to `Selected clipboard.png (0 KB)`.
+  - The default no-search run moved from `chat: Opening Grok chat tab...` to `Submitted to Grok Imagine.` in about 38 seconds.
+  - The chat tab used a new `/c/...` conversation, retained one visible uploaded image, and contained the exact `FINAL_IMAGINE_PROMPT:` marker. The generated prompt text was not copied into notes.
+  - The Imagine tab remained on `https://grok.com/imagine`; after submission the editor was empty, Submit was disabled, Upload was visible, Search was still unchecked, and the overlay showed `Submitted to Grok Imagine.`.
+- No data URLs, cookies, auth values, or generated prompt text were written to notes.
 
 ## Selector Notes
 
@@ -99,3 +120,7 @@
   - `https://grok.com/imagine` exposes a visible contenteditable editor with `aria-label="Ask Grok anything"`, a visible `button[aria-label="Upload"]`, a disabled `button[aria-label="Submit"]` before prompt entry, Image/Video/Agent mode buttons, and Speed/Quality controls.
   - Both clean pages exposed a visible `button[aria-label="Search"]` at the left nav/global position with `data-active="false"` and `data-state="closed"`. It was not inside the composer/editor region.
   - A temporary clean Grok tab click on that left-nav Search control did not make it active. The workflow should not treat it as best-practices search.
+- Live Chrome validation on 2026-06-16, write path:
+  - Recreate overlay controls appeared after manual unpacked-extension reload and Grok tab refresh.
+  - `#gptRecreateSection`, `#gptRecreateDropzone`, `#gptRecreateBestPractices`, `#gptRecreateStartBtn`, and `#gptRecreateStatus` were visible after expanding the overlay.
+  - The no-search validation reused the same Grok selectors: chat editor `aria-label="Ask Grok anything"`, chat Attach button `aria-label="Attach"`, chat upload preview image detection, chat marker extraction with `FINAL_IMAGINE_PROMPT:`, Imagine editor `aria-label="Ask Grok anything"`, and Imagine Submit button `aria-label="Submit"`.

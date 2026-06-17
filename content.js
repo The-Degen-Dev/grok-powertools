@@ -693,7 +693,7 @@ class GrokOverlay {
                         <div class="gpt-row" style="margin-top:6px; font-size:11px;">
                             <span>Grok Search</span>
                             <label class="gpt-toggle-switch">
-                                <input type="checkbox" id="gptRecreateBestPractices" checked>
+                                <input type="checkbox" id="gptRecreateBestPractices">
                                 <span class="gpt-slider"></span>
                             </label>
                         </div>
