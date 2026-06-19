@@ -66,6 +66,16 @@
             <td>Verification</td>
             <td>Added a browser migration spec for the version 4 IndexedDB upgrade because Task 4 changes persistent local storage.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Safety</td>
+            <td>Next Vault API routes broker Worker reads server-side, proxy media bytes without exposing Worker keys or signed URLs, and keep gap-fill and index reconciliation fail-closed until explicitly armed.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The fake Worker now exercises both <code>prompts</code> and <code>data</code> metadata response shapes so the preview broker is checked against fixture and real Worker contracts.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>

@@ -108,8 +108,12 @@ const server = http.createServer((req, res) => {
     });
   }
 
-  if (url.pathname === "/v1/vault/metadata/savedPrompts" || url.pathname === "/v1/vault/metadata/promptHistory") {
-    return sendJson(res, 200, { ok: true, kind: url.pathname.split("/").pop(), prompts: fixturePrompts });
+  if (url.pathname === "/v1/vault/metadata/savedPrompts") {
+    return sendJson(res, 200, { ok: true, kind: "savedPrompts", prompts: fixturePrompts });
+  }
+
+  if (url.pathname === "/v1/vault/metadata/promptHistory") {
+    return sendJson(res, 200, { ok: true, kind: "promptHistory", data: fixturePrompts });
   }
 
   if (url.pathname === "/v1/vault/gaps") {

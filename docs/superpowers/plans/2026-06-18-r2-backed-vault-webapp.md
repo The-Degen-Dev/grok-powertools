@@ -1294,7 +1294,7 @@ git commit -m "feat(web): add vault local data model"
 - Modify: `tests/e2e-web/vault-api.spec.js`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Extend failing API tests**
+- [x] **Step 1: Extend failing API tests**
 
 Append to `tests/e2e-web/vault-api.spec.js`:
 
@@ -1328,7 +1328,7 @@ test("Gap-fill run is blocked by default", async ({ request }) => {
 });
 ```
 
-- [ ] **Step 2: Run failing API tests**
+- [x] **Step 2: Run failing API tests**
 
 Run:
 
@@ -1338,7 +1338,7 @@ npx playwright test -c playwright.web.config.js tests/e2e-web/vault-api.spec.js
 
 Expected: FAIL because the new API routes do not exist.
 
-- [ ] **Step 3: Add browser client**
+- [x] **Step 3: Add browser client**
 
 Create `web/src/lib/vault-client.ts`:
 
@@ -1368,7 +1368,7 @@ export function fetchVaultGaps() {
 }
 ```
 
-- [ ] **Step 4: Add inventory route**
+- [x] **Step 4: Add inventory route**
 
 Create `web/src/app/api/vault/inventory/route.ts`:
 
@@ -1385,7 +1385,7 @@ export async function GET(request: Request) {
 }
 ```
 
-- [ ] **Step 5: Add metadata route**
+- [x] **Step 5: Add metadata route**
 
 Create `web/src/app/api/vault/metadata/[kind]/route.ts`:
 
@@ -1400,7 +1400,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ kin
 }
 ```
 
-- [ ] **Step 6: Add media proxy route**
+- [x] **Step 6: Add media proxy route**
 
 Create `web/src/app/api/vault/media/[assetId]/route.ts`:
 
@@ -1427,7 +1427,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ass
 }
 ```
 
-- [ ] **Step 7: Add preview and gap routes**
+- [x] **Step 7: Add preview and gap routes**
 
 Create `web/src/app/api/vault/preview/route.ts`:
 
@@ -1481,7 +1481,7 @@ export async function GET() {
 }
 ```
 
-- [ ] **Step 8: Add gated action routes**
+- [x] **Step 8: Add gated action routes**
 
 Create `web/src/app/api/vault/gap-fill/plan/route.ts`:
 
@@ -1533,7 +1533,7 @@ export async function POST() {
 }
 ```
 
-- [ ] **Step 9: Run tests and build**
+- [x] **Step 9: Run tests and build**
 
 Run:
 
@@ -1544,7 +1544,7 @@ cd web && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 10: Update notes and commit**
+- [x] **Step 10: Update notes and commit**
 
 Append this row:
 
