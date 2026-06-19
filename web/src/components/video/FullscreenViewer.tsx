@@ -20,12 +20,16 @@ interface FullscreenViewerProps {
   items: VideoItem[];
   startIndex: number;
   onClose: () => void;
+  watchMode?: boolean;
+  onSaveAsMovie?: (items: VideoItem[]) => Promise<void>;
 }
 
 export default function FullscreenViewer({
   items,
   startIndex,
   onClose,
+  watchMode = false,
+  onSaveAsMovie,
 }: FullscreenViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(startIndex);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -34,11 +38,13 @@ export default function FullscreenViewer({
   const [loopVideo, setLoopVideo] = useState(true);
   const [showInfo, setShowInfo] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [savingMovie, setSavingMovie] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const slideshowTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const currentItem = items[currentIndex];
+  const isImage = currentItem?.mediaType === "image";
 
   const goTo = useCallback(
     (index: number) => {
@@ -54,7 +60,7 @@ export default function FullscreenViewer({
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || isImage) return;
     if (video.paused) {
       video.play().catch(() => {});
       setIsPlaying(true);
@@ -62,17 +68,17 @@ export default function FullscreenViewer({
       video.pause();
       setIsPlaying(false);
     }
-  }, []);
+  }, [isImage]);
 
   // Auto-play video when index changes
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || isImage) return;
     video.load();
     if (isPlaying) {
       video.play().catch(() => {});
     }
-  }, [currentIndex, isPlaying]);
+  }, [currentIndex, isPlaying, isImage]);
 
   // Slideshow timer
   useEffect(() => {
@@ -80,6 +86,12 @@ export default function FullscreenViewer({
     slideshowTimerRef.current = setTimeout(goNext, slideshowInterval * 1000);
     return () => clearTimeout(slideshowTimerRef.current);
   }, [slideshowActive, slideshowInterval, currentIndex, goNext]);
+
+  useEffect(() => {
+    if (!watchMode || !isImage) return;
+    slideshowTimerRef.current = setTimeout(goNext, 3000);
+    return () => clearTimeout(slideshowTimerRef.current);
+  }, [watchMode, isImage, currentIndex, goNext]);
 
   // Auto-hide controls
   useEffect(() => {
@@ -141,11 +153,22 @@ export default function FullscreenViewer({
   }
 
   function handleDownload() {
-    if (currentItem?.videoUrl) {
+    const url = currentItem?.mediaType === "image" ? currentItem.imageUrl || currentItem.thumbnailUrl : currentItem?.videoUrl;
+    if (url) {
       const a = document.createElement("a");
-      a.href = currentItem.videoUrl;
-      a.download = `${currentItem.grokPostId}.mp4`;
+      a.href = url;
+      a.download = `${currentItem.grokPostId}.${currentItem.mediaType === "image" ? "png" : "mp4"}`;
       a.click();
+    }
+  }
+
+  async function handleSaveAsMovie() {
+    if (!onSaveAsMovie) return;
+    setSavingMovie(true);
+    try {
+      await onSaveAsMovie(items);
+    } finally {
+      setSavingMovie(false);
     }
   }
 
@@ -153,17 +176,26 @@ export default function FullscreenViewer({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
-      {/* Video */}
-      <video
-        ref={videoRef}
-        src={currentItem.videoUrl}
-        className="h-full w-full object-contain"
-        loop={loopVideo}
-        muted={false}
-        playsInline
-        autoPlay
-        onClick={togglePlay}
-      />
+      {isImage ? (
+        // eslint-disable-next-line @next/next/no-img-element -- Vault images are served through local API proxy.
+        <img
+          src={currentItem.imageUrl || currentItem.thumbnailUrl}
+          alt={currentItem.promptText || currentItem.id}
+          className="h-full w-full object-contain"
+        />
+      ) : (
+        <video
+          ref={videoRef}
+          src={currentItem.videoUrl}
+          className="h-full w-full object-contain"
+          loop={watchMode ? false : loopVideo}
+          muted={false}
+          playsInline
+          autoPlay
+          onEnded={watchMode ? goNext : undefined}
+          onClick={togglePlay}
+        />
+      )}
 
       {/* Controls overlay */}
       <div
@@ -182,9 +214,15 @@ export default function FullscreenViewer({
                 Slideshow
               </span>
             )}
+            {watchMode && (
+              <span className="rounded-full bg-white/15 px-2 py-0.5 text-xs font-medium text-white">
+                Watch Mode
+              </span>
+            )}
           </div>
           <button
             type="button"
+            aria-label="Close"
             onClick={onClose}
             className="rounded-full bg-white/10 p-2 text-white/80 backdrop-blur-sm transition hover:bg-white/20 hover:text-white"
           >
@@ -234,11 +272,13 @@ export default function FullscreenViewer({
           {/* Control buttons */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1">
-              <ControlButton
-                icon={isPlaying ? Pause : Play}
-                label={isPlaying ? "Pause (Space)" : "Play (Space)"}
-                onClick={togglePlay}
-              />
+              {!isImage && (
+                <ControlButton
+                  icon={isPlaying ? Pause : Play}
+                  label={isPlaying ? "Pause (Space)" : "Play (Space)"}
+                  onClick={togglePlay}
+                />
+              )}
               <ControlButton
                 icon={SkipForward}
                 label={`Slideshow ${slideshowActive ? "ON" : "OFF"} (S)`}
@@ -266,6 +306,16 @@ export default function FullscreenViewer({
               )}
             </div>
             <div className="flex items-center gap-1">
+              {watchMode && onSaveAsMovie && (
+                <button
+                  type="button"
+                  onClick={handleSaveAsMovie}
+                  disabled={savingMovie}
+                  className="rounded-lg bg-white/10 px-3 py-2 text-sm font-medium text-white/80 transition hover:bg-white/20 hover:text-white disabled:opacity-50"
+                >
+                  {savingMovie ? "Saving..." : "Save as Movie"}
+                </button>
+              )}
               <ControlButton
                 icon={Info}
                 label="Prompt info (I)"

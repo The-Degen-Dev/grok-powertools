@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import CollectionView from "@/components/collections/CollectionView";
 
 export default function CollectionsPage() {
-  redirect("/");
+  return <CollectionView />;
 }

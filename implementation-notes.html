@@ -121,6 +121,36 @@
             <td>Design decision</td>
             <td>The Vault media viewer handles Escape, focus entry, focus restoration, and a small focus loop itself because it is a custom full-screen dialog, not a shared modal component.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Task 9 adds a top-level Collections nav item and makes <code>/collections</code> open the newest local collection. The plan's browser test uses that route after adding a Vault asset to <code>New Collection</code>, and the previous route redirected home.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Watch queues accept first-class image and video items. Images become timed still clips when saved as a movie, while video clips keep their source URL. Thumbnail-only unknown items are not treated as watchable to avoid broken movie clips.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td><code>VaultPage</code> creates fresh local collection item IDs while preserving <code>assetId</code>, and it de-dupes repeat adds by <code>assetId</code>. This keeps React/DnD selection stable without mutating source Vault facts.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Deviation</td>
+            <td>The plan's non-blocking warning toasts use <code>info</code> because the current toast type only supports <code>success</code>, <code>error</code>, and <code>info</code>. Task 9 did not expand the toast API just to add one synonym.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Task 9 verifies that <code>Save as Movie</code> creates image and video clips with Vault <code>sourceAssetId</code> values. Full Movie Maker rendering polish for image clips remains with Task 10, which is the plan task dedicated to image clip playback and source picking.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 9 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The test covers adding both fake Vault assets to a local collection, preserving image/video asset facts, opening Watch Mode, saving a movie, and inspecting IndexedDB movie clips.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>

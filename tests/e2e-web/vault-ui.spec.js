@@ -86,3 +86,66 @@ test("Vault viewer opens image and video assets", async ({ page }) => {
   await expect(videoDialog.getByText(/video \/ verified/i)).toBeVisible();
   await expect(videoDialog.locator("video")).toHaveAttribute("src", /asset-video-1/);
 });
+
+test("Vault assets can become a collection and watch queue", async ({ page }) => {
+  await resetDb(page);
+  await page.goto("/vault");
+  await page.getByRole("button", { name: /Preview Vault/i }).click();
+  await page.getByRole("button", { name: /Commit Vault/i }).click();
+  const addButtons = page.getByRole("button", { name: /Add to Collection/i });
+  await addButtons.nth(0).click();
+  await expect(page.getByText(/Added to New Collection/i)).toBeVisible();
+  await addButtons.nth(1).click();
+  await expect(page.getByText(/Added to New Collection/i)).toBeVisible();
+  const collectionState = await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("grok-power-tools");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const collections = await new Promise((resolve, reject) => {
+      const tx = db.transaction("collections", "readonly");
+      const request = tx.objectStore("collections").getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    db.close();
+    const collection = collections.find((entry) => entry.name === "New Collection");
+    return {
+      itemIds: collection.items.map((item) => item.id),
+      assetIds: collection.items.map((item) => item.assetId).sort(),
+      mediaTypes: collection.items.map((item) => item.mediaType).sort(),
+    };
+  });
+  expect(collectionState.assetIds).toEqual(["asset-image-1", "asset-video-1"]);
+  expect(collectionState.mediaTypes).toEqual(["image", "video"]);
+  expect(new Set(collectionState.itemIds).size).toBe(2);
+  await page.getByRole("link", { name: /Collections/i }).click();
+  await page.getByRole("button", { name: /Watch All/i }).click();
+  await expect(page.getByText(/Watch Mode/i)).toBeVisible();
+  await page.getByRole("button", { name: /Save as Movie/i }).click();
+  await expect(page).toHaveURL(/\/movie\?id=/);
+  const movieState = await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("grok-power-tools");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const movies = await new Promise((resolve, reject) => {
+      const tx = db.transaction("movies", "readonly");
+      const request = tx.objectStore("movies").getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    db.close();
+    const movie = movies.find((entry) => entry.name === "New Collection Compilation");
+    return {
+      clipTypes: movie.clips.map((clip) => clip.type).sort(),
+      sourceAssetIds: movie.clips.map((clip) => clip.sourceAssetId).sort(),
+      imageStillDuration: movie.clips.find((clip) => clip.type === "image")?.stillDuration,
+    };
+  });
+  expect(movieState.clipTypes).toEqual(["image", "video"]);
+  expect(movieState.sourceAssetIds).toEqual(["asset-image-1", "asset-video-1"]);
+  expect(movieState.imageStillDuration).toBe(3);
+});

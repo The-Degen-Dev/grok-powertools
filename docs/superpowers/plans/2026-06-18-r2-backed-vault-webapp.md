@@ -2161,10 +2161,12 @@ git commit -m "feat(web): add media-aware vault viewer"
 - Modify: `web/src/components/collections/CollectionView.tsx`
 - Modify: `web/src/components/collections/BulkActionBar.tsx`
 - Modify: `web/src/components/video/FullscreenViewer.tsx`
+- Modify: `web/src/components/layout/Header.tsx`
+- Modify: `web/src/app/collections/page.tsx`
 - Modify: `tests/e2e-web/vault-ui.spec.js`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Add failing collection and watch test**
+- [x] **Step 1: Add failing collection and watch test**
 
 Append:
 
@@ -2182,7 +2184,7 @@ test("Vault assets can become a collection and watch queue", async ({ page }) =>
 });
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -2192,7 +2194,7 @@ npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js
 
 Expected: FAIL because collection and watch actions are not wired.
 
-- [ ] **Step 3: Add watch helper**
+- [x] **Step 3: Add watch helper**
 
 Create `web/src/lib/watch-mode.ts`:
 
@@ -2229,7 +2231,7 @@ export async function createMovieFromWatchQueue(queue: VideoItem[], name: string
 }
 ```
 
-- [ ] **Step 4: Wire Add to Collection from Vault**
+- [x] **Step 4: Wire Add to Collection from Vault**
 
 Modify `web/src/components/vault/VaultPage.tsx` to import:
 
@@ -2263,7 +2265,7 @@ Change `VaultGrid`:
           onAddToCollection={handleAddToCollection}
 ```
 
-- [ ] **Step 5: Add Watch All to collections**
+- [x] **Step 5: Add Watch All to collections**
 
 Modify `web/src/components/collections/BulkActionBar.tsx` to add an `onWatchSelected` prop and a `Watch Selected` button with `Play` icon.
 
@@ -2322,7 +2324,7 @@ Replace the FullscreenViewer render with:
       )}
 ```
 
-- [ ] **Step 6: Extend FullscreenViewer props**
+- [x] **Step 6: Extend FullscreenViewer props**
 
 Modify `web/src/components/video/FullscreenViewer.tsx` to accept:
 
@@ -2349,7 +2351,7 @@ For images, render:
 
 Add a visible `Watch Mode` label and `Save as Movie` button when `watchMode` is true.
 
-- [ ] **Step 7: Run tests and build**
+- [x] **Step 7: Run tests and build**
 
 Run:
 
@@ -2360,7 +2362,7 @@ cd web && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 8: Update notes and commit**
+- [x] **Step 8: Update notes and commit**
 
 Append:
 
