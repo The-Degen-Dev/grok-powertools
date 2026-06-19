@@ -30,6 +30,11 @@ test("local database migration preserves app stores and adds Vault stores", asyn
   await page.goto("/");
   await deleteAppDb(page);
   await page.reload();
+  await page.waitForFunction(async () => {
+    const databases = await indexedDB.databases();
+    const db = databases.find((entry) => entry.name === "grok-power-tools");
+    return Number(db?.version || 0) >= 4;
+  });
 
   const stores = await objectStoreNames(page);
   expect(stores).toEqual(

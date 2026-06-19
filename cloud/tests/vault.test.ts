@@ -20,6 +20,19 @@ test('mediaTypeFromContentType classifies images and videos', () => {
   assert.equal(mediaTypeFromContentType('application/octet-stream'), 'unknown');
 });
 
+test('normalizeVaultObject falls back to object key extension when content type is missing', () => {
+  const asset = normalizeVaultObject(
+    {
+      key: 'grok-powertools/v1/users/greymaker/media/c196e1e7-ee4d-4f6e-a6b8-c325ff12a800.jpg',
+      size: 2048,
+      uploaded: new Date('2026-06-18T00:00:00.000Z'),
+    },
+    'grok-powertools/v1'
+  );
+
+  assert.equal(asset.mediaType, 'image');
+});
+
 test('normalizeVaultObject creates stable asset records from R2 object metadata', () => {
   const asset = normalizeVaultObject(
     {

@@ -9,6 +9,18 @@ interface R2ListObjectLike {
     customMetadata?: Record<string, string>;
 }
 
+interface VaultIndexRow {
+    asset_id: string;
+    canonical_object_key: string;
+    source_url_hashes: string;
+    content_sha256: string | null;
+    media_type: string | null;
+    first_seen_at: string;
+    last_seen_at: string;
+    upload_status: string;
+    duplicate_object_keys: string;
+}
+
 function sanitizeKeyPrefix(keyPrefix: string | undefined): string {
     const normalized = String(keyPrefix || 'grok-powertools/v1')
         .trim()
@@ -33,11 +45,65 @@ export function mediaTypeFromContentType(contentType: string | undefined): Vault
     return 'unknown';
 }
 
+function mediaTypeFromObjectKey(objectKey: string): VaultMediaType {
+    const pathname = objectKey.split(/[?#]/)[0].toLowerCase();
+    if (/\.(avif|gif|heic|jpeg|jpg|png|webp)$/.test(pathname)) return 'image';
+    if (/\.(m4v|mov|mp4|webm)$/.test(pathname)) return 'video';
+    return 'unknown';
+}
+
+function mediaTypeFromObject(contentType: string | undefined, objectKey: string): VaultMediaType {
+    const contentMediaType = mediaTypeFromContentType(contentType);
+    return contentMediaType === 'unknown' ? mediaTypeFromObjectKey(objectKey) : contentMediaType;
+}
+
 export function assetIdFromObjectKey(objectKey: string): string {
     const byAsset = objectKey.match(/\/media\/by-asset\/([^/.?#]+)/);
     if (byAsset?.[1]) return byAsset[1];
     const filename = objectKey.split('/').pop() || objectKey;
     return filename.replace(/\.[a-z0-9]+$/i, '');
+}
+
+function parseStringArray(value: string | null | undefined): string[] {
+    if (!value) return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+function mediaTypeFromIndexRow(row: VaultIndexRow): VaultMediaType {
+    if (row.media_type === 'image' || row.media_type === 'video') return row.media_type;
+    return mediaTypeFromObjectKey(row.canonical_object_key);
+}
+
+function vaultStatusFromUploadStatus(uploadStatus: string): VaultAsset['verificationStatus'] {
+    if (uploadStatus === 'verified') return 'verified';
+    if (uploadStatus === 'failed') return 'failed';
+    if (uploadStatus === 'blocked') return 'blocked';
+    return 'unproven';
+}
+
+function normalizeVaultIndexRow(row: VaultIndexRow): VaultAsset {
+    const sourceUrlHashes = parseStringArray(row.source_url_hashes);
+    const uploadedAt = row.last_seen_at || row.first_seen_at || new Date(0).toISOString();
+
+    return {
+        assetId: row.asset_id,
+        mediaType: mediaTypeFromIndexRow(row),
+        canonicalObjectKey: row.canonical_object_key,
+        legacyObjectKeys: parseStringArray(row.duplicate_object_keys),
+        sha256: row.content_sha256 || undefined,
+        sourceUrlHash: sourceUrlHashes[0],
+        firstSeenAt: row.first_seen_at,
+        lastSeenAt: row.last_seen_at,
+        verificationStatus: vaultStatusFromUploadStatus(row.upload_status),
+        gapCodes: [],
+        createdAt: row.first_seen_at || uploadedAt,
+        updatedAt: uploadedAt,
+    };
 }
 
 export async function redactedApiKeyFingerprint(apiKey: string | undefined): Promise<string | null> {
@@ -75,7 +141,7 @@ export function normalizeVaultObject(object: R2ListObjectLike, keyPrefix: string
 
     return {
         assetId,
-        mediaType: mediaTypeFromContentType(contentType),
+        mediaType: mediaTypeFromObject(contentType, object.key),
         canonicalObjectKey: isCanonical ? object.key : undefined,
         legacyObjectKeys: isCanonical ? [] : [object.key],
         contentType,
@@ -92,8 +158,52 @@ export function normalizeVaultObject(object: R2ListObjectLike, keyPrefix: string
     };
 }
 
+async function listVaultInventoryFromD1(env: Env, keyPrefix: string, cursor: string | null | undefined, limit: number) {
+    const offset = Math.max(0, Number(cursor || '0') || 0);
+    const queryLimit = Math.max(1, Math.min(limit, 1000));
+    const result = await env.DB
+        .prepare(
+            `SELECT asset_id, canonical_object_key, source_url_hashes, content_sha256,
+                    media_type, first_seen_at, last_seen_at, upload_status, duplicate_object_keys
+             FROM r2_dedupe_index
+             WHERE canonical_object_key LIKE ?1
+             ORDER BY last_seen_at DESC, asset_id ASC
+             LIMIT ?2 OFFSET ?3`
+        )
+        .bind(`${sanitizeKeyPrefix(keyPrefix)}/users/%/media/%`, queryLimit + 1, offset)
+        .all<VaultIndexRow>();
+
+    const rows = result.results || [];
+    const pageRows = rows.slice(0, queryLimit);
+    const items = pageRows.map(normalizeVaultIndexRow);
+
+    return {
+        ok: true,
+        items,
+        nextCursor: rows.length > queryLimit ? String(offset + queryLimit) : null,
+        counts: {
+            assets: items.length,
+            images: items.filter((item) => item.mediaType === 'image').length,
+            videos: items.filter((item) => item.mediaType === 'video').length,
+            verified: items.filter((item) => item.verificationStatus === 'verified').length,
+            blocked: items.filter((item) => item.verificationStatus === 'blocked').length,
+            failed: items.filter((item) => item.verificationStatus === 'failed').length,
+            unproven: items.filter((item) => item.verificationStatus === 'unproven').length,
+        },
+    };
+}
+
 export async function listVaultInventory(env: Env, cursor?: string | null, limit = 100) {
     const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+    if (env.DB) {
+        try {
+            const indexed = await listVaultInventoryFromD1(env, keyPrefix, cursor, limit);
+            if (indexed.items.length > 0) return indexed;
+        } catch {
+            // Fall back to R2 when the D1 index is absent or temporarily unavailable.
+        }
+    }
+
     const listed = await env.R2_BUCKET.list({
         prefix: `${keyPrefix}/users/`,
         cursor: cursor || undefined,

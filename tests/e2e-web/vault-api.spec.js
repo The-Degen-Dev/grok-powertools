@@ -16,9 +16,20 @@ test("Vault preview returns inventory, prompts, gaps, and counts", async ({ requ
   const body = await res.json();
   expect(body.assets).toHaveLength(2);
   expect(body.prompts).toHaveLength(2);
+  expect(body.gaps).toHaveLength(0);
   expect(body.counts.assets).toBe(2);
   expect(body.counts.images).toBe(1);
   expect(body.counts.videos).toBe(1);
+  expect(body.counts.verified).toBe(2);
+  expect(body.warnings).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("inventory.items[2]"),
+      expect.stringContaining("metadata.prompts[2]"),
+      expect.stringContaining("gaps[0]"),
+    ]),
+  );
+  expect(JSON.stringify(body)).not.toContain("asset-malformed-1");
+  expect(JSON.stringify(body)).not.toContain("prompt-malformed-1");
 });
 
 test("Vault media route proxies media without exposing Worker API key", async ({ request }) => {

@@ -1,4 +1,4 @@
-import type { VaultPreview } from "./vault-types";
+import { parseVaultPreview } from "./vault-types";
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, cache: "no-store" });
@@ -20,8 +20,9 @@ export function fetchVaultIdentity() {
   return json<Record<string, unknown>>("/api/vault/identity");
 }
 
-export function fetchVaultPreview() {
-  return json<VaultPreview>("/api/vault/preview");
+export async function fetchVaultPreview() {
+  const data = await json<unknown>("/api/vault/preview");
+  return parseVaultPreview(data).value;
 }
 
 export function fetchVaultGaps() {

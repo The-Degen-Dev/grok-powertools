@@ -1,5 +1,13 @@
 import type { IDBPDatabase } from "idb";
-import type { VaultAsset, VaultGap, VaultImportRun, VaultOverlay, VaultPreview } from "./vault-types";
+import {
+  parseVaultPreview,
+  parseVaultWorkerIdentity,
+  type VaultAsset,
+  type VaultGap,
+  type VaultImportRun,
+  type VaultOverlay,
+  type VaultPreview,
+} from "./vault-types";
 
 export const VAULT_STORE_NAMES = [
   "vault_assets",
@@ -37,26 +45,28 @@ export function upgradeVaultStores(db: IDBPDatabase): void {
 }
 
 export async function commitVaultPreview(db: IDBPDatabase, preview: VaultPreview): Promise<VaultImportRun> {
+  const parsedPreview = parseVaultPreview(preview).value;
+  const identity = parseVaultWorkerIdentity(parsedPreview.identity);
   const now = new Date().toISOString();
   const run: VaultImportRun = {
     id: `vault-import-${Date.now()}`,
     source: "production-r2",
-    workerHost: String(preview.identity.workerHost || preview.identity.service || "unknown"),
-    keyPrefix: String(preview.identity.keyPrefix || "grok-powertools/v1"),
+    workerHost: identity.workerHost,
+    keyPrefix: identity.keyPrefix,
     importedAt: now,
     status: "committed",
-    counts: preview.counts,
-    warnings: preview.warnings,
+    counts: parsedPreview.counts,
+    warnings: parsedPreview.warnings,
   };
 
   const tx = db.transaction(["vault_assets", "vault_gaps", "vault_prompts", "vault_import_runs"], "readwrite");
-  for (const asset of preview.assets) {
+  for (const asset of parsedPreview.assets) {
     await tx.objectStore("vault_assets").put(asset);
   }
-  for (const gap of preview.gaps) {
+  for (const gap of parsedPreview.gaps) {
     await tx.objectStore("vault_gaps").put(gap);
   }
-  for (const prompt of preview.prompts) {
+  for (const prompt of parsedPreview.prompts) {
     await tx.objectStore("vault_prompts").put(prompt);
   }
   await tx.objectStore("vault_import_runs").put(run);

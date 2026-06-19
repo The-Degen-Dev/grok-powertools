@@ -233,8 +233,8 @@
           </tr>
           <tr>
             <td>2026-06-19</td>
-            <td>Blocker</td>
-            <td><code>npm run test:unit</code> failed in unrelated dirty recreate workflow code: <code>tests/unit/recreateWorkflowContent.test.js</code> expected <code>chat_answer_timeout</code> but received <code>chat_submit_not_sent</code>. A focused rerun of that test also failed with <code>native_click_unavailable</code>, so the root unit gate is not clean yet.</td>
+            <td>Verification</td>
+            <td>The previous root unit blocker is resolved in the current worktree. <code>npm run test:unit</code> passed 16 suites and 276 tests.</td>
           </tr>
           <tr>
             <td>2026-06-19</td>
@@ -243,8 +243,68 @@
           </tr>
           <tr>
             <td>2026-06-19</td>
-            <td>Blocker</td>
-            <td>Real R2 read-only preview was not run because <code>web/.env.local</code> and the current shell expose <code>WORKER_URL</code> but no non-empty <code>WORKER_API_KEY</code> or <code>CLIENT_API_KEY</code> name. No Worker key value was printed, copied, or guessed.</td>
+            <td>Verification</td>
+            <td>Real R2 read-only preview is unblocked. <code>web/.env.local</code> has separate non-empty <code>WORKER_API_KEY</code> and <code>WORKER_SYNC_SECRET</code> values, and they are not equal. Secret values were not printed.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Safety</td>
+            <td><code>WORKER_API_KEY</code> maps to the Worker <code>CLIENT_API_KEY</code>; <code>WORKER_SYNC_SECRET</code> maps to the Worker <code>SYNC_SECRET</code>. The deployed Worker accepted a JWT signed with the local sync secret on <code>/v1/sync/pull</code>.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Live R2 exposed legacy objects with no listed <code>contentType</code> but image file extensions. Worker inventory now falls back to object-key extension for media type, and the web app treats legacy <code>unknown</code> image-like Vault rows as images in cards, viewer, collections, and movie clips.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The media-type fix was deployed to <code>grok-r2-backup-worker</code>. Live preview now reports 100 assets, 96 images, 4 videos, 0 gaps, and 0 warnings. A headless browser smoke previewed and committed 100 live R2 assets, opened an image viewer, and added an image asset to a local collection.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Final gates passed after the live-R2 unblock and media-type fix: <code>npm run test:unit</code>, <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, and <code>npx playwright test -c playwright.web.config.js</code>.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Vault parsing is now runtime schema-first without adding a new package. The parsers in <code>web/src/lib/vault-types.ts</code> validate Worker identity, inventory, prompts, gaps, counts, and previews before data reaches client state or IndexedDB. Malformed Worker rows are dropped from preview with validation warnings.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Worker inventory now reads <code>r2_dedupe_index</code> first and falls back to R2 listing when D1 is unavailable or empty. It remains read-only. Current fallback does not merge partial D1 pages with R2 list results in the same response; that keeps preview deterministic and avoids accidental source-fact writes.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Vault page controls were expanded in-place instead of replacing the page. The page now has grid/table modes, search, media/status/visibility filters, prompt copy, source links when known, add to collection, add to movie, local favorite/tag/note/hide overlays, and safe bulk favorite/hide actions. Overlay edits remain local IndexedDB rows.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Ops now shows Worker health and host, key prefix, live R2 preview counts, local committed asset count, metadata prompt count, latest import status, open gap count, local owner/auth/sync status, and the explicit boundary that Worker health is not object proof.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Final verification passed on the current worktree: <code>npm run test:unit</code>, <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, and <code>npx playwright test -c playwright.web.config.js</code>. Web Playwright passed 18 tests.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Fake Worker manual smoke passed on local servers for preview, local commit, image and video cards, image viewer, video viewer, add to collection, Collection Watch All, Save as Movie, two Vault prompts in Prompt Library, and Ops object-proof boundary.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Deployed <code>grok-r2-backup-worker</code> version <code>a95e4d4a-1e48-49bd-8d0b-022359fab752</code>. Read-only real R2 validation through local Next routes passed: ops verified, Worker reachable, identity host <code>grok-r2-backup-worker.greymakerxyz-grok.workers.dev</code>, key prefix <code>grok-powertools/v1</code>, 100 assets, 56 images, 44 videos, 0 gaps, 0 warnings, and media proxy returned bytes. A headless live-R2 UI smoke committed 100 assets locally, opened a media viewer, wrote a local overlay, added to collection, and added to movie without R2, D1 source-fact, processed-ID, or live Grok mutation.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Final gates were rerun before the final Vault commit. <code>npm run test:unit</code>, <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, and <code>npm --prefix cloud run typecheck</code> passed. The first <code>npx playwright test -c playwright.web.config.js</code> attempt failed because this repo's local Next dev server held <code>web/.next/dev/lock</code>; after stopping only that repo-local dev process, the rerun passed 18 tests against the fake Worker.</td>
           </tr>
         </tbody>
       </table>

@@ -1,27 +1,19 @@
 import { NextResponse } from "next/server";
-import { workerJson } from "@/lib/vault-server";
+import { getWorkerHost, workerJson } from "@/lib/vault-server";
+import {
+  parseVaultGaps,
+  parseVaultInventory,
+  parseVaultPrompts,
+  parseVaultWorkerIdentity,
+  parseVaultCounts,
+  type VaultPrompt,
+} from "@/lib/vault-types";
 
-interface InventoryResponse {
-  items?: unknown[];
-  counts?: Record<string, number>;
+function promptKey(prompt: VaultPrompt): string {
+  return prompt.id || prompt.text;
 }
 
-interface PromptResponse {
-  prompts?: unknown[];
-  data?: unknown[];
-}
-
-function promptRows(response: PromptResponse): unknown[] {
-  return response.prompts || response.data || [];
-}
-
-function promptKey(prompt: unknown): string {
-  if (!prompt || typeof prompt !== "object") return JSON.stringify(prompt);
-  const record = prompt as Record<string, unknown>;
-  return String(record.id || record.text || JSON.stringify(record));
-}
-
-function dedupePrompts(prompts: unknown[]): unknown[] {
+function dedupePrompts(prompts: VaultPrompt[]): VaultPrompt[] {
   const seen = new Set<string>();
   return prompts.filter((prompt) => {
     const key = promptKey(prompt);
@@ -33,33 +25,42 @@ function dedupePrompts(prompts: unknown[]): unknown[] {
 
 export async function GET() {
   const [identity, inventory, savedPrompts, promptHistory, gaps] = await Promise.all([
-    workerJson<Record<string, unknown>>("/v1/vault/identity"),
-    workerJson<InventoryResponse>("/v1/vault/inventory"),
-    workerJson<PromptResponse>("/v1/vault/metadata/savedPrompts"),
-    workerJson<PromptResponse>("/v1/vault/metadata/promptHistory"),
-    workerJson<{ gaps?: unknown[] }>("/v1/vault/gaps"),
+    workerJson<unknown>("/v1/vault/identity"),
+    workerJson<unknown>("/v1/vault/inventory"),
+    workerJson<unknown>("/v1/vault/metadata/savedPrompts"),
+    workerJson<unknown>("/v1/vault/metadata/promptHistory"),
+    workerJson<unknown>("/v1/vault/gaps"),
   ]);
 
-  const items = inventory.items || [];
-  const counts = inventory.counts || {};
-  const prompts = dedupePrompts([...promptRows(savedPrompts), ...promptRows(promptHistory)]);
+  const parsedIdentity = parseVaultWorkerIdentity({
+    ...(typeof identity === "object" && identity !== null ? identity : {}),
+    workerHost:
+      typeof identity === "object" &&
+      identity !== null &&
+      "workerHost" in identity &&
+      typeof identity.workerHost === "string"
+        ? identity.workerHost
+        : getWorkerHost(),
+  });
+  const parsedInventory = parseVaultInventory(inventory);
+  const parsedSavedPrompts = parseVaultPrompts(savedPrompts);
+  const parsedPromptHistory = parseVaultPrompts(promptHistory, "metadata.prompts");
+  const parsedGaps = parseVaultGaps(gaps);
+  const prompts = dedupePrompts([...parsedSavedPrompts.value, ...parsedPromptHistory.value]);
+  const warnings = [
+    ...parsedInventory.warnings,
+    ...parsedSavedPrompts.warnings,
+    ...parsedPromptHistory.warnings,
+    ...parsedGaps.warnings,
+  ];
 
   return NextResponse.json({
     ok: true,
-    identity,
-    assets: items,
+    identity: parsedIdentity,
+    assets: parsedInventory.value.assets,
     prompts,
-    gaps: gaps.gaps || [],
-    counts: {
-      assets: counts.assets || items.length,
-      images: counts.images || 0,
-      videos: counts.videos || 0,
-      prompts: prompts.length,
-      verified: counts.verified || 0,
-      blocked: counts.blocked || 0,
-      failed: counts.failed || 0,
-      unproven: counts.unproven || 0,
-    },
-    warnings: [],
+    gaps: parsedGaps.value,
+    counts: parseVaultCounts(parsedInventory.value.counts, parsedInventory.value.assets, prompts.length),
+    warnings,
   });
 }

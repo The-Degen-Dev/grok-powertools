@@ -3100,7 +3100,7 @@ git commit -m "feat(sync): add vault overlay sync boundary"
 **Files:**
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Run root unit tests**
+- [x] **Step 1: Run root unit tests**
 
 Run:
 
@@ -3110,7 +3110,7 @@ npm run test:unit
 
 Expected: PASS.
 
-- [ ] **Step 2: Run root extension E2E tests**
+- [x] **Step 2: Run root extension E2E tests**
 
 Run:
 
@@ -3120,7 +3120,7 @@ npm run test:e2e
 
 Expected: PASS. If it fails due an unrelated pre-existing extension fixture issue, record the exact failure in `implementation-notes.html` and do not call the Vault work done until the owner decides whether to fix that blocker in scope.
 
-- [ ] **Step 3: Run root lint**
+- [x] **Step 3: Run root lint**
 
 Run:
 
@@ -3130,7 +3130,7 @@ npm run lint
 
 Expected: PASS. If generated `cloud/.wrangler/tmp` files break lint, clean generated tmp files or update lint ignores in a separate explicit commit, then rerun.
 
-- [ ] **Step 4: Run web build and lint**
+- [x] **Step 4: Run web build and lint**
 
 Run:
 
@@ -3141,7 +3141,7 @@ cd web && npm run lint
 
 Expected: PASS. Verify `npm run dev` still uses webpack dev on port 3001 and build still respects the Next root fix.
 
-- [ ] **Step 5: Run cloud gates**
+- [x] **Step 5: Run cloud gates**
 
 Run:
 
@@ -3152,7 +3152,7 @@ cd cloud && npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 6: Run web Playwright tests**
+- [x] **Step 6: Run web Playwright tests**
 
 Run:
 
@@ -3162,7 +3162,7 @@ npx playwright test -c playwright.web.config.js
 
 Expected: PASS.
 
-- [ ] **Step 7: Manual local browser check with fake Worker**
+- [x] **Step 7: Manual local browser check with fake Worker**
 
 Run:
 
@@ -3189,7 +3189,7 @@ Open `http://localhost:3001/vault` in browser automation and verify:
 - Prompt Library shows two Vault prompts.
 - Ops shows Vault Import and says Worker health is not object proof.
 
-- [ ] **Step 8: Manual real R2 read-only check**
+- [x] **Step 8: Manual real R2 read-only check**
 
 Before this step, confirm `web/.env.local` has a server-only `WORKER_API_KEY` or `CLIENT_API_KEY` key name. Do not print the value.
 
@@ -3210,7 +3210,7 @@ Open `http://localhost:3001/vault` and verify:
 
 Pause and ask the user before any live Grok gap-fill, R2 write, D1 source-fact write, backfill, retry, full media backup, or processed-ID reset.
 
-- [ ] **Step 9: Record final notes**
+- [x] **Step 9: Record final notes**
 
 Append a verification row to `implementation-notes.html`:
 
@@ -3222,7 +3222,7 @@ Append a verification row to `implementation-notes.html`:
           </tr>
 ```
 
-- [ ] **Step 10: Commit final notes**
+- [x] **Step 10: Commit final notes**
 
 Run:
 

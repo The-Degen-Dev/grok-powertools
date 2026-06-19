@@ -3,7 +3,7 @@
 const { defineConfig, devices } = require("@playwright/test");
 
 const workerPort = 43117;
-const webPort = 3001;
+const webPort = 43118;
 
 module.exports = defineConfig({
   testDir: "./tests/e2e-web",
@@ -18,13 +18,13 @@ module.exports = defineConfig({
     {
       command: `FAKE_VAULT_WORKER_PORT=${workerPort} FAKE_VAULT_WORKER_API_KEY=client-sample node tests/e2e-web/fixtures/fake-vault-worker.mjs`,
       url: `http://127.0.0.1:${workerPort}/health`,
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 30000,
     },
     {
-      command: `WORKER_URL=http://127.0.0.1:${workerPort} CLIENT_API_KEY=client-sample AUTH_SECRET=local-test-secret npm --prefix web run dev`,
+      command: `WORKER_URL=http://127.0.0.1:${workerPort} WORKER_API_KEY=client-sample CLIENT_API_KEY=client-sample AUTH_SECRET=local-test-secret npm --prefix web run dev -- --port ${webPort}`,
       url: `http://127.0.0.1:${webPort}`,
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 120000,
     },
   ],

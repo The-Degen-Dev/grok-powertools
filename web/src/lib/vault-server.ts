@@ -18,6 +18,15 @@ export function getWorkerConfig(): WorkerConfig {
   return { workerUrl, apiKey };
 }
 
+export function getWorkerHost(): string {
+  const workerUrl = process.env.WORKER_URL || "";
+  try {
+    return workerUrl ? new URL(workerUrl).host : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export async function workerJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { workerUrl, apiKey } = getWorkerConfig();
   const headers = new Headers(init.headers);

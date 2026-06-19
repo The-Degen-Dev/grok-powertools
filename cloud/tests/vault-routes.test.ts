@@ -108,7 +108,75 @@ test('Vault identity returns redacted target proof', async () => {
     assert.equal(JSON.stringify(body).includes(sampleKey), false);
 });
 
-test('Vault inventory lists normalized assets without D1 writes', async () => {
+test('Vault inventory prefers D1 index rows without R2 listing or D1 writes', async () => {
+    const calls: Array<{ sql: string; args: unknown[] }> = [];
+
+    const response = await worker.fetch(
+        new Request('https://worker.example/v1/vault/inventory', {
+            headers: { [headerName]: sampleKey },
+        }),
+        env({
+            R2_BUCKET: {
+                list: async () => {
+                    throw new Error('D1 inventory rows should avoid R2 list fallback');
+                },
+            },
+            DB: {
+                prepare: (sql: string) => ({
+                    bind: (...args: unknown[]) => ({
+                        all: async () => {
+                            calls.push({ sql, args });
+                            return {
+                                results: [
+                                    {
+                                        asset_id: 'asset-image-1',
+                                        canonical_object_key: 'grok-powertools/v1/users/greymaker/media/by-asset/asset-image-1.png',
+                                        source_url_hashes: JSON.stringify(['source-hash-1']),
+                                        content_sha256: 'sha-image-1',
+                                        media_type: 'image',
+                                        first_seen_at: '2026-06-17T00:00:00.000Z',
+                                        last_seen_at: '2026-06-18T00:00:00.000Z',
+                                        upload_status: 'verified',
+                                        duplicate_object_keys: JSON.stringify([
+                                            'grok-powertools/v1/users/greymaker/media/conflicts/asset-image-1.png',
+                                        ]),
+                                    },
+                                ],
+                            };
+                        },
+                    }),
+                }),
+            },
+        })
+    );
+    const body = await response.json() as { items: Array<{ assetId: string; mediaType: string; legacyObjectKeys: string[]; canonicalObjectKey: string }> };
+    assert.equal(response.status, 200);
+    assert.equal(body.items.length, 1);
+    assert.equal(body.items[0].assetId, 'asset-image-1');
+    assert.equal(body.items[0].mediaType, 'image');
+    assert.equal(body.items[0].canonicalObjectKey, 'grok-powertools/v1/users/greymaker/media/by-asset/asset-image-1.png');
+    assert.deepEqual(body.items[0].legacyObjectKeys, ['grok-powertools/v1/users/greymaker/media/conflicts/asset-image-1.png']);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].sql, /^SELECT /);
+    assert.equal(calls[0].sql.includes('INSERT'), false);
+    assert.equal(calls[0].sql.includes('UPDATE'), false);
+    assert.equal(calls[0].sql.includes('DELETE'), false);
+});
+
+test('Vault inventory falls back to R2 list when D1 has no rows', async () => {
+    const response = await worker.fetch(
+        new Request('https://worker.example/v1/vault/inventory', {
+            headers: { [headerName]: sampleKey },
+        }),
+        env()
+    );
+    const body = await response.json() as { items: Array<{ assetId: string; mediaType: string }> };
+    assert.equal(response.status, 200);
+    assert.equal(body.items[0].assetId, 'asset-video-1');
+    assert.equal(body.items[0].mediaType, 'video');
+});
+
+test('Vault inventory falls back to R2 list when D1 read fails', async () => {
     const response = await worker.fetch(
         new Request('https://worker.example/v1/vault/inventory', {
             headers: { [headerName]: sampleKey },
@@ -116,7 +184,7 @@ test('Vault inventory lists normalized assets without D1 writes', async () => {
         env({
             DB: {
                 prepare: () => {
-                    throw new Error('Inventory must not write or read D1 in this first route slice');
+                    throw new Error('D1 unavailable');
                 },
             },
         })

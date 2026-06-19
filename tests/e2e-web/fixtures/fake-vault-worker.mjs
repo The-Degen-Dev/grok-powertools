@@ -48,6 +48,15 @@ const fixtureAssets = [
     createdAt: "2026-06-18T00:00:00.000Z",
     updatedAt: "2026-06-18T00:00:00.000Z",
   },
+  {
+    assetId: "asset-malformed-1",
+    mediaType: "audio",
+    legacyObjectKeys: [],
+    verificationStatus: "verified",
+    gapCodes: [],
+    createdAt: "2026-06-18T00:00:00.000Z",
+    updatedAt: "2026-06-18T00:00:00.000Z",
+  },
 ];
 
 const fixturePrompts = [
@@ -66,6 +75,11 @@ const fixturePrompts = [
     sourceAssetIds: ["asset-image-1"],
     usageCount: 1,
     createdAt: "2026-06-18T00:00:00.000Z",
+  },
+  {
+    id: "prompt-malformed-1",
+    text: "   ",
+    tags: ["vault"],
   },
 ];
 
@@ -104,7 +118,7 @@ const server = http.createServer((req, res) => {
       ok: true,
       items: fixtureAssets,
       nextCursor: null,
-      counts: { assets: 2, images: 1, videos: 1, verified: 2, blocked: 0, failed: 0, unproven: 0 },
+      counts: { assets: 3, images: 1, videos: 1, verified: 3, blocked: 0, failed: 0, unproven: 0 },
     });
   }
 
@@ -117,7 +131,20 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === "/v1/vault/gaps") {
-    return sendJson(res, 200, { ok: true, gaps: [] });
+    return sendJson(res, 200, {
+      ok: true,
+      gaps: [
+        {
+          id: "gap-malformed-1",
+          code: "missing-source",
+          severity: "critical",
+          evidence: "bad severity should not reach IndexedDB",
+          recommendedAction: "drop this row",
+          requiresLiveGrok: false,
+          requiresCloudWrite: false,
+        },
+      ],
+    });
   }
 
   if (url.pathname === "/v1/vault/media") {

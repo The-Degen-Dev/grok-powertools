@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import type { VaultAsset } from "@/lib/vault-types";
+import { isVaultImageAsset } from "@/lib/vault-media";
 
 export default function VaultMediaViewer({
   asset,
@@ -54,7 +55,7 @@ export default function VaultMediaViewer({
 
   if (!asset) return null;
   const mediaUrl = `/api/vault/media/${encodeURIComponent(asset.assetId)}`;
-  const isImage = asset.mediaType === "image";
+  const isImage = isVaultImageAsset(asset);
 
   return (
     <div

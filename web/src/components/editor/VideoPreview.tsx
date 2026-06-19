@@ -60,7 +60,11 @@ const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>(
       togglePlay: () => {
         const v = videoRef.current;
         if (!v) return;
-        v.paused ? v.play().catch(() => {}) : v.pause();
+        if (v.paused) {
+          v.play().catch(() => {});
+        } else {
+          v.pause();
+        }
       },
       isPaused: () => videoRef.current?.paused ?? true,
     }));
@@ -104,7 +108,12 @@ const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>(
           }}
           onClick={() => {
             const v = videoRef.current;
-            if (v) v.paused ? v.play().catch(() => {}) : v.pause();
+            if (!v) return;
+            if (v.paused) {
+              v.play().catch(() => {});
+            } else {
+              v.pause();
+            }
           }}
         />
 

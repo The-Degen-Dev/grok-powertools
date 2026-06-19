@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { LogOut, RefreshCw, User, Wifi, WifiOff } from "lucide-react";
+import { LogOut, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import SignInModal from "./SignInModal";
 import Button from "@/components/ui/Button";
 
@@ -77,6 +77,7 @@ export default function UserMenu({
         className="relative flex items-center gap-2 rounded-(--radius-btn) p-1 transition-colors hover:bg-(--color-surface-100) dark:hover:bg-(--color-surface-800)"
       >
         {user.image ? (
+          // eslint-disable-next-line @next/next/no-img-element -- Provider avatar URLs are already optimized and not controlled by the app.
           <img
             src={user.image}
             alt=""

@@ -196,6 +196,7 @@ export default function VideoCard({
             )}
           </>
         ) : item.thumbnailUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- Thumbnails may come from arbitrary Grok/export URLs.
           <img
             src={item.thumbnailUrl}
             alt={item.promptText || "Grok Imagine"}
