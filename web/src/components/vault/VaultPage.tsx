@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Button from "@/components/ui/Button";
 import VaultLoadPanel from "./VaultLoadPanel";
 import VaultGrid from "./VaultGrid";
+import VaultMediaViewer from "./VaultMediaViewer";
 import { getDB } from "@/lib/local-storage";
 import { commitVaultPreview, getVaultAssets } from "@/lib/vault-storage";
 import type { VaultAsset, VaultPreview } from "@/lib/vault-types";
@@ -13,6 +14,7 @@ export default function VaultPage() {
   const [preview, setPreview] = useState<VaultPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [assets, setAssets] = useState<VaultAsset[]>([]);
+  const [viewerAsset, setViewerAsset] = useState<VaultAsset | null>(null);
 
   useEffect(() => {
     getDB().then(getVaultAssets).then(setAssets).catch(() => setAssets([]));
@@ -52,8 +54,9 @@ export default function VaultPage() {
         </section>
       )}
       <section className="mt-6">
-        <VaultGrid assets={assets} onOpen={() => {}} onAddToCollection={() => {}} />
+        <VaultGrid assets={assets} onOpen={setViewerAsset} onAddToCollection={() => {}} />
       </section>
+      <VaultMediaViewer asset={viewerAsset} onClose={() => setViewerAsset(null)} />
     </div>
   );
 }

@@ -1998,12 +1998,13 @@ git commit -m "feat(web): commit vault preview locally"
 **Files:**
 - Create: `web/src/components/vault/VaultMediaViewer.tsx`
 - Modify: `web/src/components/vault/VaultPage.tsx`
+- Modify: `web/src/components/vault/VaultMediaCard.tsx`
 - Modify: `web/src/components/video/VideoCard.tsx`
 - Modify: `web/src/components/video/FullscreenViewer.tsx`
 - Modify: `tests/e2e-web/vault-ui.spec.js`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Add failing media viewer test**
+- [x] **Step 1: Add failing media viewer test**
 
 Append:
 
@@ -2022,7 +2023,7 @@ test("Vault viewer opens image and video assets", async ({ page }) => {
 });
 ```
 
-- [ ] **Step 2: Run failing viewer test**
+- [x] **Step 2: Run failing viewer test**
 
 Run:
 
@@ -2032,7 +2033,7 @@ npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js
 
 Expected: FAIL because the viewer is not wired.
 
-- [ ] **Step 3: Add Vault media viewer**
+- [x] **Step 3: Add Vault media viewer**
 
 Create `web/src/components/vault/VaultMediaViewer.tsx`:
 
@@ -2078,7 +2079,7 @@ export default function VaultMediaViewer({
 }
 ```
 
-- [ ] **Step 4: Wire viewer**
+- [x] **Step 4: Wire viewer**
 
 Modify `web/src/components/vault/VaultPage.tsx`:
 
@@ -2104,7 +2105,7 @@ Add at the end of the return:
       <VaultMediaViewer asset={viewerAsset} onClose={() => setViewerAsset(null)} />
 ```
 
-- [ ] **Step 5: Update existing video card for images**
+- [x] **Step 5: Update existing video card for images**
 
 Modify `web/src/components/video/VideoCard.tsx` so the media container branch starts with:
 
@@ -2121,7 +2122,7 @@ Modify `web/src/components/video/VideoCard.tsx` so the media container branch st
 
 Keep the rest of the existing video branch after that line.
 
-- [ ] **Step 6: Run tests and build**
+- [x] **Step 6: Run tests and build**
 
 Run:
 
@@ -2132,7 +2133,7 @@ cd web && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 7: Update notes and commit**
+- [x] **Step 7: Update notes and commit**
 
 Append:
 

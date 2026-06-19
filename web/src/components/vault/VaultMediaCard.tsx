@@ -34,9 +34,15 @@ export default function VaultMediaCard({
           <span>{asset.mediaType}</span>
           <span>{asset.verificationStatus}</span>
         </div>
-        <p className="truncate font-mono text-xs text-(--color-surface-500)">{asset.assetId}</p>
-        {asset.promptText && <p className="line-clamp-2 text-sm text-(--color-surface-700) dark:text-(--color-surface-300)">{asset.promptText}</p>}
-        <Button variant="secondary" size="sm" onClick={() => onAddToCollection(asset)}>
+        <button type="button" onClick={() => onOpen(asset)} className="block w-full space-y-2 text-left">
+          <span className="block truncate font-mono text-xs text-(--color-surface-500)">{asset.assetId}</span>
+          {asset.promptText && <span className="line-clamp-2 text-sm text-(--color-surface-700) dark:text-(--color-surface-300)">{asset.promptText}</span>}
+        </button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => onAddToCollection(asset)}
+        >
           <Plus className="h-3.5 w-3.5" />
           Add to Collection
         </Button>

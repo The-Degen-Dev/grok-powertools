@@ -91,6 +91,36 @@
             <td>Verification</td>
             <td>Vault preview commit is local IndexedDB only. The browser test proves committed fixture assets survive reload without any Worker, R2, D1, sync, or live Grok write.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Vault viewer handles images and videos directly. Existing video cards get image support without renaming the component tree in this pass.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td><code>FullscreenViewer</code> remains video-only until the watch queue work in Task 9, even though Task 8 listed it, because Task 8's concrete steps only wire the Vault media viewer and image branch in cards.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td><code>VaultMediaCard</code> uses explicit media and text buttons instead of making the whole card clickable, so the Task 8 text-click test works without nesting button interactions.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 8 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The first Playwright attempt timed out waiting for its web server, then passed after manual fake Worker and Next readiness checks; after the IndexedDB reset fix, the direct Playwright webServer run also passed.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>The Vault UI test reset waits for the app-created IndexedDB v4 database before clearing stores. This avoids accidentally creating an empty v1 database from the test helper while preserving existing app stores during normal use.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>The Vault media viewer handles Escape, focus entry, focus restoration, and a small focus loop itself because it is a custom full-screen dialog, not a shared modal component.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>
