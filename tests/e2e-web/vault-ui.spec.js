@@ -221,3 +221,39 @@ test("Movie Maker source picker preserves Vault source assets", async ({ page })
   expect(pickerMovieState.clipTypes).toEqual(["image", "video"]);
   expect(pickerMovieState.sourceAssetIds).toEqual(["asset-image-1", "asset-video-1"]);
 });
+
+test("Prompt library includes Vault prompts after commit", async ({ page }) => {
+  await resetDb(page);
+  await page.goto("/vault");
+  await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("grok-power-tools");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const tx = db.transaction("prompts", "readwrite");
+    tx.objectStore("prompts").put({
+      id: "local-duplicate-prompt",
+      text: "  A cinematic   neon canyon flythrough.  ",
+      tags: ["local"],
+      usageCount: 10,
+      createdAt: "2026-06-17T00:00:00.000Z",
+    });
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+  });
+  await page.getByRole("button", { name: /Preview Vault/i }).click();
+  await page.getByRole("button", { name: /Commit Vault/i }).click();
+  await page.getByRole("button", { name: /Prompts/i }).click();
+  const promptLibrary = page.locator(".fixed.inset-0").filter({ hasText: "Prompt Library" });
+  await expect(promptLibrary.getByText(/cinematic\s+neon canyon/i)).toBeVisible();
+  await expect(promptLibrary.getByText(/quiet glass library/i)).toBeVisible();
+  await expect(promptLibrary.locator("p").filter({ hasText: /cinematic\s+neon canyon/i })).toHaveCount(1);
+  await promptLibrary.getByPlaceholder(/Search prompts/i).fill("vault");
+  await expect(promptLibrary.getByText(/cinematic\s+neon canyon/i)).toBeVisible();
+  await expect(promptLibrary.getByTitle("Delete")).toHaveCount(0);
+});

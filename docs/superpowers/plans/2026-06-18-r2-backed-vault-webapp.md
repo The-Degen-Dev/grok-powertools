@@ -2552,7 +2552,7 @@ git commit -m "feat(web): support image clips in movie maker"
 - Modify: `tests/e2e-web/vault-ui.spec.js`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Add failing prompt test**
+- [x] **Step 1: Add failing prompt test**
 
 Append:
 
@@ -2568,7 +2568,7 @@ test("Prompt library includes Vault prompts after commit", async ({ page }) => {
 });
 ```
 
-- [ ] **Step 2: Run failing prompt test**
+- [x] **Step 2: Run failing prompt test**
 
 Run:
 
@@ -2578,13 +2578,24 @@ npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js
 
 Expected: FAIL until Prompt Library reads Vault prompts.
 
-- [ ] **Step 3: Add prompt merge helper**
+- [x] **Step 3: Add prompt merge helper**
 
 Create `web/src/lib/vault-prompts.ts`:
 
 ```ts
 import type { SavedPrompt } from "./types";
-import { normalizePromptText } from "./vault-types";
+import { normalizePromptText, type VaultPrompt } from "./vault-types";
+
+export function vaultPromptToSavedPrompt(prompt: VaultPrompt): SavedPrompt {
+  return {
+    id: `vault-${prompt.id}`,
+    text: prompt.text,
+    tags: Array.from(new Set(["vault", ...(prompt.tags || [])])),
+    sourceVideoId: prompt.sourceAssetIds?.[0],
+    usageCount: prompt.usageCount ?? 0,
+    createdAt: prompt.createdAt ?? new Date(0).toISOString(),
+  };
+}
 
 export function mergePrompts(localPrompts: SavedPrompt[], vaultPrompts: SavedPrompt[]): SavedPrompt[] {
   const byHash = new Map<string, SavedPrompt>();
@@ -2592,38 +2603,64 @@ export function mergePrompts(localPrompts: SavedPrompt[], vaultPrompts: SavedPro
     const key = normalizePromptText(prompt.text);
     if (!key) continue;
     const existing = byHash.get(key);
-    if (!existing || prompt.usageCount > existing.usageCount) {
-      byHash.set(key, {
-        ...prompt,
-        tags: Array.from(new Set([...(existing?.tags || []), ...(prompt.tags || [])])),
-        usageCount: Math.max(existing?.usageCount || 0, prompt.usageCount || 0),
-      });
+    if (!existing) {
+      byHash.set(key, prompt);
+      continue;
     }
+
+    const preferPrompt =
+      prompt.usageCount > existing.usageCount ||
+      (existing.id.startsWith("vault-") && !prompt.id.startsWith("vault-"));
+    const displayPrompt = preferPrompt ? prompt : existing;
+    const latestCreatedAt =
+      new Date(prompt.createdAt).getTime() > new Date(existing.createdAt).getTime()
+        ? prompt.createdAt
+        : existing.createdAt;
+    byHash.set(key, {
+      ...displayPrompt,
+      tags: Array.from(new Set([...(existing.tags || []), ...(prompt.tags || [])])),
+      sourceVideoId: displayPrompt.sourceVideoId || existing.sourceVideoId || prompt.sourceVideoId,
+      usageCount: Math.max(existing.usageCount || 0, prompt.usageCount || 0),
+      createdAt: latestCreatedAt,
+    });
   }
   return Array.from(byHash.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
+
+export function filterPrompts(prompts: SavedPrompt[], query: string): SavedPrompt[] {
+  const lower = query.trim().toLowerCase();
+  if (!lower) return prompts;
+  return prompts.filter(
+    (prompt) =>
+      prompt.text.toLowerCase().includes(lower) ||
+      prompt.tags.some((tag) => tag.toLowerCase().includes(lower)),
+  );
+}
 ```
 
-- [ ] **Step 4: Wire PromptLibrary**
+- [x] **Step 4: Wire PromptLibrary**
 
 Modify `web/src/components/prompts/PromptLibrary.tsx` so it imports:
 
 ```tsx
 import { getDB, getSavedPrompts } from "@/lib/local-storage";
-import { mergePrompts } from "@/lib/vault-prompts";
+import type { VaultPrompt } from "@/lib/vault-types";
+import { filterPrompts, mergePrompts, vaultPromptToSavedPrompt } from "@/lib/vault-prompts";
 ```
 
 In its load function, after local prompts are loaded, read `vault_prompts`:
 
 ```tsx
-      const db = await getDB();
-      const vaultPrompts = await db.getAll("vault_prompts");
-      setPrompts(mergePrompts(localPrompts, vaultPrompts as SavedPrompt[]));
+      const [localPrompts, db] = await Promise.all([getSavedPrompts(), getDB()]);
+      const vaultRows = (await db.getAll("vault_prompts")) as VaultPrompt[];
+      const mergedPrompts = mergePrompts(localPrompts, vaultRows.map(vaultPromptToSavedPrompt));
+      setPrompts(filterPrompts(mergedPrompts, query));
 ```
 
 Keep existing local add/edit/delete behavior unchanged.
+Hide the delete action for rows tagged `vault`, because deleting those rows from the local prompt store would not remove the committed Vault prompt.
 
-- [ ] **Step 5: Run tests and build**
+- [x] **Step 5: Run tests and build**
 
 Run:
 
@@ -2634,7 +2671,7 @@ cd web && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 6: Update notes and commit**
+- [x] **Step 6: Update notes and commit**
 
 Append:
 

@@ -176,6 +176,21 @@
             <td>Verification</td>
             <td>The Clip Source Picker path now preserves Vault <code>sourceAssetId</code> for image and video clips. The Task 10 browser suite includes a focused source-picker test and passed all 7 Vault UI tests after this check was added.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Prompt Library converts <code>vault_prompts</code> rows into display-safe prompt rows before merging with local saved prompts by normalized text. Search filters the merged set so Vault prompts behave like local prompts without writing them into the local prompt store.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 11 includes a browser test that commits fake Vault prompts, opens the Prompt Library slide-over, and verifies Vault prompts render there. The same test seeds a normalized duplicate local prompt and confirms the merged library shows one matching prompt row.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Rows with Vault provenance hide the local delete control. A local-only prompt can still be deleted, but a merged Vault row should not show a delete button that would no-op against the local prompt store while the committed Vault prompt remains.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>
