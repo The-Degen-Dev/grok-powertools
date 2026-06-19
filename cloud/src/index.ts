@@ -14,6 +14,7 @@ import type {
 import { verifyJWT, extractBearerToken } from './auth';
 import { buildAcceptanceIdentity, validateAcceptanceWrite } from './acceptance';
 import { upsertEntity, getEntitiesSince, ensureUser, upsertR2DedupeIndex, upsertMetadataSnapshotIndex } from './db';
+import { buildVaultIdentity, findVaultMediaObject, listVaultInventory, readVaultMetadata } from './vault';
 
 const SERVICE_NAME = 'grok-r2-backup';
 const PRESIGN_EXPIRY_SECONDS = 3600;
@@ -24,14 +25,16 @@ const ACCEPTANCE_CORRELATION_ID_HEADER = 'x-acceptance-correlation-id';
 const METADATA_FILENAMES: Record<Exclude<MetadataKind, 'backfillManifest'>, string> = {
     savedPrompts: 'saved-prompts.latest.json',
     promptHistory: 'prompt-history.latest.json',
-    processedIds: 'processed-ids.latest.json'
+    processedIds: 'processed-ids.latest.json',
+    savedList: 'saved-list.latest.json'
 };
 
 const ALLOWED_METADATA_KINDS = new Set<MetadataKind>([
     'savedPrompts',
     'promptHistory',
     'processedIds',
-    'backfillManifest'
+    'backfillManifest',
+    'savedList'
 ]);
 
 function corsHeaders(): HeadersInit {
@@ -669,6 +672,38 @@ export default {
 
         if (request.method === 'POST' && url.pathname === '/v1/presign') {
             return handlePresign(request, env);
+        }
+
+        if (url.pathname.startsWith('/v1/vault/')) {
+            if (request.method === 'GET' && url.pathname === '/v1/vault/identity') {
+                return jsonResponse(await buildVaultIdentity(env), 200);
+            }
+
+            if (request.method === 'GET' && url.pathname === '/v1/vault/inventory') {
+                const cursor = url.searchParams.get('cursor');
+                const limit = Number(url.searchParams.get('limit') || '100');
+                return jsonResponse(await listVaultInventory(env, cursor, limit), 200);
+            }
+
+            if (request.method === 'GET' && url.pathname.startsWith('/v1/vault/metadata/')) {
+                const kind = url.pathname.split('/').pop() || '';
+                const result = await readVaultMetadata(env, kind);
+                return jsonResponse(result, 'status' in result && typeof result.status === 'number' ? result.status : 200);
+            }
+
+            if (request.method === 'GET' && url.pathname === '/v1/vault/gaps') {
+                return jsonResponse({ ok: true, gaps: [] }, 200);
+            }
+
+            if (request.method === 'GET' && url.pathname === '/v1/vault/media') {
+                const assetId = url.searchParams.get('assetId') || '';
+                const object = await findVaultMediaObject(env, assetId);
+                if (!object?.body) return errorResponse('MEDIA_OBJECT_MISSING', 404);
+                const headers = new Headers(corsHeaders());
+                if (object.httpMetadata?.contentType) headers.set('content-type', object.httpMetadata.contentType);
+                headers.set('cache-control', 'private, no-store');
+                return new Response(object.body, { status: 200, headers });
+            }
         }
 
         if (request.method === 'HEAD' && url.pathname === '/v1/objects/verify') {

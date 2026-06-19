@@ -696,7 +696,7 @@ git commit -m "feat(cloud): add vault normalization helpers"
 - Modify: `cloud/src/types.ts`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Write failing route tests**
+- [x] **Step 1: Write failing route tests**
 
 Create `cloud/tests/vault-routes.test.ts`:
 
@@ -806,7 +806,7 @@ test("Vault media streams object bytes for server-side proxy", async () => {
 });
 ```
 
-- [ ] **Step 2: Run failing Worker route tests**
+- [x] **Step 2: Run failing Worker route tests**
 
 Run:
 
@@ -816,7 +816,7 @@ cd cloud && npm run test:acceptance
 
 Expected: FAIL because `/v1/vault/*` routes are not wired.
 
-- [ ] **Step 3: Add Worker inventory and media helpers**
+- [x] **Step 3: Add Worker inventory and media helpers**
 
 Add these exports to `cloud/src/vault.ts`:
 
@@ -872,7 +872,7 @@ export async function findVaultMediaObject(env: Env, assetId: string) {
 }
 ```
 
-- [ ] **Step 4: Wire Worker routes**
+- [x] **Step 4: Wire Worker routes**
 
 Modify `cloud/src/index.ts` imports:
 
@@ -919,7 +919,7 @@ Add route handlers before the default 404:
         }
 ```
 
-- [ ] **Step 5: Run Worker tests**
+- [x] **Step 5: Run Worker tests**
 
 Run:
 
@@ -930,7 +930,7 @@ cd cloud && npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 6: Update notes and commit**
+- [x] **Step 6: Update notes and commit**
 
 Append this row to `implementation-notes.html`:
 

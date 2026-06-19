@@ -2,7 +2,8 @@ export type MetadataKind =
     | 'savedPrompts'
     | 'promptHistory'
     | 'processedIds'
-    | 'backfillManifest';
+    | 'backfillManifest'
+    | 'savedList';
 
 export interface Env {
     DB: D1Database;

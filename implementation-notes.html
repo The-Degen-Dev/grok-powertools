@@ -46,6 +46,16 @@
             <td>Design decision</td>
             <td>Worker Vault helpers normalize canonical and legacy R2 keys without moving or rewriting existing objects, and canonical media must stay under the configured key prefix.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Worker Vault read routes use only R2 list/get operations for the first preview path. Metadata lookup follows the current Greymaker latest-snapshot path from the plan and must be verified against real R2 before final acceptance.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Worker metadata responses expose normalized rows as <code>data</code>; the fake Worker still exposes prompt fixtures as <code>prompts</code>, so the Next preview broker must accept both shapes.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>

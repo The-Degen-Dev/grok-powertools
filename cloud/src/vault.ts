@@ -91,3 +91,61 @@ export function normalizeVaultObject(object: R2ListObjectLike, keyPrefix: string
         updatedAt: uploadedAt,
     };
 }
+
+export async function listVaultInventory(env: Env, cursor?: string | null, limit = 100) {
+    const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+    const listed = await env.R2_BUCKET.list({
+        prefix: `${keyPrefix}/users/`,
+        cursor: cursor || undefined,
+        limit: Math.max(1, Math.min(limit, 1000)),
+    });
+    const items = listed.objects
+        .filter((object) => object.key.includes('/media/'))
+        .map((object) => normalizeVaultObject(object, keyPrefix));
+
+    return {
+        ok: true,
+        items,
+        nextCursor: listed.truncated ? listed.cursor || null : null,
+        counts: {
+            assets: items.length,
+            images: items.filter((item) => item.mediaType === 'image').length,
+            videos: items.filter((item) => item.mediaType === 'video').length,
+            verified: items.filter((item) => item.verificationStatus === 'verified').length,
+            blocked: 0,
+            failed: 0,
+            unproven: 0,
+        },
+    };
+}
+
+export async function readVaultMetadata(env: Env, kind: string) {
+    const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+    const filenameByKind: Record<string, string> = {
+        savedPrompts: 'saved-prompts.latest.json',
+        promptHistory: 'prompt-history.latest.json',
+        processedIds: 'processed-ids.latest.json',
+        backfillManifest: 'backfill-manifest.latest.json',
+        savedList: 'saved-list.latest.json',
+    };
+    const filename = filenameByKind[kind];
+    if (!filename) return { ok: false, status: 400, error: 'Unsupported metadata kind.' };
+
+    const object = await env.R2_BUCKET.get(`${keyPrefix}/users/greymaker/metadata/${filename}`);
+    if (!object) return { ok: true, kind, data: [] };
+
+    const parsed = JSON.parse(await object.text()) as { data?: unknown };
+    return {
+        ok: true,
+        kind,
+        data: Array.isArray(parsed.data) ? parsed.data : parsed.data ? [parsed.data] : [],
+    };
+}
+
+export async function findVaultMediaObject(env: Env, assetId: string) {
+    const inventory = await listVaultInventory(env, null, 1000);
+    const match = inventory.items.find((item) => item.assetId === assetId);
+    const objectKey = match?.canonicalObjectKey || match?.legacyObjectKeys[0];
+    if (!objectKey) return null;
+    return env.R2_BUCKET.get(objectKey);
+}
