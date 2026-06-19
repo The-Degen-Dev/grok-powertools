@@ -10,6 +10,7 @@ import MovieCard from "./MovieCard";
 import Button from "@/components/ui/Button";
 import EmptyState from "@/components/ui/EmptyState";
 import WelcomeModal from "@/components/onboarding/WelcomeModal";
+import VaultLoadPanel from "@/components/vault/VaultLoadPanel";
 
 const EXAMPLE_ITEMS = [
   {
@@ -95,9 +96,12 @@ export default function Dashboard() {
 
   if (isEmpty) {
     return (
-      <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center px-6">
+      <div className="mx-auto flex min-h-[calc(100vh-3.5rem)] max-w-screen-xl flex-col justify-center px-6 py-10">
         <WelcomeModal onLoadExamples={handleLoadExamples} />
-        <div className="max-w-lg text-center">
+        <div className="mb-8">
+          <VaultLoadPanel onPreview={() => router.push("/vault")} />
+        </div>
+        <div className="mx-auto max-w-lg text-center">
           <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-(--color-accent)/10">
             <Sparkles className="h-8 w-8 text-(--color-accent)" />
           </div>

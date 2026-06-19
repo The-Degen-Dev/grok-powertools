@@ -1574,7 +1574,7 @@ git commit -m "feat(web): add vault api routes"
 - Modify: `web/src/components/dashboard/Dashboard.tsx`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Write failing UI smoke test**
+- [x] **Step 1: Write failing UI smoke test**
 
 Create `tests/e2e-web/vault-ui.spec.js`:
 
@@ -1609,7 +1609,7 @@ test("Vault route renders preview controls", async ({ page }) => {
 });
 ```
 
-- [ ] **Step 2: Run failing UI test**
+- [x] **Step 2: Run failing UI test**
 
 Run:
 
@@ -1619,7 +1619,7 @@ npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js
 
 Expected: FAIL because `/vault` and dashboard Vault load do not exist.
 
-- [ ] **Step 3: Add Vault page shell**
+- [x] **Step 3: Add Vault page shell**
 
 Create `web/src/app/vault/page.tsx`:
 
@@ -1718,7 +1718,7 @@ export default function VaultPage() {
 }
 ```
 
-- [ ] **Step 4: Add Header nav and breadcrumb**
+- [x] **Step 4: Add Header nav and breadcrumb**
 
 Modify `web/src/components/layout/Header.tsx`:
 
@@ -1738,7 +1738,7 @@ Add breadcrumb:
   if (pathname === "/vault") return { label: "Vault", href: "/vault" };
 ```
 
-- [ ] **Step 5: Put Vault load on empty dashboard**
+- [x] **Step 5: Put Vault load on empty dashboard**
 
 Modify `web/src/components/dashboard/Dashboard.tsx` to import:
 
@@ -1754,7 +1754,7 @@ In the empty state branch, add this before the existing welcome copy:
           </div>
 ```
 
-- [ ] **Step 6: Run UI test and build**
+- [x] **Step 6: Run UI test and build**
 
 Run:
 
@@ -1765,7 +1765,7 @@ cd web && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 7: Update notes and commit**
+- [x] **Step 7: Update notes and commit**
 
 Append this row:
 

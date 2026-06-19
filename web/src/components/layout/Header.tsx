@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Scissors, Film, Sparkles, Settings, BookOpen, Activity } from "lucide-react";
+import { Archive, Scissors, Film, Sparkles, Settings, BookOpen, Activity } from "lucide-react";
 import ThemeToggle from "@/components/ui/ThemeToggle";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 import PromptLibrary from "@/components/prompts/PromptLibrary";
@@ -11,6 +11,7 @@ import UserMenu from "@/components/auth/UserMenu";
 import { useSyncContext } from "@/components/auth/SyncProvider";
 
 const NAV_ITEMS = [
+  { href: "/vault", icon: Archive, label: "Vault" },
   { href: "/ops", icon: Activity, label: "Ops" },
   { href: "/edit", icon: Scissors, label: "Clip Editor" },
   { href: "/movie", icon: Film, label: "Movie Maker" },
@@ -21,6 +22,7 @@ function useBreadcrumb() {
   if (pathname === "/") return null;
   if (pathname.startsWith("/collections/"))
     return { label: "Collection", href: pathname };
+  if (pathname === "/vault") return { label: "Vault", href: "/vault" };
   if (pathname === "/edit") return { label: "Clip Editor", href: "/edit" };
   if (pathname === "/ops") return { label: "Ops", href: "/ops" };
   if (pathname.startsWith("/movie"))
