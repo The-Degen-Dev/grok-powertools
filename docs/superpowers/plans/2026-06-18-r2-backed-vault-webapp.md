@@ -438,7 +438,7 @@ git commit -m "feat(web): add vault identity test harness"
 - Modify: `cloud/src/types.ts`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Add failing Worker helper tests**
+- [x] **Step 1: Add failing Worker helper tests**
 
 Create `cloud/tests/vault.test.ts`:
 
@@ -504,7 +504,7 @@ test("buildVaultIdentity redacts secrets", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing Worker tests**
+- [x] **Step 2: Run the failing Worker tests**
 
 Run:
 
@@ -514,7 +514,7 @@ cd cloud && npm run test:acceptance -- vault.test
 
 Expected: FAIL because `cloud/src/vault.ts` does not exist.
 
-- [ ] **Step 3: Add Worker Vault types**
+- [x] **Step 3: Add Worker Vault types**
 
 Append to `cloud/src/types.ts`:
 
@@ -560,7 +560,7 @@ export interface VaultGap {
 }
 ```
 
-- [ ] **Step 4: Add Worker Vault helper module**
+- [x] **Step 4: Add Worker Vault helper module**
 
 Create `cloud/src/vault.ts`:
 
@@ -655,7 +655,7 @@ export function normalizeVaultObject(object: R2ListObjectLike, keyPrefix: string
 }
 ```
 
-- [ ] **Step 5: Run Worker tests**
+- [x] **Step 5: Run Worker tests**
 
 Run:
 
@@ -666,7 +666,7 @@ cd cloud && npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 6: Update notes**
+- [x] **Step 6: Update notes**
 
 Append this row to `implementation-notes.html`:
 
@@ -678,7 +678,7 @@ Append this row to `implementation-notes.html`:
           </tr>
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 

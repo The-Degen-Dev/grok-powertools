@@ -41,6 +41,11 @@
             <td>Design decision</td>
             <td>The fake Worker exposes an unauthenticated health endpoint for Playwright server readiness because authenticated identity checks return 401 and would not prove the route under test.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Worker Vault helpers normalize canonical and legacy R2 keys without moving or rewriting existing objects, and canonical media must stay under the configured key prefix.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>

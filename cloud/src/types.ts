@@ -106,3 +106,43 @@ export interface ObjectVerifyResponse {
     };
     mismatches: string[];
 }
+
+export type VaultMediaType = 'image' | 'video' | 'unknown';
+export type VaultStatus = 'verified' | 'blocked' | 'failed' | 'unproven';
+
+export interface VaultAsset {
+    assetId: string;
+    mediaType: VaultMediaType;
+    canonicalObjectKey?: string;
+    legacyObjectKeys: string[];
+    contentType?: string;
+    sizeBytes?: number;
+    etag?: string;
+    sha256?: string;
+    sourceUrlHash?: string;
+    sourceUrl?: string;
+    grokPostId?: string;
+    mediaUuid?: string;
+    promptId?: string;
+    promptText?: string;
+    width?: number;
+    height?: number;
+    durationSeconds?: number;
+    firstSeenAt?: string;
+    lastSeenAt?: string;
+    verificationStatus: VaultStatus;
+    gapCodes: string[];
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface VaultGap {
+    id: string;
+    assetId?: string;
+    code: string;
+    severity: 'info' | 'warning' | 'blocking';
+    evidence: string;
+    recommendedAction: string;
+    requiresLiveGrok: boolean;
+    requiresCloudWrite: boolean;
+}
