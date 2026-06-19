@@ -226,6 +226,26 @@
             <td>Verification</td>
             <td>The Task 13 Playwright sync spec intercepts local Next sync routes to prove initial sign-in pushes Vault overlays and stale remote overlay pulls do not overwrite newer local edits.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Final gates passed for <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, and <code>npx playwright test -c playwright.web.config.js</code>.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Blocker</td>
+            <td><code>npm run test:unit</code> failed in unrelated dirty recreate workflow code: <code>tests/unit/recreateWorkflowContent.test.js</code> expected <code>chat_answer_timeout</code> but received <code>chat_submit_not_sent</code>. A focused rerun of that test also failed with <code>native_click_unavailable</code>, so the root unit gate is not clean yet.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Fake Worker manual smoke passed on local servers for Vault preview, local commit, image/video cards, image/video viewer, add to collection, Watch All, Save as Movie, Prompt Library Vault prompts, and Ops Worker-health boundary copy. The first dashboard visit after a reset shows the expected onboarding modal, which was dismissed with <code>Skip</code>.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Blocker</td>
+            <td>Real R2 read-only preview was not run because <code>web/.env.local</code> and the current shell expose <code>WORKER_URL</code> but no non-empty <code>WORKER_API_KEY</code> or <code>CLIENT_API_KEY</code> name. No Worker key value was printed, copied, or guessed.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>
