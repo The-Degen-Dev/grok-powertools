@@ -72,6 +72,18 @@ export async function getVaultOverlays(db: IDBPDatabase): Promise<VaultOverlay[]
   return (await db.getAll("vault_overlays")) as VaultOverlay[];
 }
 
+export async function getVaultOverlaysIncludingDeleted(db: IDBPDatabase): Promise<VaultOverlay[]> {
+  return (await db.getAll("vault_overlays")) as VaultOverlay[];
+}
+
+export async function getVaultOverlay(db: IDBPDatabase, assetId: string): Promise<VaultOverlay | undefined> {
+  return db.get("vault_overlays", assetId) as Promise<VaultOverlay | undefined>;
+}
+
+export async function putVaultOverlay(db: IDBPDatabase, overlay: VaultOverlay): Promise<void> {
+  await db.put("vault_overlays", overlay);
+}
+
 export async function getVaultGaps(db: IDBPDatabase): Promise<VaultGap[]> {
   return (await db.getAll("vault_gaps")) as VaultGap[];
 }

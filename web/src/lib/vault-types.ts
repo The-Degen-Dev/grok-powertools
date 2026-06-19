@@ -36,6 +36,7 @@ export interface VaultOverlay {
   hidden: boolean;
   favorite: boolean;
   updatedAt: string;
+  deletedAt?: string | null;
   syncVersion?: number;
 }
 

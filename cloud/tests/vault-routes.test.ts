@@ -4,6 +4,37 @@ import worker from '../src/index';
 
 const headerName = ['x-gpt', 'api', 'key'].join('-');
 const sampleKey = 'client-sample';
+const syncSecret = 'sync-test-secret';
+
+function base64url(value: string | Uint8Array): string {
+    const buffer = typeof value === 'string' ? Buffer.from(value) : Buffer.from(value);
+    return buffer.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+async function signSyncJWT(payloadOverrides: Record<string, unknown> = {}): Promise<string> {
+    const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+    const payload = base64url(JSON.stringify({
+        sub: 'user-1',
+        email: 'test@example.com',
+        name: 'Test User',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        ...payloadOverrides,
+    }));
+    const signingInput = `${header}.${payload}`;
+    const key = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(syncSecret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+    );
+    const signature = new Uint8Array(await crypto.subtle.sign(
+        'HMAC',
+        key,
+        new TextEncoder().encode(signingInput)
+    ));
+    return `${signingInput}.${base64url(signature)}`;
+}
 
 function env(overrides: Record<string, unknown> = {}) {
     return {
@@ -119,4 +150,150 @@ test('Vault media streams object bytes for server-side proxy', async () => {
     );
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), 'video/mp4');
+});
+
+test('Sync push rejects invalid JWT before vault overlay writes', async () => {
+    const writes: string[] = [];
+    const response = await worker.fetch(
+        new Request('https://worker.example/v1/sync/push', {
+            method: 'POST',
+            headers: {
+                authorization: 'Bearer invalid-token',
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                vaultOverlays: [
+                    {
+                        assetId: 'asset-image-1',
+                        data: JSON.stringify({ assetId: 'asset-image-1', tags: ['keep'] }),
+                        updatedAt: '2026-06-18T12:00:00.000Z',
+                        deletedAt: null,
+                    },
+                ],
+            }),
+        }),
+        env({
+            SYNC_SECRET: syncSecret,
+            DB: {
+                prepare: (sql: string) => ({
+                    bind: () => ({
+                        run: async () => {
+                            writes.push(sql);
+                        },
+                        all: async () => ({ results: [] }),
+                        first: async () => null,
+                    }),
+                }),
+            },
+        })
+    );
+
+    assert.equal(response.status, 401);
+    assert.deepEqual(writes, []);
+});
+
+test('Sync push writes vault overlays without source-fact writes', async () => {
+    const calls: Array<{ sql: string; args: unknown[] }> = [];
+    const token = await signSyncJWT();
+
+    const response = await worker.fetch(
+        new Request('https://worker.example/v1/sync/push', {
+            method: 'POST',
+            headers: {
+                authorization: `Bearer ${token}`,
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                vaultOverlays: [
+                    {
+                        assetId: 'asset-image-1',
+                        data: JSON.stringify({
+                            assetId: 'asset-image-1',
+                            tags: ['keep'],
+                            hidden: false,
+                            favorite: true,
+                            updatedAt: '2026-06-18T12:00:00.000Z',
+                        }),
+                        updatedAt: '2026-06-18T12:00:00.000Z',
+                        deletedAt: null,
+                    },
+                ],
+            }),
+        }),
+        env({
+            SYNC_SECRET: syncSecret,
+            DB: {
+                prepare: (sql: string) => ({
+                    bind: (...args: unknown[]) => ({
+                        run: async () => {
+                            calls.push({ sql, args });
+                        },
+                        all: async () => ({ results: [] }),
+                        first: async () => null,
+                    }),
+                }),
+            },
+        })
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.some((call) => call.sql.includes('vault_overlays')), true);
+    assert.equal(calls.some((call) => call.args.includes('asset-image-1')), true);
+    assert.equal(calls.some((call) => call.sql.includes('r2_dedupe_index')), false);
+    assert.equal(calls.some((call) => call.sql.includes('metadata_snapshot_index')), false);
+});
+
+test('Sync pull returns vault overlays for the authenticated user', async () => {
+    const token = await signSyncJWT();
+
+    const response = await worker.fetch(
+        new Request('https://worker.example/v1/sync/pull?since=2026-06-18T00%3A00%3A00.000Z', {
+            headers: {
+                authorization: `Bearer ${token}`,
+            },
+        }),
+        env({
+            SYNC_SECRET: syncSecret,
+            DB: {
+                prepare: (sql: string) => ({
+                    bind: () => ({
+                        all: async () => ({
+                            results: sql.includes('vault_overlays')
+                                ? [
+                                    {
+                                        user_id: 'user-1',
+                                        asset_id: 'asset-image-1',
+                                        data: JSON.stringify({
+                                            assetId: 'asset-image-1',
+                                            tags: ['keep'],
+                                            hidden: false,
+                                            favorite: true,
+                                            updatedAt: '2026-06-18T12:00:00.000Z',
+                                        }),
+                                        updated_at: '2026-06-18T12:00:00.000Z',
+                                        deleted_at: null,
+                                    },
+                                ]
+                                : [],
+                        }),
+                        first: async () => null,
+                    }),
+                }),
+            },
+        })
+    );
+
+    const body = await response.json() as {
+        vaultOverlays: Array<{ assetId: string; data: string; updatedAt: string; deletedAt: string | null }>;
+    };
+    assert.equal(response.status, 200);
+    assert.equal(body.vaultOverlays.length, 1);
+    assert.equal(body.vaultOverlays[0].assetId, 'asset-image-1');
+    assert.deepEqual(JSON.parse(body.vaultOverlays[0].data), {
+        assetId: 'asset-image-1',
+        tags: ['keep'],
+        hidden: false,
+        favorite: true,
+        updatedAt: '2026-06-18T12:00:00.000Z',
+    });
 });

@@ -8,6 +8,14 @@ export interface SyncEntity {
   deleted_at: string | null;
 }
 
+export interface SyncVaultOverlay {
+  user_id: string;
+  asset_id: string;
+  data: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
 export async function upsertEntity(
   db: D1Database,
   table: 'collections' | 'movies',
@@ -36,6 +44,35 @@ export async function getEntitiesSince(
     .prepare(`SELECT * FROM ${table} WHERE user_id = ?1 AND updated_at > ?2`)
     .bind(userId, since)
     .all<SyncEntity>();
+  return result.results;
+}
+
+export async function upsertVaultOverlay(
+  db: D1Database,
+  overlay: SyncVaultOverlay
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO vault_overlays (user_id, asset_id, data, updated_at, deleted_at)
+       VALUES (?1, ?2, ?3, ?4, ?5)
+       ON CONFLICT(user_id, asset_id) DO UPDATE SET
+         data = CASE WHEN excluded.updated_at > vault_overlays.updated_at THEN excluded.data ELSE vault_overlays.data END,
+         updated_at = CASE WHEN excluded.updated_at > vault_overlays.updated_at THEN excluded.updated_at ELSE vault_overlays.updated_at END,
+         deleted_at = CASE WHEN excluded.updated_at > vault_overlays.updated_at THEN excluded.deleted_at ELSE vault_overlays.deleted_at END`
+    )
+    .bind(overlay.user_id, overlay.asset_id, overlay.data, overlay.updated_at, overlay.deleted_at)
+    .run();
+}
+
+export async function getVaultOverlaysSince(
+  db: D1Database,
+  userId: string,
+  since: string
+): Promise<SyncVaultOverlay[]> {
+  const result = await db
+    .prepare(`SELECT * FROM vault_overlays WHERE user_id = ?1 AND updated_at > ?2`)
+    .bind(userId, since)
+    .all<SyncVaultOverlay>();
   return result.results;
 }
 

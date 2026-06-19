@@ -35,6 +35,12 @@ export interface SyncPushRequest {
         updatedAt: string;
         deletedAt?: string | null;
     }>;
+    vaultOverlays?: Array<{
+        assetId: string;
+        data: string;
+        updatedAt: string;
+        deletedAt?: string | null;
+    }>;
 }
 
 export interface SyncPullResponse {
@@ -46,6 +52,12 @@ export interface SyncPullResponse {
     }>;
     movies: Array<{
         id: string;
+        data: string;
+        updatedAt: string;
+        deletedAt: string | null;
+    }>;
+    vaultOverlays: Array<{
+        assetId: string;
         data: string;
         updatedAt: string;
         deletedAt: string | null;

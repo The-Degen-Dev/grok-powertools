@@ -201,6 +201,31 @@
             <td>Verification</td>
             <td>The Task 12 browser test commits fake Vault data, opens Ops, verifies the local Vault import count, checks the Worker-health boundary copy, and confirms the Gap Fill control is disabled.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>D1 sync receives Vault overlays only. Immutable R2 source facts stay sourced from R2 and Worker inventory.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Cloud acceptance tests sign sync JWTs with a small local HS256 helper instead of adding <code>jose</code> to the Worker package, because the Worker already verifies JWTs with WebCrypto and the cloud package had no <code>jose</code> dependency.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Safety</td>
+            <td>Vault overlay pulls only replace local overlay rows when the remote <code>updatedAt</code> is newer, so stale D1 overlay state cannot overwrite newer local tags, notes, hidden, favorite, or tombstone state.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 13 passed <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The cloud tests cover invalid JWT fail-closed behavior plus valid overlay push and pull contracts.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The Task 13 Playwright sync spec intercepts local Next sync routes to prove initial sign-in pushes Vault overlays and stale remote overlay pulls do not overwrite newer local edits.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>

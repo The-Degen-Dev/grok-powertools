@@ -22,6 +22,15 @@ CREATE TABLE movies (
   deleted_at TEXT
 );
 
+CREATE TABLE vault_overlays (
+  user_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  PRIMARY KEY (user_id, asset_id)
+);
+
 CREATE TABLE settings (
   user_id TEXT PRIMARY KEY,
   data TEXT NOT NULL,

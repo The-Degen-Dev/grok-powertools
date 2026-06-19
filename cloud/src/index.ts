@@ -13,7 +13,15 @@ import type {
 } from './types';
 import { verifyJWT, extractBearerToken } from './auth';
 import { buildAcceptanceIdentity, validateAcceptanceWrite } from './acceptance';
-import { upsertEntity, getEntitiesSince, ensureUser, upsertR2DedupeIndex, upsertMetadataSnapshotIndex } from './db';
+import {
+    upsertEntity,
+    getEntitiesSince,
+    ensureUser,
+    upsertR2DedupeIndex,
+    upsertMetadataSnapshotIndex,
+    upsertVaultOverlay,
+    getVaultOverlaysSince
+} from './db';
 import { buildVaultIdentity, findVaultMediaObject, listVaultInventory, readVaultMetadata } from './vault';
 
 const SERVICE_NAME = 'grok-r2-backup';
@@ -596,6 +604,18 @@ async function handleSyncPush(request: Request, env: Env): Promise<Response> {
         }
     }
 
+    if (payload.vaultOverlays) {
+        for (const overlay of payload.vaultOverlays) {
+            await upsertVaultOverlay(env.DB, {
+                user_id: userId,
+                asset_id: overlay.assetId,
+                data: overlay.data,
+                updated_at: overlay.updatedAt,
+                deleted_at: overlay.deletedAt ?? null,
+            });
+        }
+    }
+
     return jsonResponse({ ok: true, syncedAt: new Date().toISOString() });
 }
 
@@ -609,6 +629,7 @@ async function handleSyncPull(request: Request, env: Env): Promise<Response> {
 
     const collections = await getEntitiesSince(env.DB, 'collections', userId, since);
     const movies = await getEntitiesSince(env.DB, 'movies', userId, since);
+    const vaultOverlays = await getVaultOverlaysSince(env.DB, userId, since);
 
     const response: SyncPullResponse = {
         collections: collections.map((c) => ({
@@ -622,6 +643,12 @@ async function handleSyncPull(request: Request, env: Env): Promise<Response> {
             data: m.data,
             updatedAt: m.updated_at,
             deletedAt: m.deleted_at,
+        })),
+        vaultOverlays: vaultOverlays.map((overlay) => ({
+            assetId: overlay.asset_id,
+            data: overlay.data,
+            updatedAt: overlay.updated_at,
+            deletedAt: overlay.deleted_at,
         })),
         syncedAt: new Date().toISOString(),
     };

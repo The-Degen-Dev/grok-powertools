@@ -2835,11 +2835,13 @@ git commit -m "feat(web): show vault proof in ops"
 - Modify: `cloud/src/db.ts`
 - Modify: `cloud/src/index.ts`
 - Modify: `cloud/tests/vault-routes.test.ts`
+- Create: `tests/e2e-web/vault-sync.spec.js`
 - Modify: `web/src/lib/sync-engine.ts`
 - Modify: `web/src/lib/vault-storage.ts`
+- Modify: `web/src/lib/vault-types.ts`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Add failing cloud overlay sync test**
+- [x] **Step 1: Add failing cloud overlay sync test**
 
 Append to `cloud/tests/vault-routes.test.ts`:
 
@@ -2875,9 +2877,9 @@ test("sync push accepts vault overlays without source facts", async () => {
 });
 ```
 
-This first test proves invalid JWTs fail closed. The execution agent should add a valid JWT case by using the existing `jose` signing pattern from the web sync routes once cloud auth helpers are easy to import in tests.
+This first test proves invalid JWTs fail closed. The execution added valid push and pull JWT cases with a dependency-free HS256 test signer because `jose` is only installed in the web package, not the cloud package.
 
-- [ ] **Step 2: Add D1 table**
+- [x] **Step 2: Add D1 table**
 
 Append to `cloud/schema.sql`:
 
@@ -2892,7 +2894,7 @@ CREATE TABLE vault_overlays (
 );
 ```
 
-- [ ] **Step 3: Add sync payload types**
+- [x] **Step 3: Add sync payload types**
 
 Modify `cloud/src/types.ts`:
 
@@ -2907,7 +2909,7 @@ export interface SyncPushRequest {
 Modify `SyncPullResponse`:
 
 ```ts
-    vaultOverlays?: Array<{
+    vaultOverlays: Array<{
         assetId: string;
         data: string;
         updatedAt: string;
@@ -2915,7 +2917,7 @@ Modify `SyncPullResponse`:
     }>;
 ```
 
-- [ ] **Step 4: Add D1 overlay helpers**
+- [x] **Step 4: Add D1 overlay helpers**
 
 Add to `cloud/src/db.ts`:
 
@@ -2946,7 +2948,7 @@ export async function getVaultOverlaysSince(db: D1Database, userId: string, sinc
 }
 ```
 
-- [ ] **Step 5: Wire Worker sync**
+- [x] **Step 5: Wire Worker sync**
 
 Modify imports in `cloud/src/index.ts`:
 
@@ -2987,13 +2989,17 @@ Add to response:
         })),
 ```
 
-- [ ] **Step 6: Add web overlay sync helpers**
+- [x] **Step 6: Add web overlay sync helpers**
 
 Add to `web/src/lib/vault-storage.ts`:
 
 ```ts
 export async function getVaultOverlaysIncludingDeleted(db: IDBPDatabase): Promise<VaultOverlay[]> {
   return (await db.getAll("vault_overlays")) as VaultOverlay[];
+}
+
+export async function getVaultOverlay(db: IDBPDatabase, assetId: string): Promise<VaultOverlay | undefined> {
+  return db.get("vault_overlays", assetId) as Promise<VaultOverlay | undefined>;
 }
 
 export async function putVaultOverlay(db: IDBPDatabase, overlay: VaultOverlay): Promise<void> {
@@ -3005,7 +3011,7 @@ Modify `web/src/lib/sync-engine.ts` imports:
 
 ```ts
 import { getDB } from "./local-storage";
-import { getVaultOverlaysIncludingDeleted, putVaultOverlay } from "./vault-storage";
+import { getVaultOverlay, getVaultOverlaysIncludingDeleted, putVaultOverlay } from "./vault-storage";
 import type { VaultOverlay } from "./vault-types";
 ```
 
@@ -3021,8 +3027,16 @@ After movie merge:
     if (data.vaultOverlays) {
       const db = await getDB();
       for (const remote of data.vaultOverlays) {
+        const local = await getVaultOverlay(db, remote.assetId);
         const overlay = JSON.parse(remote.data) as VaultOverlay;
-        await putVaultOverlay(db, { ...overlay, assetId: remote.assetId, updatedAt: remote.updatedAt });
+        if (!local || new Date(remote.updatedAt) > new Date(local.updatedAt)) {
+          await putVaultOverlay(db, {
+            ...overlay,
+            assetId: remote.assetId,
+            updatedAt: remote.updatedAt,
+            deletedAt: remote.deletedAt ?? undefined,
+          });
+        }
       }
     }
 ```
@@ -3044,11 +3058,11 @@ Add to body:
         assetId: overlay.assetId,
         data: JSON.stringify(overlay),
         updatedAt: overlay.updatedAt,
-        deletedAt: null,
+        deletedAt: overlay.deletedAt ?? null,
       })),
 ```
 
-- [ ] **Step 7: Run gates**
+- [x] **Step 7: Run gates**
 
 Run:
 
@@ -3056,17 +3070,19 @@ Run:
 cd cloud && npm run test:acceptance
 cd cloud && npm run typecheck
 cd web && npm run build
+npm --prefix web run lint
+npx playwright test -c playwright.web.config.js tests/e2e-web/vault-sync.spec.js tests/e2e-web/vault-ui.spec.js
 ```
 
 Expected: PASS.
 
-- [ ] **Step 8: Update notes and commit**
+- [x] **Step 8: Update notes and commit**
 
 Append:
 
 ```html
           <tr>
-            <td>2026-06-18</td>
+            <td>2026-06-19</td>
             <td>Design decision</td>
             <td>D1 sync receives Vault overlays only. Immutable R2 source facts stay sourced from R2 and Worker inventory.</td>
           </tr>
@@ -3075,7 +3091,7 @@ Append:
 Run:
 
 ```bash
-git add cloud/schema.sql cloud/src/types.ts cloud/src/db.ts cloud/src/index.ts cloud/tests/vault-routes.test.ts web/src/lib/sync-engine.ts web/src/lib/vault-storage.ts implementation-notes.html
+git add cloud/schema.sql cloud/src/types.ts cloud/src/db.ts cloud/src/index.ts cloud/tests/vault-routes.test.ts tests/e2e-web/vault-sync.spec.js web/src/lib/sync-engine.ts web/src/lib/vault-storage.ts web/src/lib/vault-types.ts implementation-notes.html
 git commit -m "feat(sync): add vault overlay sync boundary"
 ```
 
