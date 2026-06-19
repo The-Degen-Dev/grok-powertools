@@ -959,7 +959,7 @@ git commit -m "feat(cloud): add vault read routes"
 - Modify: `web/src/lib/local-storage.ts`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Add Vault web types**
+- [x] **Step 1: Add Vault web types**
 
 Create `web/src/lib/vault-types.ts`:
 
@@ -1051,7 +1051,7 @@ export function normalizePromptText(text: string): string {
 }
 ```
 
-- [ ] **Step 2: Extend shared app types**
+- [x] **Step 2: Extend shared app types**
 
 Modify `web/src/lib/types.ts`:
 
@@ -1095,7 +1095,7 @@ export interface MovieClip {
 }
 ```
 
-- [ ] **Step 3: Add Vault storage helpers**
+- [x] **Step 3: Add Vault storage helpers**
 
 Create `web/src/lib/vault-storage.ts`:
 
@@ -1175,7 +1175,7 @@ export async function getVaultOverlays(db: IDBPDatabase): Promise<VaultOverlay[]
 }
 ```
 
-- [ ] **Step 4: Wire IndexedDB migration**
+- [x] **Step 4: Wire IndexedDB migration**
 
 Modify `web/src/lib/local-storage.ts`:
 
@@ -1209,7 +1209,7 @@ Export `getDB` so Vault UI can commit previews through the same database:
 export function getDB(): Promise<IDBPDatabase> {
 ```
 
-- [ ] **Step 5: Add projection helpers**
+- [x] **Step 5: Add projection helpers**
 
 Create `web/src/lib/vault-view-models.ts`:
 
@@ -1250,7 +1250,7 @@ export function vaultAssetToMovieClip(asset: VaultAsset, position = 0): MovieCli
 }
 ```
 
-- [ ] **Step 6: Run build**
+- [x] **Step 6: Run build**
 
 Run:
 
@@ -1260,7 +1260,7 @@ cd web && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 7: Update notes and commit**
+- [x] **Step 7: Update notes and commit**
 
 Append this row to `implementation-notes.html`:
 

@@ -56,6 +56,16 @@
             <td>Design decision</td>
             <td>Worker metadata responses expose normalized rows as <code>data</code>; the fake Worker still exposes prompt fixtures as <code>prompts</code>, so the Next preview broker must accept both shapes.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Vault data uses the existing IndexedDB database with a versioned migration so existing collections and movies are preserved. Vault prompts stay typed separately until the Prompt Library merge normalizes them into local prompt rows.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Added a browser migration spec for the version 4 IndexedDB upgrade because Task 4 changes persistent local storage.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>

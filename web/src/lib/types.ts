@@ -8,6 +8,9 @@ export interface VideoItem {
   position: number;
   notes: string;
   createdAt: string;
+  assetId?: string;
+  mediaType?: "image" | "video" | "unknown";
+  imageUrl?: string;
 }
 
 export interface Collection {
@@ -68,12 +71,15 @@ export interface Transition {
 
 export interface MovieClip {
   id: string;
-  type: "video" | "title";
+  type: "video" | "image" | "title";
   // Video clips
   videoUrl?: string;
+  imageUrl?: string;
   sourceCollectionId?: string;
+  sourceAssetId?: string;
   trimStart?: number;
   trimEnd?: number;
+  stillDuration?: number;
   // Title cards
   titleText?: string;
   titleSubtext?: string;
