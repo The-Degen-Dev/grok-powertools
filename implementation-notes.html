@@ -191,6 +191,16 @@
             <td>Tradeoff</td>
             <td>Rows with Vault provenance hide the local delete control. A local-only prompt can still be deleted, but a merged Vault row should not show a delete button that would no-op against the local prompt store while the committed Vault prompt remains.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Safety</td>
+            <td>Ops explicitly says Worker health is not object proof and keeps gap-fill disabled until a later approved live repair run. Task 12 only reads local IndexedDB Vault state and does not call any gap-fill or reconciliation mutation route.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The Task 12 browser test commits fake Vault data, opens Ops, verifies the local Vault import count, checks the Worker-health boundary copy, and confirms the Gap Fill control is disabled.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>

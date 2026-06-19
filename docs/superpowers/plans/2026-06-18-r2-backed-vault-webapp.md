@@ -2699,7 +2699,7 @@ git commit -m "feat(web): merge vault prompts into prompt library"
 - Modify: `tests/e2e-web/vault-ui.spec.js`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Add failing Ops proof test**
+- [x] **Step 1: Add failing Ops proof test**
 
 Append:
 
@@ -2716,7 +2716,7 @@ test("Ops shows Vault proof and does not mark Worker health as object proof", as
 });
 ```
 
-- [ ] **Step 2: Run failing Ops test**
+- [x] **Step 2: Run failing Ops test**
 
 Run:
 
@@ -2726,7 +2726,7 @@ npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js
 
 Expected: FAIL until Ops reads Vault state.
 
-- [ ] **Step 3: Add Vault Ops summary**
+- [x] **Step 3: Add Vault Ops summary**
 
 Create `web/src/components/vault/VaultOpsSummary.tsx`:
 
@@ -2759,9 +2759,18 @@ Create `web/src/components/vault/VaultGapPanel.tsx`:
 ```tsx
 "use client";
 
+import { useEffect, useState } from "react";
 import Button from "@/components/ui/Button";
+import { getDB } from "@/lib/local-storage";
+import { getVaultGaps } from "@/lib/vault-storage";
 
-export default function VaultGapPanel({ gapCount }: { gapCount: number }) {
+export default function VaultGapPanel() {
+  const [gapCount, setGapCount] = useState(0);
+
+  useEffect(() => {
+    getDB().then(getVaultGaps).then((gaps) => setGapCount(gaps.length)).catch(() => setGapCount(0));
+  }, []);
+
   return (
     <section className="mt-6 rounded-(--radius-card) border border-(--color-surface-200) bg-(--color-surface-0) p-4 dark:border-(--color-surface-800) dark:bg-(--color-surface-900)">
       <h2 className="text-sm font-semibold">Gap Fill</h2>
@@ -2772,7 +2781,7 @@ export default function VaultGapPanel({ gapCount }: { gapCount: number }) {
 }
 ```
 
-- [ ] **Step 4: Wire OpsConsole**
+- [x] **Step 4: Wire OpsConsole**
 
 Modify `web/src/components/ops/OpsConsole.tsx`:
 
@@ -2785,10 +2794,10 @@ Add near the top after Worker cards:
 
 ```tsx
       <VaultOpsSummary />
-      <VaultGapPanel gapCount={snapshot.rows.filter((row) => row.status !== "verified").length} />
+      <VaultGapPanel />
 ```
 
-- [ ] **Step 5: Run tests and build**
+- [x] **Step 5: Run tests and build**
 
 Run:
 
@@ -2799,7 +2808,7 @@ cd web && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 6: Update notes and commit**
+- [x] **Step 6: Update notes and commit**
 
 Append:
 

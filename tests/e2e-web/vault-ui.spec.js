@@ -257,3 +257,15 @@ test("Prompt library includes Vault prompts after commit", async ({ page }) => {
   await expect(promptLibrary.getByText(/cinematic\s+neon canyon/i)).toBeVisible();
   await expect(promptLibrary.getByTitle("Delete")).toHaveCount(0);
 });
+
+test("Ops shows Vault proof and does not mark Worker health as object proof", async ({ page }) => {
+  await resetDb(page);
+  await page.goto("/vault");
+  await page.getByRole("button", { name: /Preview Vault/i }).click();
+  await page.getByRole("button", { name: /Commit Vault/i }).click();
+  await page.goto("/ops");
+  await expect(page.getByText(/Vault Import/i)).toBeVisible();
+  await expect(page.getByText(/2 assets/i)).toBeVisible();
+  await expect(page.getByText(/Worker health is not object proof/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Gap Fill Requires Approval/i })).toBeDisabled();
+});

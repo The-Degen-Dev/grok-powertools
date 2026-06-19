@@ -5,6 +5,8 @@ import { Activity, AlertTriangle, CheckCircle2, Cloud, Database, FileJson, Refre
 import Button from "@/components/ui/Button";
 import type { OpsSnapshot, OpsStatus, WorkerDiagnostics } from "@/lib/types";
 import { buildEmptyOpsSnapshot, clearOpsSnapshot, loadOpsSnapshot, saveOpsSnapshot } from "@/lib/ops-storage";
+import VaultGapPanel from "@/components/vault/VaultGapPanel";
+import VaultOpsSummary from "@/components/vault/VaultOpsSummary";
 
 function statusClasses(status: OpsStatus) {
   if (status === "verified") return "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900";
@@ -151,6 +153,9 @@ export default function OpsConsole() {
           {importError}
         </div>
       )}
+
+      <VaultOpsSummary />
+      <VaultGapPanel />
 
       <div className="grid gap-4 lg:grid-cols-4">
         <section className="rounded-(--radius-card) border border-(--color-surface-200) bg-(--color-surface-0) p-4 shadow-(--shadow-card) dark:border-(--color-surface-800) dark:bg-(--color-surface-900)">
