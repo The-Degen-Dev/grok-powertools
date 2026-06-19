@@ -1793,7 +1793,7 @@ git commit -m "feat(web): add vault entry surface"
 - Modify: `tests/e2e-web/vault-ui.spec.js`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Add failing commit test**
+- [x] **Step 1: Add failing commit test**
 
 Append to `tests/e2e-web/vault-ui.spec.js`:
 
@@ -1812,7 +1812,7 @@ test("preview commit stores Vault assets and survives reload", async ({ page }) 
 });
 ```
 
-- [ ] **Step 2: Run failing commit test**
+- [x] **Step 2: Run failing commit test**
 
 Run:
 
@@ -1822,7 +1822,7 @@ npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js
 
 Expected: FAIL because commit and grid do not exist.
 
-- [ ] **Step 3: Add Vault media card and grid**
+- [x] **Step 3: Add Vault media card and grid**
 
 Create `web/src/components/vault/VaultMediaCard.tsx`:
 
@@ -1906,7 +1906,7 @@ export default function VaultGrid({
 }
 ```
 
-- [ ] **Step 4: Wire preview commit**
+- [x] **Step 4: Wire preview commit**
 
 Modify `web/src/components/vault/VaultPage.tsx`:
 
@@ -1963,7 +1963,7 @@ Add below preview section:
       </section>
 ```
 
-- [ ] **Step 5: Run test and build**
+- [x] **Step 5: Run test and build**
 
 Run:
 
@@ -1974,7 +1974,7 @@ cd web && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 6: Update notes and commit**
+- [x] **Step 6: Update notes and commit**
 
 Append:
 

@@ -1,13 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Button from "@/components/ui/Button";
 import VaultLoadPanel from "./VaultLoadPanel";
-import type { VaultPreview } from "@/lib/vault-types";
+import VaultGrid from "./VaultGrid";
+import { getDB } from "@/lib/local-storage";
+import { commitVaultPreview, getVaultAssets } from "@/lib/vault-storage";
+import type { VaultAsset, VaultPreview } from "@/lib/vault-types";
 import { fetchVaultPreview } from "@/lib/vault-client";
 
 export default function VaultPage() {
   const [preview, setPreview] = useState<VaultPreview | null>(null);
   const [loading, setLoading] = useState(false);
+  const [assets, setAssets] = useState<VaultAsset[]>([]);
+
+  useEffect(() => {
+    getDB().then(getVaultAssets).then(setAssets).catch(() => setAssets([]));
+  }, []);
 
   async function handlePreview() {
     setLoading(true);
@@ -18,6 +27,13 @@ export default function VaultPage() {
     }
   }
 
+  async function handleCommit() {
+    if (!preview) return;
+    const db = await getDB();
+    await commitVaultPreview(db, preview);
+    setAssets(await getVaultAssets(db));
+  }
+
   return (
     <div className="mx-auto max-w-screen-2xl px-6 py-8">
       <VaultLoadPanel onPreview={handlePreview} />
@@ -25,11 +41,19 @@ export default function VaultPage() {
       {preview && (
         <section className="mt-6 rounded-(--radius-card) border border-(--color-surface-200) bg-(--color-surface-0) p-4 dark:border-(--color-surface-800) dark:bg-(--color-surface-900)">
           <h2 className="text-sm font-semibold">Preview</h2>
-          <p className="mt-2 text-sm text-(--color-surface-500)">
-            {preview.counts.assets} assets, {preview.counts.images} images, {preview.counts.videos} videos, {preview.counts.prompts} prompts.
-          </p>
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-(--color-surface-500)">
+              {preview.counts.assets} assets, {preview.counts.images} images, {preview.counts.videos} videos, {preview.counts.prompts} prompts.
+            </p>
+            <Button variant="primary" onClick={handleCommit}>
+              Commit Vault
+            </Button>
+          </div>
         </section>
       )}
+      <section className="mt-6">
+        <VaultGrid assets={assets} onOpen={() => {}} onAddToCollection={() => {}} />
+      </section>
     </div>
   );
 }
