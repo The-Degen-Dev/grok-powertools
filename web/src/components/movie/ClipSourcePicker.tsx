@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, FolderOpen, Link2, Type, Check, ChevronRight } from "lucide-react";
+import { FolderOpen, Link2, Type, Check, ChevronRight } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import type { Collection, MovieClip, Transition, VideoItem } from "@/lib/types";
 import { getAllCollections } from "@/lib/local-storage";
@@ -16,12 +16,19 @@ interface ClipSourcePickerProps {
 const DEFAULT_TRANSITION: Transition = { type: "cut", duration: 0 };
 
 type Tab = "collections" | "url" | "title";
+type SelectedCollectionItem = {
+  videoUrl: string;
+  imageUrl?: string;
+  mediaType?: VideoItem["mediaType"];
+  assetId?: string;
+  collectionId: string;
+};
 
 export default function ClipSourcePicker({ onAddClips, onClose }: ClipSourcePickerProps) {
   const [tab, setTab] = useState<Tab>("collections");
   const [collections, setCollections] = useState<Collection[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [selectedItems, setSelectedItems] = useState<Map<string, { videoUrl: string; collectionId: string }>>(new Map());
+  const [selectedItems, setSelectedItems] = useState<Map<string, SelectedCollectionItem>>(new Map());
 
   // URL tab
   const [pasteUrl, setPasteUrl] = useState("");
@@ -41,7 +48,13 @@ export default function ClipSourcePicker({ onAddClips, onClose }: ClipSourcePick
       if (next.has(item.id)) {
         next.delete(item.id);
       } else {
-        next.set(item.id, { videoUrl: item.videoUrl, collectionId });
+        next.set(item.id, {
+          videoUrl: item.videoUrl,
+          imageUrl: item.imageUrl || item.thumbnailUrl,
+          mediaType: item.mediaType,
+          assetId: item.assetId,
+          collectionId,
+        });
       }
       return next;
     });
@@ -49,12 +62,15 @@ export default function ClipSourcePicker({ onAddClips, onClose }: ClipSourcePick
 
   function addSelectedClips() {
     if (selectedItems.size === 0) return;
-    const clips: MovieClip[] = Array.from(selectedItems.values()).map((item) => ({
+    const clips: MovieClip[] = Array.from(selectedItems.values()).map((item, index) => ({
       id: uuidv4(),
-      type: "video" as const,
-      videoUrl: item.videoUrl,
+      type: item.mediaType === "image" ? "image" : "video",
+      videoUrl: item.mediaType === "image" ? undefined : item.videoUrl,
+      imageUrl: item.mediaType === "image" ? item.imageUrl : undefined,
       sourceCollectionId: item.collectionId,
-      transition: DEFAULT_TRANSITION,
+      sourceAssetId: item.assetId,
+      stillDuration: item.mediaType === "image" ? 3 : undefined,
+      transition: index === 0 ? DEFAULT_TRANSITION : { type: "crossfade", duration: 0.5 },
       position: 0,
     }));
     onAddClips(clips);
@@ -135,11 +151,13 @@ export default function ClipSourcePicker({ onAddClips, onClose }: ClipSourcePick
                   >
                     <ChevronRight className={`h-3 w-3 text-(--color-surface-400) transition-transform ${expandedId === col.id ? "rotate-90" : ""}`} />
                     <span className="font-medium text-(--color-surface-800) dark:text-(--color-surface-200)">{col.name}</span>
-                    <span className="ml-auto text-(--color-surface-400)">{col.items.filter((i) => i.videoUrl).length} videos</span>
+                    <span className="ml-auto text-(--color-surface-400)">
+                      {col.items.filter((item) => item.videoUrl || item.imageUrl || item.thumbnailUrl).length} items
+                    </span>
                   </button>
                   {expandedId === col.id && (
                     <div className="mt-1 ml-5 space-y-1">
-                      {col.items.filter((item) => item.videoUrl).map((item) => {
+                      {col.items.filter((item) => item.videoUrl || item.imageUrl || item.thumbnailUrl).map((item) => {
                         const isSelected = selectedItems.has(item.id);
                         return (
                           <button
@@ -154,15 +172,16 @@ export default function ClipSourcePicker({ onAddClips, onClose }: ClipSourcePick
                           >
                             {/* Thumbnail */}
                             <div className="h-10 w-7 flex-shrink-0 overflow-hidden rounded bg-(--color-surface-200) dark:bg-(--color-surface-700)">
-                              {item.thumbnailUrl ? (
-                                <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+                              {item.mediaType === "image" && (item.imageUrl || item.thumbnailUrl) ? (
+                                // eslint-disable-next-line @next/next/no-img-element -- Collection thumbnails can be arbitrary user-provided URLs.
+                                <img src={item.imageUrl || item.thumbnailUrl} alt="" className="h-full w-full object-cover" />
                               ) : (
                                 <video src={item.videoUrl} className="h-full w-full object-cover" muted preload="metadata" />
                               )}
                             </div>
                             {/* Text */}
                             <span className="flex-1 truncate">
-                              {item.promptText?.slice(0, 60) || item.videoUrl.slice(-30)}
+                              {item.promptText?.slice(0, 60) || item.imageUrl?.slice(-30) || item.videoUrl.slice(-30)}
                             </span>
                             {/* Checkbox */}
                             <div className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border transition ${

@@ -149,3 +149,75 @@ test("Vault assets can become a collection and watch queue", async ({ page }) =>
   expect(movieState.sourceAssetIds).toEqual(["asset-image-1", "asset-video-1"]);
   expect(movieState.imageStillDuration).toBe(3);
 });
+
+test("Movie Maker can persist mixed image and video clips from Vault", async ({ page }) => {
+  await resetDb(page);
+  await page.goto("/vault");
+  await page.getByRole("button", { name: /Preview Vault/i }).click();
+  await page.getByRole("button", { name: /Commit Vault/i }).click();
+  const addButtons = page.getByRole("button", { name: /Add to Collection/i });
+  await addButtons.nth(0).click();
+  await addButtons.nth(1).click();
+  await page.getByRole("link", { name: /Collections/i }).click();
+  await page.getByRole("button", { name: /Watch All/i }).click();
+  await page.getByRole("button", { name: /Save as Movie/i }).click();
+  await expect(page).toHaveURL(/\/movie\?id=/);
+  await expect(page.getByText(/2 clips/i)).toBeVisible();
+  await expect(page.getByText(/asset-image-1/i)).toBeVisible();
+  const range = page.locator('input[type="range"]');
+  await range.evaluate((input) => {
+    input.value = "5.5";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect
+    .poll(async () =>
+      page.locator("canvas").evaluate((canvas) => {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return 0;
+        const [r, g, b] = ctx.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data;
+        return r + g + b;
+      }),
+    )
+    .toBeGreaterThan(0);
+});
+
+test("Movie Maker source picker preserves Vault source assets", async ({ page }) => {
+  await resetDb(page);
+  await page.goto("/vault");
+  await page.getByRole("button", { name: /Preview Vault/i }).click();
+  await page.getByRole("button", { name: /Commit Vault/i }).click();
+  const addButtons = page.getByRole("button", { name: /Add to Collection/i });
+  await addButtons.nth(0).click();
+  await addButtons.nth(1).click();
+  await page.goto("/movie");
+  await page.getByRole("button", { name: /New Movie/i }).first().click();
+  await page.getByRole("button", { name: /Add Clip/i }).click();
+  await page.getByRole("button", { name: /New Collection/i }).click();
+  await page.getByText(/glass library/i).click();
+  await page.getByText(/cinematic neon canyon/i).click();
+  await page.getByRole("button", { name: /Add 2 clips/i }).click();
+  await expect(page.getByText(/2 clips/i)).toBeVisible();
+  const pickerMovieState = await page.evaluate(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("grok-power-tools");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const movies = await new Promise((resolve, reject) => {
+      const tx = db.transaction("movies", "readonly");
+      const request = tx.objectStore("movies").getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    db.close();
+    const movie = movies.find((entry) => entry.name === "Untitled Movie");
+    return {
+      clipTypes: movie.clips.map((clip) => clip.type).sort(),
+      sourceAssetIds: movie.clips.map((clip) => clip.sourceAssetId).sort(),
+    };
+  });
+  expect(pickerMovieState.clipTypes).toEqual(["image", "video"]);
+  expect(pickerMovieState.sourceAssetIds).toEqual(["asset-image-1", "asset-video-1"]);
+});

@@ -2390,7 +2390,7 @@ git commit -m "feat(web): wire vault assets into collections and watch"
 - Modify: `tests/e2e-web/vault-ui.spec.js`
 - Modify: `implementation-notes.html`
 
-- [ ] **Step 1: Add failing mixed movie test**
+- [x] **Step 1: Add failing mixed movie test**
 
 Append:
 
@@ -2410,7 +2410,7 @@ test("Movie Maker can persist mixed image and video clips from Vault", async ({ 
 });
 ```
 
-- [ ] **Step 2: Run failing movie test**
+- [x] **Step 2: Run failing movie test**
 
 Run:
 
@@ -2420,7 +2420,7 @@ npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js
 
 Expected: FAIL until image clips render correctly.
 
-- [ ] **Step 3: Add image clip rendering to CanvasPlayer**
+- [x] **Step 3: Add image clip rendering to CanvasPlayer**
 
 In `web/src/components/movie/CanvasPlayer.tsx`, change `buildTimeline` so images use `stillDuration`:
 
@@ -2468,7 +2468,7 @@ Draw image clips:
         }
 ```
 
-- [ ] **Step 4: Update StoryboardPanel labels**
+- [x] **Step 4: Update StoryboardPanel labels**
 
 Modify `SortableClipCard` in `web/src/components/movie/StoryboardPanel.tsx`:
 
@@ -2484,18 +2484,18 @@ Modify `SortableClipCard` in `web/src/components/movie/StoryboardPanel.tsx`:
 
 Import `ImageIcon` from `lucide-react`.
 
-- [ ] **Step 5: Add image clips in ClipSourcePicker**
+- [x] **Step 5: Add image clips in ClipSourcePicker**
 
 Modify `web/src/components/movie/ClipSourcePicker.tsx` selected item map:
 
 ```tsx
-const [selectedItems, setSelectedItems] = useState<Map<string, { videoUrl: string; imageUrl?: string; mediaType?: string; collectionId: string }>>(new Map());
+const [selectedItems, setSelectedItems] = useState<Map<string, { videoUrl: string; imageUrl?: string; mediaType?: string; assetId?: string; collectionId: string }>>(new Map());
 ```
 
 When selecting an item:
 
 ```tsx
-next.set(item.id, { videoUrl: item.videoUrl, imageUrl: item.imageUrl || item.thumbnailUrl, mediaType: item.mediaType, collectionId });
+next.set(item.id, { videoUrl: item.videoUrl, imageUrl: item.imageUrl || item.thumbnailUrl, mediaType: item.mediaType, assetId: item.assetId, collectionId });
 ```
 
 When building clips:
@@ -2507,13 +2507,14 @@ When building clips:
       videoUrl: item.mediaType === "image" ? undefined : item.videoUrl,
       imageUrl: item.mediaType === "image" ? item.imageUrl : undefined,
       sourceCollectionId: item.collectionId,
+      sourceAssetId: item.assetId,
       stillDuration: item.mediaType === "image" ? 3 : undefined,
       transition: index === 0 ? DEFAULT_TRANSITION : { type: "crossfade", duration: 0.5 },
       position: 0,
     }));
 ```
 
-- [ ] **Step 6: Run tests and build**
+- [x] **Step 6: Run tests and build**
 
 Run:
 
@@ -2524,7 +2525,7 @@ cd web && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 7: Update notes and commit**
+- [x] **Step 7: Update notes and commit**
 
 Append:
 

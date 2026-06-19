@@ -151,6 +151,31 @@
             <td>Verification</td>
             <td>Task 9 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The test covers adding both fake Vault assets to a local collection, preserving image/video asset facts, opening Watch Mode, saving a movie, and inspecting IndexedDB movie clips.</td>
           </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Movie Maker now treats still-image clips as first-class preview media instead of hiding saved-gallery images from movie workflows. Canvas playback loads image elements, uses <code>stillDuration</code>, and draws them letterboxed like videos.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>The Task 10 browser test checks the generated storyboard label and a non-black canvas pixel after seeking into the image clip. This makes image rendering proof stronger than only asserting that a movie record exists.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Clip source picking includes image-backed collection items when they already have an image URL or thumbnail. It does not introduce any new upload/import path; source media remains the local Vault media proxy URL already stored in the collection item.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 10 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. Lint initially rejected clearing a stale video element <code>src</code>; that redundant mutation was removed.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The Clip Source Picker path now preserves Vault <code>sourceAssetId</code> for image and video clips. The Task 10 browser suite includes a focused source-picker test and passed all 7 Vault UI tests after this check was added.</td>
+          </tr>
         </tbody>
       </table>
       <h2>Open Questions</h2>
