@@ -11,7 +11,8 @@
     "downloads",
     "alarms",
     "cookies",
-    "offscreen"
+    "offscreen",
+    "debugger"
   ],
   "host_permissions": [
     "*://*.x.com/*",

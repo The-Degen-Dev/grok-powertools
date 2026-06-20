@@ -191,7 +191,7 @@ const RecreateWorkflowUtils = (typeof self !== 'undefined' && self.GrokRecreateW
 const RecreateWorkflowBackground = (typeof self !== 'undefined' && self.GrokRecreateWorkflowBackground)
     ? self.GrokRecreateWorkflowBackground
     : (typeof require === 'function' ? require('./recreateWorkflowBackground.js') : null);
-const RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS = 150000;
+const RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS = 540000;
 const recreateWorkflowController = RecreateWorkflowBackground
     ? RecreateWorkflowBackground.createRecreateWorkflowController({
         chromeApi: chrome,
@@ -673,6 +673,169 @@ async function sha256Blob(blob) {
     const buffer = await blob.arrayBuffer();
     const digest = await crypto.subtle.digest('SHA-256', buffer);
     return toHex(digest);
+}
+
+function binaryStringToBase64(binary) {
+    if (typeof btoa === 'function') return btoa(binary);
+    if (typeof Buffer !== 'undefined') return Buffer.from(binary, 'binary').toString('base64');
+    throw new Error('reference_capture_failed');
+}
+
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    let binary = '';
+
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(index, index + chunkSize));
+    }
+
+    return binaryStringToBase64(binary);
+}
+
+function chromeRuntimeLastErrorMessage() {
+    return chrome.runtime && chrome.runtime.lastError ? chrome.runtime.lastError.message : '';
+}
+
+function debuggerAttach(target, version = '1.3') {
+    return new Promise((resolve, reject) => {
+        chrome.debugger.attach(target, version, () => {
+            const errorMessage = chromeRuntimeLastErrorMessage();
+            if (errorMessage) {
+                reject(new Error(errorMessage));
+                return;
+            }
+            resolve();
+        });
+    });
+}
+
+function debuggerDetach(target) {
+    return new Promise((resolve) => {
+        chrome.debugger.detach(target, () => {
+            resolve();
+        });
+    });
+}
+
+function debuggerSendCommand(target, command, params = {}) {
+    return new Promise((resolve, reject) => {
+        chrome.debugger.sendCommand(target, command, params, (result) => {
+            const errorMessage = chromeRuntimeLastErrorMessage();
+            if (errorMessage) {
+                reject(new Error(errorMessage));
+                return;
+            }
+            resolve(result);
+        });
+    });
+}
+
+function getNativeClickCoordinate(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 0) throw new Error('native_click_invalid');
+    return number;
+}
+
+async function dispatchNativeClick(tabId, click = {}) {
+    if (!chrome.debugger) throw new Error('native_click_unavailable');
+    if (!Number.isFinite(Number(tabId))) throw new Error('native_click_unavailable');
+
+    const x = getNativeClickCoordinate(click.x);
+    const y = getNativeClickCoordinate(click.y);
+    const target = { tabId };
+    let attached = false;
+
+    try {
+        await debuggerAttach(target);
+        attached = true;
+        await debuggerSendCommand(target, 'Input.dispatchMouseEvent', {
+            type: 'mouseMoved',
+            x,
+            y,
+            button: 'none',
+            buttons: 0
+        });
+        await debuggerSendCommand(target, 'Input.dispatchMouseEvent', {
+            type: 'mousePressed',
+            x,
+            y,
+            button: 'left',
+            buttons: 1,
+            clickCount: 1
+        });
+        await debuggerSendCommand(target, 'Input.dispatchMouseEvent', {
+            type: 'mouseReleased',
+            x,
+            y,
+            button: 'left',
+            buttons: 0,
+            clickCount: 1
+        });
+
+        return { ok: true };
+    } catch (error) {
+        throw new Error(error.message || 'native_click_unavailable');
+    } finally {
+        if (attached) await debuggerDetach(target);
+    }
+}
+
+function getRecreateReferenceMimeType(url, blob) {
+    const allowedTypes = RecreateWorkflowUtils ? RecreateWorkflowUtils.ALLOWED_RECREATE_MIME_TYPES : [];
+    const blobType = String((blob && blob.type) || '').split(';')[0].toLowerCase();
+    if (allowedTypes.includes(blobType)) return blobType;
+
+    const inferredType = String(CloudSync.detectContentTypeFromUrl(url) || '').toLowerCase();
+    if (allowedTypes.includes(inferredType)) return inferredType;
+
+    throw new Error('reference_invalid');
+}
+
+function getRecreateReferenceExtension(mimeType) {
+    if (mimeType === 'image/jpeg') return 'jpg';
+    if (mimeType === 'image/webp') return 'webp';
+    if (mimeType === 'image/gif') return 'gif';
+    if (mimeType === 'image/bmp') return 'bmp';
+    if (mimeType === 'image/tiff') return 'tiff';
+    return 'png';
+}
+
+async function fetchRecreateReferenceDataUrl(url) {
+    if (!RecreateWorkflowUtils) throw new Error('workflow_unavailable');
+    if (!RecreateWorkflowUtils.isTrustedGrokMediaUrl(url)) throw new Error('reference_capture_failed');
+
+    const parsed = new URL(String(url || ''));
+    if (
+        parsed.protocol !== 'https:' ||
+        (parsed.hostname !== 'imagine-public.x.ai' && parsed.hostname !== 'images-public.x.ai')
+    ) {
+        throw new Error('reference_capture_failed');
+    }
+
+    const response = await fetch(parsed.href, { credentials: 'omit' });
+    if (!response || !response.ok) throw new Error('reference_capture_failed');
+
+    const blob = await response.blob();
+    const mimeType = getRecreateReferenceMimeType(parsed.href, blob);
+    const maxBytes = Number(RecreateWorkflowUtils.MAX_REFERENCE_BYTES) || 0;
+    if (!blob || blob.size <= 0 || (maxBytes > 0 && blob.size > maxBytes)) {
+        throw new Error('reference_invalid');
+    }
+
+    const dataUrl = `data:${mimeType};base64,${arrayBufferToBase64(await blob.arrayBuffer())}`;
+    const normalized = RecreateWorkflowUtils.normalizeRecreateReference({
+        name: `current-grok-image.${getRecreateReferenceExtension(mimeType)}`,
+        mimeType,
+        dataUrl,
+        source: 'current-grok-image'
+    });
+
+    return {
+        dataUrl: normalized.dataUrl,
+        mimeType: normalized.mimeType,
+        byteLength: normalized.byteLength
+    };
 }
 
 function sanitizeR2Metadata(metadata = {}) {
@@ -1172,7 +1335,7 @@ function parseFilenameInfo(url, suggestedFilename) {
         if (filename.length < 10 || GENERIC_NAMES.includes(filename.toLowerCase())) {
             filename = `${filename}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         }
-    } catch (e) {
+    } catch {
         filename = Date.now().toString();
     }
 
@@ -1194,7 +1357,7 @@ async function detectExtension(url, extHint) {
         if (ct.startsWith('video/')) return 'mp4';
         if (ct.includes('jpeg')) return 'jpg';
         if (ct.includes('webp')) return 'webp';
-    } catch (e) { /* keep default */ }
+    } catch { /* keep default */ }
     return 'png';
 }
 
@@ -1314,7 +1477,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 // Helper to send message with retry
                 const sendInit = () => {
-                    chrome.tabs.sendMessage(currentTabId, { action: 'INIT_SCRAPE' }, (response) => {
+                    chrome.tabs.sendMessage(currentTabId, { action: 'INIT_SCRAPE' }, () => {
                         if (chrome.runtime.lastError) {
                             console.warn('Injecting Content Script...');
                             chrome.scripting.executeScript({
@@ -1362,7 +1525,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
                 if (tabs[0] && (tabs[0].url.includes('x.com') || tabs[0].url.includes('grok.com'))) {
                     currentTabId = tabs[0].id;
-                    chrome.tabs.sendMessage(currentTabId, initMessage, (response) => {
+                    chrome.tabs.sendMessage(currentTabId, initMessage, () => {
                         if (chrome.runtime.lastError) {
                             chrome.scripting.executeScript({
                                 target: { tabId: currentTabId },
@@ -1650,6 +1813,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
+    if (request.action === 'FETCH_GPT_RECREATE_REFERENCE_DATA_URL') {
+        (async () => {
+            try {
+                const result = await fetchRecreateReferenceDataUrl(request.url);
+                sendResponse({ ok: true, ...result });
+            } catch (e) {
+                sendResponse({ ok: false, error: e.message || 'reference_capture_failed' });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'GPT_RECREATE_NATIVE_CLICK') {
+        (async () => {
+            try {
+                const tabId = sender && sender.tab ? sender.tab.id : null;
+                const result = await dispatchNativeClick(tabId, request.click || {});
+                sendResponse(result);
+            } catch (e) {
+                sendResponse({ ok: false, error: e.message || 'native_click_unavailable' });
+            }
+        })();
+        return true;
+    }
+
     if (request.action === 'START_GPT_RECREATE') {
         if (!recreateWorkflowController) {
             sendResponse({ ok: false, error: 'workflow_unavailable' });
@@ -1681,7 +1869,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 // --- NEW TAB INTERCEPTOR ---
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     const stored = await chrome.storage.local.get(['isScraping']);
     if (!stored.isScraping) return;
 
@@ -1727,6 +1915,8 @@ if (typeof module !== 'undefined') {
         buildDirectBackupUploadResponse,
         buildR2BackupInitMessage,
         buildR2BackupInitMessageForConfig,
+        dispatchNativeClick,
+        fetchRecreateReferenceDataUrl,
         getR2BackupCompletionStatusLabel,
         getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
         isR2BackupCompletionSuccessful,

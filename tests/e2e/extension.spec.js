@@ -290,7 +290,7 @@ test.describe('Grok Power Tools E2E', () => {
         await expect(page.locator('#gptRecreateStatus')).toContainText('Selected sample.png');
 
         await page.locator('#gptRecreateStartBtn').click();
-        await expect(page.locator('#gptRecreateStatus')).toHaveText('Submitted to Grok Imagine.');
+        await expect(page.locator('#gptRecreateStatus')).toHaveText('Generated image ready.');
 
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).toContainEqual(expect.objectContaining({
@@ -322,7 +322,7 @@ test.describe('Grok Power Tools E2E', () => {
         await expect(page.locator('#gptRecreateBestPractices')).toBeChecked();
 
         await page.locator('#gptRecreateStartBtn').click();
-        await expect(page.locator('#gptRecreateStatus')).toHaveText('Submitted to Grok Imagine.');
+        await expect(page.locator('#gptRecreateStatus')).toHaveText('Generated image ready.');
 
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).toContainEqual(expect.objectContaining({

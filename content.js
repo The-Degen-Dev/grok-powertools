@@ -475,7 +475,7 @@ class PromptHistoryManager {
         try {
             const stored = await chrome.storage.local.get(['promptHistory']);
             if (stored.promptHistory) { this.history = stored.promptHistory; this.notify(); }
-        } catch (e) {
+        } catch {
             this.warnContextInvalid('load history');
         }
     }
@@ -571,7 +571,7 @@ class PromptHistoryManager {
     save() {
         try {
             chrome.storage.local.set({ promptHistory: this.history });
-        } catch (e) {
+        } catch {
             this.warnContextInvalid('save history');
         }
         this.notify();
@@ -906,20 +906,17 @@ class GrokOverlay {
 
         // --- RESIZE LOGIC ---
         const resizeHandle = this.el.querySelector('.gpt-resize-handle');
-        let isResizing = false, resizeStartX, resizeStartY, startWidth, startHeight;
+        let isResizing = false, resizeStartX, startWidth;
         resizeHandle.addEventListener('mousedown', (e) => {
             isResizing = true;
             resizeStartX = e.clientX;
-            resizeStartY = e.clientY;
             startWidth = this.el.offsetWidth;
-            startHeight = this.el.offsetHeight;
             e.stopPropagation();
             e.preventDefault();
         });
         document.addEventListener('mousemove', (e) => {
             if (!isResizing) return;
             const newWidth = startWidth + (e.clientX - resizeStartX);
-            const newHeight = startHeight + (e.clientY - resizeStartY);
             this.el.style.width = Math.max(300, newWidth) + 'px';
             // this.el.style.height = Math.max(200, newHeight) + 'px'; 
             this.state.width = Math.max(300, newWidth);
@@ -946,7 +943,7 @@ class GrokOverlay {
             e.stopPropagation();
             this.minimize(true);
         });
-        this.el.addEventListener('click', (e) => {
+        this.el.addEventListener('click', () => {
             if (this.state.minimized && !isDragging) this.minimize(false);
         });
 
@@ -1050,7 +1047,7 @@ class GrokOverlay {
             try {
                 await this.setRecreateReferenceFromCurrentImage();
             } catch (error) {
-                this.setRecreateStatus(error.message || 'reference_missing', 'error');
+                this.setRecreateStatus(`Current image: ${error.message || 'reference_missing'}`, 'error');
             }
         });
         this.el.querySelector('#gptRecreateStartBtn').addEventListener('click', () => {
@@ -1636,7 +1633,7 @@ class GrokOverlay {
             }
 
             if (response && response.ok) {
-                this.setRecreateStatus('Submitted to Grok Imagine.', 'success');
+                this.setRecreateStatus('Generated image ready.', 'success');
             } else {
                 this.setRecreateStatus(this.formatRecreateStatus(response), 'error');
             }
@@ -2877,6 +2874,39 @@ class TemplateBatchManager {
     }
 }
 
+function isSensitiveRecreateDiagnosticKey(key) {
+    const normalizedKey = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normalizedKey === 'dataurl' || normalizedKey === 'reference') return true;
+
+    return ['cookie', 'authheader', 'authorization', 'token', 'apikey', 'password', 'secret', 'bearer'].some(
+        (substring) => normalizedKey.includes(substring)
+    );
+}
+
+function scrubRecreateDiagnosticValue(value) {
+    if (typeof value === 'string' && value.trimStart().startsWith('data:image/')) return undefined;
+
+    if (Array.isArray(value)) {
+        return value.map((entry) => scrubRecreateDiagnosticValue(entry)).filter((entry) => typeof entry !== 'undefined');
+    }
+
+    if (value && typeof value === 'object') return scrubRecreateDiagnostics(value);
+    return value;
+}
+
+function scrubRecreateDiagnostics(diagnostics) {
+    const safe = {};
+
+    Object.entries(diagnostics || {}).forEach(([key, value]) => {
+        if (isSensitiveRecreateDiagnosticKey(key)) return;
+
+        const scrubbed = scrubRecreateDiagnosticValue(value);
+        if (typeof scrubbed !== 'undefined') safe[key] = scrubbed;
+    });
+
+    return safe;
+}
+
 class RecreateWorkflowContentBridge {
     constructor(overlay, historyManager, options = {}) {
         this.overlay = overlay;
@@ -2956,6 +2986,7 @@ class RecreateWorkflowContentBridge {
                     phase: 'content',
                     error: (error && error.code) || 'workflow_failed',
                     diagnostics: {
+                        ...scrubRecreateDiagnostics(error && error.diagnostics ? error.diagnostics : {}),
                         url: this.locationRef ? this.locationRef.href : '',
                         title: this.documentRef ? this.documentRef.title : ''
                     }
@@ -3006,7 +3037,7 @@ class GrokScraper {
                     }
                 }
             }
-        } catch (e) { }
+        } catch { }
 
         if (this.state.isRunning) {
             console.log(`Resuming Scraper. Index: ${this.state.currentIndex}`);
@@ -3084,7 +3115,7 @@ class GrokScraper {
         }
     }
 
-    getCleanId(url) { if (!url) return null; try { return url.split('?')[0]; } catch (e) { return url; } }
+    getCleanId(url) { if (!url) return null; try { return url.split('?')[0]; } catch { return url; } }
 
     getGalleryScroller() {
         return document.querySelector('.overflow-scroll') || document.querySelector('[role="list"]')?.parentElement || window;
@@ -3145,7 +3176,7 @@ class GrokScraper {
                 console.error('R2 Backup config validation failed:', validation?.error);
                 return;
             }
-        } catch (e) {
+        } catch {
             this.log('R2 Backup aborted: Could not validate cloud config.', 'error');
             return;
         } finally {

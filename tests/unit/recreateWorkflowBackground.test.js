@@ -7,12 +7,16 @@ function createChromeHarness() {
     const chromeApi = {
         tabs: {
             create: jest.fn((options, callback) => {
-                const tab = { id: createdTabs.length + 10, url: options.url, active: options.active };
+                const tab = { id: createdTabs.length + 10, url: options.url, active: options.active, status: 'complete' };
                 createdTabs.push(tab);
                 callback(tab);
             }),
             get: jest.fn((tabId, callback) => {
-                callback(createdTabs.find((tab) => tab.id === tabId) || { id: tabId, url: 'https://grok.com/' });
+                callback(createdTabs.find((tab) => tab.id === tabId) || {
+                    id: tabId,
+                    url: 'https://grok.com/',
+                    status: 'complete'
+                });
             }),
             sendMessage: jest.fn((tabId, message, callback) => {
                 messages.push({ tabId, message });
@@ -21,14 +25,24 @@ function createChromeHarness() {
                     return;
                 }
                 if (message.action === 'GPT_RECREATE_IMAGINE_STEP') {
-                    callback({ ok: true, runId: message.runId, submitted: true });
+                    callback({
+                        ok: true,
+                        runId: message.runId,
+                        submitted: true,
+                        resultReady: true,
+                        result: { sourceKind: 'trusted-grok-media' }
+                    });
                     return;
                 }
                 callback({ ok: true });
             }),
             update: jest.fn((tabId, options, callback) => {
-                callback({ id: tabId, ...options });
+                callback({ id: tabId, status: 'complete', ...options });
             })
+        },
+        scripting: {
+            executeScript: jest.fn((_options, callback) => callback()),
+            insertCSS: jest.fn((_options, callback) => callback())
         },
         runtime: { lastError: null }
     };
@@ -86,10 +100,13 @@ describe('recreate background controller', () => {
             expect.objectContaining({
                 ok: true,
                 generatedPrompt: 'A red cabin in snow.',
-                submitted: true
+                submitted: true,
+                resultReady: true
             })
         );
         expect(createdTabs.map((tab) => tab.url)).toEqual(['https://grok.com/']);
+        expect(createdTabs[0].active).toBe(true);
+        expect(chromeApi.tabs.update).toHaveBeenCalledWith(1, { active: true }, expect.any(Function));
         expect(messages.map((entry) => entry.message.action)).toEqual([
             'GPT_RECREATE_STATUS',
             'GPT_RECREATE_CHAT_STEP',
@@ -110,6 +127,8 @@ describe('recreate background controller', () => {
 
         const imagineMessage = messages.find((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP');
         expect(createdTabs.map((tab) => tab.url)).toEqual(['https://grok.com/']);
+        expect(createdTabs[0].active).toBe(true);
+        expect(chromeApi.tabs.update).toHaveBeenCalledWith(7, { active: true }, expect.any(Function));
         expect(imagineMessage.tabId).toBe(7);
     });
 
@@ -124,6 +143,23 @@ describe('recreate background controller', () => {
 
         const imagineMessage = messages.find((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP');
         expect(createdTabs.map((tab) => tab.url)).toEqual(['https://grok.com/', 'https://grok.com/imagine']);
+        expect(createdTabs.map((tab) => tab.active)).toEqual([true, true]);
+        expect(chromeApi.tabs.update).not.toHaveBeenCalledWith(1, { active: true }, expect.any(Function));
+        expect(imagineMessage.tabId).toBe(11);
+    });
+
+    test('opens a new Imagine tab when source tab is an Imagine post detail page', async () => {
+        const { chromeApi, createdTabs, messages } = createChromeHarness();
+        const controller = createRecreateWorkflowController({ chromeApi, utils });
+
+        await controller.start(createStartRequest(), {
+            sourceTabId: 7,
+            sourceTabUrl: 'https://grok.com/imagine/post/ecda4c9e-a6f1-46b6-9d6c-cf204a6f5c2f'
+        });
+
+        const imagineMessage = messages.find((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP');
+        expect(createdTabs.map((tab) => tab.url)).toEqual(['https://grok.com/', 'https://grok.com/imagine']);
+        expect(chromeApi.tabs.update).not.toHaveBeenCalledWith(7, { active: true }, expect.any(Function));
         expect(imagineMessage.tabId).toBe(11);
     });
 
@@ -336,6 +372,83 @@ describe('recreate background controller', () => {
         );
     });
 
+    test('requires Imagine response to confirm generated result readiness', async () => {
+        const { chromeApi, messages } = createChromeHarness();
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, callback) => {
+            messages.push({ tabId, message });
+            if (message.action === 'GPT_RECREATE_CHAT_STEP') {
+                callback({ ok: true, runId: message.runId, generatedPrompt: 'A red cabin in snow.' });
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_IMAGINE_STEP') {
+                callback({ ok: true, runId: message.runId, submitted: true });
+                return;
+            }
+            callback({ ok: true });
+        });
+        const controller = createRecreateWorkflowController({ chromeApi, utils });
+
+        const result = await controller.start(createStartRequest(), {
+            sourceTabId: 1,
+            sourceTabUrl: 'https://grok.com/imagine'
+        });
+
+        const statuses = getStatusMessages(messages);
+        expect(result).toEqual(expect.objectContaining({ ok: false, phase: 'imagine', error: 'imagine_result_unverified' }));
+        expect(statuses[statuses.length - 1]).toEqual(
+            expect.objectContaining({
+                phase: 'imagine',
+                message: 'imagine_result_unverified',
+                type: 'error'
+            })
+        );
+    });
+
+    test('returns content result validation failures without treating submit as success', async () => {
+        const { chromeApi, messages } = createChromeHarness();
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, callback) => {
+            messages.push({ tabId, message });
+            if (message.action === 'GPT_RECREATE_CHAT_STEP') {
+                callback({ ok: true, runId: message.runId, generatedPrompt: 'A red cabin in snow.' });
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_IMAGINE_STEP') {
+                callback({
+                    ok: false,
+                    runId: message.runId,
+                    phase: 'imagine',
+                    error: 'imagine_result_placeholder',
+                    diagnostics: { placeholderResultCount: 4 }
+                });
+                return;
+            }
+            callback({ ok: true });
+        });
+        const controller = createRecreateWorkflowController({ chromeApi, utils });
+
+        const result = await controller.start(createStartRequest(), {
+            sourceTabId: 1,
+            sourceTabUrl: 'https://grok.com/imagine'
+        });
+
+        const statuses = getStatusMessages(messages);
+        expect(result).toEqual(
+            expect.objectContaining({
+                ok: false,
+                phase: 'imagine',
+                error: 'imagine_result_placeholder',
+                diagnostics: expect.objectContaining({ placeholderResultCount: 4 })
+            })
+        );
+        expect(statuses[statuses.length - 1]).toEqual(
+            expect.objectContaining({
+                phase: 'imagine',
+                message: 'imagine_result_placeholder',
+                type: 'error'
+            })
+        );
+    });
+
     test('maps Chrome chat tab create failures to named chat errors', async () => {
         const { chromeApi } = createChromeHarness();
         chromeApi.tabs.create = jest.fn((_options, callback) => {
@@ -414,7 +527,7 @@ describe('recreate background controller', () => {
                 return;
             }
             if (message.action === 'GPT_RECREATE_IMAGINE_STEP') {
-                callback({ ok: true, runId: message.runId, submitted: true });
+                callback({ ok: true, runId: message.runId, submitted: true, resultReady: true });
                 return;
             }
             callback({ ok: true });
@@ -434,6 +547,17 @@ describe('recreate background controller', () => {
         expect(result).toEqual(expect.objectContaining({ ok: true, submitted: true }));
         expect(chatAttempts).toBe(2);
         expect(messages.filter((entry) => entry.message.action === 'GPT_RECREATE_CHAT_STEP')).toHaveLength(2);
+        expect(chromeApi.scripting.insertCSS).toHaveBeenCalledWith(
+            { target: { tabId: 10 }, files: ['overlay.css'] },
+            expect.any(Function)
+        );
+        expect(chromeApi.scripting.executeScript).toHaveBeenCalledWith(
+            {
+                target: { tabId: 10 },
+                files: ['recreateWorkflowUtils.js', 'recreateWorkflowContent.js', 'content.js']
+            },
+            expect.any(Function)
+        );
     });
 
     test('chat send timeout fails with named chat error instead of hanging', async () => {

@@ -21,6 +21,14 @@
     const DEFAULT_STATUS_MESSAGE_TIMEOUT_MS = 1000;
     const DEFAULT_RECEIVER_RETRY_ATTEMPTS = 6;
     const DEFAULT_RECEIVER_RETRY_DELAY_MS = 250;
+    const DEFAULT_TAB_READY_TIMEOUT_MS = 30000;
+    const DEFAULT_TAB_READY_POLL_MS = 250;
+    const RECREATE_CONTENT_SCRIPT_FILES = [
+        'recreateWorkflowUtils.js',
+        'recreateWorkflowContent.js',
+        'content.js'
+    ];
+    const RECREATE_CONTENT_CSS_FILES = ['overlay.css'];
 
     function createError(code) {
         const error = new Error(code);
@@ -47,7 +55,7 @@
             return (
                 url.protocol === 'https:' &&
                 url.hostname === 'grok.com' &&
-                (url.pathname === '/imagine' || url.pathname.startsWith('/imagine/'))
+                url.pathname === '/imagine'
             );
         } catch {
             return false;
@@ -90,6 +98,12 @@
         const receiverRetryDelayMs = Number.isFinite(options.receiverRetryDelayMs)
             ? options.receiverRetryDelayMs
             : DEFAULT_RECEIVER_RETRY_DELAY_MS;
+        const tabReadyTimeoutMs = Number.isFinite(options.tabReadyTimeoutMs)
+            ? options.tabReadyTimeoutMs
+            : DEFAULT_TAB_READY_TIMEOUT_MS;
+        const tabReadyPollMs = Number.isFinite(options.tabReadyPollMs)
+            ? options.tabReadyPollMs
+            : DEFAULT_TAB_READY_POLL_MS;
         let activeRun = null;
 
         function createRunId() {
@@ -113,6 +127,119 @@
                     resolve(tab || {});
                 });
             });
+        }
+
+        function tabsUpdate(tabId, updateOptions, errorCode, phase) {
+            return new Promise((resolve, reject) => {
+                if (!chromeApi.tabs.update) {
+                    resolve({ id: tabId, ...updateOptions });
+                    return;
+                }
+
+                chromeApi.tabs.update(tabId, updateOptions, (tab) => {
+                    if (chromeApi.runtime && chromeApi.runtime.lastError) {
+                        reject(
+                            createPhaseError(errorCode, phase, {
+                                chromeLastError: chromeApi.runtime.lastError.message
+                            })
+                        );
+                        return;
+                    }
+                    resolve(tab || { id: tabId, ...updateOptions });
+                });
+            });
+        }
+
+        function tabsGet(tabId, errorCode, phase) {
+            return new Promise((resolve, reject) => {
+                if (!chromeApi.tabs.get) {
+                    resolve({ id: tabId, status: 'complete' });
+                    return;
+                }
+
+                chromeApi.tabs.get(tabId, (tab) => {
+                    if (chromeApi.runtime && chromeApi.runtime.lastError) {
+                        reject(
+                            createPhaseError(errorCode, phase, {
+                                chromeLastError: chromeApi.runtime.lastError.message
+                            })
+                        );
+                        return;
+                    }
+                    resolve(tab || { id: tabId });
+                });
+            });
+        }
+
+        async function waitForTabReady(tabId, errorCode, phase) {
+            const startedAt = now();
+
+            while (now() - startedAt <= tabReadyTimeoutMs) {
+                const tab = await tabsGet(tabId, errorCode, phase);
+                if (tab && tab.status === 'complete') return tab;
+                await wait(tabReadyPollMs);
+            }
+
+            throw createPhaseError(errorCode, phase, {
+                reason: 'tab_load_timeout',
+                timeoutMs: tabReadyTimeoutMs
+            });
+        }
+
+        function executeScript(tabId, files, errorCode, phase) {
+            return new Promise((resolve, reject) => {
+                if (!chromeApi.scripting || !chromeApi.scripting.executeScript) {
+                    reject(createPhaseError(errorCode, phase, { reason: 'scripting_unavailable' }));
+                    return;
+                }
+
+                chromeApi.scripting.executeScript(
+                    { target: { tabId }, files },
+                    () => {
+                        if (chromeApi.runtime && chromeApi.runtime.lastError) {
+                            reject(
+                                createPhaseError(errorCode, phase, {
+                                    chromeLastError: chromeApi.runtime.lastError.message,
+                                    action: 'executeScript'
+                                })
+                            );
+                            return;
+                        }
+                        resolve();
+                    }
+                );
+            });
+        }
+
+        function insertCss(tabId, files, errorCode, phase) {
+            return new Promise((resolve, reject) => {
+                if (!chromeApi.scripting || !chromeApi.scripting.insertCSS) {
+                    resolve();
+                    return;
+                }
+
+                chromeApi.scripting.insertCSS(
+                    { target: { tabId }, files },
+                    () => {
+                        if (chromeApi.runtime && chromeApi.runtime.lastError) {
+                            reject(
+                                createPhaseError(errorCode, phase, {
+                                    chromeLastError: chromeApi.runtime.lastError.message,
+                                    action: 'insertCSS'
+                                })
+                            );
+                            return;
+                        }
+                        resolve();
+                    }
+                );
+            });
+        }
+
+        async function injectRecreateContentScripts(tabId, errorCode, phase) {
+            await waitForTabReady(tabId, errorCode, phase);
+            await insertCss(tabId, RECREATE_CONTENT_CSS_FILES, errorCode, phase);
+            await executeScript(tabId, RECREATE_CONTENT_SCRIPT_FILES, errorCode, phase);
         }
 
         function tabsSendMessageOnce(tabId, message, errorCode, phase, timeoutMs) {
@@ -166,6 +293,7 @@
             const retryReceiverNotReady = sendOptions.retryReceiverNotReady !== false;
             const maxAttempts = retryReceiverNotReady ? receiverRetryAttempts : 1;
             let lastError = null;
+            let injected = false;
 
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                 try {
@@ -174,6 +302,10 @@
                     lastError = error;
                     if (!retryReceiverNotReady || !isReceiverNotReadyError(error) || attempt >= maxAttempts) {
                         throw error;
+                    }
+                    if (!injected) {
+                        await injectRecreateContentScripts(tabId, errorCode, phase);
+                        injected = true;
                     }
                     await wait(receiverRetryDelayMs);
                 }
@@ -233,10 +365,13 @@
 
         async function getImagineTabId(run) {
             if (isGrokImagineUrl(run.sourceTabUrl)) {
+                await tabsUpdate(run.sourceTabId, { active: true }, 'imagine_tab_unavailable', 'imagine');
+                await waitForTabReady(run.sourceTabId, 'imagine_tab_unavailable', 'imagine');
                 return run.sourceTabId;
             }
 
             const imagineTab = await tabsCreate({ url: IMAGINE_URL, active: true }, 'imagine_tab_unavailable', 'imagine');
+            await waitForTabReady(imagineTab.id, 'imagine_tab_unavailable', 'imagine');
             return imagineTab.id;
         }
 
@@ -261,8 +396,11 @@
                 await sendStatus(run, 'chat', 'Opening Grok chat tab...', 'info');
                 ensureActive(run);
 
-                const chatTab = await tabsCreate({ url: CHAT_URL, active: false }, 'chat_tab_unavailable', 'chat');
+                const chatTab = await tabsCreate({ url: CHAT_URL, active: true }, 'chat_tab_unavailable', 'chat');
                 run.chatTabId = chatTab.id;
+                ensureActive(run);
+
+                await waitForTabReady(run.chatTabId, 'chat_tab_unavailable', 'chat');
                 ensureActive(run);
 
                 const chatResponse = await tabsSendMessage(run.chatTabId, {
@@ -289,7 +427,7 @@
                     return failed;
                 }
 
-                await sendStatus(run, 'imagine', 'Submitting prompt in Grok Imagine...', 'info');
+                await sendStatus(run, 'imagine', 'Submitting prompt and waiting for generated images...', 'info');
                 ensureActive(run);
 
                 run.imagineTabId = await getImagineTabId(run);
@@ -317,14 +455,23 @@
                     return failed;
                 }
 
-                await sendStatus(run, 'done', 'Submitted to Grok Imagine.', 'success');
+                if (imagineResponse.resultReady !== true) {
+                    const failed = buildFailure(run, 'imagine', 'imagine_result_unverified', imagineResponse.diagnostics || {});
+                    await sendStatus(run, failed.phase, failed.error, 'error');
+                    clearActiveRun(run);
+                    return failed;
+                }
+
+                await sendStatus(run, 'done', 'Generated image ready.', 'success');
                 clearActiveRun(run);
 
                 return {
                     ok: true,
                     runId: run.runId,
                     generatedPrompt,
-                    submitted: true
+                    submitted: true,
+                    resultReady: true,
+                    result: imagineResponse.result
                 };
             } catch (error) {
                 const result = buildFailure(run, 'workflow', error, {

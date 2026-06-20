@@ -153,7 +153,24 @@
         const markerIndex = text.indexOf(FINAL_PROMPT_MARKER);
         if (markerIndex < 0) throw fail('chat_prompt_marker_missing');
 
-        const prompt = text.slice(markerIndex + FINAL_PROMPT_MARKER.length).trim();
+        const rawPrompt = text.slice(markerIndex + FINAL_PROMPT_MARKER.length).trim();
+        const stopPatterns = [
+            /\n\s*\d+\s+sources?\b/i,
+            /\n\s*(?:Explore|Omit)\b/i,
+            /\n\s*Agent\s+\d+\b/i,
+            /\s+Agent\s+\d+\b/i,
+            /\n\s*(?:Final suggestion|My final suggested prompt text)\s*:/i,
+            /\s+(?:Final suggestion|My final suggested prompt text)\s*:/i
+        ];
+        const stopIndex = stopPatterns.reduce((earliest, pattern) => {
+            const match = rawPrompt.match(pattern);
+            if (!match || typeof match.index !== 'number') return earliest;
+            return earliest === -1 ? match.index : Math.min(earliest, match.index);
+        }, -1);
+        const prompt = (stopIndex >= 0 ? rawPrompt.slice(0, stopIndex) : rawPrompt)
+            .trim()
+            .replace(/^["“”]+|["“”]+$/g, '')
+            .trim();
         if (!prompt) throw fail('chat_prompt_marker_missing');
 
         return prompt;
@@ -183,7 +200,11 @@
             const parsed = new URL(String(value || ''));
             return (
                 parsed.protocol === 'https:' &&
-                (parsed.hostname === 'imagine-public.x.ai' || parsed.hostname === 'assets.grok.com')
+                (
+                    parsed.hostname === 'imagine-public.x.ai' ||
+                    parsed.hostname === 'images-public.x.ai' ||
+                    parsed.hostname === 'assets.grok.com'
+                )
             );
         } catch {
             return false;
@@ -195,9 +216,30 @@
         return value.startsWith('data:image/') || value.startsWith('blob:') || isTrustedGrokMediaUrl(value);
     }
 
+    function isLikelyGeneratedImageCandidate(candidate) {
+        if (!candidate) return false;
+        if (String(candidate.alt || '').trim() === 'Generated image') return true;
+        return isTrustedGrokMediaUrl(candidate.src);
+    }
+
     function isVisibleRect(rect) {
         if (!rect) return false;
         return Number(rect.width || 0) > 0 && Number(rect.height || 0) > 0;
+    }
+
+    function intersectsViewport(rect, viewport) {
+        if (!isVisibleRect(rect)) return false;
+
+        const viewportWidth = viewport && Number.isFinite(viewport.width) ? viewport.width : 0;
+        const viewportHeight = viewport && Number.isFinite(viewport.height) ? viewport.height : 0;
+        if (viewportWidth <= 0 || viewportHeight <= 0) return true;
+
+        const left = Number(rect.left || 0);
+        const top = Number(rect.top || 0);
+        const right = left + Number(rect.width || 0);
+        const bottom = top + Number(rect.height || 0);
+
+        return right > 0 && bottom > 0 && left < viewportWidth && top < viewportHeight;
     }
 
     function chooseBestGeneratedImageCandidate(candidates, viewport) {
@@ -209,9 +251,9 @@
         return (
             (Array.isArray(candidates) ? candidates : [])
                 .filter((candidate) => {
-                    if (!candidate || candidate.alt !== 'Generated image') return false;
+                    if (!isLikelyGeneratedImageCandidate(candidate)) return false;
                     if (!isSupportedCurrentImageSrc(candidate.src)) return false;
-                    if (!isVisibleRect(candidate.rect)) return false;
+                    if (!intersectsViewport(candidate.rect, viewport)) return false;
                     return Math.max(candidate.naturalWidth || 0, candidate.naturalHeight || 0) >= 256;
                 })
                 .map((candidate) => {
@@ -289,6 +331,7 @@
         chooseBestGeneratedImageCandidate,
         createRecreateRunId,
         extractFinalImaginePrompt,
+        isLikelyGeneratedImageCandidate,
         isSupportedCurrentImageSrc,
         isTrustedGrokMediaUrl,
         normalizeRecreateReference,

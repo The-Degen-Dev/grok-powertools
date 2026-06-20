@@ -4,6 +4,7 @@ const {
     buildRecreateFailure,
     chooseBestGeneratedImageCandidate,
     extractFinalImaginePrompt,
+    isTrustedGrokMediaUrl,
     MAX_REFERENCE_BYTES,
     normalizeRecreateReference,
     parseRecreateDataUrl
@@ -71,6 +72,27 @@ describe('recreate workflow utils', () => {
         );
     });
 
+    test('strips Grok sources and agent chatter after the final prompt marker', () => {
+        expect(
+            extractFinalImaginePrompt(
+                [
+                    'FINAL_IMAGINE_PROMPT: Minimalist geometric abstract painting with red circle and green triangle.',
+                    '',
+                    '5 sources',
+                    'Explore Constructivist geometry'
+                ].join('\n')
+            )
+        ).toBe('Minimalist geometric abstract painting with red circle and green triangle.');
+
+        expect(
+            extractFinalImaginePrompt(
+                'FINAL_IMAGINE_PROMPT: minimalist geometric abstract painting with red circle, purple diagonal stripe, green triangle, blue square, yellow circle, flat vector style Agent 8 Refinements: Ensure the purple is a long thin rotated rectangle.'
+            )
+        ).toBe(
+            'minimalist geometric abstract painting with red circle, purple diagonal stripe, green triangle, blue square, yellow circle, flat vector style'
+        );
+    });
+
     test('fails when final prompt marker is absent', () => {
         expect(() => extractFinalImaginePrompt('A cinematic red cabin in snow.')).toThrow('chat_prompt_marker_missing');
     });
@@ -121,6 +143,37 @@ describe('recreate workflow utils', () => {
         );
 
         expect(best.src).toBe('data:image/png;base64,bbb=');
+    });
+
+    test('trusts current Grok image result hosts', () => {
+        expect(isTrustedGrokMediaUrl('https://imagine-public.x.ai/imagine-public/images/sample.jpg')).toBe(true);
+        expect(isTrustedGrokMediaUrl('https://images-public.x.ai/xai-images-public/mj/images/sample.png')).toBe(true);
+        expect(isTrustedGrokMediaUrl('https://assets.grok.com/users/sample/content')).toBe(true);
+        expect(isTrustedGrokMediaUrl('https://example.com/sample.png')).toBe(false);
+    });
+
+    test('ignores generated image candidates outside the viewport', () => {
+        const best = chooseBestGeneratedImageCandidate(
+            [
+                {
+                    src: 'data:image/png;base64,offscreen=',
+                    alt: 'Generated image',
+                    naturalWidth: 720,
+                    naturalHeight: 720,
+                    rect: { left: 450, top: 900, width: 100, height: 100 }
+                },
+                {
+                    src: 'data:image/png;base64,visible=',
+                    alt: 'Generated image',
+                    naturalWidth: 720,
+                    naturalHeight: 720,
+                    rect: { left: 20, top: 20, width: 100, height: 100 }
+                }
+            ],
+            { width: 800, height: 600 }
+        );
+
+        expect(best.src).toBe('data:image/png;base64,visible=');
     });
 
     test('builds safe failure responses without payloads', () => {
