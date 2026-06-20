@@ -28,6 +28,13 @@ interface StoryboardPanelProps {
   onActiveIndexChange: (index: number) => void;
 }
 
+function mediaClipLabel(clip: MovieClip): string {
+  if (clip.sourceAssetId) return clip.sourceAssetId;
+  if (clip.type === "video") return clip.videoUrl?.split(/[/?#]/).filter(Boolean).pop()?.slice(0, 25) ?? "Video";
+  if (clip.type === "image") return clip.imageUrl?.split(/[/?#]/).filter(Boolean).pop()?.slice(0, 25) ?? "Image";
+  return clip.titleText ?? "Title";
+}
+
 function SortableClipCard({
   clip,
   isActive,
@@ -65,11 +72,7 @@ function SortableClipCard({
           <Type className="h-3 w-3 flex-shrink-0" />
         )}
         <span className="flex-1 truncate">
-          {clip.type === "video"
-            ? clip.videoUrl?.split("/").pop()?.slice(0, 25) ?? "Video"
-            : clip.type === "image"
-              ? clip.imageUrl?.split("/").pop()?.slice(0, 25) ?? "Image"
-            : clip.titleText ?? "Title"}
+          {mediaClipLabel(clip)}
         </span>
         <button
           type="button"

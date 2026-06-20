@@ -4,6 +4,7 @@ import { Copy, ExternalLink, EyeOff, Film, ImageIcon, Play, Plus, Star } from "l
 import Button from "@/components/ui/Button";
 import type { VaultAsset, VaultOverlay } from "@/lib/vault-types";
 import { isVaultImageAsset } from "@/lib/vault-media";
+import { vaultMediaUrl } from "@/lib/vault-media-url";
 
 export default function VaultMediaCard({
   asset,
@@ -26,7 +27,7 @@ export default function VaultMediaCard({
   onAddToMovie: (asset: VaultAsset) => void;
   onOverlayChange: (assetId: string, patch: Partial<Pick<VaultOverlay, "favorite" | "hidden" | "notes" | "tags">>) => void;
 }) {
-  const mediaUrl = `/api/vault/media/${encodeURIComponent(asset.assetId)}`;
+  const mediaUrl = vaultMediaUrl(asset);
   const isImage = isVaultImageAsset(asset);
   const tags = overlay?.tags || [];
   const objectKey = asset.canonicalObjectKey || asset.legacyObjectKeys[0] || "";

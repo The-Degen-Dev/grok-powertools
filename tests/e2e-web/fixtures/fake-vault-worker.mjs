@@ -59,6 +59,28 @@ const fixtureAssets = [
   },
 ];
 
+const paginatedFixtureAssets = [
+  {
+    assetId: "zz-page-2-image",
+    mediaType: "image",
+    canonicalObjectKey: "grok-powertools/v1/users/greymaker/media/by-asset/zz-page-2-image.png",
+    legacyObjectKeys: [],
+    contentType: "image/png",
+    sizeBytes: 256,
+    etag: "etag-zz-page-2-image",
+    sha256: "sha-zz-page-2-image",
+    sourceUrl: "https://grok.com/imagine/post/post-zz-page-2-image",
+    grokPostId: "post-zz-page-2-image",
+    promptText: "A second page asset from the paginated vault inventory.",
+    firstSeenAt: "2026-06-18T00:00:00.000Z",
+    lastSeenAt: "2026-06-18T00:00:00.000Z",
+    verificationStatus: "verified",
+    gapCodes: [],
+    createdAt: "2026-06-18T00:00:00.000Z",
+    updatedAt: "2026-06-18T00:00:00.000Z",
+  },
+];
+
 const fixturePrompts = [
   {
     id: "prompt-1",
@@ -114,10 +136,19 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === "/v1/vault/inventory") {
+    if (url.searchParams.get("cursor") === "page-2") {
+      return sendJson(res, 200, {
+        ok: true,
+        items: paginatedFixtureAssets,
+        nextCursor: null,
+        counts: { assets: 1, images: 1, videos: 0, verified: 1, blocked: 0, failed: 0, unproven: 0 },
+      });
+    }
+
     return sendJson(res, 200, {
       ok: true,
       items: fixtureAssets,
-      nextCursor: null,
+      nextCursor: "page-2",
       counts: { assets: 3, images: 1, videos: 1, verified: 3, blocked: 0, failed: 0, unproven: 0 },
     });
   }
@@ -149,7 +180,8 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === "/v1/vault/media") {
     const assetId = url.searchParams.get("assetId");
-    if (assetId === "asset-image-1") {
+    const objectKey = url.searchParams.get("objectKey");
+    if (assetId === "asset-image-1" || objectKey?.endsWith("zz-page-2-image.png")) {
       const png = Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lp7dNwAAAABJRU5ErkJggg==",
         "base64",

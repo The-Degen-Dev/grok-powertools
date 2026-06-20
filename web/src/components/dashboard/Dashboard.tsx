@@ -16,7 +16,7 @@ const EXAMPLE_ITEMS = [
   {
     grokPostId: "demo-1",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-1.mp4",
     thumbnailUrl: "",
     promptText: "Calm organic movement, otters drifting gently.",
     notes: "",
@@ -24,7 +24,7 @@ const EXAMPLE_ITEMS = [
   {
     grokPostId: "demo-2",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-2.mp4",
     thumbnailUrl: "",
     promptText: "Cyberpunk city at night with neon reflections.",
     notes: "",
@@ -32,7 +32,7 @@ const EXAMPLE_ITEMS = [
   {
     grokPostId: "demo-3",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/sintel/mp4/h264/360/Sintel_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-3.mp4",
     thumbnailUrl: "",
     promptText: "Ancient forest with bioluminescent mushrooms.",
     notes: "",

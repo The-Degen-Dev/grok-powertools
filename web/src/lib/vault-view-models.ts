@@ -1,9 +1,10 @@
 import type { MovieClip, VideoItem } from "./types";
 import type { VaultAsset } from "./vault-types";
 import { isVaultImageAsset } from "./vault-media";
+import { vaultMediaUrl } from "./vault-media-url";
 
 export function vaultAssetToVideoItem(asset: VaultAsset, position = 0): VideoItem {
-  const mediaUrl = `/api/vault/media/${encodeURIComponent(asset.assetId)}`;
+  const mediaUrl = vaultMediaUrl(asset);
   const isImage = isVaultImageAsset(asset);
   return {
     id: asset.assetId,
@@ -22,7 +23,7 @@ export function vaultAssetToVideoItem(asset: VaultAsset, position = 0): VideoIte
 }
 
 export function vaultAssetToMovieClip(asset: VaultAsset, position = 0): MovieClip {
-  const mediaUrl = `/api/vault/media/${encodeURIComponent(asset.assetId)}`;
+  const mediaUrl = vaultMediaUrl(asset);
   const isImage = isVaultImageAsset(asset);
   return {
     id: crypto.randomUUID(),

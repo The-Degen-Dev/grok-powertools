@@ -1,9 +1,13 @@
 import { getWorkerConfig } from "@/lib/vault-server";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ assetId: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ assetId: string }> }) {
   const { assetId } = await params;
   const { workerUrl, apiKey } = getWorkerConfig();
-  const res = await fetch(`${workerUrl}/v1/vault/media?assetId=${encodeURIComponent(assetId)}`, {
+  const requestUrl = new URL(request.url);
+  const workerSearch = new URLSearchParams({ assetId });
+  const objectKey = requestUrl.searchParams.get("objectKey");
+  if (objectKey) workerSearch.set("objectKey", objectKey);
+  const res = await fetch(`${workerUrl}/v1/vault/media?${workerSearch.toString()}`, {
     headers: { "x-gpt-api-key": apiKey },
     cache: "no-store",
   });

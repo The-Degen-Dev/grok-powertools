@@ -724,7 +724,12 @@ export default {
 
             if (request.method === 'GET' && url.pathname === '/v1/vault/media') {
                 const assetId = url.searchParams.get('assetId') || '';
-                const object = await findVaultMediaObject(env, assetId);
+                const objectKey = url.searchParams.get('objectKey') || '';
+                const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+                if (objectKey && !isValidObjectKey(objectKey, keyPrefix)) {
+                    return errorResponse('Invalid object key.', 400);
+                }
+                const object = objectKey ? await env.R2_BUCKET.get(objectKey) : await findVaultMediaObject(env, assetId);
                 if (!object?.body) return errorResponse('MEDIA_OBJECT_MISSING', 404);
                 const headers = new Headers(corsHeaders());
                 if (object.httpMetadata?.contentType) headers.set('content-type', object.httpMetadata.contentType);

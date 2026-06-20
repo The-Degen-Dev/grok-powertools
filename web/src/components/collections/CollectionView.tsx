@@ -22,7 +22,6 @@ import { CSS } from "@dnd-kit/utilities";
 import type { Collection, VideoItem } from "@/lib/types";
 import {
   getAllCollections,
-  getCollection,
   createCollection,
   updateCollection,
   deleteCollection,
@@ -49,7 +48,7 @@ const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-1",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-1.mp4",
     thumbnailUrl: "",
     promptText: "Calm organic movement subject, still is still and pulls out slowly. Otters slightly drifting, mostly calm.",
     notes: "",
@@ -57,7 +56,7 @@ const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-2",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-2.mp4",
     thumbnailUrl: "",
     promptText: "A cyberpunk city at night with neon reflections in rain puddles, cinematic camera movement through streets.",
     notes: "",
@@ -65,7 +64,7 @@ const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-3",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/sintel/mp4/h264/360/Sintel_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-3.mp4",
     thumbnailUrl: "",
     promptText: "Ancient forest with bioluminescent mushrooms, gentle fog rolling through massive tree trunks, fairy lights.",
     notes: "",
@@ -73,7 +72,7 @@ const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-4",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_2MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-4.mp4",
     thumbnailUrl: "",
     promptText: "Aerial shot of a volcanic island erupting with flowing lava meeting the ocean, dramatic steam clouds.",
     notes: "",
@@ -81,12 +80,23 @@ const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-5",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_2MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-5.mp4",
     thumbnailUrl: "",
     promptText: "A majestic whale breaching in slow motion, sunset golden hour lighting, water droplets sparkling.",
     notes: "",
   },
 ];
+
+function toNewCollectionItemInput({
+  grokPostId,
+  sourceUrl,
+  videoUrl,
+  thumbnailUrl,
+  promptText,
+  notes,
+}: VideoItem): Omit<VideoItem, "id" | "position" | "createdAt"> {
+  return { grokPostId, sourceUrl, videoUrl, thumbnailUrl, promptText, notes };
+}
 
 function SortableVideoCard({
   item,
@@ -248,7 +258,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
       if (activeCollection) {
         const updated = await addItemsToCollection(
           activeCollection.id,
-          newItems.map(({ id: _id, position: _pos, createdAt: _ca, ...rest }) => rest)
+          newItems.map(toNewCollectionItemInput)
         );
         if (updated) {
           setCollections((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
@@ -277,7 +287,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
     if (activeCollection) {
       addItemsToCollection(
         activeCollection.id,
-        newExamples.map(({ id: _id, position: _pos, createdAt: _ca, ...rest }) => rest)
+        newExamples.map(toNewCollectionItemInput)
       ).then((updated) => {
         if (updated) {
           setCollections((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));

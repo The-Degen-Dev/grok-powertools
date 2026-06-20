@@ -220,6 +220,94 @@ test('Vault media streams object bytes for server-side proxy', async () => {
     assert.equal(response.headers.get('content-type'), 'video/mp4');
 });
 
+test('Vault media assetId lookup follows inventory pagination', async () => {
+    const objectKey = 'grok-powertools/v1/users/greymaker/media/by-asset/asset-page-2.mp4';
+    const listCalls: Array<string | null> = [];
+    const response = await worker.fetch(
+        new Request('https://worker.example/v1/vault/media?assetId=asset-page-2', {
+            headers: { [headerName]: sampleKey },
+        }),
+        env({
+            R2_BUCKET: {
+                list: async ({ cursor }: { cursor?: string }) => {
+                    listCalls.push(cursor || null);
+                    if (!cursor) {
+                        return { objects: [], truncated: true, cursor: 'page-2' };
+                    }
+                    return {
+                        objects: [
+                            {
+                                key: objectKey,
+                                size: 2048,
+                                etag: 'etag-page-2',
+                                uploaded: new Date('2026-06-18T00:00:00.000Z'),
+                                httpMetadata: { contentType: 'video/mp4' },
+                                customMetadata: { assetId: 'asset-page-2' },
+                            },
+                        ],
+                        truncated: false,
+                        cursor: undefined,
+                    };
+                },
+                get: async (key: string) => {
+                    assert.equal(key, objectKey);
+                    return {
+                        body: new ReadableStream({
+                            start(controller) {
+                                controller.enqueue(new Uint8Array([1, 2, 3]));
+                                controller.close();
+                            },
+                        }),
+                        httpMetadata: { contentType: 'video/mp4' },
+                    };
+                },
+            },
+        })
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(listCalls, [null, 'page-2']);
+});
+
+test('Vault media streams exact objectKey without inventory lookup', async () => {
+    const objectKey = 'grok-powertools/v1/users/greymaker/media/by-asset/asset-video-1.mp4';
+    const response = await worker.fetch(
+        new Request(`https://worker.example/v1/vault/media?assetId=asset-video-1&objectKey=${encodeURIComponent(objectKey)}`, {
+            headers: { [headerName]: sampleKey },
+        }),
+        env({
+            R2_BUCKET: {
+                list: async () => {
+                    throw new Error('objectKey media fetch should not list inventory');
+                },
+                get: async (key: string) => {
+                    assert.equal(key, objectKey);
+                    return {
+                        body: new ReadableStream({
+                            start(controller) {
+                                controller.enqueue(new Uint8Array([1, 2, 3]));
+                                controller.close();
+                            },
+                        }),
+                        httpMetadata: { contentType: 'video/mp4' },
+                    };
+                },
+            },
+        })
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'video/mp4');
+});
+
+test('Vault media rejects invalid objectKey', async () => {
+    const response = await worker.fetch(
+        new Request('https://worker.example/v1/vault/media?assetId=asset-video-1&objectKey=../secret.mp4', {
+            headers: { [headerName]: sampleKey },
+        }),
+        env()
+    );
+    assert.equal(response.status, 400);
+});
+
 test('Sync push rejects invalid JWT before vault overlay writes', async () => {
     const writes: string[] = [];
     const response = await worker.fetch(
