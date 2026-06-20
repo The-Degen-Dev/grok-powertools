@@ -2,13 +2,14 @@ import { openDB, type IDBPDatabase } from "idb";
 import { v4 as uuidv4 } from "uuid";
 import type { Collection, VideoItem, AppSettings, Movie, SavedPrompt, SyncMeta } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import { upgradeVaultStores } from "./vault-storage";
 
 const DB_NAME = "grok-power-tools";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
-function getDB(): Promise<IDBPDatabase> {
+export function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion) {
@@ -28,6 +29,9 @@ function getDB(): Promise<IDBPDatabase> {
           const promptStore = db.createObjectStore("prompts", { keyPath: "id" });
           promptStore.createIndex("by-created", "createdAt");
           db.createObjectStore("sync_meta");
+        }
+        if (oldVersion < 4) {
+          upgradeVaultStores(db);
         }
       },
     });

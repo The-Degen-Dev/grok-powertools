@@ -35,6 +35,8 @@ function buildTimeline(clips: MovieClip[], videoDurations: Map<string, number>):
 
     if (clip.type === "title") {
       clipDuration = clip.titleDuration ?? 3;
+    } else if (clip.type === "image") {
+      clipDuration = clip.stillDuration ?? 3;
     } else {
       const fullDuration = videoDurations.get(clip.id) ?? 5;
       const start = clip.trimStart ?? 0;
@@ -79,6 +81,7 @@ export default function CanvasPlayer({
 }: CanvasPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const imageRefs = useRef<Map<string, HTMLImageElement>>(new Map());
   const videoDurations = useRef<Map<string, number>>(new Map());
   const rafRef = useRef<number>(0);
   const playStartRef = useRef<number>(0);
@@ -92,41 +95,6 @@ export default function CanvasPlayer({
   useEffect(() => {
     onTotalDurationChange?.(totalDuration);
   }, [totalDuration, onTotalDurationChange]);
-
-  // Create/update video elements when clips change
-  useEffect(() => {
-    const currentIds = new Set(clips.filter((c) => c.type === "video").map((c) => c.id));
-    // Remove stale
-    for (const [id, el] of videoRefs.current) {
-      if (!currentIds.has(id)) {
-        el.pause();
-        el.src = "";
-        videoRefs.current.delete(id);
-        videoDurations.current.delete(id);
-      }
-    }
-    // Add new
-    for (const clip of clips) {
-      if (clip.type !== "video" || !clip.videoUrl) continue;
-      if (videoRefs.current.has(clip.id)) continue;
-      const video = document.createElement("video");
-      video.crossOrigin = "anonymous";
-      video.preload = "auto";
-      video.muted = true;
-      video.playsInline = true;
-      video.src = clip.videoUrl;
-      video.addEventListener("loadedmetadata", () => {
-        videoDurations.current.set(clip.id, video.duration);
-        // Recalculate total duration
-        const timeline = buildTimeline(clips, videoDurations.current);
-        if (timeline.length > 0) {
-          setTotalDuration(timeline[timeline.length - 1].endTime);
-        }
-      });
-      video.load();
-      videoRefs.current.set(clip.id, video);
-    }
-  }, [clips]);
 
   // Recalculate total duration when clips change
   useEffect(() => {
@@ -233,6 +201,14 @@ export default function CanvasPlayer({
             ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
           }
         }
+      } else if (clip.type === "image") {
+        const image = imageRefs.current.get(clip.id);
+        if (image && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+          const scale = Math.min(w / image.naturalWidth, h / image.naturalHeight);
+          const dw = image.naturalWidth * scale;
+          const dh = image.naturalHeight * scale;
+          ctx.drawImage(image, (w - dw) / 2, (h - dh) / 2, dw, dh);
+        }
       } else if (clip.type === "title") {
         // Title card
         ctx.fillStyle = clip.titleBgColor ?? "#000000";
@@ -258,6 +234,49 @@ export default function CanvasPlayer({
       ctx.restore();
     }
   }, [clips, resolution, currentTimeValue]);
+
+  // Create/update media elements when clips change
+  useEffect(() => {
+    const currentIds = new Set(clips.filter((c) => c.type === "video").map((c) => c.id));
+    const currentImageIds = new Set(clips.filter((c) => c.type === "image").map((c) => c.id));
+    // Remove stale
+    for (const [id, el] of videoRefs.current) {
+      if (!currentIds.has(id)) {
+        el.pause();
+        videoRefs.current.delete(id);
+        videoDurations.current.delete(id);
+      }
+    }
+    for (const id of imageRefs.current.keys()) {
+      if (!currentImageIds.has(id)) imageRefs.current.delete(id);
+    }
+    // Add new
+    for (const clip of clips) {
+      if (clip.type === "video" && clip.videoUrl && !videoRefs.current.has(clip.id)) {
+        const video = document.createElement("video");
+        video.crossOrigin = "anonymous";
+        video.preload = "auto";
+        video.muted = true;
+        video.playsInline = true;
+        video.src = clip.videoUrl;
+        video.addEventListener("loadedmetadata", () => {
+          videoDurations.current.set(clip.id, video.duration);
+          const timeline = buildTimeline(clips, videoDurations.current);
+          if (timeline.length > 0) {
+            setTotalDuration(timeline[timeline.length - 1].endTime);
+          }
+        });
+        video.load();
+        videoRefs.current.set(clip.id, video);
+      } else if (clip.type === "image" && clip.imageUrl && !imageRefs.current.has(clip.id)) {
+        const image = new Image();
+        image.crossOrigin = "anonymous";
+        image.onload = render;
+        image.src = clip.imageUrl;
+        imageRefs.current.set(clip.id, image);
+      }
+    }
+  }, [clips, render]);
 
   // Animation loop for playback
   useEffect(() => {

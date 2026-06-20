@@ -33,6 +33,7 @@ module.exports = [
             'playwright-report/**',
             'test-results/**',
             'temp_ref/**',
+            'cloud/.tmp-test/**',
             // web/ is a separate Next.js app with its own tooling; skip it
             // at the extension root so `npm run lint` here stays fast and clean.
             'web/**',

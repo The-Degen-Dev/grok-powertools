@@ -2,7 +2,8 @@ export type MetadataKind =
     | 'savedPrompts'
     | 'promptHistory'
     | 'processedIds'
-    | 'backfillManifest';
+    | 'backfillManifest'
+    | 'savedList';
 
 export interface Env {
     DB: D1Database;
@@ -34,6 +35,12 @@ export interface SyncPushRequest {
         updatedAt: string;
         deletedAt?: string | null;
     }>;
+    vaultOverlays?: Array<{
+        assetId: string;
+        data: string;
+        updatedAt: string;
+        deletedAt?: string | null;
+    }>;
 }
 
 export interface SyncPullResponse {
@@ -45,6 +52,12 @@ export interface SyncPullResponse {
     }>;
     movies: Array<{
         id: string;
+        data: string;
+        updatedAt: string;
+        deletedAt: string | null;
+    }>;
+    vaultOverlays: Array<{
+        assetId: string;
         data: string;
         updatedAt: string;
         deletedAt: string | null;
@@ -105,4 +118,44 @@ export interface ObjectVerifyResponse {
         contentType: boolean | null;
     };
     mismatches: string[];
+}
+
+export type VaultMediaType = 'image' | 'video' | 'unknown';
+export type VaultStatus = 'verified' | 'blocked' | 'failed' | 'unproven';
+
+export interface VaultAsset {
+    assetId: string;
+    mediaType: VaultMediaType;
+    canonicalObjectKey?: string;
+    legacyObjectKeys: string[];
+    contentType?: string;
+    sizeBytes?: number;
+    etag?: string;
+    sha256?: string;
+    sourceUrlHash?: string;
+    sourceUrl?: string;
+    grokPostId?: string;
+    mediaUuid?: string;
+    promptId?: string;
+    promptText?: string;
+    width?: number;
+    height?: number;
+    durationSeconds?: number;
+    firstSeenAt?: string;
+    lastSeenAt?: string;
+    verificationStatus: VaultStatus;
+    gapCodes: string[];
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface VaultGap {
+    id: string;
+    assetId?: string;
+    code: string;
+    severity: 'info' | 'warning' | 'blocking';
+    evidence: string;
+    recommendedAction: string;
+    requiresLiveGrok: boolean;
+    requiresCloudWrite: boolean;
 }

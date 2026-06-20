@@ -432,7 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             return new URL(trimmed).origin;
-        } catch (e) {
+        } catch {
             return trimmed.replace(/\/+$/, '');
         }
     }
@@ -455,7 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const labels = prefix.split('.');
             return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
-        } catch (e) {
+        } catch {
             return false;
         }
     }

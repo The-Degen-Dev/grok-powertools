@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>R2 Backed Vault Web App Notes</title>
+    <style>
+      body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; background: #f8fafc; }
+      main { max-width: 980px; margin: 0 auto; padding: 32px 20px 56px; }
+      h1 { margin: 0 0 8px; font-size: 28px; }
+      h2 { margin-top: 28px; font-size: 18px; }
+      table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; }
+      th, td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; font-size: 14px; }
+      th { background: #f3f4f6; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+      code { background: #eef2ff; padding: 2px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>R2 Backed Vault Web App Notes</h1>
+      <p>
+        Running notes for <code>docs/superpowers/specs/2026-06-18-r2-backed-vault-webapp-design.md</code>.
+      </p>
+      <h2>Notes</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Use a fake Worker for browser tests so local UI work proves the server-route contract without touching production R2 or D1.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>The fake Worker exposes an unauthenticated health endpoint for Playwright server readiness because authenticated identity checks return 401 and would not prove the route under test.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Worker Vault helpers normalize canonical and legacy R2 keys without moving or rewriting existing objects, and canonical media must stay under the configured key prefix.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Worker Vault read routes use only R2 list/get operations for the first preview path. Metadata lookup follows the current Greymaker latest-snapshot path from the plan and must be verified against real R2 before final acceptance.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Worker metadata responses expose normalized rows as <code>data</code>; the fake Worker still exposes prompt fixtures as <code>prompts</code>, so the Next preview broker must accept both shapes.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Vault data uses the existing IndexedDB database with a versioned migration so existing collections and movies are preserved. Vault prompts stay typed separately until the Prompt Library merge normalizes them into local prompt rows.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Added a browser migration spec for the version 4 IndexedDB upgrade because Task 4 changes persistent local storage.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Safety</td>
+            <td>Next Vault API routes broker Worker reads server-side, proxy media bytes without exposing Worker keys or signed URLs, and keep gap-fill and index reconciliation fail-closed until explicitly armed.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The fake Worker now exercises both <code>prompts</code> and <code>data</code> metadata response shapes so the preview broker is checked against fixture and real Worker contracts.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>The empty dashboard leads with the Vault load panel even if Worker identity is blocked; the control disables itself and shows the blocker instead of hiding the real-data path behind demo content.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Open question</td>
+            <td>Later tasks mention warning toasts, but the current toast type supports success, error, and info only. Use info for non-blocking warnings or intentionally extend the toast type when needed.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Vault preview commit is local IndexedDB only. The browser test proves committed fixture assets survive reload without any Worker, R2, D1, sync, or live Grok write.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Vault viewer handles images and videos directly. Existing video cards get image support without renaming the component tree in this pass.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td><code>FullscreenViewer</code> remains video-only until the watch queue work in Task 9, even though Task 8 listed it, because Task 8's concrete steps only wire the Vault media viewer and image branch in cards.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td><code>VaultMediaCard</code> uses explicit media and text buttons instead of making the whole card clickable, so the Task 8 text-click test works without nesting button interactions.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 8 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The first Playwright attempt timed out waiting for its web server, then passed after manual fake Worker and Next readiness checks; after the IndexedDB reset fix, the direct Playwright webServer run also passed.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>The Vault UI test reset waits for the app-created IndexedDB v4 database before clearing stores. This avoids accidentally creating an empty v1 database from the test helper while preserving existing app stores during normal use.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>The Vault media viewer handles Escape, focus entry, focus restoration, and a small focus loop itself because it is a custom full-screen dialog, not a shared modal component.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Task 9 adds a top-level Collections nav item and makes <code>/collections</code> open the newest local collection. The plan's browser test uses that route after adding a Vault asset to <code>New Collection</code>, and the previous route redirected home.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Watch queues accept first-class image and video items. Images become timed still clips when saved as a movie, while video clips keep their source URL. Thumbnail-only unknown items are not treated as watchable to avoid broken movie clips.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td><code>VaultPage</code> creates fresh local collection item IDs while preserving <code>assetId</code>, and it de-dupes repeat adds by <code>assetId</code>. This keeps React/DnD selection stable without mutating source Vault facts.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Deviation</td>
+            <td>The plan's non-blocking warning toasts use <code>info</code> because the current toast type only supports <code>success</code>, <code>error</code>, and <code>info</code>. Task 9 did not expand the toast API just to add one synonym.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Task 9 verifies that <code>Save as Movie</code> creates image and video clips with Vault <code>sourceAssetId</code> values. Full Movie Maker rendering polish for image clips remains with Task 10, which is the plan task dedicated to image clip playback and source picking.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 9 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The test covers adding both fake Vault assets to a local collection, preserving image/video asset facts, opening Watch Mode, saving a movie, and inspecting IndexedDB movie clips.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Movie Maker now treats still-image clips as first-class preview media instead of hiding saved-gallery images from movie workflows. Canvas playback loads image elements, uses <code>stillDuration</code>, and draws them letterboxed like videos.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>The Task 10 browser test checks the generated storyboard label and a non-black canvas pixel after seeking into the image clip. This makes image rendering proof stronger than only asserting that a movie record exists.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Clip source picking includes image-backed collection items when they already have an image URL or thumbnail. It does not introduce any new upload/import path; source media remains the local Vault media proxy URL already stored in the collection item.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 10 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. Lint initially rejected clearing a stale video element <code>src</code>; that redundant mutation was removed.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The Clip Source Picker path now preserves Vault <code>sourceAssetId</code> for image and video clips. The Task 10 browser suite includes a focused source-picker test and passed all 7 Vault UI tests after this check was added.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Prompt Library converts <code>vault_prompts</code> rows into display-safe prompt rows before merging with local saved prompts by normalized text. Search filters the merged set so Vault prompts behave like local prompts without writing them into the local prompt store.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 11 includes a browser test that commits fake Vault prompts, opens the Prompt Library slide-over, and verifies Vault prompts render there. The same test seeds a normalized duplicate local prompt and confirms the merged library shows one matching prompt row.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Rows with Vault provenance hide the local delete control. A local-only prompt can still be deleted, but a merged Vault row should not show a delete button that would no-op against the local prompt store while the committed Vault prompt remains.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Safety</td>
+            <td>Ops explicitly says Worker health is not object proof and keeps gap-fill disabled until a later approved live repair run. Task 12 only reads local IndexedDB Vault state and does not call any gap-fill or reconciliation mutation route.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The Task 12 browser test commits fake Vault data, opens Ops, verifies the local Vault import count, checks the Worker-health boundary copy, and confirms the Gap Fill control is disabled.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>D1 sync receives Vault overlays only. Immutable R2 source facts stay sourced from R2 and Worker inventory.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Tradeoff</td>
+            <td>Cloud acceptance tests sign sync JWTs with a small local HS256 helper instead of adding <code>jose</code> to the Worker package, because the Worker already verifies JWTs with WebCrypto and the cloud package had no <code>jose</code> dependency.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Safety</td>
+            <td>Vault overlay pulls only replace local overlay rows when the remote <code>updatedAt</code> is newer, so stale D1 overlay state cannot overwrite newer local tags, notes, hidden, favorite, or tombstone state.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Task 13 passed <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The cloud tests cover invalid JWT fail-closed behavior plus valid overlay push and pull contracts.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The Task 13 Playwright sync spec intercepts local Next sync routes to prove initial sign-in pushes Vault overlays and stale remote overlay pulls do not overwrite newer local edits.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Final gates passed for <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, and <code>npx playwright test -c playwright.web.config.js</code>.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The previous root unit blocker is resolved in the current worktree. <code>npm run test:unit</code> passed 16 suites and 276 tests.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Fake Worker manual smoke passed on local servers for Vault preview, local commit, image/video cards, image/video viewer, add to collection, Watch All, Save as Movie, Prompt Library Vault prompts, and Ops Worker-health boundary copy. The first dashboard visit after a reset shows the expected onboarding modal, which was dismissed with <code>Skip</code>.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Real R2 read-only preview is unblocked. <code>web/.env.local</code> has separate non-empty <code>WORKER_API_KEY</code> and <code>WORKER_SYNC_SECRET</code> values, and they are not equal. Secret values were not printed.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Safety</td>
+            <td><code>WORKER_API_KEY</code> maps to the Worker <code>CLIENT_API_KEY</code>; <code>WORKER_SYNC_SECRET</code> maps to the Worker <code>SYNC_SECRET</code>. The deployed Worker accepted a JWT signed with the local sync secret on <code>/v1/sync/pull</code>.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Live R2 exposed legacy objects with no listed <code>contentType</code> but image file extensions. Worker inventory now falls back to object-key extension for media type, and the web app treats legacy <code>unknown</code> image-like Vault rows as images in cards, viewer, collections, and movie clips.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>The media-type fix was deployed to <code>grok-r2-backup-worker</code>. Live preview now reports 100 assets, 96 images, 4 videos, 0 gaps, and 0 warnings. A headless browser smoke previewed and committed 100 live R2 assets, opened an image viewer, and added an image asset to a local collection.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Final gates passed after the live-R2 unblock and media-type fix: <code>npm run test:unit</code>, <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, and <code>npx playwright test -c playwright.web.config.js</code>.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Vault parsing is now runtime schema-first without adding a new package. The parsers in <code>web/src/lib/vault-types.ts</code> validate Worker identity, inventory, prompts, gaps, counts, and previews before data reaches client state or IndexedDB. Malformed Worker rows are dropped from preview with validation warnings.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Worker inventory now reads <code>r2_dedupe_index</code> first and falls back to R2 listing when D1 is unavailable or empty. It remains read-only. Current fallback does not merge partial D1 pages with R2 list results in the same response; that keeps preview deterministic and avoids accidental source-fact writes.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Design decision</td>
+            <td>Vault page controls were expanded in-place instead of replacing the page. The page now has grid/table modes, search, media/status/visibility filters, prompt copy, source links when known, add to collection, add to movie, local favorite/tag/note/hide overlays, and safe bulk favorite/hide actions. Overlay edits remain local IndexedDB rows.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Ops now shows Worker health and host, key prefix, live R2 preview counts, local committed asset count, metadata prompt count, latest import status, open gap count, local owner/auth/sync status, and the explicit boundary that Worker health is not object proof.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Final verification passed on the current worktree: <code>npm run test:unit</code>, <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, and <code>npx playwright test -c playwright.web.config.js</code>. Web Playwright passed 18 tests.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Fake Worker manual smoke passed on local servers for preview, local commit, image and video cards, image viewer, video viewer, add to collection, Collection Watch All, Save as Movie, two Vault prompts in Prompt Library, and Ops object-proof boundary.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Deployed <code>grok-r2-backup-worker</code> version <code>a95e4d4a-1e48-49bd-8d0b-022359fab752</code>. Read-only real R2 validation through local Next routes passed: ops verified, Worker reachable, identity host <code>grok-r2-backup-worker.greymakerxyz-grok.workers.dev</code>, key prefix <code>grok-powertools/v1</code>, 100 assets, 56 images, 44 videos, 0 gaps, 0 warnings, and media proxy returned bytes. A headless live-R2 UI smoke committed 100 assets locally, opened a media viewer, wrote a local overlay, added to collection, and added to movie without R2, D1 source-fact, processed-ID, or live Grok mutation.</td>
+          </tr>
+          <tr>
+            <td>2026-06-19</td>
+            <td>Verification</td>
+            <td>Final gates were rerun before the final Vault commit. <code>npm run test:unit</code>, <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, and <code>npm --prefix cloud run typecheck</code> passed. The first <code>npx playwright test -c playwright.web.config.js</code> attempt failed because this repo's local Next dev server held <code>web/.next/dev/lock</code>; after stopping only that repo-local dev process, the rerun passed 18 tests against the fake Worker.</td>
+          </tr>
+        </tbody>
+      </table>
+      <h2>Open Questions</h2>
+      <p>None at execution start.</p>
+    </main>
+  </body>
+</html>

@@ -6,11 +6,13 @@
   "permissions": [
     "storage",
     "activeTab",
+    "tabs",
     "scripting",
     "downloads",
     "alarms",
     "cookies",
-    "offscreen"
+    "offscreen",
+    "debugger"
   ],
   "host_permissions": [
     "*://*.x.com/*",
@@ -44,6 +46,8 @@
         "*://imagine-public.x.ai/*"
       ],
       "js": [
+        "recreateWorkflowUtils.js",
+        "recreateWorkflowContent.js",
         "content.js"
       ],
       "css": [

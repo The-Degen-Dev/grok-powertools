@@ -10,12 +10,13 @@ import MovieCard from "./MovieCard";
 import Button from "@/components/ui/Button";
 import EmptyState from "@/components/ui/EmptyState";
 import WelcomeModal from "@/components/onboarding/WelcomeModal";
+import VaultLoadPanel from "@/components/vault/VaultLoadPanel";
 
 const EXAMPLE_ITEMS = [
   {
     grokPostId: "demo-1",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-1.mp4",
     thumbnailUrl: "",
     promptText: "Calm organic movement, otters drifting gently.",
     notes: "",
@@ -23,7 +24,7 @@ const EXAMPLE_ITEMS = [
   {
     grokPostId: "demo-2",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-2.mp4",
     thumbnailUrl: "",
     promptText: "Cyberpunk city at night with neon reflections.",
     notes: "",
@@ -31,7 +32,7 @@ const EXAMPLE_ITEMS = [
   {
     grokPostId: "demo-3",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/sintel/mp4/h264/360/Sintel_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-3.mp4",
     thumbnailUrl: "",
     promptText: "Ancient forest with bioluminescent mushrooms.",
     notes: "",
@@ -95,9 +96,12 @@ export default function Dashboard() {
 
   if (isEmpty) {
     return (
-      <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center px-6">
+      <div className="mx-auto flex min-h-[calc(100vh-3.5rem)] max-w-screen-xl flex-col justify-center px-6 py-10">
         <WelcomeModal onLoadExamples={handleLoadExamples} />
-        <div className="max-w-lg text-center">
+        <div className="mb-8">
+          <VaultLoadPanel onPreview={() => router.push("/vault")} />
+        </div>
+        <div className="mx-auto max-w-lg text-center">
           <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-(--color-accent)/10">
             <Sparkles className="h-8 w-8 text-(--color-accent)" />
           </div>

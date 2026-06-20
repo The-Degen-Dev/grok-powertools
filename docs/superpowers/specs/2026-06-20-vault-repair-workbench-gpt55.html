@@ -1,0 +1,1129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vault Repair Workbench, GPT-5.5 Operator Map</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172026;
+      --muted: #52616b;
+      --line: #c9d3dc;
+      --panel: #ffffff;
+      --page: #f4f6f1;
+      --rail: #23313a;
+      --read: #d9f0e3;
+      --index: #dcecff;
+      --meta: #fff0c8;
+      --link: #f4d7ff;
+      --media: #ffd8d2;
+      --ok: #137a52;
+      --warn: #9a6100;
+      --stop: #b42318;
+      --blue: #245c9f;
+      --violet: #6840a8;
+      --shadow: 0 14px 32px rgba(26, 36, 43, 0.11);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: var(--page);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    body {
+      margin: 0;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0 48px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 760px;
+      font-size: 3rem;
+      line-height: 0.98;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 1.75rem;
+      line-height: 1.08;
+      margin-bottom: 14px;
+    }
+
+    h3 {
+      font-size: 1rem;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    p {
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+      gap: 24px;
+      align-items: stretch;
+      min-height: 390px;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.76)),
+        repeating-linear-gradient(0deg, rgba(23, 32, 38, 0.06) 0 1px, transparent 1px 42px),
+        repeating-linear-gradient(90deg, rgba(23, 32, 38, 0.04) 0 1px, transparent 1px 42px),
+        #edf1ea;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-copy {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 26px;
+    }
+
+    .kicker {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border: 1px solid #aebbc5;
+      border-radius: 999px;
+      background: #ffffff;
+      color: #2f3b43;
+      font-size: 0.82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--stop);
+    }
+
+    .hero-note {
+      max-width: 700px;
+      color: #2f3b43;
+      font-size: 1.08rem;
+    }
+
+    .state-panel {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 16px;
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid #aebbc5;
+      border-radius: 8px;
+      background: #fffdf8;
+    }
+
+    .status-row {
+      display: grid;
+      grid-template-columns: 15px 1fr;
+      gap: 10px;
+      align-items: start;
+      padding: 10px 0;
+      border-top: 1px solid #d7cdb6;
+    }
+
+    .status-row:first-of-type {
+      border-top: 0;
+    }
+
+    .status-light {
+      width: 13px;
+      height: 13px;
+      margin-top: 5px;
+      border-radius: 50%;
+      background: var(--warn);
+    }
+
+    .status-row strong {
+      display: block;
+      font-size: 1rem;
+    }
+
+    .status-row span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .state-panel .stamp {
+      padding: 10px;
+      border: 1px solid #e0c59c;
+      border-radius: 6px;
+      background: #fff3d9;
+      color: #5c3b00;
+      font-weight: 700;
+    }
+
+    .section {
+      margin-top: 28px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .section-head p {
+      max-width: 500px;
+    }
+
+    .workbench-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(120px, 1fr));
+      gap: 10px;
+    }
+
+    .stage {
+      min-height: 170px;
+      padding: 14px;
+      border: 1px solid #afbdc8;
+      border-radius: 8px;
+      background: #ffffff;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 8px;
+      background: var(--rail);
+    }
+
+    .stage:nth-child(2)::before {
+      background: var(--blue);
+    }
+
+    .stage:nth-child(3)::before {
+      background: var(--violet);
+    }
+
+    .stage:nth-child(4)::before {
+      background: var(--warn);
+    }
+
+    .stage:nth-child(5)::before {
+      background: #6f4520;
+    }
+
+    .stage:nth-child(6)::before {
+      background: var(--ok);
+    }
+
+    .stage:nth-child(7)::before {
+      background: #2f3b43;
+    }
+
+    .stage-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      background: #f8faf8;
+      font-weight: 800;
+    }
+
+    .stage h3 {
+      margin-top: 18px;
+    }
+
+    .stage p {
+      margin-top: 8px;
+      font-size: 0.94rem;
+    }
+
+    .flow-wrap {
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .flow-svg,
+    .topology-svg {
+      display: block;
+      width: 100%;
+      min-width: 850px;
+      height: auto;
+    }
+
+    .svg-label {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .svg-small {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .svg-note {
+      fill: #33414a;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: minmax(140px, 0.75fr) repeat(5, minmax(120px, 1fr));
+      border: 1px solid #aebbc5;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+
+    .cell {
+      min-height: 82px;
+      padding: 12px;
+      border-right: 1px solid #d9e0e6;
+      border-bottom: 1px solid #d9e0e6;
+    }
+
+    .cell:nth-child(6n) {
+      border-right: 0;
+    }
+
+    .cell.header {
+      min-height: 64px;
+      background: #21303a;
+      color: #ffffff;
+      font-weight: 800;
+    }
+
+    .cell.row-head {
+      background: #f6f8f9;
+      color: #26343d;
+      font-weight: 800;
+    }
+
+    .cell small {
+      display: block;
+      margin-top: 4px;
+      color: inherit;
+      font-size: 0.82rem;
+      opacity: 0.78;
+    }
+
+    .read {
+      background: var(--read);
+    }
+
+    .index {
+      background: var(--index);
+    }
+
+    .meta {
+      background: var(--meta);
+    }
+
+    .link {
+      background: var(--link);
+    }
+
+    .media {
+      background: var(--media);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 1px solid rgba(23, 32, 38, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.76);
+      color: #1e2b33;
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    .gate-layout {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.1fr);
+      gap: 18px;
+    }
+
+    .gate {
+      padding: 18px;
+      border: 2px solid var(--stop);
+      border-radius: 8px;
+      background: #fff8f7;
+    }
+
+    .gate-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .lock {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 54px;
+      border-radius: 8px;
+      background: var(--stop);
+      color: #ffffff;
+      font-size: 1.9rem;
+      font-weight: 900;
+    }
+
+    .gate-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .gate-item {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 10px;
+      align-items: start;
+      padding: 10px;
+      border: 1px solid #f0b6ae;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .gate-item b {
+      display: block;
+    }
+
+    .gate-item span {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .gate-mark {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #ffe5e1;
+      color: var(--stop);
+      font-weight: 900;
+    }
+
+    .approval-rail {
+      display: grid;
+      gap: 10px;
+    }
+
+    .approval-step {
+      display: grid;
+      grid-template-columns: 82px 1fr;
+      gap: 12px;
+      align-items: center;
+      min-height: 72px;
+      padding: 12px;
+      border: 1px solid #b8c4cc;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .approval-step strong {
+      display: block;
+    }
+
+    .approval-step span {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .badge {
+      display: grid;
+      place-items: center;
+      min-height: 46px;
+      border-radius: 6px;
+      background: #edf2f5;
+      color: #25323b;
+      font-weight: 900;
+    }
+
+    .topology-note {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .proof-card {
+      min-height: 116px;
+      padding: 12px;
+      border: 1px solid #c5d0d9;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .proof-card strong {
+      display: block;
+      font-size: 0.98rem;
+    }
+
+    .proof-card span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .lessons {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .lesson {
+      min-height: 122px;
+      padding: 14px;
+      border: 1px solid #c5d0d9;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .lesson strong {
+      display: block;
+      margin-bottom: 8px;
+      color: #26343d;
+    }
+
+    .ledger {
+      display: grid;
+      gap: 14px;
+      position: relative;
+    }
+
+    .ledger::before {
+      content: "";
+      position: absolute;
+      top: 18px;
+      bottom: 18px;
+      left: 23px;
+      width: 4px;
+      border-radius: 999px;
+      background: #b9c5cd;
+    }
+
+    .ledger-row {
+      display: grid;
+      grid-template-columns: 52px 1fr minmax(160px, 0.32fr);
+      gap: 14px;
+      align-items: stretch;
+      position: relative;
+    }
+
+    .ledger-dot {
+      z-index: 1;
+      display: grid;
+      place-items: center;
+      width: 50px;
+      height: 50px;
+      border: 3px solid #ffffff;
+      border-radius: 50%;
+      background: var(--rail);
+      color: #ffffff;
+      font-weight: 900;
+      box-shadow: 0 0 0 1px #9babb5;
+    }
+
+    .ledger-body,
+    .ledger-status {
+      padding: 13px;
+      border: 1px solid #c5d0d9;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .ledger-status {
+      display: grid;
+      align-items: center;
+      font-weight: 800;
+      color: #26343d;
+    }
+
+    .ledger-body strong {
+      display: block;
+    }
+
+    .ledger-body span {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .notes-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .note {
+      padding: 14px;
+      border: 1px solid #ccd6dd;
+      border-radius: 8px;
+      background: #fbfcfb;
+    }
+
+    .note strong {
+      display: block;
+      margin-bottom: 7px;
+    }
+
+    footer {
+      margin-top: 28px;
+      padding: 18px 0 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .gate-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .workbench-grid,
+      .lessons,
+      .notes-grid,
+      .topology-note {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .matrix {
+        display: block;
+        border: 0;
+        background: transparent;
+      }
+
+      .cell {
+        border: 1px solid #d9e0e6;
+        border-radius: 8px;
+        margin-bottom: 8px;
+      }
+
+      .cell.header:first-child {
+        display: none;
+      }
+
+      .cell.header {
+        min-height: 0;
+      }
+    }
+
+    @media (max-width: 680px) {
+      main {
+        width: min(100% - 20px, 1180px);
+        padding-top: 10px;
+      }
+
+      .hero,
+      .section {
+        padding: 16px;
+      }
+
+      .workbench-grid,
+      .lessons,
+      .notes-grid,
+      .topology-note {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .section-head p {
+        margin-top: 8px;
+      }
+
+      .ledger-row {
+        grid-template-columns: 52px 1fr;
+      }
+
+      .ledger-status {
+        grid-column: 2;
+      }
+
+      .approval-step {
+        grid-template-columns: 64px 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <div class="hero-copy">
+        <div>
+          <span class="kicker"><span class="dot" aria-hidden="true"></span> Operator direction, not shipped behavior</span>
+          <h1 id="page-title">Vault Repair Workbench</h1>
+        </div>
+        <p class="hero-note">
+          A gated repair console for the Vault: it scans evidence, classifies gaps, plans fixes, waits for approval, runs only approved actions, verifies results, and records an append-only ledger.
+        </p>
+      </div>
+
+      <aside class="state-panel" aria-label="Current state">
+        <h2>Current State</h2>
+        <div>
+          <div class="status-row">
+            <span class="status-light" aria-hidden="true"></span>
+            <div>
+              <strong>Fail closed today</strong>
+              <span>Gap-fill and reconcile routes are blocked unless explicitly approved.</span>
+            </div>
+          </div>
+          <div class="status-row">
+            <span class="status-light" aria-hidden="true"></span>
+            <div>
+              <strong>Design direction only</strong>
+              <span>This one-pager describes the approved repair direction, not completed functionality.</span>
+            </div>
+          </div>
+          <div class="status-row">
+            <span class="status-light" aria-hidden="true"></span>
+            <div>
+              <strong>Cloud state preserved</strong>
+              <span>No app behavior, Worker route, R2 object, D1 row, processed ID, env file, or secret changes are represented here.</span>
+            </div>
+          </div>
+        </div>
+        <div class="stamp">GPT-5.5 variant: control-room map with proof-first ordering.</div>
+      </aside>
+    </section>
+
+    <section class="section" aria-labelledby="model-title">
+      <div class="section-head">
+        <div>
+          <h2 id="model-title">Product Model</h2>
+          <p>The Repair Workbench is a seven-role operator tool. Each role emits evidence before the next role can act.</p>
+        </div>
+      </div>
+      <div class="workbench-grid">
+        <article class="stage">
+          <span class="stage-number">1</span>
+          <h3>Scanner</h3>
+          <p>Reads inventory, indexes, snapshots, and selected local proof without changing cloud or browser state.</p>
+        </article>
+        <article class="stage">
+          <span class="stage-number">2</span>
+          <h3>Classifier</h3>
+          <p>Labels gaps by risk tier, proof strength, affected asset count, and repair lane.</p>
+        </article>
+        <article class="stage">
+          <span class="stage-number">3</span>
+          <h3>Planner</h3>
+          <p>Builds a dry-run plan with target rows, object keys, expected writes, and verification checks.</p>
+        </article>
+        <article class="stage">
+          <span class="stage-number">4</span>
+          <h3>Approval Gate</h3>
+          <p>Blocks all state changes until an operator approves the exact plan and scope.</p>
+        </article>
+        <article class="stage">
+          <span class="stage-number">5</span>
+          <h3>Runner</h3>
+          <p>Executes approved, idempotent actions only. The runner never broadens scope during execution.</p>
+        </article>
+        <article class="stage">
+          <span class="stage-number">6</span>
+          <h3>Verifier</h3>
+          <p>Rechecks source proof and records pass, fail, blocked, and unproven states.</p>
+        </article>
+        <article class="stage">
+          <span class="stage-number">7</span>
+          <h3>Ledger</h3>
+          <p>Appends run history, inputs, approvals, writes, verification results, and residual gaps.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="flow-title">
+      <div class="section-head">
+        <div>
+          <h2 id="flow-title">Main Flow</h2>
+          <p>The default path is read-only until the approval gate. Every write path must return to verification and recordkeeping.</p>
+        </div>
+      </div>
+      <div class="flow-wrap" role="img" aria-label="Scan to classify to plan to approve to run to verify to record flow diagram">
+        <svg class="flow-svg" viewBox="0 0 1120 250">
+          <defs>
+            <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+              <path d="M1,1 L11,6 L1,11 Z" fill="#23313a"></path>
+            </marker>
+          </defs>
+          <rect x="16" y="38" width="132" height="92" rx="8" fill="#ffffff" stroke="#9fb0bc" stroke-width="2"></rect>
+          <text x="82" y="78" text-anchor="middle" class="svg-label">Scan</text>
+          <text x="82" y="106" text-anchor="middle" class="svg-small">read-only proof</text>
+
+          <line x1="148" y1="84" x2="204" y2="84" stroke="#23313a" stroke-width="4" marker-end="url(#arrow)"></line>
+          <rect x="204" y="38" width="132" height="92" rx="8" fill="#ffffff" stroke="#9fb0bc" stroke-width="2"></rect>
+          <text x="270" y="78" text-anchor="middle" class="svg-label">Classify</text>
+          <text x="270" y="106" text-anchor="middle" class="svg-small">tier and gap</text>
+
+          <line x1="336" y1="84" x2="392" y2="84" stroke="#23313a" stroke-width="4" marker-end="url(#arrow)"></line>
+          <rect x="392" y="38" width="132" height="92" rx="8" fill="#ffffff" stroke="#9fb0bc" stroke-width="2"></rect>
+          <text x="458" y="78" text-anchor="middle" class="svg-label">Plan</text>
+          <text x="458" y="106" text-anchor="middle" class="svg-small">dry run only</text>
+
+          <line x1="524" y1="84" x2="580" y2="84" stroke="#23313a" stroke-width="4" marker-end="url(#arrow)"></line>
+          <rect x="580" y="26" width="144" height="116" rx="8" fill="#fff3d9" stroke="#b42318" stroke-width="3"></rect>
+          <text x="652" y="72" text-anchor="middle" class="svg-label">Approve</text>
+          <text x="652" y="101" text-anchor="middle" class="svg-small">explicit operator gate</text>
+          <text x="652" y="126" text-anchor="middle" class="svg-small">otherwise stop</text>
+
+          <line x1="724" y1="84" x2="780" y2="84" stroke="#23313a" stroke-width="4" marker-end="url(#arrow)"></line>
+          <rect x="780" y="38" width="132" height="92" rx="8" fill="#ffffff" stroke="#9fb0bc" stroke-width="2"></rect>
+          <text x="846" y="78" text-anchor="middle" class="svg-label">Run</text>
+          <text x="846" y="106" text-anchor="middle" class="svg-small">approved scope</text>
+
+          <line x1="912" y1="84" x2="968" y2="84" stroke="#23313a" stroke-width="4" marker-end="url(#arrow)"></line>
+          <rect x="968" y="38" width="132" height="92" rx="8" fill="#ffffff" stroke="#9fb0bc" stroke-width="2"></rect>
+          <text x="1034" y="78" text-anchor="middle" class="svg-label">Verify</text>
+          <text x="1034" y="106" text-anchor="middle" class="svg-small">source recheck</text>
+
+          <path d="M1034 130 C1034 190, 900 202, 740 202 L178 202" fill="none" stroke="#52616b" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow)"></path>
+          <rect x="18" y="166" width="160" height="72" rx="8" fill="#f6f8f9" stroke="#9fb0bc" stroke-width="2"></rect>
+          <text x="98" y="196" text-anchor="middle" class="svg-label">Record</text>
+          <text x="98" y="222" text-anchor="middle" class="svg-small">append-only ledger</text>
+
+          <text x="620" y="224" text-anchor="middle" class="svg-note">Failures and residual gaps loop back as new scan evidence, not hidden retries.</text>
+        </svg>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="risk-title">
+      <div class="section-head">
+        <div>
+          <h2 id="risk-title">Risk-Tier Matrix</h2>
+          <p>Each tier defines the maximum action surface. Higher tiers require stronger proof and a narrower approval.</p>
+        </div>
+      </div>
+      <div class="matrix" role="table" aria-label="Vault repair risk-tier matrix">
+        <div class="cell header" role="columnheader">Dimension</div>
+        <div class="cell header" role="columnheader">Read-only detection</div>
+        <div class="cell header" role="columnheader">D1 index repair</div>
+        <div class="cell header" role="columnheader">Metadata repair</div>
+        <div class="cell header" role="columnheader">Canonical linking</div>
+        <div class="cell header" role="columnheader">Media restore</div>
+
+        <div class="cell row-head" role="rowheader">Allowed action</div>
+        <div class="cell read">List, compare, classify <small>No cloud writes</small></div>
+        <div class="cell index">Create or update index rows <small>D1 only</small></div>
+        <div class="cell meta">Write repaired metadata snapshot <small>Append, never erase</small></div>
+        <div class="cell link">Attach canonical object key <small>Keep legacy keys</small></div>
+        <div class="cell media">Restore missing media object <small>Strict proof required</small></div>
+
+        <div class="cell row-head" role="rowheader">Proof floor</div>
+        <div class="cell read"><span class="pill">inventory match</span></div>
+        <div class="cell index"><span class="pill">R2 object plus D1 gap</span></div>
+        <div class="cell meta"><span class="pill">snapshot plus object</span></div>
+        <div class="cell link"><span class="pill">hash or stable ID</span></div>
+        <div class="cell media"><span class="pill">verified object or live session</span></div>
+
+        <div class="cell row-head" role="rowheader">Approval shape</div>
+        <div class="cell read">None for scan</div>
+        <div class="cell index">Count and row set</div>
+        <div class="cell meta">Snapshot kind and diff</div>
+        <div class="cell link">Asset IDs and keys</div>
+        <div class="cell media">Asset IDs, source, object keys, byte proof</div>
+
+        <div class="cell row-head" role="rowheader">Default result</div>
+        <div class="cell read">Report gaps</div>
+        <div class="cell index">Repair index drift</div>
+        <div class="cell meta">Recover missing context</div>
+        <div class="cell link">Resolve duplicates</div>
+        <div class="cell media">Fill confirmed absence only</div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="gate-title">
+      <div class="section-head">
+        <div>
+          <h2 id="gate-title">Blocked Until Approved</h2>
+          <p>The Workbench must make unsafe actions impossible by default, not merely discouraged by copy.</p>
+        </div>
+      </div>
+      <div class="gate-layout">
+        <article class="gate">
+          <div class="gate-top">
+            <div class="lock" aria-hidden="true">!</div>
+            <div>
+              <h3>Safety gates</h3>
+              <p>These rules hold for every tier.</p>
+            </div>
+          </div>
+          <div class="gate-list">
+            <div class="gate-item">
+              <span class="gate-mark">x</span>
+              <div><b>No deletes</b><span>Repair cannot delete R2 objects, D1 rows, snapshots, or local evidence.</span></div>
+            </div>
+            <div class="gate-item">
+              <span class="gate-mark">x</span>
+              <div><b>No processed-ID reset</b><span>Processed IDs are proof inputs, not a repair shortcut.</span></div>
+            </div>
+            <div class="gate-item">
+              <span class="gate-mark">x</span>
+              <div><b>No silent overwrite</b><span>Existing cloud and metadata values require a visible diff before change.</span></div>
+            </div>
+            <div class="gate-item">
+              <span class="gate-mark">x</span>
+              <div><b>No detached Chrome profile</b><span>Live Grok proof uses the user's existing Chrome session only.</span></div>
+            </div>
+            <div class="gate-item">
+              <span class="gate-mark">x</span>
+              <div><b>No unapproved R2 or D1 writes</b><span>Every write needs exact scope, plan, approval, and ledger entry.</span></div>
+            </div>
+          </div>
+        </article>
+
+        <div class="approval-rail" aria-label="Approval gate checklist">
+          <div class="approval-step">
+            <div class="badge">READ</div>
+            <div><strong>Read-only check first</strong><span>Scan current R2, D1, snapshot, local, and live-proof options before planning any repair.</span></div>
+          </div>
+          <div class="approval-step">
+            <div class="badge">PLAN</div>
+            <div><strong>Dry-run plan</strong><span>Show tier, asset IDs, target keys, target rows, estimated writes, and verification method.</span></div>
+          </div>
+          <div class="approval-step">
+            <div class="badge">SIGN</div>
+            <div><strong>Operator approval</strong><span>Approval binds the runner to a fixed plan. Any scope drift returns to planning.</span></div>
+          </div>
+          <div class="approval-step">
+            <div class="badge">RUN</div>
+            <div><strong>Idempotent execution</strong><span>Safe retries must converge to the same result without duplicate rows or conflicting objects.</span></div>
+          </div>
+          <div class="approval-step">
+            <div class="badge">PROVE</div>
+            <div><strong>Verify and record</strong><span>Pass, fail, blocked, and unproven outcomes are appended to the ledger.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="topology-title">
+      <div class="section-head">
+        <div>
+          <h2 id="topology-title">Data And Source Topology</h2>
+          <p>The proof ladder is ordered by durable evidence. Cached public URLs are hints, not proof.</p>
+        </div>
+      </div>
+      <div class="flow-wrap" role="img" aria-label="Data source topology diagram">
+        <svg class="topology-svg" viewBox="0 0 1120 420">
+          <defs>
+            <marker id="top-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+              <path d="M1,1 L11,6 L1,11 Z" fill="#23313a"></path>
+            </marker>
+          </defs>
+          <rect x="430" y="150" width="260" height="120" rx="10" fill="#ffffff" stroke="#23313a" stroke-width="3"></rect>
+          <text x="560" y="195" text-anchor="middle" class="svg-label">Repair Workbench</text>
+          <text x="560" y="224" text-anchor="middle" class="svg-small">scanner, planner, gate, runner</text>
+          <text x="560" y="249" text-anchor="middle" class="svg-small">verifier, ledger</text>
+
+          <rect x="40" y="34" width="212" height="86" rx="8" fill="#d9f0e3" stroke="#88aa99" stroke-width="2"></rect>
+          <text x="146" y="70" text-anchor="middle" class="svg-label">R2 object</text>
+          <text x="146" y="98" text-anchor="middle" class="svg-small">strongest durable media proof</text>
+
+          <rect x="40" y="168" width="212" height="86" rx="8" fill="#dcecff" stroke="#9db6cf" stroke-width="2"></rect>
+          <text x="146" y="204" text-anchor="middle" class="svg-label">D1 index row</text>
+          <text x="146" y="232" text-anchor="middle" class="svg-small">search and object mapping</text>
+
+          <rect x="40" y="302" width="212" height="86" rx="8" fill="#fff0c8" stroke="#ccb270" stroke-width="2"></rect>
+          <text x="146" y="338" text-anchor="middle" class="svg-label">Metadata snapshot</text>
+          <text x="146" y="366" text-anchor="middle" class="svg-small">prompt, ID, manifest context</text>
+
+          <rect x="868" y="82" width="212" height="86" rx="8" fill="#ffffff" stroke="#9fb0bc" stroke-width="2"></rect>
+          <text x="974" y="118" text-anchor="middle" class="svg-label">Verified local</text>
+          <text x="974" y="146" text-anchor="middle" class="svg-small">file or object selected by user</text>
+
+          <rect x="868" y="254" width="212" height="86" rx="8" fill="#f4d7ff" stroke="#b498c9" stroke-width="2"></rect>
+          <text x="974" y="290" text-anchor="middle" class="svg-label">Live Grok</text>
+          <text x="974" y="318" text-anchor="middle" class="svg-small">existing Chrome session only</text>
+
+          <line x1="252" y1="77" x2="430" y2="180" stroke="#23313a" stroke-width="3" marker-end="url(#top-arrow)"></line>
+          <line x1="252" y1="211" x2="430" y2="211" stroke="#23313a" stroke-width="3" marker-end="url(#top-arrow)"></line>
+          <line x1="252" y1="345" x2="430" y2="240" stroke="#23313a" stroke-width="3" marker-end="url(#top-arrow)"></line>
+          <line x1="690" y1="190" x2="868" y2="125" stroke="#23313a" stroke-width="3" marker-end="url(#top-arrow)"></line>
+          <line x1="690" y1="232" x2="868" y2="297" stroke="#23313a" stroke-width="3" marker-end="url(#top-arrow)"></line>
+
+          <rect x="354" y="32" width="412" height="76" rx="8" fill="#f6f8f9" stroke="#b8c4cc" stroke-width="2"></rect>
+          <text x="560" y="64" text-anchor="middle" class="svg-label">Source proof ladder</text>
+          <text x="560" y="91" text-anchor="middle" class="svg-small">R2 object, D1 row, metadata snapshot, verified local proof, live Grok</text>
+
+          <rect x="378" y="320" width="364" height="58" rx="8" fill="#fff8f7" stroke="#e8ada5" stroke-width="2"></rect>
+          <text x="560" y="355" text-anchor="middle" class="svg-note">Cached public URLs are not proof.</text>
+        </svg>
+      </div>
+      <div class="topology-note">
+        <article class="proof-card">
+          <strong>1. R2 object</strong>
+          <span>Direct object existence, size, content type, checksum, and key prefix are the strongest cloud proof.</span>
+        </article>
+        <article class="proof-card">
+          <strong>2. D1/index row</strong>
+          <span>Useful for discovery and mapping, but weaker than object proof.</span>
+        </article>
+        <article class="proof-card">
+          <strong>3. Metadata snapshot</strong>
+          <span>Provides saved prompts, prompt history, processed IDs, and backfill manifest context.</span>
+        </article>
+        <article class="proof-card">
+          <strong>4. Verified local file/object</strong>
+          <span>Accepted only when the operator selects or verifies it as a source artifact.</span>
+        </article>
+        <article class="proof-card">
+          <strong>5. Live Grok through existing Chrome</strong>
+          <span>Gated repair input for gaps after R2 import proof exists.</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="lessons-title">
+      <div class="section-head">
+        <div>
+          <h2 id="lessons-title">Research Lessons Embedded In The Tool</h2>
+          <p>The interface should make these lessons visible as constraints, not buried in implementation notes.</p>
+        </div>
+      </div>
+      <div class="lessons">
+        <article class="lesson">
+          <strong>Direct R2 consistency</strong>
+          <p>Trust direct object reads and HEAD checks over UI cache state or old public URLs.</p>
+        </article>
+        <article class="lesson">
+          <strong>Conditional R2 writes</strong>
+          <p>Writes must be conditional and scoped to avoid overwriting newer or already-restored objects.</p>
+        </article>
+        <article class="lesson">
+          <strong>Append-only repair ledger</strong>
+          <p>Every plan, approval, write, verification, and residual gap becomes durable run history.</p>
+        </article>
+        <article class="lesson">
+          <strong>Idempotent actions</strong>
+          <p>Retries should not create duplicate rows, duplicate objects, or conflicting canonical links.</p>
+        </article>
+        <article class="lesson">
+          <strong>Read-only check before repair</strong>
+          <p>Repair begins only after the Workbench proves the current state without changing it.</p>
+        </article>
+        <article class="lesson">
+          <strong>Cached public URLs are not proof</strong>
+          <p>They can suggest an asset existed, but cannot prove current ownership, durability, or byte identity.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="ledger-title">
+      <div class="section-head">
+        <div>
+          <h2 id="ledger-title">Evidence Ledger Timeline</h2>
+          <p>The ledger is a run-history spine. It keeps the repair system auditable even when a run is blocked or only partially verified.</p>
+        </div>
+      </div>
+      <div class="ledger">
+        <div class="ledger-row">
+          <div class="ledger-dot">01</div>
+          <div class="ledger-body"><strong>Scan package opened</strong><span>Inventory cursors, snapshot kinds, local selections, live-session eligibility, and timestamps.</span></div>
+          <div class="ledger-status read">Read-only</div>
+        </div>
+        <div class="ledger-row">
+          <div class="ledger-dot">02</div>
+          <div class="ledger-body"><strong>Classification emitted</strong><span>Risk tier, affected assets, proof level, gap codes, and blocked reasons.</span></div>
+          <div class="ledger-status index">Classified</div>
+        </div>
+        <div class="ledger-row">
+          <div class="ledger-dot">03</div>
+          <div class="ledger-body"><strong>Plan proposed</strong><span>Exact writes, expected no-op cases, verification probes, and rollback-free stop points.</span></div>
+          <div class="ledger-status meta">Dry run</div>
+        </div>
+        <div class="ledger-row">
+          <div class="ledger-dot">04</div>
+          <div class="ledger-body"><strong>Approval recorded</strong><span>Operator identity, approved scope, run ceiling, tier, and expiry.</span></div>
+          <div class="ledger-status link">Approved</div>
+        </div>
+        <div class="ledger-row">
+          <div class="ledger-dot">05</div>
+          <div class="ledger-body"><strong>Run and verification closed</strong><span>Writes attempted, checks passed, checks failed, assets left unproven, and next scan seed.</span></div>
+          <div class="ledger-status media">Recorded</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="operator-title">
+      <div class="section-head">
+        <div>
+          <h2 id="operator-title">Operator Notes</h2>
+          <p>Short constraints that keep the Workbench in repair mode instead of turning it into a hidden migration script.</p>
+        </div>
+      </div>
+      <div class="notes-grid">
+        <article class="note">
+          <strong>Fail closed</strong>
+          <p>Missing auth, missing identity, missing cursors, or uncertain proof stops the run.</p>
+        </article>
+        <article class="note">
+          <strong>Small approvals</strong>
+          <p>Approve a bounded asset set or row set, not a broad class of future writes.</p>
+        </article>
+        <article class="note">
+          <strong>No proof laundering</strong>
+          <p>A weaker source cannot silently promote itself to stronger proof.</p>
+        </article>
+        <article class="note">
+          <strong>Every action returns to proof</strong>
+          <p>The final screen is not success copy. It is verification evidence and remaining gaps.</p>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      Documentation artifact only. Contains no external dependencies, network calls, secrets, keys, tokens, cookies, env values, or executable repair logic.
+    </footer>
+  </main>
+</body>
+</html>

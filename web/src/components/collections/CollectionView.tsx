@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Save, FolderPlus, Presentation, Share2, Check, ClipboardCopy, CheckSquare, X } from "lucide-react";
+import { Save, FolderPlus, Presentation, Share2, Check, ClipboardCopy, CheckSquare, X, Play } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -22,7 +22,6 @@ import { CSS } from "@dnd-kit/utilities";
 import type { Collection, VideoItem } from "@/lib/types";
 import {
   getAllCollections,
-  getCollection,
   createCollection,
   updateCollection,
   deleteCollection,
@@ -43,12 +42,13 @@ import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import BulkActionBar from "./BulkActionBar";
+import { createMovieFromWatchQueue, getSelectedWatchableQueue, getWatchableQueue } from "@/lib/watch-mode";
 
 const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-1",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-1.mp4",
     thumbnailUrl: "",
     promptText: "Calm organic movement subject, still is still and pulls out slowly. Otters slightly drifting, mostly calm.",
     notes: "",
@@ -56,7 +56,7 @@ const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-2",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-2.mp4",
     thumbnailUrl: "",
     promptText: "A cyberpunk city at night with neon reflections in rain puddles, cinematic camera movement through streets.",
     notes: "",
@@ -64,7 +64,7 @@ const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-3",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/sintel/mp4/h264/360/Sintel_360_10s_1MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-3.mp4",
     thumbnailUrl: "",
     promptText: "Ancient forest with bioluminescent mushrooms, gentle fog rolling through massive tree trunks, fairy lights.",
     notes: "",
@@ -72,7 +72,7 @@ const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-4",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_2MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-4.mp4",
     thumbnailUrl: "",
     promptText: "Aerial shot of a volcanic island erupting with flowing lava meeting the ocean, dramatic steam clouds.",
     notes: "",
@@ -80,12 +80,23 @@ const EXAMPLE_ITEMS: Omit<VideoItem, "id" | "position" | "createdAt">[] = [
   {
     grokPostId: "demo-5",
     sourceUrl: "https://grok.com/imagine",
-    videoUrl: "https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_2MB.mp4",
+    videoUrl: "/demo-videos/grok-demo-5.mp4",
     thumbnailUrl: "",
     promptText: "A majestic whale breaching in slow motion, sunset golden hour lighting, water droplets sparkling.",
     notes: "",
   },
 ];
+
+function toNewCollectionItemInput({
+  grokPostId,
+  sourceUrl,
+  videoUrl,
+  thumbnailUrl,
+  promptText,
+  notes,
+}: VideoItem): Omit<VideoItem, "id" | "position" | "createdAt"> {
+  return { grokPostId, sourceUrl, videoUrl, thumbnailUrl, promptText, notes };
+}
 
 function SortableVideoCard({
   item,
@@ -153,7 +164,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
   const [unsavedItems, setUnsavedItems] = useState<VideoItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [collectionName, setCollectionName] = useState("Unsaved Collection");
-  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [viewerState, setViewerState] = useState<{ items: VideoItem[]; startIndex: number; watchMode: boolean } | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [editingItem, setEditingItem] = useState<VideoItem | null>(null);
@@ -180,6 +191,9 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
           setCollectionName(col.name);
           setActiveCollectionId(col.id);
         }
+      } else if (cols.length > 0) {
+        setCollectionName(cols[0].name);
+        setActiveCollectionId(cols[0].id);
       }
       setInitialLoaded(true);
     });
@@ -244,7 +258,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
       if (activeCollection) {
         const updated = await addItemsToCollection(
           activeCollection.id,
-          newItems.map(({ id: _id, position: _pos, createdAt: _ca, ...rest }) => rest)
+          newItems.map(toNewCollectionItemInput)
         );
         if (updated) {
           setCollections((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
@@ -273,7 +287,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
     if (activeCollection) {
       addItemsToCollection(
         activeCollection.id,
-        newExamples.map(({ id: _id, position: _pos, createdAt: _ca, ...rest }) => rest)
+        newExamples.map(toNewCollectionItemInput)
       ).then((updated) => {
         if (updated) {
           setCollections((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
@@ -421,6 +435,18 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
     toast(`Downloading ${selected.length} video${selected.length !== 1 ? "s" : ""}`, "success");
   }, [displayItems, selectedIds, toast]);
 
+  const handleWatchAll = useCallback(() => {
+    const queue = getWatchableQueue(displayItems);
+    if (queue.length === 0) return toast("No watchable media in this collection", "info");
+    setViewerState({ items: queue, startIndex: 0, watchMode: true });
+  }, [displayItems, toast]);
+
+  const handleWatchSelected = useCallback(() => {
+    const queue = getSelectedWatchableQueue(displayItems, selectedIds);
+    if (queue.length === 0) return toast("No watchable selected media", "info");
+    setViewerState({ items: queue, startIndex: 0, watchMode: true });
+  }, [displayItems, selectedIds, toast]);
+
   if (!initialLoaded) {
     return (
       <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center">
@@ -453,7 +479,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
               className="bg-transparent font-[family-name:var(--font-display)] text-lg font-semibold text-(--color-surface-900) focus:outline-none dark:text-(--color-surface-100)"
             />
             <span className="text-sm text-(--color-surface-400)">
-              {itemCount} video{itemCount !== 1 ? "s" : ""}
+              {itemCount} item{itemCount !== 1 ? "s" : ""}
             </span>
             {!isSaved && itemCount > 0 && (
               <span className="rounded-full bg-(--color-accent)/10 px-2 py-0.5 text-xs font-medium text-(--color-accent)">
@@ -462,6 +488,10 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="primary" onClick={handleWatchAll} disabled={itemCount === 0}>
+              <Play className="h-4 w-4" />
+              Watch All
+            </Button>
             <Button
               variant="secondary"
               onClick={handleCopyAllLinks}
@@ -524,7 +554,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
 
           {itemCount > 0 && (
             <div className="mt-3">
-              <Button variant="ghost" onClick={() => setViewerIndex(0)}>
+              <Button variant="ghost" onClick={() => setViewerState({ items: displayItems, startIndex: 0, watchMode: false })}>
                 <Presentation className="h-4 w-4" />
                 Slideshow
               </Button>
@@ -540,7 +570,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
                       key={item.id}
                       item={item}
                       onDelete={handleDeleteItem}
-                      onExpand={() => setViewerIndex(index)}
+                      onExpand={() => setViewerState({ items: displayItems, startIndex: index, watchMode: false })}
                       onEdit={setEditingItem}
                       onAddToMovie={setAddToMovieItem}
                       isMultiSelectMode={isMultiSelectMode}
@@ -566,11 +596,16 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
         </div>
       </main>
 
-      {viewerIndex !== null && (
+      {viewerState && (
         <FullscreenViewer
-          items={displayItems}
-          startIndex={viewerIndex}
-          onClose={() => setViewerIndex(null)}
+          items={viewerState.items}
+          startIndex={viewerState.startIndex}
+          onClose={() => setViewerState(null)}
+          watchMode={viewerState.watchMode}
+          onSaveAsMovie={async (items) => {
+            const movie = await createMovieFromWatchQueue(items, `${collectionName} Compilation`);
+            router.push(`/movie?id=${movie.id}`);
+          }}
         />
       )}
 
@@ -596,6 +631,7 @@ export default function CollectionView({ collectionId }: CollectionViewProps) {
           onDelete={handleBulkDelete}
           onDownload={handleBulkDownload}
           onCopyLinks={handleBulkCopyLinks}
+          onWatchSelected={handleWatchSelected}
           onDeselectAll={() => setSelectedIds(new Set())}
         />
       )}

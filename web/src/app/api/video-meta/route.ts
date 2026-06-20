@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
       promptText,
       title,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: "Failed to fetch metadata" },
       { status: 500 }

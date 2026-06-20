@@ -6,12 +6,14 @@ import SlideOver from "@/components/ui/SlideOver";
 import Button from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import {
+  getDB,
   getSavedPrompts,
   addPrompt,
   deletePrompt,
-  searchPrompts,
 } from "@/lib/local-storage";
 import type { SavedPrompt } from "@/lib/types";
+import type { VaultPrompt } from "@/lib/vault-types";
+import { filterPrompts, mergePrompts, vaultPromptToSavedPrompt } from "@/lib/vault-prompts";
 
 interface PromptLibraryProps {
   open: boolean;
@@ -26,8 +28,10 @@ export default function PromptLibrary({ open, onClose }: PromptLibraryProps) {
 
   const loadPrompts = useCallback(async () => {
     try {
-      const results = query ? await searchPrompts(query) : await getSavedPrompts();
-      setPrompts(results);
+      const [localPrompts, db] = await Promise.all([getSavedPrompts(), getDB()]);
+      const vaultRows = (await db.getAll("vault_prompts")) as VaultPrompt[];
+      const mergedPrompts = mergePrompts(localPrompts, vaultRows.map(vaultPromptToSavedPrompt));
+      setPrompts(filterPrompts(mergedPrompts, query));
     } catch (err) {
       console.error("[PromptLibrary] failed to load:", err);
       toast("Failed to load prompts", "error");
@@ -116,14 +120,16 @@ export default function PromptLibrary({ open, onClose }: PromptLibraryProps) {
                   >
                     <Copy className="h-3.5 w-3.5" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(prompt.id)}
-                    className="rounded-(--radius-btn) p-1 text-(--color-surface-400) hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                    title="Delete"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {!prompt.tags.includes("vault") && (
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(prompt.id)}
+                      className="rounded-(--radius-btn) p-1 text-(--color-surface-400) hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

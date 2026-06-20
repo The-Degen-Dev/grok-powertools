@@ -5,6 +5,7 @@ Use this file to get oriented before changing the repo. For a paste-ready onboar
 ## Tool Routing
 
 - Use Browser/browser-use first for websites, localhost apps, file URLs, and UI that is fully inside the browser.
+- For live Grok validation in the user's loaded Chrome profile, do not run whole-profile tab discovery or full-window accessibility snapshots. Avoid DevTools `list_pages`, full Chrome snapshots, and AppleScript loops over every tab; operate only on the visible Grok tab/window with narrow probes.
 - Use Peekaboo only when the task needs native macOS UI state or control that Browser/browser-use cannot reach: desktop apps, system dialogs, app windows, menu bar, Dock, Spaces, clipboard, screenshots, or direct Accessibility actions.
 - Before using Peekaboo for element interactions, capture fresh state with `peekaboo see --json` and use snapshot or element IDs when practical.
 - If Peekaboo capture or automation fails, confirm `peekaboo permissions status --json` before treating it as an application bug.
@@ -64,6 +65,7 @@ npm run typecheck
 ```
 
 For extension behavior, unit and mocked Playwright tests are not enough. Validate the relevant path in Chrome on `grok.com/imagine` when the change touches selectors, cookies, downloads, or live Grok DOM behavior.
+- For Vault/R2 work, do not treat a single preview page or default limit as the full dataset. Verify pagination, final unique asset count, and media access for an item beyond the first page before calling the Vault loaded.
 
 ## Branch And Safety Notes
 

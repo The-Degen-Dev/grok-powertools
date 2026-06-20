@@ -13,7 +13,16 @@ import type {
 } from './types';
 import { verifyJWT, extractBearerToken } from './auth';
 import { buildAcceptanceIdentity, validateAcceptanceWrite } from './acceptance';
-import { upsertEntity, getEntitiesSince, ensureUser, upsertR2DedupeIndex, upsertMetadataSnapshotIndex } from './db';
+import {
+    upsertEntity,
+    getEntitiesSince,
+    ensureUser,
+    upsertR2DedupeIndex,
+    upsertMetadataSnapshotIndex,
+    upsertVaultOverlay,
+    getVaultOverlaysSince
+} from './db';
+import { buildVaultIdentity, findVaultMediaObject, listVaultInventory, readVaultMetadata } from './vault';
 
 const SERVICE_NAME = 'grok-r2-backup';
 const PRESIGN_EXPIRY_SECONDS = 3600;
@@ -24,14 +33,16 @@ const ACCEPTANCE_CORRELATION_ID_HEADER = 'x-acceptance-correlation-id';
 const METADATA_FILENAMES: Record<Exclude<MetadataKind, 'backfillManifest'>, string> = {
     savedPrompts: 'saved-prompts.latest.json',
     promptHistory: 'prompt-history.latest.json',
-    processedIds: 'processed-ids.latest.json'
+    processedIds: 'processed-ids.latest.json',
+    savedList: 'saved-list.latest.json'
 };
 
 const ALLOWED_METADATA_KINDS = new Set<MetadataKind>([
     'savedPrompts',
     'promptHistory',
     'processedIds',
-    'backfillManifest'
+    'backfillManifest',
+    'savedList'
 ]);
 
 function corsHeaders(): HeadersInit {
@@ -593,6 +604,18 @@ async function handleSyncPush(request: Request, env: Env): Promise<Response> {
         }
     }
 
+    if (payload.vaultOverlays) {
+        for (const overlay of payload.vaultOverlays) {
+            await upsertVaultOverlay(env.DB, {
+                user_id: userId,
+                asset_id: overlay.assetId,
+                data: overlay.data,
+                updated_at: overlay.updatedAt,
+                deleted_at: overlay.deletedAt ?? null,
+            });
+        }
+    }
+
     return jsonResponse({ ok: true, syncedAt: new Date().toISOString() });
 }
 
@@ -606,6 +629,7 @@ async function handleSyncPull(request: Request, env: Env): Promise<Response> {
 
     const collections = await getEntitiesSince(env.DB, 'collections', userId, since);
     const movies = await getEntitiesSince(env.DB, 'movies', userId, since);
+    const vaultOverlays = await getVaultOverlaysSince(env.DB, userId, since);
 
     const response: SyncPullResponse = {
         collections: collections.map((c) => ({
@@ -619,6 +643,12 @@ async function handleSyncPull(request: Request, env: Env): Promise<Response> {
             data: m.data,
             updatedAt: m.updated_at,
             deletedAt: m.deleted_at,
+        })),
+        vaultOverlays: vaultOverlays.map((overlay) => ({
+            assetId: overlay.asset_id,
+            data: overlay.data,
+            updatedAt: overlay.updated_at,
+            deletedAt: overlay.deleted_at,
         })),
         syncedAt: new Date().toISOString(),
     };
@@ -669,6 +699,43 @@ export default {
 
         if (request.method === 'POST' && url.pathname === '/v1/presign') {
             return handlePresign(request, env);
+        }
+
+        if (url.pathname.startsWith('/v1/vault/')) {
+            if (request.method === 'GET' && url.pathname === '/v1/vault/identity') {
+                return jsonResponse(await buildVaultIdentity(env), 200);
+            }
+
+            if (request.method === 'GET' && url.pathname === '/v1/vault/inventory') {
+                const cursor = url.searchParams.get('cursor');
+                const limit = Number(url.searchParams.get('limit') || '100');
+                return jsonResponse(await listVaultInventory(env, cursor, limit), 200);
+            }
+
+            if (request.method === 'GET' && url.pathname.startsWith('/v1/vault/metadata/')) {
+                const kind = url.pathname.split('/').pop() || '';
+                const result = await readVaultMetadata(env, kind);
+                return jsonResponse(result, 'status' in result && typeof result.status === 'number' ? result.status : 200);
+            }
+
+            if (request.method === 'GET' && url.pathname === '/v1/vault/gaps') {
+                return jsonResponse({ ok: true, gaps: [] }, 200);
+            }
+
+            if (request.method === 'GET' && url.pathname === '/v1/vault/media') {
+                const assetId = url.searchParams.get('assetId') || '';
+                const objectKey = url.searchParams.get('objectKey') || '';
+                const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
+                if (objectKey && !isValidObjectKey(objectKey, keyPrefix)) {
+                    return errorResponse('Invalid object key.', 400);
+                }
+                const object = objectKey ? await env.R2_BUCKET.get(objectKey) : await findVaultMediaObject(env, assetId);
+                if (!object?.body) return errorResponse('MEDIA_OBJECT_MISSING', 404);
+                const headers = new Headers(corsHeaders());
+                if (object.httpMetadata?.contentType) headers.set('content-type', object.httpMetadata.contentType);
+                headers.set('cache-control', 'private, no-store');
+                return new Response(object.body, { status: 200, headers });
+            }
         }
 
         if (request.method === 'HEAD' && url.pathname === '/v1/objects/verify') {

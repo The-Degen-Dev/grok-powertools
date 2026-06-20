@@ -9,8 +9,15 @@ import {
   updateSyncMeta,
   createCollection,
   createMovie,
+  getDB,
 } from "./local-storage";
+import {
+  getVaultOverlay,
+  getVaultOverlaysIncludingDeleted,
+  putVaultOverlay,
+} from "./vault-storage";
 import type { Collection, Movie } from "./types";
+import type { VaultOverlay } from "./vault-types";
 
 export type SyncStatus = "synced" | "syncing" | "offline" | "error";
 
@@ -141,6 +148,7 @@ export class SyncEngine {
     const data = await res.json() as {
       collections: Array<{ id: string; data: string; updatedAt: string; deletedAt: string | null }>;
       movies: Array<{ id: string; data: string; updatedAt: string; deletedAt: string | null }>;
+      vaultOverlays?: Array<{ assetId: string; data: string; updatedAt: string; deletedAt: string | null }>;
     };
 
     // Merge collections (server wins if newer)
@@ -195,6 +203,21 @@ export class SyncEngine {
         await updateMovie(merged);
       }
     }
+
+    const db = await getDB();
+    for (const remote of data.vaultOverlays ?? []) {
+      const local = await getVaultOverlay(db, remote.assetId);
+      const remoteData = JSON.parse(remote.data) as VaultOverlay;
+
+      if (!local || new Date(remote.updatedAt) > new Date(local.updatedAt)) {
+        await putVaultOverlay(db, {
+          ...remoteData,
+          assetId: remote.assetId,
+          updatedAt: remote.updatedAt,
+          deletedAt: remote.deletedAt ?? undefined,
+        });
+      }
+    }
   }
 
   private async push(): Promise<void> {
@@ -203,6 +226,8 @@ export class SyncEngine {
 
     const allCollections = await getAllCollectionsIncludingDeleted();
     const allMovies = await getAllMoviesIncludingDeleted();
+    const db = await getDB();
+    const allVaultOverlays = await getVaultOverlaysIncludingDeleted(db);
 
     const changedCollections = allCollections.filter(
       (c) => new Date(c.updatedAt).getTime() > sinceDate
@@ -210,8 +235,11 @@ export class SyncEngine {
     const changedMovies = allMovies.filter(
       (m) => new Date(m.updatedAt).getTime() > sinceDate
     );
+    const changedVaultOverlays = allVaultOverlays.filter(
+      (overlay) => new Date(overlay.updatedAt).getTime() > sinceDate
+    );
 
-    if (changedCollections.length === 0 && changedMovies.length === 0) return;
+    if (changedCollections.length === 0 && changedMovies.length === 0 && changedVaultOverlays.length === 0) return;
 
     const body = {
       collections: changedCollections.map((c) => ({
@@ -225,6 +253,12 @@ export class SyncEngine {
         data: JSON.stringify(m),
         updatedAt: m.updatedAt,
         deletedAt: m.deletedAt ?? null,
+      })),
+      vaultOverlays: changedVaultOverlays.map((overlay) => ({
+        assetId: overlay.assetId,
+        data: JSON.stringify(overlay),
+        updatedAt: overlay.updatedAt,
+        deletedAt: overlay.deletedAt ?? null,
       })),
     };
 
@@ -245,7 +279,9 @@ export class SyncEngine {
   async initialPush(onProgress?: (done: number, total: number) => void): Promise<void> {
     const allCollections = await getAllCollectionsIncludingDeleted();
     const allMovies = await getAllMoviesIncludingDeleted();
-    const total = allCollections.length + allMovies.length;
+    const db = await getDB();
+    const allVaultOverlays = await getVaultOverlaysIncludingDeleted(db);
+    const total = allCollections.length + allMovies.length + allVaultOverlays.length;
     let done = 0;
 
     // Push collections in batches of 10
@@ -280,6 +316,29 @@ export class SyncEngine {
           data: JSON.stringify(m),
           updatedAt: m.updatedAt,
           deletedAt: m.deletedAt ?? null,
+        })),
+      };
+
+      const res = await fetch("/api/sync/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Initial push failed: ${res.status}`);
+
+      done += batch.length;
+      onProgress?.(done, total);
+    }
+
+    // Push vault overlays in batches of 10
+    for (let i = 0; i < allVaultOverlays.length; i += 10) {
+      const batch = allVaultOverlays.slice(i, i + 10);
+      const body = {
+        vaultOverlays: batch.map((overlay) => ({
+          assetId: overlay.assetId,
+          data: JSON.stringify(overlay),
+          updatedAt: overlay.updatedAt,
+          deletedAt: overlay.deletedAt ?? null,
         })),
       };
 

@@ -1,0 +1,820 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vault Repair Workbench | Grok Power Tools</title>
+<style>
+  :root{
+    --bg:#0a0d0b;
+    --panel:#10140f;
+    --panel-2:#161b14;
+    --panel-3:#1d2318;
+    --line:#2a3122;
+    --line-2:#3a4530;
+    --ink:#e8e3d2;
+    --ink-dim:#9aa28b;
+    --ink-faint:#666c5a;
+    --amber:#f0a830;
+    --amber-d:#b8801d;
+    --green:#7bc75f;
+    --red:#e0593c;
+    --blue:#5fa8c7;
+    --purple:#9a7cc7;
+    --cyan:#46d6c7;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  body{padding:24px 20px 80px;min-height:100vh}
+  .wrap{max-width:1280px;margin:0 auto}
+  a{color:inherit;text-decoration:none}
+
+  /* ===== Top bar ===== */
+  .topbar{
+    display:flex;align-items:center;justify-content:space-between;
+    border:1px solid var(--line);background:var(--panel);
+    padding:10px 14px;font-size:11px;letter-spacing: 0;
+    text-transform:uppercase;color:var(--ink-dim);
+    flex-wrap:wrap;gap:10px;
+  }
+  .topbar .left,.topbar .right{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-2);padding:3px 8px;color:var(--ink)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber)}
+  .dot.g{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .dot.r{background:var(--red);box-shadow:0 0 8px var(--red)}
+  .blink{animation:bl 1.6s steps(2,end) infinite}
+  @keyframes bl{50%{opacity:.25}}
+
+  /* ===== Hero ===== */
+  .hero{
+    margin-top:14px;border:1px solid var(--line);
+    background:
+      linear-gradient(180deg,var(--panel-2),var(--panel));
+    padding:24px 22px;position:relative;overflow:hidden;
+  }
+  .hero::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:
+      repeating-linear-gradient(0deg,transparent 0 28px,rgba(240,168,48,.04) 28px 29px),
+      repeating-linear-gradient(90deg,transparent 0 28px,rgba(240,168,48,.03) 28px 29px);
+  }
+  .hero .tag{font-size:11px;letter-spacing: 0;color:var(--amber);text-transform:uppercase;margin-bottom:10px}
+  .hero h1{
+    font-family:var(--mono);font-weight:900;font-size:42px;
+    margin:0 0 8px;letter-spacing: 0;line-height:1;
+  }
+  .hero h1 .accent{color:var(--amber)}
+  .hero .sub{color:var(--ink-dim);max-width:780px;font-size:13px}
+  .hero .meta{display:flex;gap:18px;flex-wrap:wrap;margin-top:18px;font-size:11px;color:var(--ink-dim);text-transform:uppercase;letter-spacing: 0}
+  .hero .meta b{color:var(--ink);font-weight:600}
+  .ascii-art{
+    position:absolute;right:18px;top:18px;color:var(--amber);
+    opacity:.5;font-size:10px;line-height:1.1;white-space:pre;
+    pointer-events:none;
+  }
+  @media(max-width:880px){.ascii-art{display:none}}
+
+  /* ===== Section ===== */
+  .sec{margin-top:28px}
+  .sec-head{
+    display:flex;align-items:baseline;gap:14px;
+    border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:14px;
+  }
+  .sec-num{
+    color:var(--bg);background:var(--amber);
+    font-weight:900;padding:2px 8px;font-size:11px;letter-spacing: 0;
+  }
+  .sec-title{font-size:15px;font-weight:700;letter-spacing: 0;text-transform:uppercase}
+  .sec-sub{color:var(--ink-faint);font-size:11px;margin-left:auto;text-transform:uppercase;letter-spacing: 0}
+
+  .panel{border:1px solid var(--line);background:var(--panel);padding:16px}
+  .panel + .panel{margin-top:12px}
+  .grid{display:grid;gap:12px}
+  .g7{grid-template-columns:repeat(7,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g5{grid-template-columns:repeat(5,1fr)}
+  .g6{grid-template-columns:repeat(6,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:1000px){.g7,.g6{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:760px){
+    .g7,.g6,.g5,.g4{grid-template-columns:repeat(2,1fr)}
+    .g3,.g2{grid-template-columns:1fr}
+  }
+
+  /* ===== Component node ===== */
+  .node{
+    border:1px solid var(--line-2);background:var(--panel-2);
+    padding:12px;position:relative;min-height:118px;
+    display:flex;flex-direction:column;justify-content:space-between;
+  }
+  .node .id{
+    position:absolute;top:-1px;left:-1px;background:var(--amber);color:var(--bg);
+    font-weight:900;font-size:10px;padding:2px 6px;letter-spacing: 0;
+  }
+  .node .nm{font-size:13px;font-weight:700;margin-top:14px;letter-spacing: 0}
+  .node .ds{color:var(--ink-dim);font-size:10.5px;line-height:1.45;margin-top:4px}
+  .node .st{font-size:10px;letter-spacing: 0;text-transform:uppercase;color:var(--ink-faint);display:flex;justify-content:space-between;align-items:center}
+  .ok{color:var(--green)}
+  .warn{color:var(--amber)}
+  .bad{color:var(--red)}
+
+  /* ===== ASCII bus diagram ===== */
+  .bus{
+    border:1px solid var(--line);background:#0c100a;
+    padding:14px;overflow-x:auto;color:var(--green);
+    font-size:12px;line-height:1.45;white-space:pre;
+  }
+  .bus .hl{color:var(--amber)}
+  .bus .lo{color:var(--ink-faint)}
+  .bus .rd{color:var(--red)}
+  .bus .cy{color:var(--cyan)}
+
+  /* ===== Flow chain ===== */
+  .flow{
+    display:grid;grid-template-columns:repeat(7,1fr);gap:0;
+    border:1px solid var(--line);background:var(--panel);
+  }
+  @media(max-width:1000px){.flow{grid-template-columns:repeat(7,1fr)}}
+  @media(max-width:760px){.flow{grid-template-columns:1fr}}
+  .step{
+    padding:14px 10px;border-right:1px solid var(--line);
+    position:relative;display:flex;flex-direction:column;gap:6px;
+    min-height:120px;
+  }
+  @media(max-width:760px){.step{border-right:none;border-bottom:1px solid var(--line)}}
+  .step:last-child{border-right:none}
+  .step .sn{font-size:10px;color:var(--ink-faint);letter-spacing: 0}
+  .step .sn b{color:var(--amber)}
+  .step .tt{font-weight:700;font-size:13px;letter-spacing: 0;text-transform:uppercase}
+  .step .io{font-size:10px;color:var(--ink-dim)}
+  .step .arr{
+    position:absolute;right:-7px;top:50%;transform:translateY(-50%);
+    color:var(--amber);font-weight:900;z-index:2;background:var(--panel);padding:1px 2px;
+  }
+  @media(max-width:760px){.step .arr{display:none}}
+  .step.safety{background:linear-gradient(180deg,rgba(224,89,60,.08),transparent)}
+
+  /* ===== Risk matrix ===== */
+  table.mx{width:100%;border-collapse:collapse;font-size:11.5px}
+  table.mx th,table.mx td{
+    border:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top;
+  }
+  table.mx th{
+    background:var(--panel-2);color:var(--ink-dim);font-weight:600;
+    text-transform:uppercase;letter-spacing: 0;font-size:10px;
+  }
+  table.mx td{color:var(--ink-dim)}
+  table.mx td.nm{color:var(--ink);font-weight:700}
+  .tg{display:inline-block;border:1px solid;padding:1px 6px;font-size:10px;letter-spacing: 0;text-transform:uppercase}
+  .tg.t0{color:var(--green);border-color:var(--green)}
+  .tg.t1{color:var(--cyan);border-color:var(--cyan)}
+  .tg.t2{color:var(--amber);border-color:var(--amber)}
+  .tg.t3{color:var(--red);border-color:var(--red)}
+  .bar{height:8px;background:var(--panel-3);position:relative;overflow:hidden}
+  .bar > i{position:absolute;inset:0;width:var(--w,50%);background:linear-gradient(90deg,var(--amber-d),var(--amber))}
+  .bar.g > i{background:linear-gradient(90deg,#3a8a32,var(--green))}
+  .bar.r > i{background:linear-gradient(90deg,#8a2f22,var(--red))}
+  .bar.c > i{background:linear-gradient(90deg,#2a7d76,var(--cyan))}
+  .lbl{display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:4px;letter-spacing: 0;text-transform:uppercase}
+
+  /* ===== Safety gate ===== */
+  .gate-wrap{
+    border:1px solid var(--red);background:
+      repeating-linear-gradient(45deg,rgba(224,89,60,.05) 0 10px,transparent 10px 20px),
+      var(--panel);
+    padding:18px;
+  }
+  .gate-head{
+    display:flex;align-items:center;justify-content:space-between;
+    margin-bottom:14px;flex-wrap:wrap;gap:10px;
+  }
+  .gate-title{font-weight:900;letter-spacing: 0;color:var(--red);text-transform:uppercase;font-size:13px}
+  .gate-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+  @media(max-width:1000px){.gate-row{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.gate-row{grid-template-columns:1fr}}
+  .gate{
+    background:#0d0c0a;border:1px solid #3a201c;padding:12px;position:relative;
+  }
+  .gate .gno{
+    position:absolute;top:-1px;right:-1px;background:var(--red);color:#1a0a06;
+    font-weight:900;padding:2px 6px;font-size:10px;letter-spacing: 0;
+  }
+  .gate .gx{color:var(--red);font-size:18px;font-weight:900;line-height:1}
+  .gate .gn{margin-top:8px;font-weight:700;font-size:12px;letter-spacing: 0;text-transform:uppercase}
+  .gate .gd{color:var(--ink-dim);font-size:10.5px;margin-top:4px;line-height:1.45}
+  .gate .status{margin-top:10px;font-size:10px;letter-spacing: 0;color:var(--green);text-transform:uppercase}
+
+  /* ===== Proof ladder ===== */
+  .ladder{border:1px solid var(--line);background:var(--panel)}
+  .rung{
+    display:grid;grid-template-columns:60px 1fr 180px;gap:0;
+    border-bottom:1px solid var(--line);
+  }
+  .rung:last-child{border-bottom:none}
+  .rung .lv{
+    background:var(--panel-2);border-right:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;
+    font-weight:900;color:var(--amber);font-size:14px;
+  }
+  .rung .bd{padding:12px 14px}
+  .rung .bd .nm{font-weight:700;letter-spacing: 0;text-transform:uppercase;font-size:12px}
+  .rung .bd .ds{color:var(--ink-dim);font-size:11px;margin-top:3px}
+  .rung .wt{
+    border-left:1px solid var(--line);padding:12px;display:flex;flex-direction:column;
+    justify-content:center;gap:4px;background:rgba(240,168,48,.03);
+  }
+  @media(max-width:760px){
+    .rung{grid-template-columns:50px 1fr}
+    .rung .wt{grid-column:1/-1;border-left:none;border-top:1px dashed var(--line);flex-direction:row;gap:14px;align-items:center}
+  }
+  .wtag{font-size:10px;letter-spacing: 0;text-transform:uppercase;color:var(--ink-faint)}
+  .wval{font-size:13px;font-weight:700;letter-spacing: 0}
+  .wval.hi{color:var(--amber)}
+  .wval.lo{color:var(--ink-dim)}
+
+  /* ===== Lessons ===== */
+  .lcard{
+    border:1px solid var(--line);background:var(--panel);
+    padding:14px;display:flex;flex-direction:column;gap:6px;position:relative;
+    min-height:140px;
+  }
+  .lcard .ln{font-size:10px;color:var(--ink-faint);letter-spacing: 0}
+  .lcard .lt{font-weight:700;font-size:12.5px;letter-spacing: 0;text-transform:uppercase;line-height:1.3}
+  .lcard .ld{color:var(--ink-dim);font-size:11px;line-height:1.5}
+  .lcard .ic{
+    position:absolute;top:12px;right:12px;color:var(--amber);font-size:16px;
+  }
+
+  /* ===== State / status ===== */
+  .state{
+    display:grid;grid-template-columns:1.4fr 1fr;gap:14px;
+  }
+  @media(max-width:880px){.state{grid-template-columns:1fr}}
+  .status-board{
+    border:1px solid var(--amber);background:var(--panel);
+    padding:16px;
+  }
+  .sb-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line);font-size:12px}
+  .sb-row:last-child{border-bottom:none}
+  .sb-row .k{color:var(--ink-dim);letter-spacing: 0;text-transform:uppercase;font-size:10.5px}
+  .sb-row .v{font-weight:700;letter-spacing: 0}
+
+  .timeline{border:1px solid var(--line);background:var(--panel);padding:16px}
+  .tl-head{font-size:11px;color:var(--ink-faint);letter-spacing: 0;text-transform:uppercase;margin-bottom:14px}
+  .tl{position:relative;padding-left:22px}
+  .tl::before{content:"";position:absolute;left:6px;top:4px;bottom:4px;width:2px;background:var(--line-2)}
+  .tl .it{position:relative;padding:0 0 14px 4px}
+  .tl .it:last-child{padding-bottom:0}
+  .tl .it::before{
+    content:"";position:absolute;left:-19px;top:3px;width:10px;height:10px;
+    background:var(--panel);border:2px solid var(--amber);border-radius:50%;
+  }
+  .tl .it.done::before{background:var(--green);border-color:var(--green)}
+  .tl .it.now::before{background:var(--amber);border-color:var(--amber);box-shadow:0 0 8px var(--amber)}
+  .tl .it .ts{font-size:10px;color:var(--ink-faint);letter-spacing: 0;text-transform:uppercase}
+  .tl .it .tx{font-size:12px;margin-top:2px}
+  .tl .it .tx b{font-weight:700}
+  .tl .it .tx span{color:var(--ink-dim)}
+
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:11.5px}
+  .kv .k{color:var(--ink-faint);text-transform:uppercase;letter-spacing: 0;font-size:10px}
+  .kv .v{color:var(--ink)}
+
+  /* ===== Footer ===== */
+  .foot{
+    margin-top:34px;border-top:1px solid var(--line);padding-top:14px;
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;
+    color:var(--ink-faint);font-size:10.5px;letter-spacing: 0;text-transform:uppercase;
+  }
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:var(--ink-dim);letter-spacing: 0;text-transform:uppercase}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===== Top bar ===== -->
+  <div class="topbar">
+    <div class="left">
+      <span class="pill"><span class="dot"></span> OPERATOR CONSOLE</span>
+      <span>GROK POWER TOOLS | VAULT REPAIR WORKBENCH</span>
+    </div>
+    <div class="right">
+      <span class="pill">REV 0.4.2-RC</span>
+      <span class="pill"><span class="dot g"></span> BUILD STABLE</span>
+      <span class="pill warn"><span class="dot"></span> SAFETY ARMED</span>
+      <span class="pill">READ-ONLY MODE</span>
+    </div>
+  </div>
+
+  <!-- ===== Hero ===== -->
+  <section class="hero">
+    <div class="ascii-art">   __________________________
+  |  ______________________  |
+  | |  VAULT.REPAIR.WB    |  |
+  | |  [] [] [] [] [] []  |  |
+  | |_____________________|  |
+  |__________________________|
+       |   |   |   |   |
+      [S] [C] [P] [A] [R]
+       \   |   |   |   /
+        +--v---v---v--+
+        |  VERIFIER  |
+        +-----+------+
+              |
+        [ LEDGER.LOG ]</div>
+    <div class="tag">// TECHNICAL OPERATOR ARTIFACT | INTERNAL USE</div>
+    <h1>VAULT REPAIR <span class="accent">WORKBENCH</span></h1>
+    <p class="sub">A controlled pipeline for inspecting, classifying, planning, approving, executing, verifying, and recording repair actions against the Grok content vault. All mutations route through the approval gate. No path bypasses the ledger.</p>
+    <div class="meta">
+      <span><b>DOMAIN:</b> vault.grok</span>
+      <span><b>STORAGE:</b> R2 + D1</span>
+      <span><b>SESSION:</b> existing Chrome</span>
+      <span><b>LEDGER:</b> append-only</span>
+      <span><b>STATUS:</b> approved direction | not completed repair</span>
+    </div>
+  </section>
+
+  <!-- ===== 1. System component map ===== -->
+  <section class="sec">
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <span class="sec-title">System Component Map</span>
+      <span class="sec-sub">7 services | linear pipeline</span>
+    </div>
+    <div class="grid g7">
+      <div class="node">
+        <span class="id">S1</span>
+        <div>
+          <div class="nm">SCANNER</div>
+          <div class="ds">Walks R2 keys + D1 rows. Emits raw differential stream.</div>
+        </div>
+        <div class="st"><span>INPUT: vault</span><span class="ok">ONLINE</span></div>
+      </div>
+      <div class="node">
+        <span class="id">S2</span>
+        <div>
+          <div class="nm">CLASSIFIER</div>
+          <div class="ds">Tags each delta by failure mode + risk tier (T0-T3).</div>
+        </div>
+        <div class="st"><span>INPUT: stream</span><span class="ok">ONLINE</span></div>
+      </div>
+      <div class="node">
+        <span class="id">S3</span>
+        <div>
+          <div class="nm">PLANNER</div>
+          <div class="ds">Builds idempotent action set with preconditions + inverses.</div>
+        </div>
+        <div class="st"><span>INPUT: tags</span><span class="ok">ONLINE</span></div>
+      </div>
+      <div class="node">
+        <span class="id">S4</span>
+        <div>
+          <div class="nm">APPROVAL GATE</div>
+          <div class="ds">Human sign-off. Hard stop. No plan = no execution.</div>
+        </div>
+        <div class="st"><span>INPUT: plan</span><span class="warn">GATING</span></div>
+      </div>
+      <div class="node">
+        <span class="id">S5</span>
+        <div>
+          <div class="nm">RUNNER</div>
+          <div class="ds">Executes conditional writes only. Halts on first conflict.</div>
+        </div>
+        <div class="st"><span>INPUT: signed plan</span><span class="ok">READY</span></div>
+      </div>
+      <div class="node">
+        <span class="id">S6</span>
+        <div>
+          <div class="nm">VERIFIER</div>
+          <div class="ds">Re-reads targets. Compares to plan-predicted post-state.</div>
+        </div>
+        <div class="st"><span>INPUT: post-state</span><span class="ok">ONLINE</span></div>
+      </div>
+      <div class="node">
+        <span class="id">S7</span>
+        <div>
+          <div class="nm">LEDGER</div>
+          <div class="ds">Append-only record. Hash-chained. Source of truth.</div>
+        </div>
+        <div class="st"><span>INPUT: receipts</span><span class="ok">IMMUTABLE</span></div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <div class="sec-sub" style="margin:0 0 10px 0">DATA BUS | LOGICAL TOPOLOGY</div>
+<pre class="bus">  +-----------+    stream    +--------------+    tags    +----------+    plan    +----------------+
+  | SCANNER   |==============>| CLASSIFIER   |===========>| PLANNER  |===========>| APPROVAL GATE  |
+  | (S1)      |  raw deltas   | (S2)         |  T0..T3   | (S3)     |  idempotent| (S4)  [HARD STOP]|
+  +-----------+               +--------------+           +----------+            +-------+----------+
+        ^                                                                                  |
+        | read-back                                                                        | signed
+        |                                                                                  | plan
+  +-----+------+                                                                          _v_____
+  |  LEDGER   |<=== receipts ==== +-----------+  post-state  +------------+              |       |
+  | (S7)      |   hash-chained    | VERIFIER  |<=============| RUNNER     |<=============|  OK?  |
+  | append-   |                   | (S6)      |              | (S5) cond. |              |_______|
+  | only      |                   +-----------+              +------------+   write
+  +-----------+                                                       ^
+                                                                      |
+                              <span class="rd">no plan, no execution</span> <span class="lo">||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||</span>
+</pre>
+    </div>
+  </section>
+
+  <!-- ===== 2. Flow ===== -->
+  <section class="sec">
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <span class="sec-title">Operational Flow</span>
+      <span class="sec-sub">scan | classify | plan | approve | run | verify | record</span>
+    </div>
+    <div class="flow">
+      <div class="step">
+        <div class="sn">STEP <b>01</b></div>
+        <div class="tt">Scan</div>
+        <div class="io">> R2 keys<br>> D1 rows<br>< delta stream</div>
+        <span class="arr">></span>
+      </div>
+      <div class="step">
+        <div class="sn">STEP <b>02</b></div>
+        <div class="tt">Classify</div>
+        <div class="io">> deltas<br>< T0-T3 tag<br>< failure mode</div>
+        <span class="arr">></span>
+      </div>
+      <div class="step">
+        <div class="sn">STEP <b>03</b></div>
+        <div class="tt">Plan</div>
+        <div class="io">> tagged set<br>< action plan<br>< preconditions</div>
+        <span class="arr">></span>
+      </div>
+      <div class="step safety">
+        <div class="sn">STEP <b>04</b> <span class="warn">| GATE</span></div>
+        <div class="tt" style="color:var(--amber)">Approve</div>
+        <div class="io">> plan review<br>< signed approval<br>< or REJECT</div>
+        <span class="arr">></span>
+      </div>
+      <div class="step">
+        <div class="sn">STEP <b>05</b></div>
+        <div class="tt">Run</div>
+        <div class="io">> signed plan<br>< conditional writes<br>< halt-on-conflict</div>
+        <span class="arr">></span>
+      </div>
+      <div class="step">
+        <div class="sn">STEP <b>06</b></div>
+        <div class="tt">Verify</div>
+        <div class="io">> post-state<br>< match / drift<br>< evidence</div>
+        <span class="arr">></span>
+      </div>
+      <div class="step">
+        <div class="sn">STEP <b>07</b></div>
+        <div class="tt">Record</div>
+        <div class="io">> receipt<br>< ledger entry<br>< hash chained</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 3. Risk tier matrix ===== -->
+  <section class="sec">
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <span class="sec-title">Risk Tier Matrix</span>
+      <span class="sec-sub">class | mutability | approval | blast radius</span>
+    </div>
+    <div class="panel" style="padding:0;overflow-x:auto">
+      <table class="mx">
+        <thead>
+          <tr>
+            <th style="width:34%">Repair Class</th>
+            <th>Tier</th>
+            <th>Mutates State</th>
+            <th>Approval</th>
+            <th style="width:22%">Blast Radius</th>
+            <th>Reversible</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="nm">Read-Only Detection</td>
+            <td><span class="tg t0">T0</span></td>
+            <td>No</td>
+            <td>Auto</td>
+            <td>
+              <div class="bar g"><i style="--w:5%"></i></div>
+              <div class="lbl"><span>NONE</span><span>5%</span></div>
+            </td>
+            <td class="ok">N/A</td>
+          </tr>
+          <tr>
+            <td class="nm">D1 Index Repair</td>
+            <td><span class="tg t1">T1</span></td>
+            <td>Yes - index rows only</td>
+            <td>Operator</td>
+            <td>
+              <div class="bar c"><i style="--w:25%"></i></div>
+              <div class="lbl"><span>LOW</span><span>25%</span></div>
+            </td>
+            <td class="ok">Yes | via ledger</td>
+          </tr>
+          <tr>
+            <td class="nm">Metadata Repair</td>
+            <td><span class="tg t2">T2</span></td>
+            <td>Yes - object metadata</td>
+            <td>Operator + peer</td>
+            <td>
+              <div class="bar"><i style="--w:55%"></i></div>
+              <div class="lbl"><span>MEDIUM</span><span>55%</span></div>
+            </td>
+            <td class="warn">Conditional</td>
+          </tr>
+          <tr>
+            <td class="nm">Canonical Linking</td>
+            <td><span class="tg t2">T2</span></td>
+            <td>Yes - link graph</td>
+            <td>Operator + peer</td>
+            <td>
+              <div class="bar"><i style="--w:65%"></i></div>
+              <div class="lbl"><span>MEDIUM</span><span>65%</span></div>
+            </td>
+            <td class="warn">Conditional</td>
+          </tr>
+          <tr>
+            <td class="nm">Media Restore</td>
+            <td><span class="tg t3">T3</span></td>
+            <td>Yes - object bytes</td>
+            <td>Operator + owner</td>
+            <td>
+              <div class="bar r"><i style="--w:90%"></i></div>
+              <div class="lbl"><span>HIGH</span><span>90%</span></div>
+            </td>
+            <td class="bad">Last-resort</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="legend" style="margin-top:10px">
+      <span><span class="dot g"></span> T0 read-only</span>
+      <span><span class="dot" style="background:var(--cyan);box-shadow:0 0 8px var(--cyan)"></span> T1 index</span>
+      <span><span class="dot"></span> T2 metadata/link</span>
+      <span><span class="dot r"></span> T3 media bytes</span>
+    </div>
+  </section>
+
+  <!-- ===== 4. Safety gate ===== -->
+  <section class="sec">
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <span class="sec-title">Safety Gate | Hard Refusals</span>
+      <span class="sec-sub">non-negotiable | enforced pre-execution</span>
+    </div>
+    <div class="gate-wrap">
+      <div class="gate-head">
+        <div class="gate-title">[!] HARD-STOP LATCH | TRIP = ABORT</div>
+        <div class="legend">
+          <span><span class="dot r blink"></span> ENFORCED</span>
+          <span class="pill" style="color:var(--red);border-color:var(--red)">FAIL CLOSED</span>
+        </div>
+      </div>
+      <div class="gate-row">
+        <div class="gate">
+          <span class="gno">G1</span>
+          <div class="gx">[X]</div>
+          <div class="gn">No Deletes</div>
+          <div class="gd">Destroyers are not in the action vocabulary. Repair = write or link, never remove.</div>
+          <div class="status">> LATCHED</div>
+        </div>
+        <div class="gate">
+          <span class="gno">G2</span>
+          <div class="gx">[X]</div>
+          <div class="gn">No Processed-ID Reset</div>
+          <div class="gd">processed_id is monotonic. Rewinding it causes duplicate processing and silent re-writes.</div>
+          <div class="status">> LATCHED</div>
+        </div>
+        <div class="gate">
+          <span class="gno">G3</span>
+          <div class="gx">[X]</div>
+          <div class="gn">No Silent Overwrite</div>
+          <div class="gd">Every write needs a conditional precondition (etag / row version). Otherwise abort.</div>
+          <div class="status">> LATCHED</div>
+        </div>
+        <div class="gate">
+          <span class="gno">G4</span>
+          <div class="gx">[X]</div>
+          <div class="gn">No Detached Chrome Profile</div>
+          <div class="gd">Runner must bind to the live Grok existing session. Cold profiles create ghost state.</div>
+          <div class="status">> LATCHED</div>
+        </div>
+        <div class="gate">
+          <span class="gno">G5</span>
+          <div class="gx">[X]</div>
+          <div class="gn">No Unapproved R2 / D1 Writes</div>
+          <div class="gd">Unsigned plans cannot reach the runner. Gate signature is checked at write time.</div>
+          <div class="status">> LATCHED</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 5. Source proof ladder ===== -->
+  <section class="sec">
+    <div class="sec-head">
+      <span class="sec-num">05</span>
+      <span class="sec-title">Source Proof Ladder</span>
+      <span class="sec-sub">ascending authority | weight per rung</span>
+    </div>
+    <div class="ladder">
+      <div class="rung">
+        <div class="lv">L1</div>
+        <div class="bd">
+          <div class="nm">Cached Public URL</div>
+          <div class="ds">Edge cache, CDN, browser cache. <span class="bad">Not proof.</span> May lag the origin by minutes or hours.</div>
+        </div>
+        <div class="wt"><span class="wtag">Weight</span><span class="wval lo">0.0 | rejected</span></div>
+      </div>
+      <div class="rung">
+        <div class="lv">L2</div>
+        <div class="bd">
+          <div class="nm">Verified Local File / Object</div>
+          <div class="ds">Checksummed local copy. Acceptable as input media, not as authoritative record.</div>
+        </div>
+        <div class="wt"><span class="wtag">Weight</span><span class="wval">0.4</span></div>
+      </div>
+      <div class="rung">
+        <div class="lv">L3</div>
+        <div class="bd">
+          <div class="nm">Metadata Snapshot</div>
+          <div class="ds">Captured headers, etag, size, content-type. Proves shape; does not prove bytes.</div>
+        </div>
+        <div class="wt"><span class="wtag">Weight</span><span class="wval">0.6</span></div>
+      </div>
+      <div class="rung">
+        <div class="lv">L4</div>
+        <div class="bd">
+          <div class="nm">D1 / Index Row</div>
+          <div class="ds">Canonical pointer + state flag. Authoritative for routing; trails R2 in consistency.</div>
+        </div>
+        <div class="wt"><span class="wtag">Weight</span><span class="wval">0.8</span></div>
+      </div>
+      <div class="rung">
+        <div class="lv">L5</div>
+        <div class="bd">
+          <div class="nm">R2 Object</div>
+          <div class="ds">Source-of-truth bytes + etag. Highest storage authority. Conditional writes use this etag.</div>
+        </div>
+        <div class="wt"><span class="wtag">Weight</span><span class="wval hi">1.0 | canonical</span></div>
+      </div>
+      <div class="rung">
+        <div class="lv">L6</div>
+        <div class="bd">
+          <div class="nm">Live Grok | Existing Chrome Session</div>
+          <div class="ds">Runtime source-of-truth for identity and current processed cursor. <span class="warn">Required</span> for any state-changing op.</div>
+        </div>
+        <div class="wt"><span class="wtag">Weight</span><span class="wval hi">GATE | required</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 6. Research lessons ===== -->
+  <section class="sec">
+    <div class="sec-head">
+      <span class="sec-num">06</span>
+      <span class="sec-title">Research Lessons</span>
+      <span class="sec-sub">hard-won | encoded into the pipeline</span>
+    </div>
+    <div class="grid g3">
+      <div class="lcard">
+        <span class="ic">L.01</span>
+        <div class="ln">LESSON | STORAGE</div>
+        <div class="lt">Direct R2 is consistency source</div>
+        <div class="ld">Index and cache lag the object store. Resolve conflicts by reading R2 directly with etags.</div>
+      </div>
+      <div class="lcard">
+        <span class="ic">L.02</span>
+        <div class="ln">LESSON | WRITES</div>
+        <div class="lt">Conditional writes only</div>
+        <div class="ld">Every mutation carries a precondition. Lost races abort instead of overwriting silently.</div>
+      </div>
+      <div class="lcard">
+        <span class="ic">L.03</span>
+        <div class="ln">LESSON | AUDIT</div>
+        <div class="lt">Append-only repair ledger</div>
+        <div class="ld">Receipts are hash-chained and immutable. Replay yields identical verifier output.</div>
+      </div>
+      <div class="lcard">
+        <span class="ic">L.04</span>
+        <div class="ln">LESSON | EXECUTION</div>
+        <div class="lt">Idempotent actions</div>
+        <div class="ld">Every action specifies its expected post-state. Re-running a recorded step is a no-op.</div>
+      </div>
+      <div class="lcard">
+        <span class="ic">L.05</span>
+        <div class="ln">LESSON | ORDERING</div>
+        <div class="lt">Read-only check before repair</div>
+        <div class="ld">A successful T0 pass is a prerequisite to scheduling any T1+ action. No scan, no plan.</div>
+      </div>
+      <div class="lcard">
+        <span class="ic">L.06</span>
+        <div class="ln">LESSON | PROOF</div>
+        <div class="lt">Cached public URLs are not proof</div>
+        <div class="ld">A 200 from the edge proves cache state, not origin state. Never use as repair authority.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 7. Current state ===== -->
+  <section class="sec">
+    <div class="sec-head">
+      <span class="sec-num">07</span>
+      <span class="sec-title">Current State</span>
+      <span class="sec-sub">approved direction | not completed repair</span>
+    </div>
+    <div class="state">
+      <div class="status-board">
+        <div class="sec-sub" style="margin:0 0 8px 0">OPERATIONAL POSTURE</div>
+        <div class="sb-row"><span class="k">Gap-fill route</span><span class="v warn">FAIL CLOSED TODAY</span></div>
+        <div class="sb-row"><span class="k">Reconcile route</span><span class="v warn">FAIL CLOSED TODAY</span></div>
+        <div class="sb-row"><span class="k">Read-only detection (T0)</span><span class="v ok">ACTIVE</span></div>
+        <div class="sb-row"><span class="k">Mutation paths (T1-T3)</span><span class="v bad">DISABLED | GATED</span></div>
+        <div class="sb-row"><span class="k">Ledger</span><span class="v ok">RECORDING T0 ONLY</span></div>
+        <div class="sb-row"><span class="k">Direction</span><span class="v ok">APPROVED</span></div>
+        <div class="sb-row"><span class="k">Completion</span><span class="v warn">IN PROGRESS | NOT DONE</span></div>
+
+        <div style="margin-top:16px;padding:12px;border:1px dashed var(--line-2);background:rgba(240,168,48,.04);font-size:11.5px;color:var(--ink-dim);line-height:1.55">
+          <span class="warn" style="letter-spacing: 0">// NOTE</span> &nbsp; Gap-fill and reconcile routes are intentionally fail-closed in the current build. The model, the safety gate, and the ledger are approved direction; they are <b style="color:var(--ink)">not</b> completed repair functionality. Operators must not assume T1+ writes are available, even if the runner appears to accept a plan.
+        </div>
+
+        <div style="margin-top:14px" class="kv">
+          <span class="k">Owner</span><span class="v">vault-repair@grok</span>
+          <span class="k">Review cadence</span><span class="v">per-release</span>
+          <span class="k">Rollback</span><span class="v">replay ledger | halt runner</span>
+          <span class="k">Visibility</span><span class="v">internal | operator only</span>
+        </div>
+      </div>
+
+      <div class="timeline">
+        <div class="tl-head">DELIVERY TIMELINE</div>
+        <div class="tl">
+          <div class="it done">
+            <div class="ts">PHASE 01 | DONE</div>
+            <div class="tx"><b>Scanner + read-only T0</b> <span>| differential stream, ledger skeleton</span></div>
+          </div>
+          <div class="it done">
+            <div class="ts">PHASE 02 | DONE</div>
+            <div class="tx"><b>Classifier</b> <span>| failure-mode tagging, tier assignment</span></div>
+          </div>
+          <div class="it done">
+            <div class="ts">PHASE 03 | DONE</div>
+            <div class="tx"><b>Safety gate spec</b> <span>| G1-G5 latches defined and enforced</span></div>
+          </div>
+          <div class="it now">
+            <div class="ts">PHASE 04 | IN PROGRESS</div>
+            <div class="tx"><b>Planner + approval gate</b> <span>| idempotent action set, signing</span></div>
+          </div>
+          <div class="it">
+            <div class="ts">PHASE 05 | PENDING</div>
+            <div class="tx"><b>Runner (conditional writes)</b> <span>| R2/D1 paths behind gate</span></div>
+          </div>
+          <div class="it">
+            <div class="ts">PHASE 06 | PENDING</div>
+            <div class="tx"><b>Verifier</b> <span>| post-state match, drift detection</span></div>
+          </div>
+          <div class="it">
+            <div class="ts">PHASE 07 | PENDING</div>
+            <div class="tx"><b>Ledger replay</b> <span>| full hash-chained audit</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <div class="sec-sub" style="margin:0 0 8px 0">DECISION MATRIX | CURRENT</div>
+<pre class="bus">  +-----------------------------+--------+-----------+----------------+
+  | ROUTE                       | GATE   | STATE     | OPERATOR ACTION|
+  +-----------------------------+--------+-----------+----------------+
+  | scan (T0)                   | auto   | <span class="hl">OPEN</span>      | run freely     |
+  | classify                    | auto   | <span class="hl">OPEN</span>      | run freely     |
+  | plan (dry)                  | auto   | <span class="hl">OPEN</span>      | review output  |
+  | approve                     | human  | <span class="hl">READY</span>    | sign or reject |
+  | run | gap-fill              | G1-G5  | <span class="rd">CLOSED</span>    | <span class="rd">blocked</span>       |
+  | run | reconcile             | G1-G5  | <span class="rd">CLOSED</span>    | <span class="rd">blocked</span>       |
+  | verify                      | n/a    | <span class="lo">pending</span>  | awaiting run   |
+  | record (T1+)                | n/a    | <span class="lo">pending</span>  | awaiting run   |
+  +-----------------------------+--------+-----------+----------------+
+  <span class="lo">direction: approved   |   completion: not done   |   fail mode: closed</span>
+</pre>
+    </div>
+  </section>
+
+  <!-- ===== Footer ===== -->
+  <div class="foot">
+    <span>VAULT REPAIR WORKBENCH | GROK POWER TOOLS | INTERNAL OPERATOR ARTIFACT</span>
+    <span>NO COOKIES | NO ENDPOINTS | NO SCRIPTS | STATIC DOCUMENT</span>
+    <span>REV 0.4.2-RC | FAIL CLOSED</span>
+  </div>
+
+</div>
+</body>
+</html>

@@ -158,7 +158,14 @@ export default function VideoCard({
         className="relative overflow-hidden bg-(--color-surface-950)"
         style={{ paddingBottom: `${paddingPercent}%` }}
       >
-        {item.videoUrl ? (
+        {item.mediaType === "image" && (item.imageUrl || item.thumbnailUrl) ? (
+          // eslint-disable-next-line @next/next/no-img-element -- Vault images are served through local API proxy.
+          <img
+            src={item.imageUrl || item.thumbnailUrl}
+            alt={item.promptText || "Grok Imagine"}
+            className={`absolute inset-0 h-full w-full ${fitMode === "contain" ? "object-contain" : "object-cover"}`}
+          />
+        ) : item.videoUrl ? (
           <>
             {loadVideo && (
               <video
@@ -189,6 +196,7 @@ export default function VideoCard({
             )}
           </>
         ) : item.thumbnailUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- Thumbnails may come from arbitrary Grok/export URLs.
           <img
             src={item.thumbnailUrl}
             alt={item.promptText || "Grok Imagine"}

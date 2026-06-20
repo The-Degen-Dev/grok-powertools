@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Trash2, Film, Type } from "lucide-react";
+import { Plus, Trash2, Film, Type, ImageIcon } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -28,15 +28,20 @@ interface StoryboardPanelProps {
   onActiveIndexChange: (index: number) => void;
 }
 
+function mediaClipLabel(clip: MovieClip): string {
+  if (clip.sourceAssetId) return clip.sourceAssetId;
+  if (clip.type === "video") return clip.videoUrl?.split(/[/?#]/).filter(Boolean).pop()?.slice(0, 25) ?? "Video";
+  if (clip.type === "image") return clip.imageUrl?.split(/[/?#]/).filter(Boolean).pop()?.slice(0, 25) ?? "Image";
+  return clip.titleText ?? "Title";
+}
+
 function SortableClipCard({
   clip,
-  index,
   isActive,
   onSelect,
   onDelete,
 }: {
   clip: MovieClip;
-  index: number;
   isActive: boolean;
   onSelect: () => void;
   onDelete: () => void;
@@ -61,13 +66,13 @@ function SortableClipCard({
       >
         {clip.type === "video" ? (
           <Film className="h-3 w-3 flex-shrink-0" />
+        ) : clip.type === "image" ? (
+          <ImageIcon className="h-3 w-3 flex-shrink-0" />
         ) : (
           <Type className="h-3 w-3 flex-shrink-0" />
         )}
         <span className="flex-1 truncate">
-          {clip.type === "video"
-            ? clip.videoUrl?.split("/").pop()?.slice(0, 25) ?? "Video"
-            : clip.titleText ?? "Title"}
+          {mediaClipLabel(clip)}
         </span>
         <button
           type="button"
@@ -177,7 +182,6 @@ export default function StoryboardPanel({
 
                 <SortableClipCard
                   clip={clip}
-                  index={index}
                   isActive={index === activeIndex}
                   onSelect={() => onActiveIndexChange(index)}
                   onDelete={() => handleDelete(index)}
