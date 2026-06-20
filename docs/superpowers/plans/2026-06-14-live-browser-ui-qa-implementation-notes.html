@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Live Browser UI QA Implementation Notes</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      margin: 40px auto;
+      max-width: 980px;
+      color: #1f2328;
+    }
+    h1, h2 {
+      line-height: 1.2;
+    }
+    code {
+      background: #f6f8fa;
+      border-radius: 4px;
+      padding: 0.1em 0.3em;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid #d0d7de;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f6f8fa;
+    }
+    .pending {
+      color: #8250df;
+      font-weight: 600;
+    }
+    .done {
+      color: #1a7f37;
+      font-weight: 600;
+    }
+    .blocked {
+      color: #cf222e;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>Live Browser UI QA Implementation Notes</h1>
+  <p>
+    Running notes for executing
+    <code>docs/superpowers/plans/2026-06-14-live-browser-ui-qa.md</code>.
+    This file records design decisions, deviations, tradeoffs, open questions,
+    pause criteria, and evidence paths for run
+    <code>qa-live-browser-20260614T211215Z</code>.
+  </p>
+
+  <h2>Status</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Task</th>
+        <th>Status</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Execution setup</td>
+        <td class="done">Done</td>
+        <td>Read <code>AGENTS.md</code>, design spec, full plan, repo docs, local gate script, and subagent-driven-development skill before creating run state.</td>
+      </tr>
+      <tr>
+        <td>Task 1: preflight</td>
+        <td class="done">Done</td>
+        <td>Read-only preflight recorded. Found three exact Grok Imagine tabs, port <code>3011</code> free, Peekaboo required permissions granted, <code>agent-browser</code> and <code>plwr</code> absent, and popup tab not open.</td>
+      </tr>
+      <tr>
+        <td>Task 2: local gates</td>
+        <td class="done">Done</td>
+        <td>Subagent ran <code>acceptance/scripts/run-local-gates.mjs</code> with <code>ACCEPTANCE_RUN_ID=qa-live-browser-20260614T211215Z-local</code>. Local gates verdict is <code>verified</code> for root unit, root e2e, root lint, web lint, web build, cloud typecheck, and cloud acceptance.</td>
+      </tr>
+      <tr>
+        <td>Task 3: local web UI</td>
+        <td class="done">Done</td>
+        <td>Local web server started from <code>web/</code> on <code>http://localhost:3011</code>, Playwright evidence captured, supplemental fresh-page checks added, and server stopped. Product failures remain: Prompt Library offscreen, Settings clipped above viewport, and mobile horizontal overflow on home, movie, edit, ops, and share.</td>
+      </tr>
+      <tr>
+        <td>Task 4: Chrome baseline and read-only UI</td>
+        <td class="done">Done</td>
+        <td>Focused exact <code>https://grok.com/imagine</code> tab, captured Peekaboo/DOM baseline, verified overlay injection and settings view, opened popup URL in the existing Chrome window because no popup tab was open, and read popup fields without clicking controls. Popup remains mixed: <code>cloud_only</code>, production Worker URL, acceptance prefix.</td>
+      </tr>
+      <tr>
+        <td>Task 5: image generation</td>
+        <td class="blocked">Contaminated</td>
+        <td>Resumed with sanitized capture, entered the QA image prompt, and clicked the visible Grok Submit button once. During polling, the active Chrome tab left <code>https://grok.com/imagine</code>, hit <code>chrome://new-tab-page/</code>, then an unrelated Databricks URL. This is a scope escape, so live execution stopped and the run verdict is contaminated.</td>
+      </tr>
+      <tr>
+        <td>Task 6: video generation</td>
+        <td class="blocked">Paused</td>
+        <td>Continuation run <code>qa-live-browser-continuation-20260614T214227Z</code> re-proved the exact Grok tab, selected Video mode, entered the QA video prompt, clicked the visible Submit button once, and ran six sanitized exact-tab polls. User reported Grok credits are out and asked to resume later. No video, queue, or error was observed before interruption.</td>
+      </tr>
+      <tr>
+        <td>Task 7: post-generation overlay and popup</td>
+        <td class="blocked">Not run</td>
+        <td>Skipped because live Chrome execution stopped after contamination.</td>
+      </tr>
+      <tr>
+        <td>Task 8: evidence review and redaction</td>
+        <td class="done">Done</td>
+        <td>Initial and final redaction scans passed after private prompt redaction and final report creation. Final report verdict is <code>contaminated</code>.</td>
+      </tr>
+      <tr>
+        <td>Task 9: cleanup and final state</td>
+        <td class="done">Done</td>
+        <td>Local dev server was already stopped, no product source edits were present, no commits or pushes were performed. No further live Chrome action was taken after scope escape.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Design Decisions</h2>
+  <ul>
+    <li>Adapt the subagent-driven-development skill for QA execution. Subagents may run safe local or artifact work, while the main coordinator retains exclusive ownership of the live Grok Chrome tab.</li>
+    <li>Use the plan and spec as source of truth instead of inferring behavior from previous run memory.</li>
+    <li>Use the plan's AppleScript plus Peekaboo path for existing Chrome because <code>agent-browser</code> and <code>plwr</code> are not installed in this shell.</li>
+  </ul>
+
+  <h2>Deviations</h2>
+  <ul>
+    <li>The generic subagent skill references code changes, commits, and code-quality review. This run overrides those parts because the approved goal is QA-only with no product source edits, commits, or pushes.</li>
+    <li>The plan's <code>npm --prefix web exec -- next dev --port 3011</code> command started Next from the repo root and failed to find <code>web/app</code>. The server was started from the <code>web/</code> working directory with the same Next dev command instead.</li>
+    <li>The first web script left the clipped Prompt Library modal open after failure, which caused later Settings and Sign In click attempts to be intercepted. A supplemental pass used fresh pages to separate product failures from test cascade effects.</li>
+    <li>No extension popup tab was open at baseline. A popup tab was opened at <code>chrome-extension://bcjoehhhmhpjmlmjhojcokmfeafcmimd/popup.html</code> inside the existing Chrome window after confirming none existed.</li>
+    <li>Live Chrome screenshots that may have shown prior private prompt text were replaced with redacted placeholder images. This preserves privacy at the cost of losing visual detail for those specific milestones.</li>
+    <li>Stopped all live Chrome actions after the image poll loop detected a wrong active tab. The plan expected the active tab to remain the proven Grok tab, but the runtime state changed during polling.</li>
+  </ul>
+
+  <h2>Tradeoffs</h2>
+  <ul>
+    <li>Keep implementation notes in the repo for durable progress tracking, while keeping evidence artifacts under <code>/private/tmp</code> to avoid committing screenshots, account state, or generated QA data.</li>
+    <li>Delegated local gates to a subagent because they are isolated shell checks with no live Chrome state. The main session independently re-read the generated JSON before proceeding.</li>
+    <li>Stopped before image submission because the goal explicitly says to pause if evidence may contain private prompts. Continuing safely requires a sanitized resume path that avoids recording live composer text and saved prompt titles.</li>
+    <li>After resume, the image poll loop redacted screenshots immediately and omitted media URLs, but it did not re-prove the exact tab before each individual poll. The wrong-tab detection in poll data is therefore treated as contamination and the remaining live steps are skipped.</li>
+  </ul>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li>The extension popup tab was not open during preflight. Popup evidence will require opening or focusing a popup surface later without clicking backup or sync controls.</li>
+    <li>Need a follow-up fix before another full live run: the poll loop must re-focus or re-prove the exact Grok tab on every iteration and abort before collecting state from any other active tab.</li>
+    <li>When credits are available, resume from <code>/private/tmp/grok-powertools-qa/qa-live-browser-continuation-20260614T214227Z/PAUSED_FOR_USER.md</code>. Re-prove the exact Grok tab first, then inspect whether the submitted QA video produced, queued, failed, or needs one fresh video attempt. Do not submit another image.</li>
+  </ul>
+
+  <h2>Evidence Artifacts</h2>
+  <ul>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/run.env</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/git-state.txt</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/tools.txt</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/peekaboo-permissions.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/chrome-tabs.txt</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/popup-state.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/preflight.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/local-gates.json</code></li>
+    <li><code>acceptance/runs/qa-live-browser-20260614T211215Z-local/local-gates.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/web-ui-evidence.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/web-ui-supplemental.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/web-ui-summary.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/chrome-baseline.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/chrome-grok-baseline.png</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/chrome-overlay-open.png</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/chrome-overlay-settings.png</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/chrome-popup-baseline.png</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/private-prompt-redaction-log.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/PAUSED_FOR_USER.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/PAUSED_FOR_USER.md</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/image-submit.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/grok-image-generation.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/redaction-scan.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/redaction-scan-final.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/final-report.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-20260614T211215Z/final-report.md</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-continuation-20260614T214227Z/run.env</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-continuation-20260614T214227Z/video-submit.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-continuation-20260614T214227Z/grok-video-generation.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-continuation-20260614T214227Z/PAUSED_FOR_USER.json</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-continuation-20260614T214227Z/PAUSED_FOR_USER.md</code></li>
+    <li><code>/private/tmp/grok-powertools-qa/qa-live-browser-continuation-20260614T214227Z/redaction-scan-paused.json</code></li>
+  </ul>
+</body>
+</html>

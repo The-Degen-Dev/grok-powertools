@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vault Repair Workbench | Grok 4.3 Variant</title>
+  <style>
+    :root {
+      --bg: #0a0f1a;
+      --panel: #121a2a;
+      --panel-2: #1a2538;
+      --line: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --quiet: #64748b;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --info: #38bdf8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.4;
+      padding: 24px;
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: flex-end;
+      margin-bottom: 28px;
+      border-bottom: 1px solid #1f2a40;
+      padding-bottom: 20px;
+    }
+
+    h1,
+    h2,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      margin-top: 8px;
+      font-size: 28px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 30px 0 12px;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .caption {
+      color: var(--quiet);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .badge {
+      display: inline-block;
+      border-radius: 3px;
+      background: #1f2a40;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      padding: 3px 8px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid #1f2a40;
+      border-radius: 6px;
+      padding: 18px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid-2 {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+
+    .grid-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .component {
+      min-height: 86px;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 14px;
+    }
+
+    .component strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    .component span,
+    .mini {
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .flow {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .step {
+      position: relative;
+      min-width: 118px;
+      flex: 1;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 12px 12px 11px;
+      text-align: center;
+      font-size: 13px;
+    }
+
+    .step:after {
+      content: ">";
+      position: absolute;
+      right: -9px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--quiet);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      z-index: 1;
+    }
+
+    .step:last-child:after {
+      display: none;
+    }
+
+    .matrix {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .matrix th,
+    .matrix td {
+      border-bottom: 1px solid #1f2a40;
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .matrix th {
+      background: var(--panel-2);
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .tier-1 { border-left: 4px solid var(--ok); }
+    .tier-2 { border-left: 4px solid #eab308; }
+    .tier-3 { border-left: 4px solid var(--warn); }
+    .tier-4 { border-left: 4px solid #fb923c; }
+    .tier-5 { border-left: 4px solid var(--danger); }
+
+    .guard-list {
+      display: grid;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .guard {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: #171923;
+      border: 1px solid #2b3445;
+      border-left: 4px solid var(--danger);
+      border-radius: 4px;
+      padding: 10px;
+    }
+
+    .guard code {
+      color: #fca5a5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .ladder {
+      display: grid;
+      gap: 5px;
+    }
+
+    .rung {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      min-height: 38px;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      background: linear-gradient(90deg, #142033, #26364d);
+      padding: 0 14px;
+      font-size: 13px;
+    }
+
+    .rung span {
+      color: var(--quiet);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+    }
+
+    .lesson-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .lesson {
+      min-height: 48px;
+      border: 1px solid #2b3445;
+      border-radius: 4px;
+      background: #101827;
+      padding: 10px;
+      font-size: 12px;
+    }
+
+    .timeline {
+      position: relative;
+      padding-left: 28px;
+    }
+
+    .timeline:before {
+      content: "";
+      position: absolute;
+      left: 11px;
+      top: 8px;
+      bottom: 8px;
+      width: 2px;
+      background: var(--line);
+    }
+
+    .event {
+      position: relative;
+      margin-bottom: 14px;
+      font-size: 13px;
+    }
+
+    .event:before {
+      content: "";
+      position: absolute;
+      left: -22px;
+      top: 5px;
+      width: 10px;
+      height: 10px;
+      background: var(--ok);
+      border: 2px solid var(--bg);
+      border-radius: 50%;
+    }
+
+    .gate {
+      border: 3px dashed var(--danger);
+      border-radius: 8px;
+      background: #171923;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .gate strong {
+      display: block;
+      color: #fca5a5;
+      letter-spacing: 0;
+      margin-bottom: 10px;
+    }
+
+    .status {
+      margin-top: 32px;
+      border-left: 5px solid var(--warn);
+      background: var(--panel-2);
+      border-radius: 5px;
+      padding: 14px 18px;
+      font-size: 13px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    @media (max-width: 860px) {
+      body {
+        padding: 16px;
+      }
+
+      header,
+      .grid-2,
+      .grid-3 {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        display: grid;
+      }
+
+      .flow {
+        display: grid;
+      }
+
+      .step:after {
+        display: none;
+      }
+
+      .lesson-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <span class="badge">GROK POWER TOOLS</span>
+        <h1>Vault Repair Workbench</h1>
+        <p class="caption">Grok 4.3 operator-map variant. Design direction only, not completed repair functionality.</p>
+      </div>
+      <div class="caption">
+        docs/superpowers/specs/2026-06-20-vault-repair-workbench-grok43.html<br>
+        Fail-closed routes: gap-fill and reconcile
+      </div>
+    </header>
+
+    <section>
+      <h2>Component Model</h2>
+      <div class="grid grid-3">
+        <div class="component"><strong>SCANNER</strong><span>Read-only R2, D1, metadata, local Vault, and Chrome evidence inventory.</span></div>
+        <div class="component"><strong>CLASSIFIER</strong><span>Turns drift into issue classes and risk tiers without writing state.</span></div>
+        <div class="component"><strong>PLANNER</strong><span>Builds exact action lists, target counts, proof, write class, and plan hash.</span></div>
+        <div class="component"><strong>APPROVAL GATE</strong><span>Locks approval to the stable plan hash and exact impact.</span></div>
+        <div class="component"><strong>RUNNER</strong><span>Executes approved, idempotent non-Grok repairs through narrow routes.</span></div>
+        <div class="component"><strong>VERIFIER + LEDGER</strong><span>Checks direct R2/D1 proof and appends run evidence.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Operational Flow</h2>
+      <div class="panel flow" aria-label="scan to record repair flow">
+        <div class="step">SCAN<br><span class="mini">enumerate</span></div>
+        <div class="step">CLASSIFY<br><span class="mini">issue + tier</span></div>
+        <div class="step">PLAN<br><span class="mini">target hash</span></div>
+        <div class="step">APPROVE<br><span class="mini">operator gate</span></div>
+        <div class="step">RUN<br><span class="mini">idempotent</span></div>
+        <div class="step">VERIFY<br><span class="mini">direct proof</span></div>
+        <div class="step">RECORD<br><span class="mini">append-only</span></div>
+      </div>
+    </section>
+
+    <section class="grid grid-2">
+      <div>
+        <h2>Risk Tier Matrix</h2>
+        <table class="matrix">
+          <thead>
+            <tr><th>Tier</th><th>Scope</th><th>Allowed impact</th></tr>
+          </thead>
+          <tbody>
+            <tr class="tier-1"><td>T0</td><td>Read-only detection</td><td>Diagnostics only</td></tr>
+            <tr class="tier-2"><td>T1</td><td>D1 index repair</td><td>Approved proof/index rows</td></tr>
+            <tr class="tier-3"><td>T2</td><td>Metadata repair</td><td>Approved sidecar or snapshot write</td></tr>
+            <tr class="tier-4"><td>T3</td><td>Canonical linking</td><td>Approved links and conflict records</td></tr>
+            <tr class="tier-5"><td>T4</td><td>Media restore</td><td>Conditional restore from verified source only</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h2>Safety Gates</h2>
+        <div class="panel guard-list">
+          <div class="guard"><code>BLOCK</code> No deletes permitted</div>
+          <div class="guard"><code>BLOCK</code> No processed-ID reset</div>
+          <div class="guard"><code>BLOCK</code> No silent overwrite</div>
+          <div class="guard"><code>BLOCK</code> No detached Chrome profile</div>
+          <div class="guard"><code>BLOCK</code> No unapproved R2 or D1 write</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Source Proof Ladder</h2>
+      <div class="panel ladder">
+        <div class="rung"><strong>R2 object</strong><span>base media proof</span></div>
+        <div class="rung"><strong>D1 / index row</strong><span>catalog proof</span></div>
+        <div class="rung"><strong>Metadata snapshot</strong><span>sidecar proof</span></div>
+        <div class="rung"><strong>Verified local file/object</strong><span>hash or identity proof</span></div>
+        <div class="rung"><strong>Live Grok existing Chrome session</strong><span>operator runbook only</span></div>
+      </div>
+    </section>
+
+    <section class="grid grid-2">
+      <div>
+        <h2>Data / Source Topology</h2>
+        <div class="panel">
+          <svg viewBox="0 0 620 170" role="img" aria-label="R2 D1 local Chrome and repair ledger topology">
+            <defs>
+              <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <path d="M0,0 L8,4 L0,8 Z" fill="#475569"></path>
+              </marker>
+            </defs>
+            <rect x="22" y="32" width="112" height="72" rx="4" fill="#1a2538" stroke="#475569"></rect>
+            <text x="78" y="64" fill="#e2e8f0" font-size="13" text-anchor="middle">R2</text>
+            <text x="78" y="82" fill="#94a3b8" font-size="11" text-anchor="middle">objects</text>
+            <rect x="180" y="32" width="112" height="72" rx="4" fill="#1a2538" stroke="#475569"></rect>
+            <text x="236" y="64" fill="#e2e8f0" font-size="13" text-anchor="middle">D1</text>
+            <text x="236" y="82" fill="#94a3b8" font-size="11" text-anchor="middle">indexes</text>
+            <rect x="338" y="32" width="112" height="72" rx="4" fill="#1a2538" stroke="#475569"></rect>
+            <text x="394" y="64" fill="#e2e8f0" font-size="13" text-anchor="middle">LOCAL</text>
+            <text x="394" y="82" fill="#94a3b8" font-size="11" text-anchor="middle">verified file</text>
+            <rect x="496" y="32" width="112" height="72" rx="4" fill="#1a2538" stroke="#475569"></rect>
+            <text x="552" y="64" fill="#e2e8f0" font-size="13" text-anchor="middle">CHROME</text>
+            <text x="552" y="82" fill="#94a3b8" font-size="11" text-anchor="middle">live Grok</text>
+            <line x1="134" y1="68" x2="180" y2="68" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"></line>
+            <line x1="292" y1="68" x2="338" y2="68" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"></line>
+            <line x1="450" y1="68" x2="496" y2="68" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"></line>
+            <rect x="206" y="126" width="208" height="32" rx="4" fill="#10231a" stroke="#22c55e"></rect>
+            <text x="310" y="147" fill="#bbf7d0" font-size="12" text-anchor="middle">append-only repair ledger</text>
+            <line x1="236" y1="104" x2="278" y2="126" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"></line>
+            <line x1="394" y1="104" x2="342" y2="126" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"></line>
+          </svg>
+        </div>
+      </div>
+
+      <div>
+        <h2>Research Lessons</h2>
+        <div class="lesson-grid">
+          <div class="lesson">Direct R2 and S3/Worker reads are proof. Cached public URLs are not.</div>
+          <div class="lesson">R2 restore uses conditional writes. Existing canonical objects are never silently replaced.</div>
+          <div class="lesson">Every action gets an idempotency key so retries do not duplicate repair.</div>
+          <div class="lesson">The app owns a ledger because R2 audit logs do not record object data writes.</div>
+          <div class="lesson">Read-only check/report comes before any repair action.</div>
+          <div class="lesson">Live Grok repair runs through the existing Chrome session only.</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Evidence Ledger Timeline</h2>
+      <div class="panel timeline">
+        <div class="event"><strong>14:22:03</strong> Scan complete. Objects, rows, snapshots, and local proof read only.</div>
+        <div class="event"><strong>14:22:17</strong> Classification complete. Issues assigned risk tiers.</div>
+        <div class="event"><strong>14:23:41</strong> Plan generated. Target count, keys, writes, and hash locked.</div>
+        <div class="event"><strong>14:24:09</strong> Approval recorded. Plan hash still matches.</div>
+        <div class="event"><strong>14:25:02</strong> Runner executed approved idempotent actions.</div>
+        <div class="event"><strong>14:25:18</strong> Direct proof verified. Ledger entry appended.</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Approval Gate</h2>
+      <div class="gate">
+        <strong>EXECUTION BLOCKED UNTIL APPROVED</strong>
+        <p class="caption">Plan hash verified. Risk tier inside approved limit. No safety rule violated. Exact target count visible.</p>
+        <p style="margin-top: 14px;"><span class="badge">AWAITING OPERATOR SIGNATURE</span></p>
+      </div>
+    </section>
+
+    <div class="status">
+      <strong>CURRENT STATE:</strong> gap-fill and reconcile routes fail closed today. This page describes the approved repair direction only. It does not claim repair functionality is already built.
+    </div>
+  </main>
+</body>
+</html>
