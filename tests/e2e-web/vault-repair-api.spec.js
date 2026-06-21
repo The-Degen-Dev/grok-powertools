@@ -1,5 +1,7 @@
 const { test, expect } = require("@playwright/test");
 
+const fakeWorkerUrl = "http://127.0.0.1:43117";
+
 const identityScope = {
   workerHost: "127.0.0.1",
   keyPrefix: "grok-powertools/v1",
@@ -22,6 +24,49 @@ const indexDriftIssue = {
   ],
   writeClass: "d1_index",
 };
+
+test("repair scan is read-only and classifies index drift and runbook-only issues", async ({ request }) => {
+  await request.get(`${fakeWorkerUrl}/__fake-worker/debug/requests`);
+
+  const response = await request.post("/api/vault/repair/scan");
+  expect(response.ok()).toBe(true);
+  const body = await response.json();
+
+  expect(body.ok).toBe(true);
+  expect(body.scan.identityScope).toMatchObject(identityScope);
+  expect(body.scan.issues).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        issueId: "repair-gap-index-drift-asset-image-1",
+        issueType: "index_drift",
+        riskTier: "T1",
+        writeClass: "d1_index",
+      }),
+      expect.objectContaining({
+        issueId: "repair-gap-live-grok-asset-missing",
+        issueType: "live_grok_required",
+        riskTier: "T4",
+        writeClass: "live_grok_runbook",
+        blockedReason: "LIVE_GROK_RUNBOOK_ONLY",
+      }),
+    ]),
+  );
+  expect(body.scan.summary).toMatchObject({
+    writableIssues: 1,
+    blockedIssues: 1,
+  });
+  expect(
+    body.scan.issues.some(
+      (issue) => issue.issueType === "scan_warning" && Array.isArray(issue.sourceProof) && issue.sourceProof.length > 0,
+    ),
+  ).toBe(true);
+
+  const logResponse = await request.get(`${fakeWorkerUrl}/__fake-worker/debug/requests`);
+  expect(logResponse.ok()).toBe(true);
+  const log = await logResponse.json();
+  const mutatingWorkerCalls = log.requests.filter((entry) => entry.method !== "GET" && entry.method !== "HEAD");
+  expect(mutatingWorkerCalls).toEqual([]);
+});
 
 test("repair plan API produces deterministic hash and exact write impact", async ({ request }) => {
   const first = await request.post("/api/vault/repair/plan", {
