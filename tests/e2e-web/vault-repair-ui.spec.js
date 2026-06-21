@@ -1,5 +1,52 @@
 const { test, expect } = require("@playwright/test");
 
+async function resetDb(page) {
+  await page.goto("/vault");
+  await page.waitForFunction(async () => {
+    const databases = await indexedDB.databases();
+    const db = databases.find((entry) => entry.name === "grok-power-tools");
+    return Number(db?.version || 0) >= 5;
+  });
+  await page.evaluate(async () => {
+    const storeNames = [
+      "collections",
+      "movies",
+      "prompts",
+      "settings",
+      "sync_meta",
+      "vault_assets",
+      "vault_overlays",
+      "vault_import_runs",
+      "vault_gaps",
+      "vault_prompts",
+      "vault_media_tokens",
+      "vault_repair_scans",
+      "vault_repair_issues",
+      "vault_repair_plans",
+      "vault_repair_runs",
+      "vault_repair_events",
+    ];
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("grok-power-tools");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const existingStores = storeNames.filter((name) => db.objectStoreNames.contains(name));
+    if (existingStores.length === 0) {
+      db.close();
+      return;
+    }
+    const tx = db.transaction(existingStores, "readwrite");
+    await Promise.all(existingStores.map((name) => tx.objectStore(name).clear()));
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+  });
+}
+
 const versionFourSchema = [
   { name: "collections", keyPath: "id", indexes: [["by-status", "status"], ["by-updated", "updatedAt"]] },
   { name: "settings" },
@@ -93,4 +140,46 @@ test("Vault repair stores exist after IndexedDB upgrade", async ({ page }) => {
     vault_repair_runs: ["by-plan", "by-status"],
     vault_repair_events: ["by-created", "by-run"],
   });
+});
+
+test("Repair Workbench scans and displays classified repair issues", async ({ page }) => {
+  await resetDb(page);
+  await page.goto("/vault");
+  const workbench = page.locator("section").filter({ has: page.getByRole("heading", { name: "Repair Workbench" }) });
+  await expect(workbench.getByRole("heading", { name: "Repair Workbench" })).toBeVisible();
+  await workbench.getByRole("button", { name: "Scan for Repair Issues" }).click();
+  await expect(workbench.getByText("5 issues")).toBeVisible();
+  await expect(workbench.getByText("1 writable")).toBeVisible();
+  await expect(workbench.getByText("1 blocked")).toBeVisible();
+  const indexDriftRow = workbench.getByRole("row").filter({ hasText: "repair-gap-index-drift-asset-image-1" });
+  await expect(indexDriftRow.getByText("T1")).toBeVisible();
+  await expect(indexDriftRow.getByText("d1_index")).toBeVisible();
+  await expect(workbench.getByLabel("Select repair-gap-index-drift-asset-image-1")).toBeEnabled();
+  const liveGrokRow = workbench.getByRole("row").filter({ hasText: "repair-gap-live-grok-asset-missing" });
+  await expect(liveGrokRow.getByText("LIVE_GROK_RUNBOOK_ONLY")).toBeVisible();
+  await expect(workbench.getByLabel("Select repair-gap-live-grok-asset-missing")).toBeDisabled();
+  await expect(workbench.getByLabel("Select repair-scan-warning-1")).toBeDisabled();
+
+  const localIssues = await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("grok-power-tools");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const issues = await new Promise((resolve, reject) => {
+      const tx = db.transaction("vault_repair_issues", "readonly");
+      const request = tx.objectStore("vault_repair_issues").getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    db.close();
+    return issues.map((issue) => issue.issueId).sort();
+  });
+  expect(localIssues).toEqual([
+    "repair-gap-index-drift-asset-image-1",
+    "repair-gap-live-grok-asset-missing",
+    "repair-scan-warning-1",
+    "repair-scan-warning-2",
+    "repair-scan-warning-3",
+  ]);
 });

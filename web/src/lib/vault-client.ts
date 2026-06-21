@@ -1,4 +1,5 @@
 import { parseVaultPreview } from "./vault-types";
+import type { RepairIdentityScope, RepairIssue } from "./vault-repair-types";
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, cache: "no-store" });
@@ -27,4 +28,23 @@ export async function fetchVaultPreview() {
 
 export function fetchVaultGaps() {
   return json("/api/vault/gaps");
+}
+
+export interface RepairScanResponse {
+  ok: true;
+  scan: {
+    scannedAt: string;
+    identityScope: RepairIdentityScope;
+    issues: RepairIssue[];
+    summary: {
+      totalIssues: number;
+      writableIssues: number;
+      blockedIssues: number;
+      readOnlyIssues: number;
+    };
+  };
+}
+
+export function fetchVaultRepairScan() {
+  return json<RepairScanResponse>("/api/vault/repair/scan", { method: "POST" });
 }

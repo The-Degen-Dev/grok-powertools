@@ -106,6 +106,12 @@ const riskTierRank: Record<RepairRiskTier, number> = {
   T4: 4,
 };
 
+function proofWithoutObservedAt(proof: SourceProof): Omit<SourceProof, "observedAt"> {
+  const { observedAt, ...stableProof } = proof;
+  void observedAt;
+  return stableProof;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -211,7 +217,7 @@ export async function buildRepairPlan(input: ParsedRepairPlanRequest & { created
       riskTierMax,
       actions: actionSeeds.map((seed) => ({
         ...seed.action,
-        expectedProof: seed.action.expectedProof.map(({ observedAt: _observedAt, ...proof }) => proof),
+        expectedProof: seed.action.expectedProof.map(proofWithoutObservedAt),
       })),
     }),
   );

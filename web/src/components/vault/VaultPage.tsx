@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/Toast";
 import VaultLoadPanel from "./VaultLoadPanel";
 import VaultGrid from "./VaultGrid";
 import VaultMediaViewer from "./VaultMediaViewer";
+import VaultRepairWorkbench from "./VaultRepairWorkbench";
 import { createCollection, createMovie, getAllCollections, getAllMovies, getDB, updateCollection, updateMovie } from "@/lib/local-storage";
 import { commitVaultPreview, getVaultAssets, getVaultOverlays, putVaultOverlay } from "@/lib/vault-storage";
 import type { VaultAsset, VaultMediaType, VaultOverlay, VaultPreview, VaultSourceStatus } from "@/lib/vault-types";
@@ -231,6 +232,7 @@ export default function VaultPage() {
           </div>
         </section>
       )}
+      <VaultRepairWorkbench />
       <section className="mt-6">
         <VaultGrid
           assets={filteredAssets}
