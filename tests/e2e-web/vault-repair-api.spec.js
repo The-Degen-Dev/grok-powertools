@@ -394,3 +394,32 @@ test("repair run fails closed for malformed bodies", async ({ request }) => {
   expect(primitiveBody.status()).toBe(409);
   await expect(primitiveBody.json()).resolves.toEqual({ ok: false, error: "REPAIR_APPROVAL_REQUIRED" });
 });
+
+test("repair proof proxy performs read-only Worker HEAD proof without leaking API key", async ({ request }) => {
+  await request.get(`${fakeWorkerUrl}/__fake-worker/debug/requests`);
+
+  const objectKey = "grok-powertools/v1/users/greymaker/media/by-asset/asset-video-1.mp4";
+  const response = await request.get(`/api/vault/repair/proof?objectKey=${encodeURIComponent(objectKey)}`);
+  expect(response.ok()).toBe(true);
+  const body = await response.json();
+
+  expect(body).toMatchObject({
+    ok: true,
+    exists: true,
+    objectKey,
+    contentType: "video/mp4",
+  });
+  expect(JSON.stringify(body)).not.toContain("client-sample");
+  expect(body.apiKey).toBeUndefined();
+
+  const logResponse = await request.get(`${fakeWorkerUrl}/__fake-worker/debug/requests`);
+  expect(logResponse.ok()).toBe(true);
+  const log = await logResponse.json();
+  expect(log.requests).toContainEqual(
+    expect.objectContaining({
+      method: "HEAD",
+      pathname: "/v1/objects/verify",
+      search: `?objectKey=${encodeURIComponent(objectKey)}`,
+    }),
+  );
+});

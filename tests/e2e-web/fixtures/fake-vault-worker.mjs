@@ -124,6 +124,10 @@ function logRequest(req, url) {
   }
 }
 
+function findFixtureObject(objectKey) {
+  return [...fixtureAssets, ...paginatedFixtureAssets].find((asset) => asset.canonicalObjectKey === objectKey);
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
   logRequest(req, url);
@@ -201,6 +205,26 @@ const server = http.createServer((req, res) => {
         },
       ],
     });
+  }
+
+  if (req.method === "HEAD" && url.pathname === "/v1/objects/verify") {
+    const objectKey = url.searchParams.get("objectKey") || "";
+    const object = findFixtureObject(objectKey);
+    if (!object?.canonicalObjectKey) {
+      res.writeHead(404, { "access-control-allow-origin": "*" });
+      return res.end();
+    }
+
+    const headers = {
+      "access-control-allow-origin": "*",
+      "x-r2-size-bytes": String(object.sizeBytes || 0),
+      "x-r2-etag": object.etag || "",
+      "content-type": object.contentType || "application/octet-stream",
+    };
+    if (object.sha256) headers["x-r2-sha256"] = object.sha256;
+
+    res.writeHead(200, headers);
+    return res.end();
   }
 
   if (url.pathname === "/v1/vault/media") {
