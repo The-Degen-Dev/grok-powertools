@@ -183,3 +183,62 @@ test("Repair Workbench scans and displays classified repair issues", async ({ pa
     "repair-scan-warning-3",
   ]);
 });
+
+test("Repair Workbench creates an approved plan and records blocked run history", async ({ page }) => {
+  await resetDb(page);
+  await page.goto("/vault");
+  const workbench = page.locator("section").filter({ has: page.getByRole("heading", { name: "Repair Workbench" }) });
+  await workbench.getByRole("button", { name: "Scan for Repair Issues" }).click();
+  await workbench.getByLabel("Select repair-gap-index-drift-asset-image-1").check();
+  await workbench.getByRole("button", { name: "Create Repair Plan" }).click();
+  await expect(workbench.getByText(/Plan hash/)).toBeVisible();
+  await expect(workbench.getByText(/1 target/)).toBeVisible();
+  await workbench.getByRole("button", { name: "Approve Exact Plan" }).click();
+  await expect(workbench.getByText("Approved")).toBeVisible();
+  await workbench.getByRole("button", { name: "Run Approved Repair" }).click();
+  await expect(workbench.getByText("REPAIR_WRITE_NOT_ARMED")).toBeVisible();
+  await expect(workbench.getByRole("button", { name: "Run Approved Repair" })).toBeDisabled();
+
+  const history = await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("grok-power-tools");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const runs = await new Promise((resolve, reject) => {
+      const tx = db.transaction("vault_repair_runs", "readonly");
+      const request = tx.objectStore("vault_repair_runs").getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const events = await new Promise((resolve, reject) => {
+      const tx = db.transaction("vault_repair_events", "readonly");
+      const request = tx.objectStore("vault_repair_events").getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    db.close();
+    return { runs, events };
+  });
+  expect(history.runs).toEqual(
+    expect.arrayContaining([expect.objectContaining({ status: "blocked", error: "REPAIR_WRITE_NOT_ARMED" })]),
+  );
+  expect(history.events.map((event) => event.eventType)).toEqual(
+    expect.arrayContaining(["plan", "approval", "run_blocked"]),
+  );
+  expect(history.runs.filter((run) => run.status === "blocked")).toHaveLength(1);
+  expect(history.runs.find((run) => run.status === "blocked")?.runId).toMatch(/-blocked$/);
+});
+
+test("Repair Workbench clears approval state when selection changes after planning", async ({ page }) => {
+  await resetDb(page);
+  await page.goto("/vault");
+  const workbench = page.locator("section").filter({ has: page.getByRole("heading", { name: "Repair Workbench" }) });
+  await workbench.getByRole("button", { name: "Scan for Repair Issues" }).click();
+  await workbench.getByLabel("Select repair-gap-index-drift-asset-image-1").check();
+  await workbench.getByRole("button", { name: "Create Repair Plan" }).click();
+  await expect(workbench.getByText(/Plan hash/)).toBeVisible();
+  await workbench.getByLabel("Select repair-gap-index-drift-asset-image-1").uncheck();
+  await expect(workbench.getByText(/Plan hash/)).toHaveCount(0);
+  await expect(workbench.getByRole("button", { name: "Create Repair Plan" })).toBeDisabled();
+});

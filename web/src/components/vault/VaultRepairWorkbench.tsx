@@ -4,9 +4,16 @@ import { useMemo, useState } from "react";
 import Button from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { getDB } from "@/lib/local-storage";
-import { fetchVaultRepairScan, type RepairScanResponse } from "@/lib/vault-client";
-import type { RepairIssue } from "@/lib/vault-repair-types";
-import { putVaultRepairScan } from "@/lib/vault-storage";
+import {
+  approveVaultRepairPlan,
+  createVaultRepairPlan,
+  fetchVaultRepairScan,
+  runVaultRepairPlan,
+  type RepairRunRecord,
+  type RepairScanResponse,
+} from "@/lib/vault-client";
+import type { RepairIssue, RepairPlan } from "@/lib/vault-repair-types";
+import { putVaultRepairPlan, putVaultRepairRun, putVaultRepairScan } from "@/lib/vault-storage";
 
 function badgeClass(value: string) {
   if (value === "T4") return "border-red-300 text-red-700 dark:border-red-900 dark:text-red-300";
@@ -60,6 +67,9 @@ function IssueRow({
 export default function VaultRepairWorkbench() {
   const [scan, setScan] = useState<RepairScanResponse["scan"] | null>(null);
   const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(() => new Set());
+  const [plan, setPlan] = useState<RepairPlan | null>(null);
+  const [run, setRun] = useState<RepairRunRecord | null>(null);
+  const [runError, setRunError] = useState("");
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
@@ -75,6 +85,9 @@ export default function VaultRepairWorkbench() {
       const response = await fetchVaultRepairScan();
       setScan(response.scan);
       setSelectedIssueIds(new Set());
+      setPlan(null);
+      setRun(null);
+      setRunError("");
       const db = await getDB();
       await putVaultRepairScan(
         db,
@@ -94,6 +107,63 @@ export default function VaultRepairWorkbench() {
     }
   }
 
+  async function handleCreatePlan() {
+    if (!scan || selectedIssues.length === 0) return;
+    try {
+      const response = await createVaultRepairPlan({
+        identityScope: scan.identityScope,
+        issues,
+        selectedIssueIds: selectedIssues.map((issue) => issue.issueId),
+      });
+      setPlan(response.plan);
+      setRun(null);
+      setRunError("");
+      const db = await getDB();
+      await putVaultRepairPlan(db, response.plan);
+      toast("Repair plan created", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Repair plan failed", "error");
+    }
+  }
+
+  async function handleApprovePlan() {
+    if (!plan) return;
+    try {
+      const response = await approveVaultRepairPlan({
+        plan,
+        approvedPlanHash: plan.planHash,
+        approvedTargetCount: plan.targetCount,
+        approvedWriteClasses: plan.writeClasses,
+      });
+      setRun(response.run);
+      setRunError("");
+      const db = await getDB();
+      await putVaultRepairRun(db, response.run);
+      toast("Repair plan approved", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Repair approval failed", "error");
+    }
+  }
+
+  async function handleRunPlan() {
+    if (!plan || !run) return;
+    try {
+      const response = await runVaultRepairPlan({ plan, run });
+      setRun(response.run);
+      setRunError("");
+      const db = await getDB();
+      await putVaultRepairRun(db, response.run);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "REPAIR_RUN_FAILED";
+      const blockedRunId = run.runId.endsWith("-blocked") ? run.runId : `${run.runId}-blocked`;
+      const blockedRun: RepairRunRecord = { ...run, runId: blockedRunId, status: "blocked", error: message };
+      setRun(blockedRun);
+      setRunError(message);
+      const db = await getDB();
+      await putVaultRepairRun(db, blockedRun);
+    }
+  }
+
   function setIssueSelected(issueId: string, selected: boolean) {
     setSelectedIssueIds((current) => {
       const next = new Set(current);
@@ -104,6 +174,9 @@ export default function VaultRepairWorkbench() {
       }
       return next;
     });
+    setPlan(null);
+    setRun(null);
+    setRunError("");
   }
 
   return (
@@ -172,6 +245,43 @@ export default function VaultRepairWorkbench() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {scan && (
+        <div className="mt-4 flex flex-col gap-3 rounded border border-(--color-surface-200) p-3 dark:border-(--color-surface-800)">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-medium">Plan Builder</div>
+              <div className="text-xs text-(--color-surface-500)">
+                {selectedIssues.length} selected issue{selectedIssues.length === 1 ? "" : "s"}
+              </div>
+            </div>
+            <Button variant="primary" onClick={handleCreatePlan} disabled={selectedIssues.length === 0}>
+              Create Repair Plan
+            </Button>
+          </div>
+
+          {plan && (
+            <div className="rounded bg-(--color-surface-50) p-3 text-sm dark:bg-(--color-surface-950)">
+              <div>
+                Plan hash: <span className="font-mono">{plan.planHash.slice(0, 16)}</span>
+              </div>
+              <div>
+                {plan.targetCount} target{plan.targetCount === 1 ? "" : "s"}: {plan.writeClasses.join(", ")}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={handleApprovePlan}>
+                  Approve Exact Plan
+                </Button>
+                <Button variant="primary" onClick={handleRunPlan} disabled={run?.status !== "approved"}>
+                  Run Approved Repair
+                </Button>
+              </div>
+              {run && <div className="mt-2 text-sm">Approved</div>}
+              {runError && <div className="mt-2 text-sm text-red-600 dark:text-red-300">{runError}</div>}
+            </div>
+          )}
         </div>
       )}
     </section>

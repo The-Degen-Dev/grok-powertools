@@ -287,3 +287,110 @@ test("repair plan API rejects malformed optional proof string fields", async ({ 
     error: "issues[0].sourceProof[0].contentSha256 must be a non-empty string when provided",
   });
 });
+
+test("repair approval binds to plan hash and run fails closed for writes", async ({ request }) => {
+  const scan = await (await request.post("/api/vault/repair/scan")).json();
+  const selectedIssue = scan.scan.issues.find((issue) => issue.writeClass === "d1_index");
+  expect(selectedIssue).toBeTruthy();
+  const plan = await (
+    await request.post("/api/vault/repair/plan", {
+      data: {
+        identityScope: scan.scan.identityScope,
+        issues: scan.scan.issues,
+        selectedIssueIds: [selectedIssue.issueId],
+      },
+    })
+  ).json();
+
+  const approvalRes = await request.post("/api/vault/repair/approve", {
+    data: {
+      plan: plan.plan,
+      approvedPlanHash: plan.plan.planHash,
+      approvedTargetCount: plan.plan.targetCount,
+      approvedWriteClasses: plan.plan.writeClasses,
+    },
+  });
+  expect(approvalRes.ok()).toBe(true);
+  const approval = await approvalRes.json();
+  expect(approval.run).toMatchObject({
+    planId: plan.plan.planId,
+    planHash: plan.plan.planHash,
+    targetCount: plan.plan.targetCount,
+    writeClasses: plan.plan.writeClasses,
+    status: "approved",
+  });
+
+  const runRes = await request.post("/api/vault/repair/run", {
+    data: {
+      plan: plan.plan,
+      run: approval.run,
+    },
+  });
+  expect(runRes.status()).toBe(409);
+  const blocked = await runRes.json();
+  expect(blocked).toMatchObject({
+    ok: false,
+    error: "REPAIR_WRITE_NOT_ARMED",
+  });
+});
+
+test("repair approval rejects stale plan hash", async ({ request }) => {
+  const scan = await (await request.post("/api/vault/repair/scan")).json();
+  const selectedIssue = scan.scan.issues.find((issue) => issue.writeClass === "d1_index");
+  expect(selectedIssue).toBeTruthy();
+  const plan = await (
+    await request.post("/api/vault/repair/plan", {
+      data: {
+        identityScope: scan.scan.identityScope,
+        issues: scan.scan.issues,
+        selectedIssueIds: [selectedIssue.issueId],
+      },
+    })
+  ).json();
+
+  const res = await request.post("/api/vault/repair/approve", {
+    data: {
+      plan: plan.plan,
+      approvedPlanHash: "sha256-stale",
+      approvedTargetCount: plan.plan.targetCount,
+      approvedWriteClasses: plan.plan.writeClasses,
+    },
+  });
+  expect(res.status()).toBe(409);
+  const body = await res.json();
+  expect(body.error).toBe("REPAIR_PLAN_HASH_STALE");
+});
+
+test("repair approval fails closed for malformed bodies", async ({ request }) => {
+  const malformedJson = await request.post("/api/vault/repair/approve", {
+    headers: { "content-type": "application/json" },
+    data: Buffer.from("{\"plan\":"),
+  });
+  expect(malformedJson.status()).toBe(400);
+  await expect(malformedJson.json()).resolves.toEqual({ ok: false, error: "REPAIR_PLAN_REQUIRED" });
+
+  const nullBody = await request.post("/api/vault/repair/approve", { data: null });
+  expect(nullBody.status()).toBe(400);
+  await expect(nullBody.json()).resolves.toEqual({ ok: false, error: "REPAIR_PLAN_REQUIRED" });
+
+  const primitiveBody = await request.post("/api/vault/repair/approve", { data: "not-an-object" });
+  expect(primitiveBody.status()).toBe(400);
+  await expect(primitiveBody.json()).resolves.toEqual({ ok: false, error: "REPAIR_PLAN_REQUIRED" });
+});
+
+test("repair run fails closed for malformed bodies", async ({ request }) => {
+  const malformedJson = await request.post("/api/vault/repair/run", {
+    headers: { "content-type": "application/json" },
+    data: Buffer.from("{\"run\":"),
+  });
+  expect(malformedJson.status()).toBe(409);
+  await expect(malformedJson.json()).resolves.toEqual({ ok: false, error: "REPAIR_APPROVAL_REQUIRED" });
+
+  const nullBody = await request.post("/api/vault/repair/run", { data: null });
+  expect(nullBody.status()).toBe(409);
+  await expect(nullBody.json()).resolves.toEqual({ ok: false, error: "REPAIR_APPROVAL_REQUIRED" });
+
+  const primitiveBody = await request.post("/api/vault/repair/run", { data: "not-an-object" });
+  expect(primitiveBody.status()).toBe(409);
+  await expect(primitiveBody.json()).resolves.toEqual({ ok: false, error: "REPAIR_APPROVAL_REQUIRED" });
+});
