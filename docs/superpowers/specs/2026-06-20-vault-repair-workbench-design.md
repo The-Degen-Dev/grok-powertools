@@ -4,6 +4,12 @@ Date: 2026-06-20
 
 ## Summary
 
+## Phase 1 Build Boundary
+
+The first implementation slice builds T0 read-only scan, T1 D1/index drift planning, approval binding, local repair history, read-only object proof, and fail-closed run behavior. T2 metadata repair, T3 canonicalization repair, T4 direct media restore, processed-ID changes, backfill, retry-unsynced, and live Grok automation require separate specs and separate approval.
+
+Vault repair operates from recorded source proof. Current Worker inventory prefers `r2_dedupe_index` rows and falls back to R2 listing. The workbench must record which proof source was observed instead of assuming a single source of truth.
+
 Build a Vault Repair Workbench for the Grok Power Tools web app. The workbench is a controlled repair console for finding, planning, approving, running, verifying, and recording repairs across the R2-backed Vault system.
 
 The workbench must make R2, D1, metadata snapshots, local proof, and live Grok evidence understandable without turning repair into a broad "fix everything" button. It starts read-only, fails closed by default, and only runs approved repair actions with exact target counts, source proof, write classes, and a stable plan hash.
