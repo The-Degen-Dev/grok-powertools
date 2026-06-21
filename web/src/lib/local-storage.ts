@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from "./types";
 import { upgradeVaultStores } from "./vault-storage";
 
 const DB_NAME = "grok-power-tools";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -30,7 +30,7 @@ export function getDB(): Promise<IDBPDatabase> {
           promptStore.createIndex("by-created", "createdAt");
           db.createObjectStore("sync_meta");
         }
-        if (oldVersion < 4) {
+        if (oldVersion < 5) {
           upgradeVaultStores(db);
         }
       },
