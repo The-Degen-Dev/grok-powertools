@@ -308,6 +308,42 @@ test('Vault media rejects invalid objectKey', async () => {
     assert.equal(response.status, 400);
 });
 
+test('Object HEAD proof is read-only and does not write to D1', async () => {
+    const objectKey = 'grok-powertools/v1/users/greymaker/media/by-asset/asset-video-1.mp4';
+    const response = await worker.fetch(
+        new Request(`https://worker.example/v1/objects/verify?objectKey=${encodeURIComponent(objectKey)}`, {
+            method: 'HEAD',
+            headers: { [headerName]: sampleKey },
+        }),
+        env({
+            R2_BUCKET: {
+                head: async (key: string) => {
+                    assert.equal(key, objectKey);
+                    return {
+                        key,
+                        size: 2048,
+                        etag: 'etag-1',
+                        uploaded: new Date('2026-06-18T00:00:00.000Z'),
+                        httpMetadata: { contentType: 'video/mp4' },
+                        customMetadata: { contentSha256: 'sha-1' },
+                    };
+                },
+            },
+            DB: {
+                prepare: (sql: string) => {
+                    assert.fail(`Object HEAD proof must not touch D1: ${sql}`);
+                },
+            },
+        })
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'video/mp4');
+    assert.equal(response.headers.get('x-r2-size-bytes'), '2048');
+    assert.equal(response.headers.get('x-r2-etag'), 'etag-1');
+    assert.equal(response.headers.get('x-r2-sha256'), 'sha-1');
+});
+
 test('Sync push rejects invalid JWT before vault overlay writes', async () => {
     const writes: string[] = [];
     const response = await worker.fetch(

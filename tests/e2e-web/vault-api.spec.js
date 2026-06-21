@@ -16,16 +16,29 @@ test("Vault preview returns inventory, prompts, gaps, and counts", async ({ requ
   const body = await res.json();
   expect(body.assets).toHaveLength(3);
   expect(body.prompts).toHaveLength(2);
-  expect(body.gaps).toHaveLength(0);
+  expect(body.gaps).toHaveLength(2);
   expect(body.counts.assets).toBe(3);
   expect(body.counts.images).toBe(2);
   expect(body.counts.videos).toBe(1);
   expect(body.counts.verified).toBe(3);
+  expect(body.scanTruncated).toBe(false);
   expect(body.warnings).toEqual(
     expect.arrayContaining([
       expect.stringContaining("inventory.items[2]"),
       expect.stringContaining("metadata.prompts[2]"),
-      expect.stringContaining("gaps[0]"),
+    ]),
+  );
+  expect(body.gaps).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: "gap-index-drift-asset-image-1",
+        objectKey: "grok-powertools/v1/users/greymaker/media/by-asset/asset-image-1.png",
+        requiresCloudWrite: true,
+      }),
+      expect.objectContaining({
+        id: "gap-live-grok-asset-missing",
+        requiresLiveGrok: true,
+      }),
     ]),
   );
   expect(JSON.stringify(body)).not.toContain("asset-malformed-1");

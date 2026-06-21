@@ -435,7 +435,7 @@ test("Ops shows Vault proof and does not mark Worker health as object proof", as
   await expect(page.getByLabel(/Committed locally 3 assets/i)).toBeVisible();
   await expect(page.getByLabel(/Metadata proof 2 prompts/i)).toBeVisible();
   await expect(page.getByLabel(/Latest import committed/i)).toBeVisible();
-  await expect(page.getByLabel(/Open gaps 0 gaps/i)).toBeVisible();
+  await expect(page.getByLabel(/Open gaps 2 gaps/i)).toBeVisible();
   await expect(page.getByLabel(/Owner mode local IndexedDB/i)).toBeVisible();
   await expect(page.getByLabel(/Auth signed out/i)).toBeVisible();
   await expect(page.getByLabel(/Last sync 6\/18\/2026/i)).toBeVisible();

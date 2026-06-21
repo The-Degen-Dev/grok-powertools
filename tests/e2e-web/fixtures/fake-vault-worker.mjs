@@ -3,6 +3,7 @@ import http from "node:http";
 const port = Number(process.env.FAKE_VAULT_WORKER_PORT || 43117);
 const apiKey = process.env.FAKE_VAULT_WORKER_API_KEY || "client-sample";
 const headerName = "x-gpt-api-key";
+const requestLog = [];
 
 const fixtureAssets = [
   {
@@ -117,10 +118,26 @@ function authorized(req) {
   return req.headers[headerName] === apiKey;
 }
 
+function logRequest(req, url) {
+  if (!url.pathname.startsWith("/__fake-worker")) {
+    requestLog.push({ method: req.method, pathname: url.pathname, search: url.search });
+  }
+}
+
+function findFixtureObject(objectKey) {
+  return [...fixtureAssets, ...paginatedFixtureAssets].find((asset) => asset.canonicalObjectKey === objectKey);
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
+  logRequest(req, url);
   if (req.method === "OPTIONS") return sendJson(res, 200, { ok: true });
   if (url.pathname === "/health") return sendJson(res, 200, { ok: true, service: "fake-grok-r2-backup" });
+  if (url.pathname === "/__fake-worker/debug/requests") {
+    const requests = [...requestLog];
+    requestLog.length = 0;
+    return sendJson(res, 200, { ok: true, requests });
+  }
   if (!authorized(req)) return sendJson(res, 401, { ok: false, error: "Unauthorized" });
 
   if (url.pathname === "/v1/vault/identity") {
@@ -166,16 +183,48 @@ const server = http.createServer((req, res) => {
       ok: true,
       gaps: [
         {
-          id: "gap-malformed-1",
-          code: "missing-source",
-          severity: "critical",
-          evidence: "bad severity should not reach IndexedDB",
-          recommendedAction: "drop this row",
+          id: "gap-index-drift-asset-image-1",
+          assetId: "asset-image-1",
+          code: "index-drift",
+          severity: "warning",
+          evidence: "D1 index is missing duplicate object proof for asset-image-1",
+          recommendedAction: "Review and approve D1 index repair from existing object proof.",
           requiresLiveGrok: false,
+          requiresCloudWrite: true,
+          objectKey: "grok-powertools/v1/users/greymaker/media/by-asset/asset-image-1.png",
+        },
+        {
+          id: "gap-live-grok-asset-missing",
+          assetId: "asset-missing-1",
+          code: "live-grok-required",
+          severity: "blocking",
+          evidence: "Stored proof points to a Grok saved item that is not present in R2.",
+          recommendedAction: "Use the existing logged-in Chrome session to inspect Grok Saved.",
+          requiresLiveGrok: true,
           requiresCloudWrite: false,
         },
       ],
     });
+  }
+
+  if (req.method === "HEAD" && url.pathname === "/v1/objects/verify") {
+    const objectKey = url.searchParams.get("objectKey") || "";
+    const object = findFixtureObject(objectKey);
+    if (!object?.canonicalObjectKey) {
+      res.writeHead(404, { "access-control-allow-origin": "*" });
+      return res.end();
+    }
+
+    const headers = {
+      "access-control-allow-origin": "*",
+      "x-r2-size-bytes": String(object.sizeBytes || 0),
+      "x-r2-etag": object.etag || "",
+      "content-type": object.contentType || "application/octet-stream",
+    };
+    if (object.sha256) headers["x-r2-sha256"] = object.sha256;
+
+    res.writeHead(200, headers);
+    return res.end();
   }
 
   if (url.pathname === "/v1/vault/media") {

@@ -1,4 +1,5 @@
 import type { IDBPDatabase } from "idb";
+import type { RepairIssue, RepairPlan } from "./vault-repair-types";
 import {
   parseVaultPreview,
   parseVaultWorkerIdentity,
@@ -16,6 +17,11 @@ export const VAULT_STORE_NAMES = [
   "vault_gaps",
   "vault_prompts",
   "vault_media_tokens",
+  "vault_repair_scans",
+  "vault_repair_issues",
+  "vault_repair_plans",
+  "vault_repair_runs",
+  "vault_repair_events",
 ] as const;
 
 export function upgradeVaultStores(db: IDBPDatabase): void {
@@ -41,6 +47,30 @@ export function upgradeVaultStores(db: IDBPDatabase): void {
   }
   if (!db.objectStoreNames.contains("vault_media_tokens")) {
     db.createObjectStore("vault_media_tokens", { keyPath: "assetId" });
+  }
+  if (!db.objectStoreNames.contains("vault_repair_scans")) {
+    const store = db.createObjectStore("vault_repair_scans", { keyPath: "scanId" });
+    store.createIndex("by-scanned", "scannedAt");
+  }
+  if (!db.objectStoreNames.contains("vault_repair_issues")) {
+    const store = db.createObjectStore("vault_repair_issues", { keyPath: "issueId" });
+    store.createIndex("by-tier", "riskTier");
+    store.createIndex("by-write-class", "writeClass");
+  }
+  if (!db.objectStoreNames.contains("vault_repair_plans")) {
+    const store = db.createObjectStore("vault_repair_plans", { keyPath: "planId" });
+    store.createIndex("by-created", "createdAt");
+    store.createIndex("by-hash", "planHash");
+  }
+  if (!db.objectStoreNames.contains("vault_repair_runs")) {
+    const store = db.createObjectStore("vault_repair_runs", { keyPath: "runId" });
+    store.createIndex("by-plan", "planId");
+    store.createIndex("by-status", "status");
+  }
+  if (!db.objectStoreNames.contains("vault_repair_events")) {
+    const store = db.createObjectStore("vault_repair_events", { keyPath: "eventId" });
+    store.createIndex("by-run", "runId");
+    store.createIndex("by-created", "createdAt");
   }
 }
 
@@ -96,4 +126,97 @@ export async function putVaultOverlay(db: IDBPDatabase, overlay: VaultOverlay): 
 
 export async function getVaultGaps(db: IDBPDatabase): Promise<VaultGap[]> {
   return (await db.getAll("vault_gaps")) as VaultGap[];
+}
+
+export interface VaultRepairScanRecord {
+  scanId: string;
+  scannedAt: string;
+  identityScope: Record<string, unknown>;
+  summary: {
+    totalIssues: number;
+    writableIssues: number;
+    blockedIssues: number;
+    readOnlyIssues: number;
+  };
+}
+
+export interface VaultRepairRunRecord {
+  runId: string;
+  planId: string;
+  planHash: string;
+  status: "approved" | "blocked" | "succeeded" | "failed";
+  createdAt: string;
+  error?: string;
+}
+
+export interface VaultRepairEventRecord {
+  eventId: string;
+  runId?: string;
+  eventType: "scan" | "plan" | "approval" | "run_blocked" | "verify";
+  createdAt: string;
+  message: string;
+}
+
+export async function putVaultRepairScan(
+  db: IDBPDatabase,
+  scan: VaultRepairScanRecord,
+  issues: RepairIssue[],
+): Promise<void> {
+  const tx = db.transaction(["vault_repair_scans", "vault_repair_issues", "vault_repair_events"], "readwrite");
+  await tx.objectStore("vault_repair_scans").put(scan);
+  for (const issue of issues) {
+    await tx.objectStore("vault_repair_issues").put(issue);
+  }
+  await tx.objectStore("vault_repair_events").put({
+    eventId: `repair-event-scan-${scan.scanId}`,
+    eventType: "scan",
+    createdAt: scan.scannedAt,
+    message: `Scan found ${scan.summary.totalIssues} repair issues`,
+  });
+  await tx.done;
+}
+
+export async function putVaultRepairPlan(db: IDBPDatabase, plan: RepairPlan): Promise<void> {
+  const tx = db.transaction(["vault_repair_plans", "vault_repair_events"], "readwrite");
+  await tx.objectStore("vault_repair_plans").put(plan);
+  await tx.objectStore("vault_repair_events").put({
+    eventId: `repair-event-plan-${plan.planId}`,
+    eventType: "plan",
+    createdAt: plan.createdAt,
+    message: `Plan ${plan.planHash.slice(0, 12)} targets ${plan.targetCount} issue${plan.targetCount === 1 ? "" : "s"}`,
+  });
+  await tx.done;
+}
+
+export async function putVaultRepairRun(db: IDBPDatabase, run: VaultRepairRunRecord): Promise<void> {
+  const tx = db.transaction(["vault_repair_runs", "vault_repair_events"], "readwrite");
+  await tx.objectStore("vault_repair_runs").put(run);
+  await tx.objectStore("vault_repair_events").put({
+    eventId: `repair-event-run-${run.runId}`,
+    runId: run.runId,
+    eventType: run.status === "blocked" ? "run_blocked" : "approval",
+    createdAt: run.createdAt,
+    message: run.error || `Run ${run.runId} is ${run.status}`,
+  });
+  await tx.done;
+}
+
+export async function getVaultRepairScans(db: IDBPDatabase): Promise<VaultRepairScanRecord[]> {
+  return (await db.getAll("vault_repair_scans")) as VaultRepairScanRecord[];
+}
+
+export async function getVaultRepairIssues(db: IDBPDatabase): Promise<RepairIssue[]> {
+  return (await db.getAll("vault_repair_issues")) as RepairIssue[];
+}
+
+export async function getVaultRepairPlans(db: IDBPDatabase): Promise<RepairPlan[]> {
+  return (await db.getAll("vault_repair_plans")) as RepairPlan[];
+}
+
+export async function getVaultRepairRuns(db: IDBPDatabase): Promise<VaultRepairRunRecord[]> {
+  return (await db.getAll("vault_repair_runs")) as VaultRepairRunRecord[];
+}
+
+export async function getVaultRepairEvents(db: IDBPDatabase): Promise<VaultRepairEventRecord[]> {
+  return (await db.getAll("vault_repair_events")) as VaultRepairEventRecord[];
 }
