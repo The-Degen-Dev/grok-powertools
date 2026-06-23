@@ -1,58 +1,111 @@
-# Grok Power Tools (Chrome Extension)
+# Grok Power Tools
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)
-
-Supercharge your Grok experience with a premium floating dashboard for automated video generation, prompt management, and bulk downloading.
+Chrome extension tools for Grok Imagine workflows, prompt management, retry automation, media backup, and local/web collection work.
 
 ## Features
 
--   **Floating Power Panel**: A sleek, draggable glassmorphism dashboard overlay on Grok.
--   **Auto-Retry System**: Automatically handles "Content Moderated" errors and retries generation until successful.
--   **Video Goals**: Set a target (e.g., "Make 10 videos") and let the extension automate the process sequentially.
--   **Prompt Manager**: Save your favorite prompts, import/export them as JSON, and inject them with a single click.
--   **Smart Scraper**: Bulk download media from your feed or favorites with smart scrolling and duplicate detection.
--   **Raw Image Mode**: Specialized handler for `imagine-public.x.ai` to download raw assets.
--   **Optional Cloud Backup (R2)**: Dual-write local downloads to your own Cloudflare R2 bucket via a BYO Worker.
+- Floating Grok overlay with prompt history, saved prompts, batch controls, auto-retry, video goals, Quality Repeat, and Image Recreate.
+- Image Recreate workflow that accepts a local, pasted, dropped, or current Grok image, asks Grok chat for a Grok Imagine prompt, and submits that prompt back into Grok Imagine.
+- Prompt history and saved prompt management backed by Chrome local storage, with settings import/export support.
+- Smart media scraper and raw image handling for Grok media surfaces.
+- Optional Cloudflare R2 backup through a bring-your-own Worker, with local-only, cloud-only, and dual-write modes.
+- Web app under `web/` for collections, prompt library, clip editing, movie workflows, sharing, auth, and sync.
+- Cloud Worker under `cloud/` for R2 upload, metadata, vault, repair, and sync routes.
 
-## Installation
+Short video and GIF recreation are not part of v0.2.0. They are future work.
 
-1.  Clone or download this repository.
-2.  Open Chrome and go to `chrome://extensions/`.
-3.  Enable **Developer mode** in the top-right corner.
-4.  Click **Load unpacked**.
-5.  Select the `chrome-extension-powertools` directory.
-6.  Navigate to [grok.com/imagine](https://grok.com/imagine) to see the overlay!
+## Install Or Update The Extension
 
-## Usage
+1. Download and unzip the release artifact, or clone this repository.
+2. Open Chrome and go to `chrome://extensions/`.
+3. Enable Developer mode.
+4. Click Load unpacked.
+5. Select the unzipped extension folder or this repository root.
+6. Open `https://grok.com/imagine`.
+7. Refresh any already-open Grok tabs after reloading the extension.
 
-### The Overlay
-The floating panel appears in the bottom-right corner. You can drag it by the header or minimize it by clicking the `_` icon.
+There is no extension build step. Chrome loads the raw MV3 files directly.
 
-### Auto-Retry & Goals
-1.  Open the **Auto-Retry & Goals** section.
-2.  Toggle **Auto-Retry Moderated** to automatically retry when Grok blocks a prompt.
-3.  Set **Max Retries** and **Cooldown** (seconds to wait between actions).
-4.  **Video Goal**: Enter a number and click "Start Video Goal" to automate continuous generation.
+## Image Recreate
 
-### Prompt Management
-1.  Type a prompt in Grok's input box.
-2.  Click the **+ (Plus)** icon in the overlay to save it.
-3.  Click any saved tag to insert it back into the input.
-4.  Use the **Import/Export** icons to backup your prompts.
+1. Open `https://grok.com/imagine`.
+2. Open the Grok Power Tools overlay.
+3. In Recreate Image, choose, drop, paste, or select the current Grok image.
+4. Optionally enable Grok Search for extra prompt-writing context.
+5. Click Start Recreate.
 
-### Cloud Backup (Optional)
-1.  Open the extension popup.
-2.  Set **Backup Mode** to **Cloud only (R2)** or **Dual-write (Local + R2)**.
-3.  Enter your `https://<worker>.<subdomain>.workers.dev` URL and API key.
-4.  Click **Test Connection** and then run sync/backfill as needed.
+The workflow uses Grok chat to analyze the reference and produce one `FINAL_IMAGINE_PROMPT`, then submits that prompt into Grok Imagine. Success should be judged by an actual generated Imagine result with openable media, not only by a submitted status.
 
-Full setup guide: [docs/CLOUD_R2_SETUP.md](docs/CLOUD_R2_SETUP.md)
+## Auto-Retry And Goals
+
+Open the Auto-Retry section in the overlay to retry failed video-generation attempts and run video goals. The goal counter is intended to track generated results after the workflow starts, not merely button clicks.
+
+## Prompt Management
+
+Use the overlay History and Saved tabs to reuse prompts. The plus button saves prompt text, and the JSON import/export controls back up extension settings.
+
+## Cloud Backup
+
+Open the extension popup to configure optional Cloudflare R2 backup. You need a deployed Worker URL and API key.
+
+Backup modes:
+
+- Local only
+- Cloud only (R2)
+- Dual-write (Local + R2)
+
+Metadata backfill covers prompts, history, and processed IDs. Media backup is handled through the R2 media backup controls.
+
+Backfill is metadata-only. Existing local media files are not uploaded during backfill.
+
+Setup guide: [docs/CLOUD_R2_SETUP.md](docs/CLOUD_R2_SETUP.md)
+
+## Known Limitations
+
+- Grok UI changes can break live automation selectors.
+- The unpacked extension must be manually reloaded in Chrome after file changes or release updates.
+- Image Recreate depends on Grok chat returning the expected final prompt marker and Grok Imagine accepting the generated prompt.
+- Generated results are model-dependent and are not guaranteed to match the reference exactly.
+- Animated GIF files can be used as image references, but GIF recreation as a motion workflow is not shipped.
+- Short video and GIF recreation are not shipped in v0.2.0.
 
 ## Development
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, tests, PR workflow
-- [HACKING.md](HACKING.md) — architecture, debugging, and the Chrome MV3 gotchas you'll hit on day one (**read this first if you're new to Chrome extensions**)
+- [AGENTS.md](AGENTS.md) has agent-specific repo instructions.
+- [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, tests, and PR workflow.
+- [HACKING.md](HACKING.md) covers architecture, debugging, and Chrome MV3 gotchas.
+
+Root extension:
+
+```bash
+npm install
+npm run test:unit
+npm run test:e2e
+npm run lint
+```
+
+Web app:
+
+```bash
+npm install --prefix web
+npm run build --prefix web
+npm run lint --prefix web
+```
+
+Cloud Worker:
+
+```bash
+npm install --prefix cloud
+npm run typecheck --prefix cloud
+npm run test:acceptance --prefix cloud
+```
+
+Build the load-unpacked extension zip:
+
+```bash
+npm run package:extension -- --out /tmp/grok-power-tools-v0.2.0.zip
+```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).

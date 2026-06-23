@@ -1,380 +1,691 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>R2 Backed Vault Web App Notes</title>
-    <style>
-      body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; background: #f8fafc; }
-      main { max-width: 980px; margin: 0 auto; padding: 32px 20px 56px; }
-      h1 { margin: 0 0 8px; font-size: 28px; }
-      h2 { margin-top: 28px; font-size: 18px; }
-      table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; }
-      th, td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; font-size: 14px; }
-      th { background: #f3f4f6; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
-      code { background: #eef2ff; padding: 2px 4px; border-radius: 4px; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>R2 Backed Vault Web App Notes</h1>
-      <p>
-        Running notes for <code>docs/superpowers/specs/2026-06-18-r2-backed-vault-webapp-design.md</code>.
-      </p>
-      <h2>Notes</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Type</th>
-            <th>Note</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Use a fake Worker for browser tests so local UI work proves the server-route contract without touching production R2 or D1.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>The fake Worker exposes an unauthenticated health endpoint for Playwright server readiness because authenticated identity checks return 401 and would not prove the route under test.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Worker Vault helpers normalize canonical and legacy R2 keys without moving or rewriting existing objects, and canonical media must stay under the configured key prefix.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Tradeoff</td>
-            <td>Worker Vault read routes use only R2 list/get operations for the first preview path. Metadata lookup follows the current Greymaker latest-snapshot path from the plan and must be verified against real R2 before final acceptance.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Worker metadata responses expose normalized rows as <code>data</code>; the fake Worker still exposes prompt fixtures as <code>prompts</code>, so the Next preview broker must accept both shapes.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Vault data uses the existing IndexedDB database with a versioned migration so existing collections and movies are preserved. Vault prompts stay typed separately until the Prompt Library merge normalizes them into local prompt rows.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Added a browser migration spec for the version 4 IndexedDB upgrade because Task 4 changes persistent local storage.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Safety</td>
-            <td>Next Vault API routes broker Worker reads server-side, proxy media bytes without exposing Worker keys or signed URLs, and keep gap-fill and index reconciliation fail-closed until explicitly armed.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>The fake Worker now exercises both <code>prompts</code> and <code>data</code> metadata response shapes so the preview broker is checked against fixture and real Worker contracts.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>The empty dashboard leads with the Vault load panel even if Worker identity is blocked; the control disables itself and shows the blocker instead of hiding the real-data path behind demo content.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Open question</td>
-            <td>Later tasks mention warning toasts, but the current toast type supports success, error, and info only. Use info for non-blocking warnings or intentionally extend the toast type when needed.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Vault preview commit is local IndexedDB only. The browser test proves committed fixture assets survive reload without any Worker, R2, D1, sync, or live Grok write.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Vault viewer handles images and videos directly. Existing video cards get image support without renaming the component tree in this pass.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Tradeoff</td>
-            <td><code>FullscreenViewer</code> remains video-only until the watch queue work in Task 9, even though Task 8 listed it, because Task 8's concrete steps only wire the Vault media viewer and image branch in cards.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td><code>VaultMediaCard</code> uses explicit media and text buttons instead of making the whole card clickable, so the Task 8 text-click test works without nesting button interactions.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Task 8 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The first Playwright attempt timed out waiting for its web server, then passed after manual fake Worker and Next readiness checks; after the IndexedDB reset fix, the direct Playwright webServer run also passed.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Tradeoff</td>
-            <td>The Vault UI test reset waits for the app-created IndexedDB v4 database before clearing stores. This avoids accidentally creating an empty v1 database from the test helper while preserving existing app stores during normal use.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>The Vault media viewer handles Escape, focus entry, focus restoration, and a small focus loop itself because it is a custom full-screen dialog, not a shared modal component.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Task 9 adds a top-level Collections nav item and makes <code>/collections</code> open the newest local collection. The plan's browser test uses that route after adding a Vault asset to <code>New Collection</code>, and the previous route redirected home.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Watch queues accept first-class image and video items. Images become timed still clips when saved as a movie, while video clips keep their source URL. Thumbnail-only unknown items are not treated as watchable to avoid broken movie clips.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Tradeoff</td>
-            <td><code>VaultPage</code> creates fresh local collection item IDs while preserving <code>assetId</code>, and it de-dupes repeat adds by <code>assetId</code>. This keeps React/DnD selection stable without mutating source Vault facts.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Deviation</td>
-            <td>The plan's non-blocking warning toasts use <code>info</code> because the current toast type only supports <code>success</code>, <code>error</code>, and <code>info</code>. Task 9 did not expand the toast API just to add one synonym.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Tradeoff</td>
-            <td>Task 9 verifies that <code>Save as Movie</code> creates image and video clips with Vault <code>sourceAssetId</code> values. Full Movie Maker rendering polish for image clips remains with Task 10, which is the plan task dedicated to image clip playback and source picking.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Task 9 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The test covers adding both fake Vault assets to a local collection, preserving image/video asset facts, opening Watch Mode, saving a movie, and inspecting IndexedDB movie clips.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Movie Maker now treats still-image clips as first-class preview media instead of hiding saved-gallery images from movie workflows. Canvas playback loads image elements, uses <code>stillDuration</code>, and draws them letterboxed like videos.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>The Task 10 browser test checks the generated storyboard label and a non-black canvas pixel after seeking into the image clip. This makes image rendering proof stronger than only asserting that a movie record exists.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Tradeoff</td>
-            <td>Clip source picking includes image-backed collection items when they already have an image URL or thumbnail. It does not introduce any new upload/import path; source media remains the local Vault media proxy URL already stored in the collection item.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Task 10 passed <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. Lint initially rejected clearing a stale video element <code>src</code>; that redundant mutation was removed.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>The Clip Source Picker path now preserves Vault <code>sourceAssetId</code> for image and video clips. The Task 10 browser suite includes a focused source-picker test and passed all 7 Vault UI tests after this check was added.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Prompt Library converts <code>vault_prompts</code> rows into display-safe prompt rows before merging with local saved prompts by normalized text. Search filters the merged set so Vault prompts behave like local prompts without writing them into the local prompt store.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Task 11 includes a browser test that commits fake Vault prompts, opens the Prompt Library slide-over, and verifies Vault prompts render there. The same test seeds a normalized duplicate local prompt and confirms the merged library shows one matching prompt row.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Tradeoff</td>
-            <td>Rows with Vault provenance hide the local delete control. A local-only prompt can still be deleted, but a merged Vault row should not show a delete button that would no-op against the local prompt store while the committed Vault prompt remains.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Safety</td>
-            <td>Ops explicitly says Worker health is not object proof and keeps gap-fill disabled until a later approved live repair run. Task 12 only reads local IndexedDB Vault state and does not call any gap-fill or reconciliation mutation route.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>The Task 12 browser test commits fake Vault data, opens Ops, verifies the local Vault import count, checks the Worker-health boundary copy, and confirms the Gap Fill control is disabled.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>D1 sync receives Vault overlays only. Immutable R2 source facts stay sourced from R2 and Worker inventory.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Tradeoff</td>
-            <td>Cloud acceptance tests sign sync JWTs with a small local HS256 helper instead of adding <code>jose</code> to the Worker package, because the Worker already verifies JWTs with WebCrypto and the cloud package had no <code>jose</code> dependency.</td>
-          </tr>
-          <tr>
-            <td>2026-06-20</td>
-            <td>Verification</td>
-            <td>Task 1 quality fix: subagent used: Galileo (<code>019ee776-2bb0-78c3-9e87-547498c2c0d8</code>). Files changed: <code>web/src/lib/vault-repair-types.ts</code>, <code>web/src/app/api/vault/repair/plan/route.ts</code>, <code>tests/e2e-web/vault-repair-api.spec.js</code>, <code>implementation-notes.html</code>. Design decisions: plan hashing strips volatile <code>observedAt</code> from canonicalized action proof only, while returned actions keep full proof; selected issue IDs now fail closed with <code>REPAIR_SELECTED_ISSUE_MISSING</code>; duplicate <code>issues[].issueId</code> values now fail closed during request parsing and exported plan construction with <code>REPAIR_ISSUE_ID_DUPLICATE</code>; optional string fields now reject non-string present values with path-specific 400 errors; <code>canonicalJson</code> now rejects top-level and array <code>undefined</code> values instead of silently encoding them; malformed JSON request bodies now normalize to <code>REPAIR_PLAN_INVALID_JSON</code> instead of surfacing parser-specific failures. Deviations/tradeoffs: kept the public plan shape unchanged and limited new checks to request parsing, shared plan construction, and route body parsing; API tests stay scoped to <code>/api/vault/repair/plan</code>, so the <code>canonicalJson</code> undefined guard is covered by code path hardening rather than a JSON request fixture. Tests run: fail, <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-repair-api.spec.js -g "repair plan"</code> before fix, 3 failed and 1 passed; pass, same command after fix, 6 passed; controller rerun with the Codex Node PATH fallback, 6 passed; spec-review correction added a whitespace-only optional string case for <code>issues[0].blockedReason</code>, and the same PATH-scoped command then passed 7 tests; code-quality correction added duplicate-issue-ID and malformed-JSON regressions, the same PATH-scoped command first failed with 2 failures and 7 passes, then passed with 9 tests after the parsing fixes; controller tightened duplicate protection in the exported builder and reran the same focused gate, 9 passed. Blockers/open questions: none.</td>
-          </tr>
-          <tr>
-            <td>2026-06-20</td>
-            <td>Verification</td>
-            <td>Task 2 worker: Shared Preview Loader And Read-Only Repair Scan. Files changed: <code>web/src/lib/vault-preview-server.ts</code>, <code>web/src/lib/vault-repair-classifier.ts</code>, <code>web/src/app/api/vault/repair/scan/route.ts</code>, <code>web/src/app/api/vault/preview/route.ts</code>, <code>tests/e2e-web/fixtures/fake-vault-worker.mjs</code>, <code>tests/e2e-web/vault-repair-api.spec.js</code>, <code>tests/e2e-web/vault-api.spec.js</code>, <code>tests/e2e-web/vault-ui.spec.js</code>, <code>implementation-notes.html</code>. Design decisions: extracted the preview broker into a shared server loader so <code>/api/vault/preview</code> and <code>/api/vault/repair/scan</code> read the same paginated inventory, prompt, and gap data; preserved malformed inventory and prompt warnings exactly as scan-warning issues; kept raw Worker <code>objectKey</code> on valid gap rows inside the shared loader only, so T1 planning can carry object proof without widening <code>web/src/lib/vault-types.ts</code>; repair classification is read-only in Phase 1, with index-drift or cloud-write gaps mapped to <code>T1</code> <code>d1_index</code>, live Grok gaps mapped to <code>T4</code> <code>live_grok_runbook</code> and blocked by <code>LIVE_GROK_RUNBOOK_ONLY</code>, and warnings mapped to <code>T0</code> <code>none</code>; the fake Worker now exposes a debug request log reset-read endpoint so the scan test can prove no mutating Worker calls occur; the shared loader return type now overrides <code>identity</code> to the parsed <code>VaultWorkerIdentity</code> shape so the classifier consumes the validated identity contract without weakening checks. Deviations/tradeoffs: valid fake gaps now surface in preview and Ops, so existing zero-gap expectations were updated instead of hiding the new gaps behind fixture flags; <code>/api/vault/preview</code> now returns <code>scanTruncated</code> for the shared scan path, but no client parser changes were needed because this task only reads the route JSON directly in tests. Tests run: expected red, <code>PATH=/opt/homebrew/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin:$PATH npx playwright test -c playwright.web.config.js tests/e2e-web/vault-repair-api.spec.js -g "repair scan is read-only"</code>, 1 failed because <code>/api/vault/repair/scan</code> did not exist; pass, <code>PATH=/opt/homebrew/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin:$PATH npx playwright test -c playwright.web.config.js tests/e2e-web/vault-api.spec.js tests/e2e-web/vault-repair-api.spec.js</code>, 15 passed; pass, <code>PATH=/opt/homebrew/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin:$PATH npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js -g "Ops shows Vault proof and does not mark Worker health as object proof"</code>, 1 passed; controller follow-up build failure: <code>./src/lib/vault-repair-classifier.ts:101:44 Type error: Argument of type 'Record&lt;string, unknown&gt;' is not assignable to parameter of type 'VaultWorkerIdentity'</code>; pass after fix, <code>PATH=/opt/homebrew/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin:$PATH npm --prefix web run build</code>; pass rerun, same PATH-scoped preview and repair API command, 15 passed; pass rerun, same PATH-scoped focused Ops UI command, 1 passed. Blockers/open questions: none.</td>
-          </tr>
-          <tr>
-            <td>2026-06-21</td>
-            <td>Verification</td>
-            <td>Task 5 recovery worker id: <code>019eea74-ed1e-7181-96dd-df710a336c94</code>; final re-review worker id: <code>019eea81-547e-7470-aab6-75b6f72e4d16</code>. Files changed: <code>web/src/app/api/vault/repair/approve/route.ts</code>, <code>web/src/app/api/vault/repair/run/route.ts</code>, <code>web/src/lib/vault-client.ts</code>, <code>web/src/components/vault/VaultRepairWorkbench.tsx</code>, and focused repair API/UI tests. Design decisions: approval is local-only and binds to the exact submitted plan hash, target count, and write classes; stale approval hashes return <code>REPAIR_PLAN_HASH_STALE</code>; the run route requires an approved run, verifies the plan hash plus the approval-bound target count and write classes, and returns <code>REPAIR_WRITE_NOT_ARMED</code> for any write class other than <code>none</code>; the workbench creates plans only from selected scan issues, keeps the existing 5-issue scan display, persists plans, approval runs, blocked runs, and shows the fail-closed error. Deviations/tradeoffs: the blocked run is saved as a separate local run record with a single <code>-blocked</code> suffix so the approval event is preserved without widening Task 5 into <code>web/src/lib/vault-storage.ts</code>. Review corrections: spec and quality reviewers found null-body crashes, stale approval state after selection changes, and repeat blocked-run hazards; controller added malformed-body, stale-selection, and single-blocked-run regressions before commit. Tests run: <code>PATH=/opt/homebrew/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin:$PATH npx playwright test -c playwright.web.config.js tests/e2e-web/vault-repair-api.spec.js tests/e2e-web/vault-repair-ui.spec.js -g "approval|approved plan|malformed bodies|selection changes"</code> passed 6 tests; <code>npm --prefix web run build</code> passed; <code>npm --prefix web run lint</code> passed. Blockers/open questions: none.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Safety</td>
-            <td>Vault overlay pulls only replace local overlay rows when the remote <code>updatedAt</code> is newer, so stale D1 overlay state cannot overwrite newer local tags, notes, hidden, favorite, or tombstone state.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Task 13 passed <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, <code>npm --prefix web run build</code>, and <code>npm --prefix web run lint</code>. The cloud tests cover invalid JWT fail-closed behavior plus valid overlay push and pull contracts.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>The Task 13 Playwright sync spec intercepts local Next sync routes to prove initial sign-in pushes Vault overlays and stale remote overlay pulls do not overwrite newer local edits.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Final gates passed for <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, and <code>npx playwright test -c playwright.web.config.js</code>.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>The previous root unit blocker is resolved in the current worktree. <code>npm run test:unit</code> passed 16 suites and 276 tests.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Fake Worker manual smoke passed on local servers for Vault preview, local commit, image/video cards, image/video viewer, add to collection, Watch All, Save as Movie, Prompt Library Vault prompts, and Ops Worker-health boundary copy. The first dashboard visit after a reset shows the expected onboarding modal, which was dismissed with <code>Skip</code>.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Real R2 read-only preview is unblocked. <code>web/.env.local</code> has separate non-empty <code>WORKER_API_KEY</code> and <code>WORKER_SYNC_SECRET</code> values, and they are not equal. Secret values were not printed.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Safety</td>
-            <td><code>WORKER_API_KEY</code> maps to the Worker <code>CLIENT_API_KEY</code>; <code>WORKER_SYNC_SECRET</code> maps to the Worker <code>SYNC_SECRET</code>. The deployed Worker accepted a JWT signed with the local sync secret on <code>/v1/sync/pull</code>.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Live R2 exposed legacy objects with no listed <code>contentType</code> but image file extensions. Worker inventory now falls back to object-key extension for media type, and the web app treats legacy <code>unknown</code> image-like Vault rows as images in cards, viewer, collections, and movie clips.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>The media-type fix was deployed to <code>grok-r2-backup-worker</code>. Live preview now reports 100 assets, 96 images, 4 videos, 0 gaps, and 0 warnings. A headless browser smoke previewed and committed 100 live R2 assets, opened an image viewer, and added an image asset to a local collection.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Final gates passed after the live-R2 unblock and media-type fix: <code>npm run test:unit</code>, <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, and <code>npx playwright test -c playwright.web.config.js</code>.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Vault parsing is now runtime schema-first without adding a new package. The parsers in <code>web/src/lib/vault-types.ts</code> validate Worker identity, inventory, prompts, gaps, counts, and previews before data reaches client state or IndexedDB. Malformed Worker rows are dropped from preview with validation warnings.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Worker inventory now reads <code>r2_dedupe_index</code> first and falls back to R2 listing when D1 is unavailable or empty. It remains read-only. Current fallback does not merge partial D1 pages with R2 list results in the same response; that keeps preview deterministic and avoids accidental source-fact writes.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Design decision</td>
-            <td>Vault page controls were expanded in-place instead of replacing the page. The page now has grid/table modes, search, media/status/visibility filters, prompt copy, source links when known, add to collection, add to movie, local favorite/tag/note/hide overlays, and safe bulk favorite/hide actions. Overlay edits remain local IndexedDB rows.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Ops now shows Worker health and host, key prefix, live R2 preview counts, local committed asset count, metadata prompt count, latest import status, open gap count, local owner/auth/sync status, and the explicit boundary that Worker health is not object proof.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Final verification passed on the current worktree: <code>npm run test:unit</code>, <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, <code>npm --prefix cloud run typecheck</code>, and <code>npx playwright test -c playwright.web.config.js</code>. Web Playwright passed 18 tests.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Fake Worker manual smoke passed on local servers for preview, local commit, image and video cards, image viewer, video viewer, add to collection, Collection Watch All, Save as Movie, two Vault prompts in Prompt Library, and Ops object-proof boundary.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Deployed <code>grok-r2-backup-worker</code> version <code>a95e4d4a-1e48-49bd-8d0b-022359fab752</code>. Read-only real R2 validation through local Next routes passed: ops verified, Worker reachable, identity host <code>grok-r2-backup-worker.greymakerxyz-grok.workers.dev</code>, key prefix <code>grok-powertools/v1</code>, 100 assets, 56 images, 44 videos, 0 gaps, 0 warnings, and media proxy returned bytes. A headless live-R2 UI smoke committed 100 assets locally, opened a media viewer, wrote a local overlay, added to collection, and added to movie without R2, D1 source-fact, processed-ID, or live Grok mutation.</td>
-          </tr>
-          <tr>
-            <td>2026-06-19</td>
-            <td>Verification</td>
-            <td>Final gates were rerun before the final Vault commit. <code>npm run test:unit</code>, <code>npm run test:e2e</code>, <code>npm run lint</code>, <code>npm --prefix web run build</code>, <code>npm --prefix web run lint</code>, <code>npm --prefix cloud run test:acceptance</code>, and <code>npm --prefix cloud run typecheck</code> passed. The first <code>npx playwright test -c playwright.web.config.js</code> attempt failed because this repo's local Next dev server held <code>web/.next/dev/lock</code>; after stopping only that repo-local dev process, the rerun passed 18 tests against the fake Worker.</td>
-          </tr>
-          <tr>
-            <td>2026-06-20</td>
-            <td>Task 1 stop</td>
-            <td>Subagent Task 1 implementer added the red repair-plan API regression at <code>tests/e2e-web/vault-repair-api.spec.js</code>, then stopped before implementation because the focused Step 2 command did not reach the expected <code>/api/vault/repair/plan</code> 404. With the Codex bundled Node PATH and local Playwright binary, Playwright failed while starting the configured web server: <code>/bin/sh: npm: command not found</code>. No repair types, route, commit, R2/D1 writes, browser work, env edits, or unrelated file changes were made.</td>
-          </tr>
-          <tr>
-            <td>2026-06-20</td>
-            <td>Task 1 correction</td>
-            <td>Task 1 then received a spec repair for the repair-plan contract: risk tiers, issue types, write classes, source proofs, public action shape, plan identity scope, issue IDs, and deterministic hash input now match the Task 1 plan. Focused verification passed: <code>PATH=/opt/homebrew/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/philipbankier/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin:$PATH npx playwright test -c playwright.web.config.js tests/e2e-web/vault-repair-api.spec.js -g "repair plan API produces deterministic hash"</code>, 1 passed in 3.5s. No T2/T3/T4 writes, R2 media restore, metadata writes, processed-ID changes, backfill, retry-unsynced, live Grok automation, real R2/D1 mutation, env or secret editing, browser work, or detached Chrome work was done.</td>
-          </tr>
-          <tr>
-            <td>2026-06-20</td>
-            <td>Task 2 blocker</td>
-            <td>Controller read-only review found a plan/current-repo mismatch before dispatching the Task 2 worker. The saved Task 2 fixture adds valid repair gaps for scan classification, but existing Vault preview tests currently assert <code>/api/vault/preview</code> returns <code>0</code> valid gaps from the fake Worker. Updating the product-faithful fixture will likely require updating existing Vault preview or Ops expectations, such as <code>tests/e2e-web/vault-api.spec.js</code> and possibly <code>tests/e2e-web/vault-ui.spec.js</code>, which are outside Task 2's listed write set. A fake-worker mode switch could keep those tests unchanged, but that would make scan behavior depend on test-only state and weaken the shared preview contract. No Task 2 code, Worker, R2, D1, browser, env, processed-ID, or live Grok changes were made. Open question: approve expanding Task 2's test write scope to include affected existing Vault preview/UI tests so valid Worker gaps remain visible to both preview and repair scan?</td>
-          </tr>
-          <tr>
-            <td>2026-06-20</td>
-            <td>Task 4 note</td>
-            <td>The Task 4 handoff said the fake Worker scan should show 3 issues: 2 gaps plus 1 warning. The checked-in fake Worker and scan API return 5 issues: 2 gaps plus 3 scan warnings. The Repair Workbench displays and persists the scan response as returned rather than hiding warnings client-side. This was kept after scope expansion approval so repair scan and preview share the same visible Worker evidence.</td>
-          </tr>
-          <tr>
-            <td>2026-06-21</td>
-            <td>Design decision</td>
-            <td>Vault Repair Workbench Phase 1 builds only T0 read-only scan and T1 index-drift planning, approval binding, local repair history, read-only object proof, and fail-closed run behavior. T2 metadata repair, T3 canonicalization repair, T4 direct media restore, processed-ID changes, backfill, retry-unsynced, and live Grok automation remain blocked until separate specs and approvals exist.</td>
-          </tr>
-          <tr>
-            <td>2026-06-21</td>
-            <td>Tradeoff</td>
-            <td>Phase 1 uses local IndexedDB repair history for owner-mode review before adding cloud repair ledger tables. This preserves scan, plan, approval, blocked-run, and event history without introducing new R2 or D1 write routes.</td>
-          </tr>
-          <tr>
-            <td>2026-06-21</td>
-            <td>Safety</td>
-            <td>Task 6 added read-only proof through Worker <code>HEAD /v1/objects/verify</code> instead of the mutating <code>POST /v1/objects/verify</code> verification path. The web proxy returns object proof metadata without exposing Worker API keys, and the Cloud acceptance test fails if the HEAD proof path touches D1.</td>
-          </tr>
-          <tr>
-            <td>2026-06-21</td>
-            <td>Verification</td>
-            <td>Final Phase 1 gates passed: <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-repair-api.spec.js tests/e2e-web/vault-repair-ui.spec.js</code> passed 19 tests; <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-api.spec.js tests/e2e-web/vault-ui.spec.js tests/e2e-web/vault-sync.spec.js</code> passed 18 tests; <code>npm --prefix cloud run test:acceptance</code> passed 26 tests; <code>npm --prefix cloud run typecheck</code> passed; <code>npm --prefix web run build</code> passed; <code>npm --prefix web run lint</code> passed; <code>npm run lint</code> passed; <code>npm run test:unit</code> passed 16 suites and 287 tests.</td>
-          </tr>
-        </tbody>
-      </table>
-      <section>
-        <h2>Vault Repair Workbench Phase 1 Notes</h2>
-        <ul>
-          <li>Built only T0 read-only scan and T1 index-drift planning.</li>
-          <li>Kept T2, T3, T4, processed-ID changes, backfill, retry-unsynced, and live Grok automation blocked.</li>
-          <li>Used local IndexedDB repair history for owner-mode review before adding cloud repair ledger tables.</li>
-          <li>Added read-only proof through Worker HEAD instead of mutating POST object verification.</li>
-          <li>Run route intentionally returns <code>REPAIR_WRITE_NOT_ARMED</code> for write classes until a narrow approved Worker repair route exists.</li>
-        </ul>
-      </section>
-      <h2>Open Questions</h2>
-      <p>None for Phase 1 after approving the test scope expansion and keeping the 5-issue fake Worker scan fixture.</p>
-    </main>
-  </body>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Grok Power Tools v0.2.0 Release Notes</title>
+        <style>
+            body {
+                margin: 0;
+                font-family:
+                    ui-sans-serif,
+                    system-ui,
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    'Segoe UI',
+                    sans-serif;
+                color: #111827;
+                background: #f8fafc;
+            }
+            main {
+                max-width: 1100px;
+                margin: 0 auto;
+                padding: 32px 20px 56px;
+            }
+            h1 {
+                margin: 0 0 8px;
+                font-size: 28px;
+            }
+            h2 {
+                margin-top: 28px;
+                font-size: 18px;
+            }
+            h3 {
+                margin-top: 18px;
+                font-size: 15px;
+            }
+            p,
+            li {
+                line-height: 1.5;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                background: #fff;
+                border: 1px solid #e5e7eb;
+                margin: 12px 0 18px;
+            }
+            th,
+            td {
+                padding: 10px 12px;
+                border-bottom: 1px solid #e5e7eb;
+                text-align: left;
+                vertical-align: top;
+                font-size: 14px;
+            }
+            th {
+                background: #f3f4f6;
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+            }
+            code {
+                background: #eef2ff;
+                padding: 2px 4px;
+                border-radius: 4px;
+            }
+            .pending {
+                color: #92400e;
+            }
+            .pass {
+                color: #166534;
+            }
+            .blocked {
+                color: #991b1b;
+            }
+        </style>
+    </head>
+    <body>
+        <main>
+            <h1>Grok Power Tools v0.2.0 Release Run Ledger</h1>
+            <p>
+                Running implementation notes for the active Codex Goal to publish
+                <code>v0.2.0</code> from <code>main</code>. Source design:
+                <code>docs/superpowers/specs/2026-06-23-v0.2.0-release-prep-design.md</code>.
+            </p>
+
+            <h2>Goal Metadata</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Field</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Started</td>
+                        <td>2026-06-23</td>
+                    </tr>
+                    <tr>
+                        <td>Release target</td>
+                        <td><code>v0.2.0</code> from merged <code>main</code></td>
+                    </tr>
+                    <tr>
+                        <td>Current working branch</td>
+                        <td><code>codex/v0.2.0-release-prep-design</code></td>
+                    </tr>
+                    <tr>
+                        <td>Controller rule</td>
+                        <td>
+                            Subagents provide bounded evidence only; controller owns gates, PR/merge
+                            interpretation, tag/release, and completion claim.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Repo State</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Check</th>
+                        <th>Evidence</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Local branch</td>
+                        <td>
+                            <code>codex/v0.2.0-release-prep-design</code> at
+                            <code>78cc9412683555442e163a7afcbe490b2c37acb1</code>.
+                        </td>
+                        <td>Recorded</td>
+                    </tr>
+                    <tr>
+                        <td>Main alignment</td>
+                        <td>
+                            Local <code>main</code> and <code>origin/main</code> both at
+                            <code>67741d9987fc44d10e14ea7e2a22d769be596a6f</code>.
+                        </td>
+                        <td class="pass">Aligned</td>
+                    </tr>
+                    <tr>
+                        <td>Open PRs</td>
+                        <td>
+                            <code>gh pr list --state open --limit 50</code> returned no open PRs.
+                        </td>
+                        <td class="pass">Clear</td>
+                    </tr>
+                    <tr>
+                        <td>Tags/releases</td>
+                        <td>
+                            Only local tag is <code>v0.1.9</code>. GitHub release
+                            <code>v0.2.0-pre-release</code> is a prerelease on tag
+                            <code>v0.1.9</code> with no assets.
+                        </td>
+                        <td>Historical, do not mutate without approval</td>
+                    </tr>
+                    <tr>
+                        <td>Latest main CI</td>
+                        <td>
+                            GitHub Actions run <code>27910274813</code> passed for
+                            <code>67741d9987fc44d10e14ea7e2a22d769be596a6f</code>.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Branch cleanup</td>
+                        <td>
+                            <code>codex/collection-watch-mode</code> and
+                            <code>codex/r2-dedupe-reliability</code> are attached to prunable
+                            worktree metadata and are not safe to delete automatically.
+                            <code>feat/web-redesign</code> remains out of scope.
+                        </td>
+                        <td class="pending">Defer</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Design Decisions</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Decision</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>2026-06-23</td>
+                        <td>
+                            Continue on <code>codex/v0.2.0-release-prep-design</code> for
+                            release-prep docs and package helper.
+                        </td>
+                        <td>
+                            The branch is already a feature branch above aligned
+                            <code>main</code> and contains the approved release-prep design doc.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-23</td>
+                        <td>
+                            Replace the stale root <code>implementation-notes.html</code> with this
+                            release run ledger.
+                        </td>
+                        <td>
+                            The objective explicitly requires
+                            <code>implementation-notes.html</code> to track this Goal; the previous
+                            file documented older Vault work.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-23</td>
+                        <td>
+                            Use an explicit runtime-only package allowlist for the extension zip.
+                        </td>
+                        <td>
+                            Broad repo archives can include tracked audits, tests, docs, release
+                            notes, or local artifacts that are not part of the load-unpacked
+                            extension.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-23</td>
+                        <td>Harden two flaky web Playwright waits exposed during release gating.</td>
+                        <td>
+                            The Repair Workbench test now waits for the repair scan API response
+                            before asserting summary text, and the Vault collection/watch test waits
+                            for durable IndexedDB collection state instead of transient toast count.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Deviations And Tradeoffs</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>2026-06-23</td>
+                        <td>Tradeoff</td>
+                        <td>
+                            The release zip will include runtime extension files only.
+                            Install/update instructions and release notes stay in the GitHub release
+                            body and repo docs, not inside the load-unpacked artifact.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-23</td>
+                        <td>Boundary</td>
+                        <td>
+                            Short video and GIF recreation remain future work. No release artifact
+                            or notes claim that workflow shipped in <code>v0.2.0</code>.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Subagent Findings</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Agent</th>
+                        <th>Scope</th>
+                        <th>Findings</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Herschel</td>
+                        <td>Release notes audit</td>
+                        <td>
+                            Recommended centering release notes on Image Recreate; replacing stale
+                            "Content Moderated" retry wording with generic failed-attempt retry
+                            wording; narrowing prompt import/export claims to settings
+                            import/export; documenting R2 modes and metadata-only backfill; stating
+                            manual extension reload and live Grok UI drift limits; adding the short
+                            video/GIF boundary; and resolving MIT README/LICENSE versus ISC package
+                            metadata mismatch.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Anscombe</td>
+                        <td>Package allowlist audit</td>
+                        <td>
+                            Recommended a runtime-only zip rooted at <code>manifest.json</code>:
+                            manifest, background, content, bridge, popup, offscreen, overlay, cloud
+                            sync, and recreate workflow files. Explicitly exclude <code>web/</code>,
+                            <code>cloud/</code>, <code>tests/</code>, <code>docs/</code>,
+                            <code>README.md</code>, <code>RELEASE_POST.md</code>, configs, env
+                            files, and local artifacts. Noted current ignored secret-risk filenames
+                            <code>web/.env.local</code> and <code>web/.env.local.save</code> without
+                            inspecting contents.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Validation Matrix</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Gate</th>
+                        <th>Command or evidence</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Root unit</td>
+                        <td><code>npm run test:unit</code></td>
+                        <td class="pass">
+                            Passed. Full suite: 17 suites, 278 tests. Focused package allowlist test
+                            also passed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Root e2e</td>
+                        <td><code>npm run test:e2e</code></td>
+                        <td class="pass">Passed. 14 Playwright extension tests.</td>
+                    </tr>
+                    <tr>
+                        <td>Root lint</td>
+                        <td><code>npm run lint</code></td>
+                        <td class="pass">Passed.</td>
+                    </tr>
+                    <tr>
+                        <td>Web build</td>
+                        <td><code>npm run build --prefix web</code></td>
+                        <td class="pass">Passed.</td>
+                    </tr>
+                    <tr>
+                        <td>Web lint</td>
+                        <td><code>npm run lint --prefix web</code></td>
+                        <td class="pass">Passed.</td>
+                    </tr>
+                    <tr>
+                        <td>Web Playwright</td>
+                        <td><code>npx playwright test -c playwright.web.config.js</code></td>
+                        <td class="pass">
+                            Passed. 38 Playwright web tests after hardening two flaky waits. Earlier
+                            failures are retained in the pause log.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Cloud typecheck</td>
+                        <td><code>npm run typecheck --prefix cloud</code></td>
+                        <td class="pass">Passed.</td>
+                    </tr>
+                    <tr>
+                        <td>Cloud acceptance</td>
+                        <td><code>npm run test:acceptance --prefix cloud</code></td>
+                        <td class="pass">Passed. 26 node tests.</td>
+                    </tr>
+                    <tr>
+                        <td>Live Grok Image Recreate</td>
+                        <td>Visible-tab validation reaching openable generated media.</td>
+                        <td class="pass">
+                            Passed on 2026-06-23 using the existing Chrome/Grok session. Details are
+                            recorded in Live Grok Proof.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Live Grok Proof</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Step</th>
+                        <th>Evidence</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Visible tab</td>
+                        <td>
+                            Created one new active tab in the existing Chrome window because the
+                            visible active tab was unrelated GitHub work. The active tab loaded
+                            <code>https://grok.com/imagine</code>. No whole-profile tab enumeration
+                            or broad tab search was used.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Extension overlay</td>
+                        <td>
+                            Overlay was present but minimized. It was expanded and showed
+                            <code>Grok Power Tools</code>, status <code>Ready</code>, and the
+                            <code>Recreate Image</code> controls.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Reference selected</td>
+                        <td>
+                            Used a temporary downsampled copy of
+                            <code>/Users/philipbankier/Documents/test.jpeg</code> at
+                            <code>/tmp/grok-release-reference.jpeg</code>, 107 KB, 768x768 JPEG.
+                            The overlay reported
+                            <code>Selected release-reference.jpeg (107 KB)</code>. The temporary
+                            reference was not committed or packaged.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Chat attachment and prompt extraction</td>
+                        <td>
+                            The workflow reached Imagine submission and then completed. This path is
+                            gated by <code>runChatPromptStep</code>: it waits for the upload input,
+                            dispatches the reference file, waits for an upload preview, submits the
+                            chat instruction, and requires a non-empty
+                            <code>FINAL_IMAGINE_PROMPT</code> extraction before the Imagine step can
+                            run. The active post page also contained the final prompt text.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Imagine submission</td>
+                        <td>
+                            The active tab title changed to the generated photorealistic prompt,
+                            then navigated to
+                            <code>https://grok.com/imagine/post/3641b180-ff71-4358-8136-2e25d9f3d5cc</code>.
+                            The overlay reported <code>Generated image ready.</code>.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Generated media visible</td>
+                        <td>
+                            The post page displayed a new generated image with natural dimensions
+                            720x1280 and rendered dimensions about 531x944. Evidence screenshot:
+                            <code>/tmp/grok-release-live-final.png</code>.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Generated media openable</td>
+                        <td>
+                            The image loaded from host <code>imagine-public.x.ai</code>. In-page
+                            fetch was blocked by CORS, so openability was verified by direct
+                            download without logging the URL: 221,532-byte JPEG, SHA-256
+                            <code>3e6e2fbab29a5c6616bb101fe4db997c7178e30e050035fdafd3cfe2cdc8b8bc</code>.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Release impact</td>
+                        <td>
+                            No live selector or Image Recreate code changes were needed from this
+                            validation run.
+                        </td>
+                        <td class="pass">No blocker</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Package Audit</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Check</th>
+                        <th>Evidence</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Candidate artifact</td>
+                        <td><code>/tmp/grok-power-tools-v0.2.0.zip</code></td>
+                        <td class="pass">Built</td>
+                    </tr>
+                    <tr>
+                        <td>SHA-256</td>
+                        <td>
+                            <code>199782fbd19b5782017d84faf60aadb8d1baded2f5e10a03e48085f2fc4eba42</code>
+                        </td>
+                        <td class="pass">Recorded</td>
+                    </tr>
+                    <tr>
+                        <td>Manifest</td>
+                        <td>
+                            Zip contains exactly <code>manifest.json</code>, <code>background.js</code>,
+                            <code>bridge.js</code>, <code>cloudSyncUtils.js</code>, <code>content.js</code>,
+                            <code>offscreen.html</code>, <code>offscreen.js</code>, <code>overlay.css</code>,
+                            <code>popup.css</code>, <code>popup.html</code>, <code>popup.js</code>,
+                            <code>recreateWorkflowBackground.js</code>,
+                            <code>recreateWorkflowContent.js</code>, and
+                            <code>recreateWorkflowUtils.js</code>.
+                        </td>
+                        <td class="pass">Reviewed</td>
+                    </tr>
+                    <tr>
+                        <td>Forbidden path scan</td>
+                        <td>
+                            No zip entries matched forbidden paths such as <code>.git</code>,
+                            <code>node_modules</code>, <code>web</code>, <code>cloud</code>,
+                            <code>tests</code>, <code>docs</code>, <code>.env*</code>, <code>*.pem</code>,
+                            or <code>*.crx</code>.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Archive integrity</td>
+                        <td><code>unzip -t /tmp/grok-power-tools-v0.2.0.zip</code> passed.</td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>High-confidence secret scan</td>
+                        <td>
+                            Extracted artifact scan found no private key, GitHub token, OpenAI key,
+                            Slack token, AWS access key, Google API key, or JWT-shaped credential.
+                        </td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Final release artifact</td>
+                        <td>Must be rebuilt from merged <code>main</code> before upload.</td>
+                        <td class="pending">Pending post-merge rebuild</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Release Notes Delta</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>File</th>
+                        <th>Delta</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>README.md</code></td>
+                        <td>
+                            Rewritten to cover Image Recreate, current overlay workflows, R2 backup,
+                            web/cloud surfaces, install/update steps, validation commands, package
+                            command, and known limitations.
+                        </td>
+                        <td class="pass">Drafted</td>
+                    </tr>
+                    <tr>
+                        <td><code>RELEASE_POST.md</code></td>
+                        <td>
+                            Rewritten as <code>v0.2.0</code> release notes with shipped scope,
+                            install/update steps, validation gates, known limitations, and future
+                            video/GIF boundary.
+                        </td>
+                        <td class="pass">Drafted</td>
+                    </tr>
+                    <tr>
+                        <td>Live evidence</td>
+                        <td>
+                            Live Image Recreate proof is recorded above. Final publication still
+                            needs PR review, CI, post-merge rebuild, and tag/release approval.
+                        </td>
+                        <td class="pass">Recorded</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Publish Trail</h2>
+            <p class="pending">
+                Pending release-prep PR, CI, merge, tag approval checkpoint, GitHub release, asset
+                upload, and artifact verification.
+            </p>
+
+            <h2>Pause Log</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Reason</th>
+                        <th>Resolution</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>2026-06-23</td>
+                        <td>
+                            Web Playwright failed in an apparently unrelated Repair Workbench test,
+                            which matches the Goal's pause rule for local gate failures unrelated to
+                            release-prep changes.
+                        </td>
+                        <td>
+                            Paused before rerun, debugging, live Grok validation, package
+                            publication, tag, or release work.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-23</td>
+                        <td>
+                            Rerun confirmed the Repair Workbench failure was a timing race, but full
+                            web Playwright later exposed another transient Vault collection toast
+                            assertion.
+                        </td>
+                        <td>
+                            Hardened both web tests against durable evidence. Focused reruns passed;
+                            final full <code>npx playwright test -c playwright.web.config.js</code>
+                            passed 38 tests.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-23</td>
+                        <td>
+                            After cleaning accidental formatting churn, a focused two-file web run
+                            with default workers failed three unrelated assertions with empty Vault
+                            or unknown Worker state.
+                        </td>
+                        <td>
+                            Reran the three failed tests with <code>--workers=1</code>; all passed.
+                            Then reran full <code>npx playwright test -c playwright.web.config.js</code>;
+                            all 38 tests passed.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Open Questions</h2>
+            <ul>
+                <li>
+                    Branch cleanup should be conservative because two branches are attached to
+                    prunable worktree metadata.
+                </li>
+            </ul>
+
+            <h2>Final Acceptance Checklist</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Requirement</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>main</code> clean and aligned with <code>origin/main</code>.</td>
+                        <td class="pending">Pending final post-merge check</td>
+                    </tr>
+                    <tr>
+                        <td>Stale branches safely handled or explicitly left with reason.</td>
+                        <td class="pending">Pending final cleanup</td>
+                    </tr>
+                    <tr>
+                        <td>All local validation commands passed.</td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Live Image Recreate run recorded with openable output evidence.</td>
+                        <td class="pass">Passed</td>
+                    </tr>
+                    <tr>
+                        <td>Release notes accurately describe <code>v0.2.0</code>.</td>
+                        <td class="pass">Drafted with validation evidence recorded; pending PR review</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            Extension zip built from reviewed allowlist and contains no secrets.
+                        </td>
+                        <td class="pass">Candidate passed; final artifact pending post-merge rebuild</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            GitHub release <code>v0.2.0</code> exists at intended
+                            <code>main</code> commit.
+                        </td>
+                        <td class="pending">Pending</td>
+                    </tr>
+                    <tr>
+                        <td>Release artifact downloads and matches reviewed manifest.</td>
+                        <td class="pending">Pending</td>
+                    </tr>
+                    <tr>
+                        <td>Local repo clean after branch cleanup.</td>
+                        <td class="pending">Pending</td>
+                    </tr>
+                </tbody>
+            </table>
+        </main>
+    </body>
 </html>

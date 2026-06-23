@@ -47,6 +47,17 @@ async function resetDb(page) {
   });
 }
 
+async function scanForRepairIssues(page, workbench) {
+  const scanResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/vault/repair/scan") &&
+      response.request().method() === "POST" &&
+      response.status() === 200,
+  );
+  await workbench.getByRole("button", { name: "Scan for Repair Issues" }).click();
+  await scanResponse;
+}
+
 const versionFourSchema = [
   { name: "collections", keyPath: "id", indexes: [["by-status", "status"], ["by-updated", "updatedAt"]] },
   { name: "settings" },
@@ -147,7 +158,7 @@ test("Repair Workbench scans and displays classified repair issues", async ({ pa
   await page.goto("/vault");
   const workbench = page.locator("section").filter({ has: page.getByRole("heading", { name: "Repair Workbench" }) });
   await expect(workbench.getByRole("heading", { name: "Repair Workbench" })).toBeVisible();
-  await workbench.getByRole("button", { name: "Scan for Repair Issues" }).click();
+  await scanForRepairIssues(page, workbench);
   await expect(workbench.getByText("5 issues")).toBeVisible();
   await expect(workbench.getByText("1 writable")).toBeVisible();
   await expect(workbench.getByText("1 blocked")).toBeVisible();
@@ -188,7 +199,7 @@ test("Repair Workbench creates an approved plan and records blocked run history"
   await resetDb(page);
   await page.goto("/vault");
   const workbench = page.locator("section").filter({ has: page.getByRole("heading", { name: "Repair Workbench" }) });
-  await workbench.getByRole("button", { name: "Scan for Repair Issues" }).click();
+  await scanForRepairIssues(page, workbench);
   await workbench.getByLabel("Select repair-gap-index-drift-asset-image-1").check();
   await workbench.getByRole("button", { name: "Create Repair Plan" }).click();
   await expect(workbench.getByText(/Plan hash/)).toBeVisible();
@@ -234,7 +245,7 @@ test("Repair Workbench clears approval state when selection changes after planni
   await resetDb(page);
   await page.goto("/vault");
   const workbench = page.locator("section").filter({ has: page.getByRole("heading", { name: "Repair Workbench" }) });
-  await workbench.getByRole("button", { name: "Scan for Repair Issues" }).click();
+  await scanForRepairIssues(page, workbench);
   await workbench.getByLabel("Select repair-gap-index-drift-asset-image-1").check();
   await workbench.getByRole("button", { name: "Create Repair Plan" }).click();
   await expect(workbench.getByText(/Plan hash/)).toBeVisible();

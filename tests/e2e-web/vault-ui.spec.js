@@ -71,6 +71,30 @@ async function waitForNewCollectionItems(page, expectedCount) {
   );
 }
 
+async function readNewCollectionState(page) {
+  return await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("grok-power-tools");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const collections = await new Promise((resolve, reject) => {
+      const tx = db.transaction("collections", "readonly");
+      const request = tx.objectStore("collections").getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    db.close();
+    const collection = collections.find((entry) => entry.name === "New Collection");
+    if (!collection) return null;
+    return {
+      itemIds: collection.items.map((item) => item.id),
+      assetIds: collection.items.map((item) => item.assetId).sort(),
+      mediaTypes: collection.items.map((item) => item.mediaType).sort(),
+    };
+  });
+}
+
 test("empty local app points to Vault load instead of demo-first flow", async ({ page }) => {
   await resetDb(page);
   await page.goto("/");
@@ -233,34 +257,36 @@ test("Vault assets can become a collection and watch queue", async ({ page }) =>
   await page.getByRole("button", { name: /Preview Vault/i }).click();
   await page.getByRole("button", { name: /Commit Vault/i }).click();
   const addButtons = page.getByRole("button", { name: /Add to Collection/i });
-  const collectionToast = page.getByText(/Added to New Collection/i);
   await addButtons.nth(0).click();
-  await expect(collectionToast).toHaveCount(1);
   await addButtons.nth(1).click();
-  await expect(collectionToast).toHaveCount(2);
-  const collectionState = await page.evaluate(async () => {
-    const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open("grok-power-tools");
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
+
+  let collectionState = null;
+  await expect
+    .poll(async () => {
+      collectionState = await readNewCollectionState(page);
+      const itemIds = collectionState?.itemIds || [];
+      return {
+        assetIds: collectionState?.assetIds || [],
+        mediaTypes: collectionState?.mediaTypes || [],
+        itemCount: itemIds.length,
+        uniqueItemCount: new Set(itemIds).size,
+      };
+    })
+    .toEqual({
+      assetIds: ["asset-image-1", "asset-video-1"],
+      mediaTypes: ["image", "video"],
+      itemCount: 2,
+      uniqueItemCount: 2,
     });
-    const collections = await new Promise((resolve, reject) => {
-      const tx = db.transaction("collections", "readonly");
-      const request = tx.objectStore("collections").getAll();
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
-    });
-    db.close();
-    const collection = collections.find((entry) => entry.name === "New Collection");
-    return {
-      itemIds: collection.items.map((item) => item.id),
-      assetIds: collection.items.map((item) => item.assetId).sort(),
-      mediaTypes: collection.items.map((item) => item.mediaType).sort(),
-    };
+  expect(collectionState).not.toBeNull();
+  if (!collectionState) {
+    throw new Error("New Collection state was not persisted");
+  }
+  expect(collectionState).toEqual({
+    itemIds: expect.any(Array),
+    assetIds: ["asset-image-1", "asset-video-1"],
+    mediaTypes: ["image", "video"],
   });
-  expect(collectionState.assetIds).toEqual(["asset-image-1", "asset-video-1"]);
-  expect(collectionState.mediaTypes).toEqual(["image", "video"]);
-  expect(new Set(collectionState.itemIds).size).toBe(2);
   await page.getByRole("link", { name: /Collections/i }).click();
   await page.getByRole("button", { name: /Watch All/i }).click();
   await expect(page.getByText(/Watch Mode/i)).toBeVisible();

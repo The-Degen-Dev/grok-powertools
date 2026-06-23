@@ -1,18 +1,19 @@
 {
   "name": "chrome-extension-powertools",
   "version": "0.2.0",
-  "description": "[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)",
+  "description": "Chrome extension tools for Grok Imagine workflows, prompt management, retry automation, media backup, and local/web collection work.",
   "main": "background.js",
   "scripts": {
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "jest",
     "test:e2e": "playwright test tests/e2e",
     "lint": "eslint . --ext .js",
+    "package:extension": "node tools/package-extension.js",
     "format": "prettier --write ."
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "eslint": "^9.39.2",
