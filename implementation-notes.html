@@ -103,7 +103,7 @@
                     </tr>
                     <tr>
                         <td>Current working branch</td>
-                        <td><code>codex/v0.2.0-release-prep-design</code></td>
+                        <td><code>main</code> after release; docs-only publish ledger followed on <code>codex/v0.2.0-publish-ledger</code></td>
                     </tr>
                     <tr>
                         <td>Controller rule</td>
@@ -128,16 +128,16 @@
                     <tr>
                         <td>Local branch</td>
                         <td>
-                            <code>codex/v0.2.0-release-prep-design</code> at
-                            <code>78cc9412683555442e163a7afcbe490b2c37acb1</code>.
+                            Release was published from <code>main</code> at
+                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>.
                         </td>
-                        <td>Recorded</td>
+                        <td class="pass">Recorded</td>
                     </tr>
                     <tr>
                         <td>Main alignment</td>
                         <td>
                             Local <code>main</code> and <code>origin/main</code> both at
-                            <code>67741d9987fc44d10e14ea7e2a22d769be596a6f</code>.
+                            <code>783b281e19bcf14249fdad88147b43dae496854a</code> before tag and release.
                         </td>
                         <td class="pass">Aligned</td>
                     </tr>
@@ -151,17 +151,17 @@
                     <tr>
                         <td>Tags/releases</td>
                         <td>
-                            Only local tag is <code>v0.1.9</code>. GitHub release
-                            <code>v0.2.0-pre-release</code> is a prerelease on tag
-                            <code>v0.1.9</code> with no assets.
+                            Fresh annotated tag <code>v0.2.0</code> was pushed and peels to
+                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>. Historical
+                            <code>v0.2.0-pre-release</code> on tag <code>v0.1.9</code> was left untouched.
                         </td>
-                        <td>Historical, do not mutate without approval</td>
+                        <td class="pass">Published without mutating old prerelease</td>
                     </tr>
                     <tr>
                         <td>Latest main CI</td>
                         <td>
-                            GitHub Actions run <code>27910274813</code> passed for
-                            <code>67741d9987fc44d10e14ea7e2a22d769be596a6f</code>.
+                            GitHub Actions run <code>28011533042</code> passed for
+                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>.
                         </td>
                         <td class="pass">Passed</td>
                     </tr>
@@ -171,9 +171,10 @@
                             <code>codex/collection-watch-mode</code> and
                             <code>codex/r2-dedupe-reliability</code> are attached to prunable
                             worktree metadata and are not safe to delete automatically.
-                            <code>feat/web-redesign</code> remains out of scope.
+                            <code>codex/grok-imagine-context-pack</code> and
+                            <code>feat/web-redesign</code> remain out of scope.
                         </td>
-                        <td class="pending">Defer</td>
+                        <td class="pass">Explicitly left</td>
                     </tr>
                 </tbody>
             </table>
@@ -570,10 +571,74 @@
             </table>
 
             <h2>Publish Trail</h2>
-            <p class="pending">
-                Pending release-prep PR, CI, merge, tag approval checkpoint, GitHub release, asset
-                upload, and artifact verification.
-            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Step</th>
+                        <th>Evidence</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Release-prep merge</td>
+                        <td>
+                            PR #5 merged into <code>main</code>; local <code>main</code> matched
+                            <code>origin/main</code> at
+                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>.
+                        </td>
+                        <td class="pass">Done</td>
+                    </tr>
+                    <tr>
+                        <td>Approval checkpoint</td>
+                        <td>
+                            User approved publishing after seeing intended commit, CI, gates, live
+                            evidence, artifact manifest, SHA-256, and scan summary.
+                        </td>
+                        <td class="pass">Approved</td>
+                    </tr>
+                    <tr>
+                        <td>Tag</td>
+                        <td>
+                            Annotated tag <code>v0.2.0</code> pushed to origin and verified with
+                            <code>git ls-remote --tags origin 'v0.2.0^{}'</code> peel
+                            output:
+                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>.
+                        </td>
+                        <td class="pass">Published</td>
+                    </tr>
+                    <tr>
+                        <td>GitHub release</td>
+                        <td>
+                            <code>https://github.com/The-Degen-Dev/grok-powertools/releases/tag/v0.2.0</code>
+                            exists, is not draft, is not prerelease, and returns HTTP 200.
+                        </td>
+                        <td class="pass">Published</td>
+                    </tr>
+                    <tr>
+                        <td>Release asset</td>
+                        <td>
+                            Uploaded <code>grok-power-tools-v0.2.0.zip</code> as
+                            <code>application/zip</code>, size <code>90881</code>, GitHub digest
+                            <code>sha256:0cda880927fb2633ca5e8b9e2300d3db467a5cb687a22151842353b9c954507a</code>.
+                        </td>
+                        <td class="pass">Uploaded</td>
+                    </tr>
+                    <tr>
+                        <td>Downloaded artifact verification</td>
+                        <td>
+                            Downloaded release asset to
+                            <code>/tmp/grok-release-v0.2.0-download.qmcszl/grok-power-tools-v0.2.0.zip</code>;
+                            SHA-256 matched
+                            <code>0cda880927fb2633ca5e8b9e2300d3db467a5cb687a22151842353b9c954507a</code>,
+                            manifest matched the reviewed 14-file allowlist, <code>unzip -t</code>
+                            passed, forbidden path scan had no matches, and high-confidence secret
+                            scan had no matches.
+                        </td>
+                        <td class="pass">Verified</td>
+                    </tr>
+                </tbody>
+            </table>
 
             <h2>Pause Log</h2>
             <table>
@@ -630,7 +695,7 @@
             <ul>
                 <li>
                     Branch cleanup should be conservative because two branches are attached to
-                    prunable worktree metadata.
+                    prunable worktree metadata and two other branches contain unrelated WIP.
                 </li>
             </ul>
 
@@ -645,11 +710,11 @@
                 <tbody>
                     <tr>
                         <td><code>main</code> clean and aligned with <code>origin/main</code>.</td>
-                        <td class="pending">Pending final post-merge check</td>
+                        <td class="pending">Passed before release; repeat after this ledger PR merge</td>
                     </tr>
                     <tr>
                         <td>Stale branches safely handled or explicitly left with reason.</td>
-                        <td class="pending">Pending final cleanup</td>
+                        <td class="pass">Explicitly left with reason</td>
                     </tr>
                     <tr>
                         <td>All local validation commands passed.</td>
@@ -661,28 +726,28 @@
                     </tr>
                     <tr>
                         <td>Release notes accurately describe <code>v0.2.0</code>.</td>
-                        <td class="pass">Drafted with validation evidence recorded; pending PR review</td>
+                        <td class="pass">Published in GitHub release</td>
                     </tr>
                     <tr>
                         <td>
                             Extension zip built from reviewed allowlist and contains no secrets.
                         </td>
-                        <td class="pass">Candidate passed; final artifact pending post-merge rebuild</td>
+                        <td class="pass">Published artifact passed hash, manifest, path, and secret scans</td>
                     </tr>
                     <tr>
                         <td>
                             GitHub release <code>v0.2.0</code> exists at intended
                             <code>main</code> commit.
                         </td>
-                        <td class="pending">Pending</td>
+                        <td class="pass">Passed</td>
                     </tr>
                     <tr>
                         <td>Release artifact downloads and matches reviewed manifest.</td>
-                        <td class="pending">Pending</td>
+                        <td class="pass">Passed</td>
                     </tr>
                     <tr>
                         <td>Local repo clean after branch cleanup.</td>
-                        <td class="pending">Pending</td>
+                        <td class="pending">Pending only this docs-only ledger PR merge</td>
                     </tr>
                 </tbody>
             </table>
