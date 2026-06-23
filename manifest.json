@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Grok Media Downloader",
+  "name": "Grok Power Tools",
   "version": "0.2.0",
-  "description": "Automate downloading media from Grok timeline.",
+  "description": "Grok Imagine workflow tools for prompts, retries, media backup, and image recreation.",
   "permissions": [
     "storage",
     "activeTab",
@@ -28,7 +28,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Grok Downloader"
+    "default_title": "Grok Power Tools"
   },
   "web_accessible_resources": [
     {

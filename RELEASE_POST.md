@@ -1,37 +1,51 @@
-# Grok Power Tools v0.2.0 Release
+# Grok Power Tools v0.2.0 Release Notes
 
-We are excited to introduce **Grok Power Tools v0.2.0**, a major upgrade to your Grok experience! 🚀
+This release ships the current Grok Power Tools extension with Image Recreate, prompt and retry workflow updates, R2 backup support, and the current web/cloud companion surfaces.
 
-## What's New in v0.2.0
+## Shipped In v0.2.0
 
-### 📝 Enhanced Prompt History
-Never lose a prompt again.
--   **Smart Context Scraping**: Captures image and video prompts intelligently, even when the input box is empty (e.g., clicking "Make video" on a card).
--   **Visual Cues**: History items now show icons (🖼️ vs 🎥) so you know exactly what type of generation it was.
--   **Robust Capturing**: Improved "Capture Phase" logic ensures prompts are saved before the app clears them.
+- Image Recreate in the Grok overlay. It accepts a local, dropped, pasted, or current Grok image, sends it through Grok chat for a Grok Imagine prompt, and submits the prompt back into Grok Imagine.
+- Optional Grok Search context for the Image Recreate prompt-generation step.
+- Prompt history and saved prompt controls in the overlay, plus settings import/export support.
+- Auto-Retry, Video Goal, Template Batch, Prompted Batch, Quick Batch, and Quality Repeat controls for Grok Imagine workflows. Retry behavior is based on failed generation attempts, not a single fixed error string.
+- Smart media scraping and raw image handling for Grok media surfaces.
+- Cloudflare R2 backup options in the extension popup, including local-only, cloud-only, dual-write, unsynced retry, metadata-only backfill, one-media canary, and full media backup controls.
+- Web app surfaces for collections, prompt library, vault, clip editing, movie workflows, sharing, auth, and sync.
+- Cloud Worker support for R2 upload, vault metadata, sync, repair, and related API routes.
 
-### 🎥 Accuracy Improvements
--   **Video Goals Fixed**: The "Videos Generated" counter now rigorously verifies that generation *actually started* before counting, eliminating false positives from rate limits or failures.
--   **Partial Prompts Fixed**: "Add Prompt Partial" now correctly injects text into the chat box in a way that React recognizes.
+## Install Or Update
 
-### 🔁 Robust Auto-Retry
-Automatically detects "Content Moderated" blocks and retries generation for you.
--   **Configurable**: Set Max Retries and Cooldown timer.
--   **Status**: See exactly how many retries have been used.
+1. Download and unzip `grok-power-tools-v0.2.0.zip`.
+2. Open Chrome and go to `chrome://extensions/`.
+3. Enable Developer mode.
+4. Click Load unpacked.
+5. Select the unzipped extension folder.
+6. Refresh open Grok tabs, then open `https://grok.com/imagine`.
 
-### 🛠️ Developer Mode
-For the power users:
--   Open **Settings** (Gear Icon).
--   Enable **Developer Mode** to see a real-time system log panel.
+The release artifact is a raw MV3 load-unpacked extension package. It does not include the web app, Cloud Worker source, tests, local artifacts, or development dependencies.
 
-## Installation Steps
+## Validation Required Before Publishing
 
-### 1. Update/Load Extension
-1.  Navigate to `chrome://extensions/`.
-2.  Enable **"Developer mode"**.
-3.  Click **"Load unpacked"** (or "Update" if already loaded).
-4.  Select the extension folder.
-5.  **Refresh your Grok tab!**
+The final release must be published only after these gates are recorded in `implementation-notes.html`:
 
----
-*Open Source Power Tools for Grok.*
+- `npm run test:unit`
+- `npm run test:e2e`
+- `npm run lint`
+- `npm run build --prefix web`
+- `npm run lint --prefix web`
+- `npm run typecheck --prefix cloud`
+- `npm run test:acceptance --prefix cloud`
+- `npx playwright test -c playwright.web.config.js`
+- Live Grok Image Recreate validation that reaches a new Grok Imagine result with openable generated media.
+
+## Known Limitations
+
+- Grok UI changes can break live automation and may require selector updates.
+- The extension has no hot reload. Reload it from `chrome://extensions/` and refresh Grok tabs after updates.
+- Image Recreate is validated by generated openable media, not by exact visual matching.
+- Animated GIF files can be used as image references, but GIF recreation as a motion workflow is not included.
+- Short video and GIF recreation are not included in v0.2.0.
+
+## Future Work
+
+Short video and GIF recreation should be designed separately. That work needs frame sampling, motion prompt strategy, playable media validation, and a measurement ledger before UI implementation.
