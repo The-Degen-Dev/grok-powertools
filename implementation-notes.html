@@ -148,6 +148,8 @@
                         <td>
                             Opened draft PR
                             <code>https://github.com/The-Degen-Dev/grok-powertools/pull/7</code>.
+                            GitHub reports merge state <code>CLEAN</code>, with Extension, Web, and
+                            Cloud Worker CI checks passing.
                             It remains draft until manual extension reload and final live canonical
                             validation prove the overlay reaches <code>Generated video ready.</code>.
                         </td>
@@ -543,8 +545,9 @@
                             <code>npm run test:unit -- --runInBand tests/unit/recreateWorkflowContent.test.js tests/unit/recreateWorkflowBackground.test.js tests/unit/recreateWorkflowUtils.test.js tests/unit/promptHistoryManager.test.js</code>
                         </td>
                         <td class="pass">
-                            Passed, 104 focused tests covering opened-post video validation, authenticated
-                            Grok video URLs, prompt capture hint, and message-channel recovery
+                            Passed focused regression tests covering opened-post video validation,
+                            authenticated Grok video URLs, prompt capture hint, contact-sheet sampling,
+                            and message-channel recovery.
                         </td>
                     </tr>
                     <tr>
@@ -569,22 +572,34 @@
                             scan matched code identifiers and UI labels only, not credential values.
                         </td>
                     </tr>
+                    <tr>
+                        <td><code>gh pr view 7 --json url,isDraft,state,mergeStateStatus,statusCheckRollup</code></td>
+                        <td class="pass">
+                            Draft PR is open, merge state is <code>CLEAN</code>, and GitHub CI passed
+                            for Extension, Web, and Cloud Worker jobs.
+                        </td>
+                    </tr>
                 </tbody>
             </table>
 
             <h2>Final Acceptance Checklist</h2>
             <ul>
-                <li class="pending">
+                <li class="pass">
                     Spec written in
                     <code>docs/superpowers/specs/2026-06-24-video-gif-recreate-design.md</code>;
-                    commit pending.
+                    committed and pushed.
                 </li>
-                <li class="pending">Video/GIF recreate implementation built on feature branch; commit pending.</li>
+                <li class="pass">Video/GIF recreate implementation built, committed, and pushed on <code>codex/video-gif-recreate</code>.</li>
                 <li class="pass">Focused unit, full unit, e2e, and lint checks pass after the latest recovery patch.</li>
                 <li class="blocked">Live canonical clip rerun needs manual unpacked-extension reload first.</li>
-                <li class="pass">Live Grok generated playable video on <code>https://grok.com/imagine/post/ccbf27fa-13ae-48cc-82e1-4716b1fc730c</code>.</li>
+                <li class="pass">
+                    Live Grok generated playable videos on
+                    <code>https://grok.com/imagine/post/ccbf27fa-13ae-48cc-82e1-4716b1fc730c</code>
+                    and
+                    <code>https://grok.com/imagine/post/39296bd5-388e-45c0-9f18-c16d4d51d7f7</code>.
+                </li>
                 <li class="pending">Extension overlay must report <code>Generated video ready.</code> after reload and rerun.</li>
-                <li class="pending">Draft PR opened; merge is pending manual reload and final live validation.</li>
+                <li class="pending">Draft PR opened with green CI; merge is pending manual reload and final live validation.</li>
             </ul>
         </main>
     </body>
