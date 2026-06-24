@@ -820,6 +820,39 @@
                             web lint, and web build also passed.
                         </td>
                     </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Final integrated validation passed for the web app feature branch.
+                        </td>
+                        <td>
+                            Evidence:
+                            <code>npm --prefix web run test:unit -- vault-movie-drafts</code>
+                            passed five tests;
+                            <code>npm --prefix web run lint</code> passed;
+                            <code>npm --prefix web run build</code> passed;
+                            focused
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-movie-drafts.spec.js tests/e2e-web/movie-player-stability.spec.js</code>
+                            passed six tests; and full
+                            <code>npx playwright test -c playwright.web.config.js</code> passed
+                            forty-four tests after commit <code>8db2889</code> updated the API
+                            fixture count assertions for the second video asset.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Final surface audit found no forbidden runtime systems touched.
+                        </td>
+                        <td>
+                            <code>git diff --name-only origin/main...HEAD</code> showed docs, web
+                            package files, web app files, and web E2E/unit fixtures only. No Chrome
+                            extension files, Cloud Worker files, R2/D1 state, processed IDs,
+                            environment files, OAuth files, or secrets were changed. Ports
+                            <code>43117</code> and <code>43118</code> were not left listening after
+                            validation.
+                        </td>
+                    </tr>
                 </tbody>
             </table>
 
