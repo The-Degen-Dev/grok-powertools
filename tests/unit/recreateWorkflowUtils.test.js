@@ -1,13 +1,19 @@
 const {
     ALLOWED_RECREATE_MIME_TYPES,
+    ALLOWED_RECREATE_VIDEO_MIME_TYPES,
     buildRecreateChatInstruction,
     buildRecreateFailure,
+    buildVideoRecreateChatInstruction,
     chooseBestGeneratedImageCandidate,
+    extractFinalImagineVideoPrompt,
     extractFinalImaginePrompt,
+    isTrustedGrokVideoUrl,
     isTrustedGrokMediaUrl,
+    MAX_VIDEO_REFERENCE_BYTES,
     MAX_REFERENCE_BYTES,
     normalizeRecreateReference,
-    parseRecreateDataUrl
+    parseRecreateDataUrl,
+    parseRecreateMediaDataUrl
 } = require('../../recreateWorkflowUtils.js');
 
 describe('recreate workflow utils', () => {
@@ -66,6 +72,60 @@ describe('recreate workflow utils', () => {
         });
     });
 
+    test('normalizes video and gif references as video media', () => {
+        const tinyMp4 = 'data:video/mp4;base64,aGVsbG8=';
+        const tinyGif = 'data:image/gif;base64,aGVsbG8=';
+
+        expect(parseRecreateMediaDataUrl(tinyMp4)).toEqual({
+            kind: 'video',
+            mimeType: 'video/mp4',
+            base64: 'aGVsbG8=',
+            byteLength: 5
+        });
+        expect(normalizeRecreateReference({
+            name: 'clip.mp4',
+            kind: 'video',
+            mimeType: 'video/mp4',
+            dataUrl: tinyMp4,
+            source: 'drop'
+        })).toEqual({
+            name: 'clip.mp4',
+            kind: 'video',
+            mimeType: 'video/mp4',
+            dataUrl: tinyMp4,
+            source: 'drop',
+            byteLength: 5
+        });
+        expect(normalizeRecreateReference({
+            name: 'motion.gif',
+            mimeType: 'image/gif',
+            dataUrl: tinyGif,
+            source: 'local'
+        })).toEqual(expect.objectContaining({
+            kind: 'video',
+            mimeType: 'image/gif',
+            byteLength: 5
+        }));
+        expect(ALLOWED_RECREATE_VIDEO_MIME_TYPES).toContain('video/mp4');
+        expect(MAX_VIDEO_REFERENCE_BYTES).toBeGreaterThan(MAX_REFERENCE_BYTES);
+    });
+
+    test('normalizes trusted Grok video URL references without a data URL', () => {
+        const url = 'https://imagine-public.x.ai/imagine-public/share-videos/abc_1080_hd.mp4';
+
+        expect(normalizeRecreateReference({
+            kind: 'video',
+            url,
+            source: 'grok-video-url'
+        })).toEqual(expect.objectContaining({
+            kind: 'video',
+            name: 'reference-video',
+            mimeType: '',
+            url,
+            source: 'grok-video-url'
+        }));
+    });
+
     test('extracts only prompt text after the strict marker', () => {
         expect(extractFinalImaginePrompt('Notes\nFINAL_IMAGINE_PROMPT:\nA cinematic red cabin in snow.')).toBe(
             'A cinematic red cabin in snow.'
@@ -105,6 +165,26 @@ describe('recreate workflow utils', () => {
         expect(withSearch).toContain('FINAL_IMAGINE_PROMPT:');
         expect(withoutSearch).not.toContain('use Grok search');
         expect(withoutSearch).toContain('FINAL_IMAGINE_PROMPT:');
+    });
+
+    test('builds and extracts Grok Imagine video prompts', () => {
+        const instruction = buildVideoRecreateChatInstruction({
+            bestPracticesEnabled: false,
+            metadata: {
+                durationSec: 10.042,
+                width: 464,
+                height: 688,
+                sourcePrompt: 'he catches up with her and embraces her slowly'
+            }
+        });
+
+        expect(instruction).toContain('Grok Imagine Video');
+        expect(instruction).toContain('Reference duration: 10.042s.');
+        expect(instruction).toContain('Known source prompt context');
+        expect(instruction).toContain('FINAL_IMAGINE_VIDEO_PROMPT:');
+        expect(extractFinalImagineVideoPrompt(
+            'Notes\nFINAL_IMAGINE_VIDEO_PROMPT:\nA handheld 10-second clip of two people embracing slowly.'
+        )).toBe('A handheld 10-second clip of two people embracing slowly.');
     });
 
     test('chooses visible generated image nearest viewport center', () => {
@@ -152,6 +232,14 @@ describe('recreate workflow utils', () => {
         expect(isTrustedGrokMediaUrl('https://example.com/sample.png')).toBe(false);
     });
 
+    test('trusts Grok Imagine shared video URLs only on the public video path', () => {
+        expect(isTrustedGrokVideoUrl('https://imagine-public.x.ai/imagine-public/share-videos/sample_1080_hd.mp4')).toBe(true);
+        expect(isTrustedGrokVideoUrl('https://assets.grok.com/users/test/generated/post-id/generated_video.mp4?cache=1')).toBe(true);
+        expect(isTrustedGrokVideoUrl('https://imagine-public.x.ai/imagine-public/images/sample.jpg')).toBe(false);
+        expect(isTrustedGrokVideoUrl('https://assets.grok.com/users/test/generated/post-id/preview.jpg')).toBe(false);
+        expect(isTrustedGrokVideoUrl('https://example.com/imagine-public/share-videos/sample.mp4')).toBe(false);
+    });
+
     test('ignores generated image candidates outside the viewport', () => {
         const best = chooseBestGeneratedImageCandidate(
             [
@@ -184,6 +272,7 @@ describe('recreate workflow utils', () => {
             diagnostics: {
                 url: 'https://grok.com/',
                 dataUrl: 'data:image/png;base64,secret',
+                videoDataUrl: 'data:video/mp4;base64,secret',
                 reference: { dataUrl: 'data:image/png;base64,secret' },
                 cookie: 'session=secret',
                 cookies: ['session=secret'],

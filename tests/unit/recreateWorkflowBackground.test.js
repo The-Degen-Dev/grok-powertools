@@ -116,6 +116,80 @@ describe('recreate background controller', () => {
         ]);
     });
 
+    test('threads video references through chat and Imagine video mode', async () => {
+        const { chromeApi, messages } = createChromeHarness();
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, callback) => {
+            messages.push({ tabId, message });
+            if (message.action === 'GPT_RECREATE_CHAT_STEP') {
+                callback({
+                    ok: true,
+                    runId: message.runId,
+                    generatedPrompt: 'A handheld 10-second embrace.',
+                    referenceSummary: {
+                        kind: 'video',
+                        sourceHash: 'sourcehash'
+                    }
+                });
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_IMAGINE_STEP') {
+                callback({
+                    ok: true,
+                    runId: message.runId,
+                    mediaKind: 'video',
+                    submitted: true,
+                    resultReady: true,
+                    result: {
+                        mediaKind: 'video',
+                        sourceKind: 'trusted-grok-video',
+                        url: 'https://imagine-public.x.ai/imagine-public/share-videos/generated_1080_hd.mp4',
+                        outputMediaHash: 'outputhash'
+                    }
+                });
+                return;
+            }
+            callback({ ok: true });
+        });
+        const controller = createRecreateWorkflowController({
+            chromeApi,
+            utils,
+            now: () => 1000,
+            random: () => 0.5
+        });
+
+        const result = await controller.start(createStartRequest({
+            reference: {
+                name: 'sample.mp4',
+                kind: 'video',
+                mimeType: 'video/mp4',
+                dataUrl: 'data:video/mp4;base64,aGVsbG8=',
+                source: 'local'
+            }
+        }), {
+            sourceTabId: 1,
+            sourceTabUrl: 'https://grok.com/imagine'
+        });
+
+        const chatMessage = messages.find((entry) => entry.message.action === 'GPT_RECREATE_CHAT_STEP').message;
+        const imagineMessage = messages.find((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP').message;
+        const doneStatus = getStatusMessages(messages).at(-1);
+
+        expect(result).toEqual(expect.objectContaining({
+            ok: true,
+            referenceKind: 'video',
+            resultReady: true
+        }));
+        expect(chatMessage.referenceKind).toBe('video');
+        expect(chatMessage.reference).toEqual(expect.objectContaining({ kind: 'video' }));
+        expect(imagineMessage.targetMode).toBe('video');
+        expect(imagineMessage.referenceKind).toBe('video');
+        expect(doneStatus).toEqual(expect.objectContaining({
+            phase: 'done',
+            message: 'Generated video ready.',
+            type: 'success'
+        }));
+    });
+
     test('reuses source Imagine tab when context source URL is https://grok.com/imagine', async () => {
         const { chromeApi, createdTabs, messages } = createChromeHarness();
         const controller = createRecreateWorkflowController({ chromeApi, utils });
@@ -506,6 +580,187 @@ describe('recreate background controller', () => {
             })
         );
         expect(result.error).not.toBe('Could not establish connection');
+    });
+
+    test('recovers when Imagine submit navigates and closes the message channel', async () => {
+        const { chromeApi, messages } = createChromeHarness();
+        let imagineTabUrl = 'https://grok.com/imagine';
+        chromeApi.tabs.get = jest.fn((tabId, callback) => {
+            callback({ id: tabId, url: imagineTabUrl, status: 'complete' });
+        });
+        chromeApi.tabs.update = jest.fn((tabId, options, callback) => {
+            callback({ id: tabId, url: imagineTabUrl, status: 'complete', ...options });
+        });
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, callback) => {
+            messages.push({ tabId, message });
+            if (message.action === 'GPT_RECREATE_CHAT_STEP') {
+                callback({
+                    ok: true,
+                    runId: message.runId,
+                    generatedPrompt: 'A handheld 10-second embrace.'
+                });
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_IMAGINE_STEP') {
+                imagineTabUrl = 'https://grok.com/imagine/post/live-video-proof';
+                callbackWithLastError(
+                    chromeApi,
+                    'A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received',
+                    callback
+                );
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_IMAGINE_POST_VALIDATION_STEP') {
+                callback({
+                    ok: true,
+                    runId: message.runId,
+                    mediaKind: 'video',
+                    submitted: true,
+                    resultReady: true,
+                    result: {
+                        mediaKind: 'video',
+                        sourceKind: 'trusted-grok-video',
+                        url: 'https://assets.grok.com/users/test/generated/live-video-proof/generated_video.mp4?cache=1',
+                        outputMediaHash: 'outputhash'
+                    }
+                });
+                return;
+            }
+            callback({ ok: true });
+        });
+        const controller = createRecreateWorkflowController({
+            chromeApi,
+            utils,
+            receiverRetryDelayMs: 0,
+            tabReadyPollMs: 0
+        });
+
+        const result = await controller.start(createStartRequest({
+            reference: {
+                name: 'sample.mp4',
+                kind: 'video',
+                mimeType: 'video/mp4',
+                dataUrl: 'data:video/mp4;base64,aGVsbG8=',
+                source: 'local'
+            }
+        }), {
+            sourceTabId: 1,
+            sourceTabUrl: 'https://grok.com/imagine'
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            ok: true,
+            referenceKind: 'video',
+            submitted: true,
+            resultReady: true
+        }));
+        expect(messages.some((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_POST_VALIDATION_STEP')).toBe(true);
+        expect(chromeApi.scripting.executeScript).toHaveBeenCalledWith(
+            {
+                target: { tabId: 1 },
+                files: ['recreateWorkflowUtils.js', 'recreateWorkflowContent.js', 'content.js']
+            },
+            expect.any(Function)
+        );
+        expect(getStatusMessages(messages)).toContainEqual(expect.objectContaining({
+            phase: 'imagine',
+            message: 'Validating opened Grok post video...',
+            type: 'info'
+        }));
+        expect(getStatusMessages(messages).at(-1)).toEqual(expect.objectContaining({
+            phase: 'done',
+            message: 'Generated video ready.',
+            type: 'success'
+        }));
+    });
+
+    test('recovers when Imagine submit message stays pending but tab navigates to a post', async () => {
+        const { chromeApi, createdTabs, messages } = createChromeHarness();
+        let imagineTabUrl = 'https://grok.com/imagine';
+        chromeApi.tabs.get = jest.fn((tabId, callback) => {
+            if (tabId === 11) {
+                callback({ id: tabId, url: imagineTabUrl, status: 'complete' });
+                return;
+            }
+            callback(createdTabs.find((tab) => tab.id === tabId) || {
+                id: tabId,
+                url: 'https://grok.com/imagine/post/source-video',
+                status: 'complete'
+            });
+        });
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, callback) => {
+            messages.push({ tabId, message });
+            if (message.action === 'GPT_RECREATE_CHAT_STEP') {
+                callback({
+                    ok: true,
+                    runId: message.runId,
+                    generatedPrompt: 'A handheld 10-second embrace.'
+                });
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_IMAGINE_STEP') {
+                imagineTabUrl = 'https://grok.com/imagine/post/live-pending-video-proof';
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_IMAGINE_POST_VALIDATION_STEP') {
+                callback({
+                    ok: true,
+                    runId: message.runId,
+                    mediaKind: 'video',
+                    submitted: true,
+                    resultReady: true,
+                    result: {
+                        mediaKind: 'video',
+                        sourceKind: 'trusted-grok-video',
+                        url: 'https://assets.grok.com/users/test/generated/live-pending-video-proof/generated_video.mp4?cache=1',
+                        openableSurface: 'opened-post-playable-video'
+                    }
+                });
+                return;
+            }
+            callback({ ok: true });
+        });
+        const controller = createRecreateWorkflowController({
+            chromeApi,
+            utils,
+            messageTimeoutMs: 50,
+            receiverRetryDelayMs: 0,
+            tabReadyPollMs: 0
+        });
+
+        const result = await controller.start(createStartRequest({
+            reference: {
+                name: 'sample.mp4',
+                kind: 'video',
+                mimeType: 'video/mp4',
+                dataUrl: 'data:video/mp4;base64,aGVsbG8=',
+                source: 'local'
+            }
+        }), {
+            sourceTabId: 1,
+            sourceTabUrl: 'https://grok.com/imagine/post/source-video'
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            ok: true,
+            referenceKind: 'video',
+            submitted: true,
+            resultReady: true
+        }));
+        expect(createdTabs.map((tab) => tab.url)).toEqual(['https://grok.com/', 'https://grok.com/imagine']);
+        expect(messages.some((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP')).toBe(true);
+        expect(messages.some((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_POST_VALIDATION_STEP')).toBe(true);
+        expect(getStatusMessages(messages)).toContainEqual(expect.objectContaining({
+            phase: 'imagine',
+            message: 'Validating opened Grok post video...',
+            type: 'info'
+        }));
+        expect(getStatusMessages(messages).at(-1)).toEqual(expect.objectContaining({
+            phase: 'done',
+            message: 'Generated video ready.',
+            type: 'success'
+        }));
+        expect(controller.getActiveRunForTest()).toBeNull();
     });
 
     test('retries a newly created tab when receiver is not ready, then succeeds', async () => {

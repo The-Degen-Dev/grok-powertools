@@ -267,10 +267,11 @@ test.describe('Grok Power Tools E2E', () => {
         await evaluateExtensionContent(page);
 
         const overlay = page.locator('#grok-powertools-overlay');
-        await expect(overlay).toContainText('Recreate Image');
-        await expect(overlay).toContainText('Drop, paste, choose image, or use current Grok image');
+        await expect(overlay).toContainText('Recreate Media');
+        await expect(overlay).toContainText('Drop, paste, choose image/video/GIF, or use current Grok image');
         await expect(page.locator('#gptRecreateFileInput')).toHaveCount(1);
         await expect(page.locator('#gptRecreateFileInput')).toHaveAttribute('accept', /image\/png/);
+        await expect(page.locator('#gptRecreateFileInput')).toHaveAttribute('accept', /video\/mp4/);
         await expect(page.locator('#gptRecreateChooseBtn')).toBeVisible();
         await expect(page.locator('#gptRecreateCurrentBtn')).toBeVisible();
         await expect(page.locator('#gptRecreateBestPractices')).not.toBeChecked();
@@ -287,7 +288,7 @@ test.describe('Grok Power Tools E2E', () => {
             mimeType: 'image/png',
             buffer: Buffer.from('sample-image')
         });
-        await expect(page.locator('#gptRecreateStatus')).toContainText('Selected sample.png');
+        await expect(page.locator('#gptRecreateStatus')).toContainText('sample.png');
 
         await page.locator('#gptRecreateStartBtn').click();
         await expect(page.locator('#gptRecreateStatus')).toHaveText('Generated image ready.');
@@ -357,7 +358,7 @@ test.describe('Grok Power Tools E2E', () => {
             mimeType: 'image/png',
             buffer: Buffer.from('sample-image')
         });
-        await expect(page.locator('#gptRecreateStatus')).toContainText('Selected sample.png');
+        await expect(page.locator('#gptRecreateStatus')).toContainText('sample.png');
 
         await page.locator('#gptRecreateFileInput').setInputFiles({
             name: 'oversized.png',
@@ -367,7 +368,7 @@ test.describe('Grok Power Tools E2E', () => {
         await expect(page.locator('#gptRecreateStatus')).toHaveText('reference_invalid');
 
         await page.locator('#gptRecreateStartBtn').click();
-        await expect(page.locator('#gptRecreateStatus')).toHaveText('Select a reference image first.');
+        await expect(page.locator('#gptRecreateStatus')).toHaveText('Select a reference media file first.');
 
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).not.toContainEqual(expect.objectContaining({
@@ -402,7 +403,7 @@ test.describe('Grok Power Tools E2E', () => {
             document.getElementById('gptRecreateDropzone').dispatchEvent(event);
         });
 
-        await expect(page.locator('#gptRecreateStatus')).toContainText('Selected paste.png');
+        await expect(page.locator('#gptRecreateStatus')).toContainText('paste.png');
         const calls = await page.evaluate(() => window.__recreateCalls);
         expect(calls).toEqual([
             { action: 'file', name: 'paste.png', source: 'paste' }

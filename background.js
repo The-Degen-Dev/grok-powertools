@@ -798,6 +798,9 @@ function getRecreateReferenceExtension(mimeType) {
     if (mimeType === 'image/gif') return 'gif';
     if (mimeType === 'image/bmp') return 'bmp';
     if (mimeType === 'image/tiff') return 'tiff';
+    if (mimeType === 'video/mp4') return 'mp4';
+    if (mimeType === 'video/quicktime') return 'mov';
+    if (mimeType === 'video/webm') return 'webm';
     return 'png';
 }
 
@@ -818,24 +821,33 @@ async function fetchRecreateReferenceDataUrl(url) {
 
     const blob = await response.blob();
     const mimeType = getRecreateReferenceMimeType(parsed.href, blob);
-    const maxBytes = Number(RecreateWorkflowUtils.MAX_REFERENCE_BYTES) || 0;
+    const kind = RecreateWorkflowUtils.getReferenceKindFromMimeType
+        ? RecreateWorkflowUtils.getReferenceKindFromMimeType(mimeType)
+        : (mimeType.startsWith('video/') ? 'video' : 'image');
+    const maxBytes = kind === 'video'
+        ? Number(RecreateWorkflowUtils.MAX_VIDEO_REFERENCE_BYTES) || 0
+        : Number(RecreateWorkflowUtils.MAX_REFERENCE_BYTES) || 0;
     if (!blob || blob.size <= 0 || (maxBytes > 0 && blob.size > maxBytes)) {
         throw new Error('reference_invalid');
     }
 
     const dataUrl = `data:${mimeType};base64,${arrayBufferToBase64(await blob.arrayBuffer())}`;
     const normalized = RecreateWorkflowUtils.normalizeRecreateReference({
-        name: `current-grok-image.${getRecreateReferenceExtension(mimeType)}`,
+        name: `current-grok-${kind}.${getRecreateReferenceExtension(mimeType)}`,
+        kind,
         mimeType,
         dataUrl,
-        source: 'current-grok-image'
+        source: kind === 'video' ? 'grok-video-url' : 'current-grok-image'
     });
 
-    return {
+    const result = {
         dataUrl: normalized.dataUrl,
         mimeType: normalized.mimeType,
         byteLength: normalized.byteLength
     };
+    if (normalized.kind === 'video') result.kind = 'video';
+
+    return result;
 }
 
 function sanitizeR2Metadata(metadata = {}) {

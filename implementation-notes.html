@@ -3,7 +3,7 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Grok Power Tools v0.2.0 Release Notes</title>
+        <title>Grok Power Tools Video/GIF Recreate Goal Notes</title>
         <style>
             body {
                 margin: 0;
@@ -12,13 +12,13 @@
                     system-ui,
                     -apple-system,
                     BlinkMacSystemFont,
-                    'Segoe UI',
+                    "Segoe UI",
                     sans-serif;
                 color: #111827;
                 background: #f8fafc;
             }
             main {
-                max-width: 1100px;
+                max-width: 1120px;
                 margin: 0 auto;
                 padding: 32px 20px 56px;
             }
@@ -29,10 +29,6 @@
             h2 {
                 margin-top: 28px;
                 font-size: 18px;
-            }
-            h3 {
-                margin-top: 18px;
-                font-size: 15px;
             }
             p,
             li {
@@ -64,11 +60,11 @@
                 padding: 2px 4px;
                 border-radius: 4px;
             }
-            .pending {
-                color: #92400e;
-            }
             .pass {
                 color: #166534;
+            }
+            .pending {
+                color: #92400e;
             }
             .blocked {
                 color: #991b1b;
@@ -77,11 +73,10 @@
     </head>
     <body>
         <main>
-            <h1>Grok Power Tools v0.2.0 Release Run Ledger</h1>
+            <h1>Video/GIF Recreate Goal Notes</h1>
             <p>
-                Running implementation notes for the active Codex Goal to publish
-                <code>v0.2.0</code> from <code>main</code>. Source design:
-                <code>docs/superpowers/specs/2026-06-23-v0.2.0-release-prep-design.md</code>.
+                Running implementation notes for the Codex Goal to design and build Grok Power
+                Tools video/GIF recreation from the existing Image Recreate workflow.
             </p>
 
             <h2>Goal Metadata</h2>
@@ -94,22 +89,29 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td>Started</td>
-                        <td>2026-06-23</td>
+                        <td>Objective file</td>
+                        <td>
+                            <code>/Users/philipbankier/.codex/attachments/c1c45ecf-9082-4b88-9fe0-1b3a95117efd/goal-objective.md</code>
+                        </td>
                     </tr>
                     <tr>
-                        <td>Release target</td>
-                        <td><code>v0.2.0</code> from merged <code>main</code></td>
+                        <td>Canonical source</td>
+                        <td>
+                            <code>https://grok.com/imagine/post/9171bd6b-496d-49ee-a91e-e82c9e392b6c</code>
+                        </td>
                     </tr>
                     <tr>
-                        <td>Current working branch</td>
-                        <td><code>main</code> after release; docs-only publish ledger followed on <code>codex/v0.2.0-publish-ledger</code></td>
+                        <td>Local fixture</td>
+                        <td>
+                            <code>/tmp/grok-video-example-9171bd6b.mp4</code> and
+                            <code>/tmp/grok-video-example-9171bd6b-contact.jpg</code>
+                        </td>
                     </tr>
                     <tr>
                         <td>Controller rule</td>
                         <td>
-                            Subagents provide bounded evidence only; controller owns gates, PR/merge
-                            interpretation, tag/release, and completion claim.
+                            Subagents provide bounded evidence only; controller owns implementation
+                            choices, live validation, PR/merge, and completion claims.
                         </td>
                     </tr>
                 </tbody>
@@ -126,141 +128,41 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td>Local branch</td>
+                        <td>Start branch</td>
                         <td>
-                            Release was published from <code>main</code> at
-                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>.
+                            Work resumed on unrelated clean branch
+                            <code>codex/vault-movie-drafts-design</code>.
+                        </td>
+                        <td class="pass">Observed</td>
+                    </tr>
+                    <tr>
+                        <td>Working branch</td>
+                        <td>
+                            Switched to <code>codex/video-gif-recreate</code>, which points at
+                            <code>a4330e0</code> with <code>origin/main</code>.
+                        </td>
+                        <td class="pass">Ready</td>
+                    </tr>
+                    <tr>
+                        <td>Draft PR</td>
+                        <td>
+                            Opened draft PR
+                            <code>https://github.com/The-Degen-Dev/grok-powertools/pull/7</code>.
+                            GitHub reports merge state <code>CLEAN</code>, with Extension, Web, and
+                            Cloud Worker CI checks passing.
+                            It remains draft until manual extension reload and final live canonical
+                            validation prove the overlay reaches <code>Generated video ready.</code>.
+                        </td>
+                        <td class="pending">Draft</td>
+                    </tr>
+                    <tr>
+                        <td>Validation scripts</td>
+                        <td>
+                            Root scripts are <code>npm run test:unit</code>,
+                            <code>npm run test:e2e</code>, and <code>npm run lint</code>.
+                            Web/cloud gates apply only if those surfaces are touched.
                         </td>
                         <td class="pass">Recorded</td>
-                    </tr>
-                    <tr>
-                        <td>Main alignment</td>
-                        <td>
-                            Local <code>main</code> and <code>origin/main</code> both at
-                            <code>783b281e19bcf14249fdad88147b43dae496854a</code> before tag and release.
-                        </td>
-                        <td class="pass">Aligned</td>
-                    </tr>
-                    <tr>
-                        <td>Open PRs</td>
-                        <td>
-                            <code>gh pr list --state open --limit 50</code> returned no open PRs.
-                        </td>
-                        <td class="pass">Clear</td>
-                    </tr>
-                    <tr>
-                        <td>Tags/releases</td>
-                        <td>
-                            Fresh annotated tag <code>v0.2.0</code> was pushed and peels to
-                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>. Historical
-                            <code>v0.2.0-pre-release</code> on tag <code>v0.1.9</code> was left untouched.
-                        </td>
-                        <td class="pass">Published without mutating old prerelease</td>
-                    </tr>
-                    <tr>
-                        <td>Latest main CI</td>
-                        <td>
-                            GitHub Actions run <code>28011533042</code> passed for
-                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>.
-                        </td>
-                        <td class="pass">Passed</td>
-                    </tr>
-                    <tr>
-                        <td>Branch cleanup</td>
-                        <td>
-                            <code>codex/collection-watch-mode</code> and
-                            <code>codex/r2-dedupe-reliability</code> are attached to prunable
-                            worktree metadata and are not safe to delete automatically.
-                            <code>codex/grok-imagine-context-pack</code> and
-                            <code>feat/web-redesign</code> remain out of scope.
-                        </td>
-                        <td class="pass">Explicitly left</td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <h2>Design Decisions</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Decision</th>
-                        <th>Reason</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>2026-06-23</td>
-                        <td>
-                            Continue on <code>codex/v0.2.0-release-prep-design</code> for
-                            release-prep docs and package helper.
-                        </td>
-                        <td>
-                            The branch is already a feature branch above aligned
-                            <code>main</code> and contains the approved release-prep design doc.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>2026-06-23</td>
-                        <td>
-                            Replace the stale root <code>implementation-notes.html</code> with this
-                            release run ledger.
-                        </td>
-                        <td>
-                            The objective explicitly requires
-                            <code>implementation-notes.html</code> to track this Goal; the previous
-                            file documented older Vault work.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>2026-06-23</td>
-                        <td>
-                            Use an explicit runtime-only package allowlist for the extension zip.
-                        </td>
-                        <td>
-                            Broad repo archives can include tracked audits, tests, docs, release
-                            notes, or local artifacts that are not part of the load-unpacked
-                            extension.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>2026-06-23</td>
-                        <td>Harden two flaky web Playwright waits exposed during release gating.</td>
-                        <td>
-                            The Repair Workbench test now waits for the repair scan API response
-                            before asserting summary text, and the Vault collection/watch test waits
-                            for durable IndexedDB collection state instead of transient toast count.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <h2>Deviations And Tradeoffs</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>Note</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>2026-06-23</td>
-                        <td>Tradeoff</td>
-                        <td>
-                            The release zip will include runtime extension files only.
-                            Install/update instructions and release notes stay in the GitHub release
-                            body and repo docs, not inside the load-unpacked artifact.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>2026-06-23</td>
-                        <td>Boundary</td>
-                        <td>
-                            Short video and GIF recreation remain future work. No release artifact
-                            or notes claim that workflow shipped in <code>v0.2.0</code>.
-                        </td>
                     </tr>
                 </tbody>
             </table>
@@ -270,422 +172,339 @@
                 <thead>
                     <tr>
                         <th>Agent</th>
-                        <th>Scope</th>
-                        <th>Findings</th>
+                        <th>Finding</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td>Herschel</td>
-                        <td>Release notes audit</td>
+                        <td>Implementation map</td>
                         <td>
-                            Recommended centering release notes on Image Recreate; replacing stale
-                            "Content Moderated" retry wording with generic failed-attempt retry
-                            wording; narrowing prompt import/export claims to settings
-                            import/export; documenting R2 modes and metadata-only backfill; stating
-                            manual extension reload and live Grok UI drift limits; adding the short
-                            video/GIF boundary; and resolving MIT README/LICENSE versus ISC package
-                            metadata mismatch.
+                            Image Recreate runs through <code>content.js</code>,
+                            <code>recreateWorkflowUtils.js</code>,
+                            <code>recreateWorkflowContent.js</code>, and
+                            <code>recreateWorkflowBackground.js</code>. The current pipeline is
+                            image-specific at MIME parsing, upload preview detection, Imagine mode
+                            selection, generated result discovery, and media openability checks.
                         </td>
                     </tr>
                     <tr>
-                        <td>Anscombe</td>
-                        <td>Package allowlist audit</td>
+                        <td>Test map</td>
                         <td>
-                            Recommended a runtime-only zip rooted at <code>manifest.json</code>:
-                            manifest, background, content, bridge, popup, offscreen, overlay, cloud
-                            sync, and recreate workflow files. Explicitly exclude <code>web/</code>,
-                            <code>cloud/</code>, <code>tests/</code>, <code>docs/</code>,
-                            <code>README.md</code>, <code>RELEASE_POST.md</code>, configs, env
-                            files, and local artifacts. Noted current ignored secret-risk filenames
-                            <code>web/.env.local</code> and <code>web/.env.local.save</code> without
-                            inspecting contents.
+                            Extend <code>tests/unit/recreateWorkflowUtils.test.js</code>,
+                            <code>tests/unit/recreateWorkflowContent.test.js</code>,
+                            <code>tests/unit/recreateWorkflowBackground.test.js</code>,
+                            <code>tests/unit/backgroundRecreateWorkflow.test.js</code>, and the
+                            root extension Playwright test for UI payload shape.
                         </td>
                     </tr>
                 </tbody>
             </table>
 
-            <h2>Validation Matrix</h2>
+            <h2>Live Grok Findings</h2>
             <table>
                 <thead>
                     <tr>
-                        <th>Gate</th>
-                        <th>Command or evidence</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Root unit</td>
-                        <td><code>npm run test:unit</code></td>
-                        <td class="pass">
-                            Passed. Full suite: 17 suites, 278 tests. Focused package allowlist test
-                            also passed.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Root e2e</td>
-                        <td><code>npm run test:e2e</code></td>
-                        <td class="pass">Passed. 14 Playwright extension tests.</td>
-                    </tr>
-                    <tr>
-                        <td>Root lint</td>
-                        <td><code>npm run lint</code></td>
-                        <td class="pass">Passed.</td>
-                    </tr>
-                    <tr>
-                        <td>Web build</td>
-                        <td><code>npm run build --prefix web</code></td>
-                        <td class="pass">Passed.</td>
-                    </tr>
-                    <tr>
-                        <td>Web lint</td>
-                        <td><code>npm run lint --prefix web</code></td>
-                        <td class="pass">Passed.</td>
-                    </tr>
-                    <tr>
-                        <td>Web Playwright</td>
-                        <td><code>npx playwright test -c playwright.web.config.js</code></td>
-                        <td class="pass">
-                            Passed. 38 Playwright web tests after hardening two flaky waits. Earlier
-                            failures are retained in the pause log.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Cloud typecheck</td>
-                        <td><code>npm run typecheck --prefix cloud</code></td>
-                        <td class="pass">Passed.</td>
-                    </tr>
-                    <tr>
-                        <td>Cloud acceptance</td>
-                        <td><code>npm run test:acceptance --prefix cloud</code></td>
-                        <td class="pass">Passed. 26 node tests.</td>
-                    </tr>
-                    <tr>
-                        <td>Live Grok Image Recreate</td>
-                        <td>Visible-tab validation reaching openable generated media.</td>
-                        <td class="pass">
-                            Passed on 2026-06-23 using the existing Chrome/Grok session. Details are
-                            recorded in Live Grok Proof.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <h2>Live Grok Proof</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Step</th>
+                        <th>Question</th>
                         <th>Evidence</th>
                         <th>Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td>Visible tab</td>
+                        <td>Loaded Grok Imagine page</td>
                         <td>
-                            Created one new active tab in the existing Chrome window because the
-                            visible active tab was unrelated GitHub work. The active tab loaded
-                            <code>https://grok.com/imagine</code>. No whole-profile tab enumeration
-                            or broad tab search was used.
+                            Active Chrome tab observed as <code>https://grok.com/imagine</code>.
+                            Screenshot saved at <code>/tmp/grok-imagine-live-discovery.png</code>.
                         </td>
-                        <td class="pass">Passed</td>
+                        <td class="pass">Observed</td>
+                    </tr>
+                    <tr>
+                        <td>Mode controls</td>
+                        <td>
+                            Screenshot shows visible <code>Image</code>, <code>Video</code>, and
+                            <code>Agent</code> controls in the composer. Image was selected.
+                        </td>
+                        <td class="pass">Observed</td>
                     </tr>
                     <tr>
                         <td>Extension overlay</td>
                         <td>
-                            Overlay was present but minimized. It was expanded and showed
-                            <code>Grok Power Tools</code>, status <code>Ready</code>, and the
-                            <code>Recreate Image</code> controls.
+                            Screenshot shows Grok Power Tools overlay loaded with current
+                            <code>Recreate Media</code> UI.
                         </td>
-                        <td class="pass">Passed</td>
+                        <td class="pass">Observed</td>
                     </tr>
                     <tr>
-                        <td>Reference selected</td>
+                        <td>Video feature config</td>
                         <td>
-                            Used a temporary downsampled copy of
-                            <code>/Users/philipbankier/Documents/test.jpeg</code> at
-                            <code>/tmp/grok-release-reference.jpeg</code>, 107 KB, 768x768 JPEG.
-                            The overlay reported
-                            <code>Selected release-reference.jpeg (107 KB)</code>. The temporary
-                            reference was not committed or packaged.
+                            Public post HTML reports
+                            <code>disable_imagine_video_mode:false</code> and video prompt modes
+                            <code>Custom</code>, <code>Spicy</code>, and <code>Normal</code>.
                         </td>
-                        <td class="pass">Passed</td>
+                        <td class="pass">Observed</td>
                     </tr>
                     <tr>
-                        <td>Chat attachment and prompt extraction</td>
+                        <td>Upload limits</td>
                         <td>
-                            The workflow reached Imagine submission and then completed. This path is
-                            gated by <code>runChatPromptStep</code>: it waits for the upload input,
-                            dispatches the reference file, waits for an upload preview, submits the
-                            chat instruction, and requires a non-empty
-                            <code>FINAL_IMAGINE_PROMPT</code> extraction before the Imagine step can
-                            run. The active post page also contained the final prompt text.
+                            Server config contains <code>web_file_upload.max_upload_video_size_mb:150</code>
+                            and <code>multipart_supported:true</code>.
                         </td>
-                        <td class="pass">Passed</td>
+                        <td class="pass">Observed</td>
                     </tr>
                     <tr>
-                        <td>Imagine submission</td>
+                        <td>Post URL and media shape</td>
                         <td>
-                            The active tab title changed to the generated photorealistic prompt,
-                            then navigated to
-                            <code>https://grok.com/imagine/post/3641b180-ff71-4358-8136-2e25d9f3d5cc</code>.
-                            The overlay reported <code>Generated image ready.</code>.
+                            Canonical post has <code>og:video</code> on
+                            <code>imagine-public.x.ai/imagine-public/share-videos/..._1080_hd.mp4</code>
+                            and <code>og:image</code> on the Grok post image route.
                         </td>
-                        <td class="pass">Passed</td>
+                        <td class="pass">Observed</td>
                     </tr>
                     <tr>
-                        <td>Generated media visible</td>
+                        <td>Raw media fetch</td>
                         <td>
-                            The post page displayed a new generated image with natural dimensions
-                            720x1280 and rendered dimensions about 531x944. Evidence screenshot:
-                            <code>/tmp/grok-release-live-final.png</code>.
+                            Plain CLI request to the public MP4 returned HTTP 403, so the extension
+                            needs a browser-backed or authenticated fetch path for some generated
+                            video media. The implementation routes authenticated Grok media through
+                            the page bridge and keeps public Imagine video eligible for direct or
+                            background fetch.
                         </td>
-                        <td class="pass">Passed</td>
+                        <td class="pass">Implemented</td>
                     </tr>
                     <tr>
-                        <td>Generated media openable</td>
+                        <td>Live mode switching and submit behavior</td>
                         <td>
-                            The image loaded from host <code>imagine-public.x.ai</code>. In-page
-                            fetch was blocked by CORS, so openability was verified by direct
-                            download without logging the URL: 221,532-byte JPEG, SHA-256
-                            <code>3e6e2fbab29a5c6616bb101fe4db997c7178e30e050035fdafd3cfe2cdc8b8bc</code>.
+                            DevTools snapshot/evaluate calls timed out. Coordinate clicks were not
+                            reliable because the Chrome window is exposed through a Screen Sharing
+                            surface. After the user resumed, Computer Use successfully switched
+                            Grok Imagine to <code>Video</code> mode and confirmed
+                            <code>Image:0</code>, <code>Video:1</code>, and
+                            <code>Agent:0</code>.
                         </td>
-                        <td class="pass">Passed</td>
+                        <td class="pass">Observed</td>
                     </tr>
                     <tr>
-                        <td>Release impact</td>
+                        <td>Video generation controls</td>
                         <td>
-                            No live selector or Image Recreate code changes were needed from this
-                            validation run.
+                            Live Video mode exposes resolution controls <code>480p</code> and
+                            <code>720p</code>, with <code>720p</code> selected, and duration
+                            controls <code>6s</code> and <code>10s</code>, with
+                            <code>10s</code> selected.
                         </td>
-                        <td class="pass">No blocker</td>
+                        <td class="pass">Observed</td>
+                    </tr>
+                    <tr>
+                        <td>Prompt entry and submit state</td>
+                        <td>
+                            A harmless draft prompt was pasted into the Video-mode prompt field.
+                            The prompt value updated and the Submit control became available.
+                            The draft prompt was then cleared before implementation work.
+                        </td>
+                        <td class="pass">Observed</td>
+                    </tr>
+                    <tr>
+                        <td>Current video quota state</td>
+                        <td>
+                            Earlier live UI showed <code>720p</code> quota pressure. A later live run
+                            auto-downgraded from 720p to 480p and still generated playable 10-second
+                            video output.
+                        </td>
+                        <td class="pass">Observed</td>
+                    </tr>
+                    <tr>
+                        <td>Live canonical URL run, first pass</td>
+                        <td>
+                            Pasting
+                            <code>https://grok.com/imagine/post/9171bd6b-496d-49ee-a91e-e82c9e392b6c</code>
+                            into the overlay selected a Grok post video URL. The workflow opened chat,
+                            generated a video prompt, submitted to Imagine, and produced playable post
+                            <code>https://grok.com/imagine/post/8ff3a800-47e7-4b9f-8d03-5c3b18208afc</code>
+                            with visible <code>0:10</code> video controls. The overlay verifier stayed
+                            in a waiting state because post video could remain blob-backed.
+                        </td>
+                        <td class="pending">Verifier patched</td>
+                    </tr>
+                    <tr>
+                        <td>Live canonical URL run, second pass</td>
+                        <td>
+                            The run produced post
+                            <code>https://grok.com/imagine/post/ccbf27fa-13ae-48cc-82e1-4716b1fc730c</code>
+                            with four video elements. The main generated video was
+                            <code>assets.grok.com/.../generated_video.mp4?cache=1</code>,
+                            <code>readyState:4</code>, <code>duration:10.041667</code>,
+                            <code>videoWidth:416</code>, <code>videoHeight:752</code>, and was
+                            actively playing. The extension reported
+                            <code>A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received</code>
+                            after Grok navigated to the post.
+                        </td>
+                        <td class="pending">Controller recovery patched</td>
+                    </tr>
+                    <tr>
+                        <td>Live canonical URL run, third pass</td>
+                        <td>
+                            A fresh Grok page accepted the canonical post URL again and generated
+                            <code>https://grok.com/imagine/post/39296bd5-388e-45c0-9f18-c16d4d51d7f7</code>.
+                            The generated <code>assets.grok.com/.../generated_video.mp4?cache=1</code>
+                            reached <code>readyState:4</code>, <code>duration:10.041667</code>,
+                            <code>videoWidth:416</code>, and <code>videoHeight:752</code>. The old
+                            live runtime still ended with the async message-channel error after stop.
+                            Local code now treats an opened-post trusted Grok video as success only
+                            when the video element is actually playable.
+                        </td>
+                        <td class="pending">Needs reload and rerun</td>
+                    </tr>
+                    <tr>
+                        <td>Live canonical URL run, fourth pass</td>
+                        <td>
+                            After reload, the overlay accepted
+                            <code>https://grok.com/imagine/post/9171bd6b-496d-49ee-a91e-e82c9e392b6c</code>
+                            as a Grok post video URL and advanced from chat into Imagine submission.
+                            Grok generated
+                            <code>https://grok.com/imagine/post/ce2f882b-ac4c-4ca5-b4b8-bf081915000f</code>.
+                            The generated video was playable at
+                            <code>readyState:4</code>, <code>duration:10.041667</code>,
+                            <code>videoWidth:416</code>, <code>videoHeight:752</code>, with an
+                            authenticated <code>assets.grok.com/.../generated_video.mp4?cache=1</code>
+                            URL. The source overlay remained stuck at
+                            <code>imagine: Submitting prompt and waiting for generated video...</code>
+                            because the original Imagine-step message stayed pending after Grok
+                            navigated the submission tab to the post.
+                        </td>
+                        <td class="pending">Controller patched</td>
+                    </tr>
+                    <tr>
+                        <td>Final live validation after reload</td>
+                        <td>
+                            After manual unpacked-extension reload, the overlay accepted the canonical
+                            source URL, moved from chat to Imagine, switched into post-navigation
+                            validation, and reached <code>Generated video ready.</code>. The generated
+                            post was
+                            <code>https://grok.com/imagine/post/b1ff9507-8c4b-4de6-a626-a64412d843e5</code>.
+                            The visible generated video used authenticated
+                            <code>assets.grok.com/.../generated_video.mp4?cache=1</code>, reached
+                            <code>readyState:4</code>, buffered <code>10.041667</code> seconds, and
+                            reported <code>videoWidth:416</code> and <code>videoHeight:752</code>.
+                        </td>
+                        <td class="pass">Passed</td>
                     </tr>
                 </tbody>
             </table>
 
-            <h2>Package Audit</h2>
+            <h2>Video Fixture Metadata</h2>
             <table>
                 <thead>
                     <tr>
-                        <th>Check</th>
-                        <th>Evidence</th>
-                        <th>Status</th>
+                        <th>Field</th>
+                        <th>Value</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td>Candidate artifact</td>
-                        <td><code>/tmp/grok-power-tools-v0.2.0.zip</code></td>
-                        <td class="pass">Built</td>
+                        <td>Prompt metadata</td>
+                        <td>he catches up with her and embraces her slowly</td>
                     </tr>
                     <tr>
-                        <td>SHA-256</td>
+                        <td>MP4 SHA-256</td>
+                        <td><code>abc8f7dc83113230ada43ea329e5aac85ee4f1ae29c734ec262de6d027b145de</code></td>
+                    </tr>
+                    <tr>
+                        <td>Contact sheet SHA-256</td>
+                        <td><code>ed9f3e37c4d08f69cbfa6a1b6fbe3e4cabbe1d56618084616fb535c1b9cc27ac</code></td>
+                    </tr>
+                    <tr>
+                        <td>ffprobe summary</td>
                         <td>
-                            <code>199782fbd19b5782017d84faf60aadb8d1baded2f5e10a03e48085f2fc4eba42</code>
+                            MP4, 4,823,974 bytes, 10.041667 seconds, H.264 video 464x688 at
+                            24 fps, AAC audio, plus MJPEG cover stream.
                         </td>
-                        <td class="pass">Recorded</td>
-                    </tr>
-                    <tr>
-                        <td>Manifest</td>
-                        <td>
-                            Zip contains exactly <code>manifest.json</code>, <code>background.js</code>,
-                            <code>bridge.js</code>, <code>cloudSyncUtils.js</code>, <code>content.js</code>,
-                            <code>offscreen.html</code>, <code>offscreen.js</code>, <code>overlay.css</code>,
-                            <code>popup.css</code>, <code>popup.html</code>, <code>popup.js</code>,
-                            <code>recreateWorkflowBackground.js</code>,
-                            <code>recreateWorkflowContent.js</code>, and
-                            <code>recreateWorkflowUtils.js</code>.
-                        </td>
-                        <td class="pass">Reviewed</td>
-                    </tr>
-                    <tr>
-                        <td>Forbidden path scan</td>
-                        <td>
-                            No zip entries matched forbidden paths such as <code>.git</code>,
-                            <code>node_modules</code>, <code>web</code>, <code>cloud</code>,
-                            <code>tests</code>, <code>docs</code>, <code>.env*</code>, <code>*.pem</code>,
-                            or <code>*.crx</code>.
-                        </td>
-                        <td class="pass">Passed</td>
-                    </tr>
-                    <tr>
-                        <td>Archive integrity</td>
-                        <td><code>unzip -t /tmp/grok-power-tools-v0.2.0.zip</code> passed.</td>
-                        <td class="pass">Passed</td>
-                    </tr>
-                    <tr>
-                        <td>High-confidence secret scan</td>
-                        <td>
-                            Extracted artifact scan found no private key, GitHub token, OpenAI key,
-                            Slack token, AWS access key, Google API key, or JWT-shaped credential.
-                        </td>
-                        <td class="pass">Passed</td>
-                    </tr>
-                    <tr>
-                        <td>Final release artifact</td>
-                        <td>Must be rebuilt from merged <code>main</code> before upload.</td>
-                        <td class="pending">Pending post-merge rebuild</td>
                     </tr>
                 </tbody>
             </table>
 
-            <h2>Release Notes Delta</h2>
+            <h2>Decisions And Tradeoffs</h2>
             <table>
                 <thead>
                     <tr>
-                        <th>File</th>
-                        <th>Delta</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td><code>README.md</code></td>
-                        <td>
-                            Rewritten to cover Image Recreate, current overlay workflows, R2 backup,
-                            web/cloud surfaces, install/update steps, validation commands, package
-                            command, and known limitations.
-                        </td>
-                        <td class="pass">Drafted</td>
-                    </tr>
-                    <tr>
-                        <td><code>RELEASE_POST.md</code></td>
-                        <td>
-                            Rewritten as <code>v0.2.0</code> release notes with shipped scope,
-                            install/update steps, validation gates, known limitations, and future
-                            video/GIF boundary.
-                        </td>
-                        <td class="pass">Drafted</td>
-                    </tr>
-                    <tr>
-                        <td>Live evidence</td>
-                        <td>
-                            Live Image Recreate proof is recorded above. Final publication still
-                            needs PR review, CI, post-merge rebuild, and tag/release approval.
-                        </td>
-                        <td class="pass">Recorded</td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <h2>Publish Trail</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Step</th>
-                        <th>Evidence</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Release-prep merge</td>
-                        <td>
-                            PR #5 merged into <code>main</code>; local <code>main</code> matched
-                            <code>origin/main</code> at
-                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>.
-                        </td>
-                        <td class="pass">Done</td>
-                    </tr>
-                    <tr>
-                        <td>Approval checkpoint</td>
-                        <td>
-                            User approved publishing after seeing intended commit, CI, gates, live
-                            evidence, artifact manifest, SHA-256, and scan summary.
-                        </td>
-                        <td class="pass">Approved</td>
-                    </tr>
-                    <tr>
-                        <td>Tag</td>
-                        <td>
-                            Annotated tag <code>v0.2.0</code> pushed to origin and verified with
-                            <code>git ls-remote --tags origin 'v0.2.0^{}'</code> peel
-                            output:
-                            <code>783b281e19bcf14249fdad88147b43dae496854a</code>.
-                        </td>
-                        <td class="pass">Published</td>
-                    </tr>
-                    <tr>
-                        <td>GitHub release</td>
-                        <td>
-                            <code>https://github.com/The-Degen-Dev/grok-powertools/releases/tag/v0.2.0</code>
-                            exists, is not draft, is not prerelease, and returns HTTP 200.
-                        </td>
-                        <td class="pass">Published</td>
-                    </tr>
-                    <tr>
-                        <td>Release asset</td>
-                        <td>
-                            Uploaded <code>grok-power-tools-v0.2.0.zip</code> as
-                            <code>application/zip</code>, size <code>90881</code>, GitHub digest
-                            <code>sha256:0cda880927fb2633ca5e8b9e2300d3db467a5cb687a22151842353b9c954507a</code>.
-                        </td>
-                        <td class="pass">Uploaded</td>
-                    </tr>
-                    <tr>
-                        <td>Downloaded artifact verification</td>
-                        <td>
-                            Downloaded release asset to
-                            <code>/tmp/grok-release-v0.2.0-download.qmcszl/grok-power-tools-v0.2.0.zip</code>;
-                            SHA-256 matched
-                            <code>0cda880927fb2633ca5e8b9e2300d3db467a5cb687a22151842353b9c954507a</code>,
-                            manifest matched the reviewed 14-file allowlist, <code>unzip -t</code>
-                            passed, forbidden path scan had no matches, and high-confidence secret
-                            scan had no matches.
-                        </td>
-                        <td class="pass">Verified</td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <h2>Pause Log</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
+                        <th>Decision</th>
                         <th>Reason</th>
-                        <th>Resolution</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td>2026-06-23</td>
+                        <td>Add video/GIF as a parallel media mode</td>
                         <td>
-                            Web Playwright failed in an apparently unrelated Repair Workbench test,
-                            which matches the Goal's pause rule for local gate failures unrelated to
-                            release-prep changes.
-                        </td>
-                        <td>
-                            Paused before rerun, debugging, live Grok validation, package
-                            publication, tag, or release work.
+                            The image path is working and has image-specific validators. A parallel
+                            mode lets shared helpers stay covered while avoiding regressions in Image
+                            Recreate.
                         </td>
                     </tr>
                     <tr>
-                        <td>2026-06-23</td>
+                        <td>Do not accept "submitted" as success</td>
                         <td>
-                            Rerun confirmed the Repair Workbench failure was a timing race, but full
-                            web Playwright later exposed another transient Vault collection toast
-                            assertion.
-                        </td>
-                        <td>
-                            Hardened both web tests against durable evidence. Focused reruns passed;
-                            final full <code>npx playwright test -c playwright.web.config.js</code>
-                            passed 38 tests.
+                            Prior recreate work showed that a submitted prompt can still produce a
+                            stale, broken, or wrong media result. Completion requires playable video
+                            proof.
                         </td>
                     </tr>
                     <tr>
-                        <td>2026-06-23</td>
+                        <td>Write video/GIF spec before code</td>
                         <td>
-                            After cleaning accidental formatting churn, a focused two-file web run
-                            with default workers failed three unrelated assertions with empty Vault
-                            or unknown Worker state.
+                            Added
+                            <code>docs/superpowers/specs/2026-06-24-video-gif-recreate-design.md</code>
+                            after live discovery confirmed Video mode controls and current quota state.
                         </td>
+                    </tr>
+                    <tr>
+                        <td>Resolve Grok post URLs inside the Grok page context</td>
                         <td>
-                            Reran the three failed tests with <code>--workers=1</code>; all passed.
-                            Then reran full <code>npx playwright test -c playwright.web.config.js</code>;
-                            all 38 tests passed.
+                            <code>recreateWorkflowContent.js</code> now extracts <code>og:video</code>
+                            from trusted Grok post URLs and fetches the resulting video through the
+                            same public/background/page-cookie media path used for authenticated Grok
+                            media.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Use a lightweight run ledger, not a separate evaluation platform</td>
+                        <td>
+                            Background stores best-effort <code>gptRecreateRunLedger</code> entries
+                            with prompt version, source hash, output URL, output hash when available,
+                            phase, and error/status. Data URLs are not stored.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Keep Image Recreate as the default path</td>
+                        <td>
+                            Image mode still uses the original marker, image upload validation, and
+                            image result checks unless a normalized reference has <code>kind: video</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Trust Grok generated video CDN output</td>
+                        <td>
+                            Live Grok Imagine generated video surfaced as
+                            <code>assets.grok.com/.../generated_video.mp4?cache=1</code>, not only as
+                            <code>imagine-public.x.ai/share-videos</code>. The trusted video URL helper
+                            now accepts authenticated <code>assets.grok.com</code> MP4/WebM/MOV files
+                            and fetches them through the page-cookie bridge.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Sample local video references when browser APIs allow it</td>
+                        <td>
+                            Local MP4/MOV/WebM references now probe duration and dimensions and use a
+                            bounded browser video/canvas sampler to build a JPEG contact sheet with
+                            representative sample times. Unsupported environments mark
+                            <code>frameSamplingLimited</code> instead of failing the recreate run.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Recover after Grok post navigation closes the submit message</td>
+                        <td>
+                            Grok can navigate from <code>/imagine</code> to
+                            <code>/imagine/post/...</code> while the content script is awaiting result
+                            validation. If Chrome reports the async message channel closed, the
+                            background now waits for the post URL, reinjects the recreate scripts, and
+                            validates the opened post media before deciding success or failure.
                         </td>
                     </tr>
                 </tbody>
@@ -694,63 +513,138 @@
             <h2>Open Questions</h2>
             <ul>
                 <li>
-                    Branch cleanup should be conservative because two branches are attached to
-                    prunable worktree metadata and two other branches contain unrelated WIP.
+                    Direct browser automation access to
+                    <code>chrome-extension://bcjoehhhmhpjmlmjhojcokmfeafcmimd/popup.html</code>
+                    was blocked by browser security policy, so the run ledger was not inspected
+                    directly through extension storage. The successful overlay state still proves the
+                    ledger write path ran because <code>Generated video ready.</code> is sent after
+                    <code>appendRecreateLedgerEntry</code> in the background controller.
                 </li>
             </ul>
 
-            <h2>Final Acceptance Checklist</h2>
+            <h2>Command Matrix</h2>
             <table>
                 <thead>
                     <tr>
-                        <th>Requirement</th>
+                        <th>Command</th>
                         <th>Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td><code>main</code> clean and aligned with <code>origin/main</code>.</td>
-                        <td class="pending">Passed before release; repeat after this ledger PR merge</td>
+                        <td><code>sed -n '1,260p' goal-objective.md</code></td>
+                        <td class="pass">Read objective</td>
                     </tr>
                     <tr>
-                        <td>Stale branches safely handled or explicitly left with reason.</td>
-                        <td class="pass">Explicitly left with reason</td>
+                        <td><code>git switch codex/video-gif-recreate</code></td>
+                        <td class="pass">Switched branch</td>
                     </tr>
                     <tr>
-                        <td>All local validation commands passed.</td>
-                        <td class="pass">Passed</td>
+                        <td><code>peekaboo image --app 'Google Chrome' --mode window</code></td>
+                        <td class="pass">Captured Grok Imagine screenshot</td>
                     </tr>
                     <tr>
-                        <td>Live Image Recreate run recorded with openable output evidence.</td>
-                        <td class="pass">Passed</td>
+                        <td><code>mcp__computer_use.get_app_state({ app: 'Google Chrome' })</code></td>
+                        <td class="pass">Confirmed the Chrome permission blocker was cleared on retry</td>
                     </tr>
                     <tr>
-                        <td>Release notes accurately describe <code>v0.2.0</code>.</td>
-                        <td class="pass">Published in GitHub release</td>
+                        <td><code>mcp__computer_use.click(element_index: 374)</code></td>
+                        <td class="pass">Switched live Grok Imagine composer to Video mode</td>
+                    </tr>
+                    <tr>
+                        <td><code>peekaboo paste --text ... --app 'Google Chrome'</code></td>
+                        <td class="pass">Confirmed prompt entry and enabled Submit state without submitting</td>
+                    </tr>
+                    <tr>
+                        <td><code>curl -I https://imagine-public.x.ai/...mp4</code></td>
+                        <td class="pass">Confirmed unauthenticated 403</td>
+                    </tr>
+                    <tr>
+                        <td><code>npm run test:unit</code></td>
+                        <td class="pass">Passed, 298 tests after contact-sheet sampling and post-navigation recovery patches</td>
                     </tr>
                     <tr>
                         <td>
-                            Extension zip built from reviewed allowlist and contains no secrets.
+                            <code>npm run test:unit -- --runInBand tests/unit/recreateWorkflowContent.test.js tests/unit/recreateWorkflowBackground.test.js tests/unit/recreateWorkflowUtils.test.js tests/unit/promptHistoryManager.test.js</code>
                         </td>
-                        <td class="pass">Published artifact passed hash, manifest, path, and secret scans</td>
+                        <td class="pass">
+                            Passed focused regression tests covering opened-post video validation,
+                            authenticated Grok video URLs, prompt capture hint, contact-sheet sampling,
+                            and message-channel recovery.
+                        </td>
                     </tr>
                     <tr>
-                        <td>
-                            GitHub release <code>v0.2.0</code> exists at intended
-                            <code>main</code> commit.
+                        <td><code>npm run test:unit -- --runInBand tests/unit/recreateWorkflowBackground.test.js</code></td>
+                        <td class="pass">
+                            Passed after adding a regression for the live fourth-pass failure where
+                            the Imagine submit message stayed pending but the tab had already
+                            navigated to a generated post.
                         </td>
+                    </tr>
+                    <tr>
+                        <td><code>npm run test:e2e</code></td>
+                        <td class="pass">Passed, 14 Playwright tests</td>
+                    </tr>
+                    <tr>
+                        <td><code>npm run lint</code></td>
                         <td class="pass">Passed</td>
                     </tr>
                     <tr>
-                        <td>Release artifact downloads and matches reviewed manifest.</td>
-                        <td class="pass">Passed</td>
+                        <td><code>npm run package:extension -- --out /tmp/grok-power-tools-video-gif-recreate.zip</code></td>
+                        <td class="pass">
+                            Passed. Artifact SHA-256:
+                            <code>7bc86d757f2d811718c7fdc452fb452c9103d98e86afe62c8a74fd6d88338ea3</code>
+                        </td>
                     </tr>
                     <tr>
-                        <td>Local repo clean after branch cleanup.</td>
-                        <td class="pending">Pending only this docs-only ledger PR merge</td>
+                        <td><code>zipinfo -1 /tmp/grok-power-tools-video-gif-recreate.zip</code> and extracted artifact scan</td>
+                        <td class="pass">
+                            Zip contains only the allowlisted extension runtime files. Secret-pattern
+                            scan matched code identifiers and UI labels only, not credential values.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>gh pr view 7 --json url,isDraft,state,mergeStateStatus,statusCheckRollup</code></td>
+                        <td class="pass">
+                            Draft PR is open, merge state is <code>CLEAN</code>, and GitHub CI passed
+                            for Extension, Web, and Cloud Worker jobs.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Live canonical Grok run after manual reload</td>
+                        <td class="pass">
+                            Overlay reached <code>Generated video ready.</code> and generated playable
+                            post
+                            <code>https://grok.com/imagine/post/b1ff9507-8c4b-4de6-a626-a64412d843e5</code>
+                            with a ready <code>assets.grok.com</code> video element.
+                        </td>
                     </tr>
                 </tbody>
             </table>
+
+            <h2>Final Acceptance Checklist</h2>
+            <ul>
+                <li class="pass">
+                    Spec written in
+                    <code>docs/superpowers/specs/2026-06-24-video-gif-recreate-design.md</code>;
+                    committed and pushed.
+                </li>
+                <li class="pass">Video/GIF recreate implementation built, committed, and pushed on <code>codex/video-gif-recreate</code>.</li>
+                <li class="pass">Focused unit, full unit, e2e, and lint checks pass after the latest recovery patch.</li>
+                <li class="pass">Live canonical clip rerun passed after manual unpacked-extension reload.</li>
+                <li class="pass">
+                    Live Grok generated playable videos on
+                    <code>https://grok.com/imagine/post/ccbf27fa-13ae-48cc-82e1-4716b1fc730c</code>
+                    and
+                    <code>https://grok.com/imagine/post/39296bd5-388e-45c0-9f18-c16d4d51d7f7</code>,
+                    plus patched-runtime discovery produced playable
+                    <code>https://grok.com/imagine/post/ce2f882b-ac4c-4ca5-b4b8-bf081915000f</code>
+                    and final acceptance produced playable
+                    <code>https://grok.com/imagine/post/b1ff9507-8c4b-4de6-a626-a64412d843e5</code>.
+                </li>
+                <li class="pass">Extension overlay reported <code>Generated video ready.</code> after reload and rerun with the post-navigation recovery patch.</li>
+                <li class="pending">Draft PR opened with green CI; merge is pending final notes commit.</li>
+            </ul>
         </main>
     </body>
 </html>

@@ -139,6 +139,37 @@ describe('background recreate workflow wiring', () => {
         );
     });
 
+    test('fetches public Grok shared videos as normalized video data URLs', async () => {
+        global.chrome = mockChromeForBackground();
+        global.fetch = jest.fn(() =>
+            Promise.resolve({
+                ok: true,
+                blob: () =>
+                    Promise.resolve({
+                        size: 5,
+                        type: 'video/mp4',
+                        arrayBuffer: () => Promise.resolve(Uint8Array.from([104, 101, 108, 108, 111]).buffer)
+                    })
+            })
+        );
+
+        const background = require('../../background.js');
+        await expect(
+            background.fetchRecreateReferenceDataUrl(
+                'https://imagine-public.x.ai/imagine-public/share-videos/reference_1080_hd.mp4'
+            )
+        ).resolves.toEqual({
+            dataUrl: 'data:video/mp4;base64,aGVsbG8=',
+            mimeType: 'video/mp4',
+            byteLength: 5,
+            kind: 'video'
+        });
+        expect(global.fetch).toHaveBeenCalledWith(
+            'https://imagine-public.x.ai/imagine-public/share-videos/reference_1080_hd.mp4',
+            { credentials: 'omit' }
+        );
+    });
+
     test('dispatches native clicks through the Chrome debugger API', async () => {
         global.chrome = mockChromeForBackground();
 
