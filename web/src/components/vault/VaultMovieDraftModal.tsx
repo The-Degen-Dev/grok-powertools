@@ -28,6 +28,7 @@ export default function VaultMovieDraftModal({
   overlays,
   filteredAssetIds,
   selectedAssetIds,
+  defaultOpenFirstMovie = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -35,13 +36,14 @@ export default function VaultMovieDraftModal({
   overlays: VaultOverlay[];
   filteredAssetIds: string[];
   selectedAssetIds: string[];
+  defaultOpenFirstMovie?: boolean;
 }) {
   const router = useRouter();
   const [scope, setScope] = useState<VaultDraftScope>(() => defaultScopeForSelection(selectedAssetIds));
   const [recipe, setRecipe] = useState<VaultDraftRecipe>(() => defaultRecipeForSelection(selectedAssetIds));
   const [maxClipsPerMovie, setMaxClipsPerMovie] = useState(10);
   const [maxMovies, setMaxMovies] = useState(4);
-  const [openFirstMovie, setOpenFirstMovie] = useState(false);
+  const [openFirstMovie, setOpenFirstMovie] = useState(defaultOpenFirstMovie);
   const [creating, setCreating] = useState(false);
   const [createdMovies, setCreatedMovies] = useState<Movie[]>([]);
   const [createdSkippedCount, setCreatedSkippedCount] = useState(0);
@@ -52,11 +54,11 @@ export default function VaultMovieDraftModal({
     setRecipe(defaultRecipeForSelection(selectedAssetIds));
     setMaxClipsPerMovie(10);
     setMaxMovies(4);
-    setOpenFirstMovie(false);
+    setOpenFirstMovie(defaultOpenFirstMovie);
     setCreating(false);
     setCreatedMovies([]);
     setCreatedSkippedCount(0);
-  }, [open, selectedAssetIds]);
+  }, [defaultOpenFirstMovie, open, selectedAssetIds]);
 
   const preview = useMemo(
     () =>

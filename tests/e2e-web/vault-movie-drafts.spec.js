@@ -116,3 +116,13 @@ test("Vault Build Movies can create favorite drafts", async ({ page }) => {
   const draft = movies.find((movie) => movie.name.includes("Favorite Video Draft"));
   expect(draft.clips.map((clip) => clip.sourceAssetId)).toEqual(["asset-video-2"]);
 });
+
+test("Movie Maker exposes Build from Vault after Vault assets are committed", async ({ page }) => {
+  await resetDb(page);
+  await commitVault(page);
+  await page.goto("/movie");
+  await page.getByRole("button", { name: /Build from Vault/i }).click();
+  await page.getByLabel(/Recipe/i).selectOption("recent");
+  await page.getByRole("button", { name: /Create movie drafts/i }).click();
+  await expect(page).toHaveURL(/\/movie\?id=/);
+});

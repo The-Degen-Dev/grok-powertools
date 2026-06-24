@@ -4,9 +4,12 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Film, Trash2, Pencil } from "lucide-react";
 import type { Movie } from "@/lib/types";
-import { getAllMovies, createMovie, deleteMovie, updateMovie } from "@/lib/local-storage";
+import { getAllMovies, createMovie, deleteMovie, updateMovie, getDB } from "@/lib/local-storage";
+import { getVaultAssets, getVaultOverlays } from "@/lib/vault-storage";
+import type { VaultAsset, VaultOverlay } from "@/lib/vault-types";
 import Button from "@/components/ui/Button";
 import EmptyState from "@/components/ui/EmptyState";
+import VaultMovieDraftModal from "@/components/vault/VaultMovieDraftModal";
 
 export default function MovieList() {
   const router = useRouter();
@@ -14,10 +17,24 @@ export default function MovieList() {
   const [loaded, setLoaded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [showVaultBuilder, setShowVaultBuilder] = useState(false);
+  const [vaultAssets, setVaultAssets] = useState<VaultAsset[]>([]);
+  const [vaultOverlays, setVaultOverlays] = useState<VaultOverlay[]>([]);
 
   useEffect(() => {
-    getAllMovies().then((m) => {
-      setMovies(m);
+    async function load() {
+      const [nextMovies, db] = await Promise.all([getAllMovies(), getDB()]);
+      const [nextAssets, nextOverlays] = await Promise.all([getVaultAssets(db), getVaultOverlays(db)]);
+      setMovies(nextMovies);
+      setVaultAssets(nextAssets);
+      setVaultOverlays(nextOverlays);
+      setLoaded(true);
+    }
+
+    load().catch(() => {
+      setMovies([]);
+      setVaultAssets([]);
+      setVaultOverlays([]);
       setLoaded(true);
     });
   }, []);
@@ -61,10 +78,16 @@ export default function MovieList() {
         <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-(--color-surface-900) dark:text-(--color-surface-100)">
           Movie Maker
         </h1>
-        <Button variant="primary" onClick={handleCreate}>
-          <Plus className="h-4 w-4" />
-          New Movie
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => setShowVaultBuilder(true)} disabled={vaultAssets.length === 0}>
+            <Film className="h-4 w-4" />
+            Build from Vault
+          </Button>
+          <Button variant="primary" onClick={handleCreate}>
+            <Plus className="h-4 w-4" />
+            New Movie
+          </Button>
+        </div>
       </div>
 
       {movies.length === 0 ? (
@@ -141,6 +164,15 @@ export default function MovieList() {
           ))}
         </div>
       )}
+      <VaultMovieDraftModal
+        open={showVaultBuilder}
+        onClose={() => setShowVaultBuilder(false)}
+        assets={vaultAssets}
+        overlays={vaultOverlays}
+        filteredAssetIds={vaultAssets.map((asset) => asset.assetId)}
+        selectedAssetIds={[]}
+        defaultOpenFirstMovie
+      />
     </div>
   );
 }
