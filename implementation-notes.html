@@ -691,6 +691,75 @@
                 </tbody>
             </table>
 
+            <h2>Vault Movie Drafts Goal Run</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Note</th>
+                        <th>Evidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Started execution for Vault movie draft generation and Movie Maker
+                            playback stabilization in an isolated worktree.
+                        </td>
+                        <td>
+                            Original checkout was on <code>codex/video-gif-recreate</code> with
+                            unrelated dirty extension/recreate files and did not contain the
+                            approved Vault movie plan/spec. Created
+                            <code>codex/vault-movie-drafts-exec</code> at
+                            <code>492dfc5</code> under
+                            <code>/Users/philipbankier/.codex/worktrees/vault-movie-drafts-exec/chrome-extension-powertools</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Preserved this existing release ledger and appended a new Goal run
+                            section instead of replacing prior notes.
+                        </td>
+                        <td>
+                            The objective requires <code>implementation-notes.html</code> to remain
+                            the live audit log. Earlier release entries remain above this section.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Task 1 builder work was implemented by subagent Hooke and reviewed by
+                            the controller.
+                        </td>
+                        <td>
+                            Commit <code>843ada4</code> added
+                            <code>web/src/lib/vault-movie-drafts.ts</code>,
+                            <code>web/src/lib/vault-movie-drafts.test.ts</code>, and Vitest wiring.
+                            Worker evidence included a failing-first focused test, passing focused
+                            test, passing web lint, passing web build, and staged secret scan. The
+                            controller reran
+                            <code>npm --prefix web run test:unit -- vault-movie-drafts</code>; all
+                            five tests passed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Controller tightened the hidden-overlay rule before moving to UI work.
+                        </td>
+                        <td>
+                            Commit <code>5948b52</code> changed draft building to exclude hidden
+                            local overlays for the visible verified scope. Evidence:
+                            <code>npm --prefix web run test:unit -- vault-movie-drafts</code>,
+                            <code>npm --prefix web run lint</code>, and
+                            <code>npm --prefix web run build</code> all passed.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
             <h2>Open Questions</h2>
             <ul>
                 <li>
