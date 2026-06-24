@@ -46,6 +46,14 @@ function assetText(page, assetId) {
   return page.getByText(assetId, { exact: true });
 }
 
+async function addAssetToCollection(page, assetId) {
+  await page
+    .locator("article")
+    .filter({ hasText: assetId })
+    .getByRole("button", { name: /Add to Collection/i })
+    .click();
+}
+
 async function waitForNewCollectionItems(page, expectedCount) {
   await page.waitForFunction(
     async (count) => {
@@ -114,13 +122,15 @@ test("preview commit stores Vault assets and survives reload", async ({ page }) 
   await resetDb(page);
   await page.goto("/vault");
   await page.getByRole("button", { name: /Preview Vault/i }).click();
-  await expect(page.getByText(/3 assets/i)).toBeVisible();
+  await expect(page.getByText(/4 assets/i)).toBeVisible();
   await page.getByRole("button", { name: /Commit Vault/i }).click();
   await expect(assetText(page, "asset-video-1")).toBeVisible();
+  await expect(assetText(page, "asset-video-2")).toBeVisible();
   await expect(assetText(page, "asset-image-1")).toBeVisible();
   await expect(assetText(page, "zz-page-2-image")).toBeVisible();
   await page.reload();
   await expect(assetText(page, "asset-video-1")).toBeVisible();
+  await expect(assetText(page, "asset-video-2")).toBeVisible();
   await expect(assetText(page, "asset-image-1")).toBeVisible();
   await expect(assetText(page, "zz-page-2-image")).toBeVisible();
 });
@@ -256,9 +266,9 @@ test("Vault assets can become a collection and watch queue", async ({ page }) =>
   await page.goto("/vault");
   await page.getByRole("button", { name: /Preview Vault/i }).click();
   await page.getByRole("button", { name: /Commit Vault/i }).click();
-  const addButtons = page.getByRole("button", { name: /Add to Collection/i });
-  await addButtons.nth(0).click();
-  await addButtons.nth(1).click();
+  await addAssetToCollection(page, "asset-image-1");
+  await addAssetToCollection(page, "asset-video-1");
+  await waitForNewCollectionItems(page, 2);
 
   let collectionState = null;
   await expect
@@ -322,9 +332,8 @@ test("Movie Maker can persist mixed image and video clips from Vault", async ({ 
   await page.goto("/vault");
   await page.getByRole("button", { name: /Preview Vault/i }).click();
   await page.getByRole("button", { name: /Commit Vault/i }).click();
-  const addButtons = page.getByRole("button", { name: /Add to Collection/i });
-  await addButtons.nth(0).click();
-  await addButtons.nth(1).click();
+  await addAssetToCollection(page, "asset-image-1");
+  await addAssetToCollection(page, "asset-video-1");
   await waitForNewCollectionItems(page, 2);
   await page.getByRole("link", { name: /Collections/i }).click();
   await page.getByRole("button", { name: /Watch All/i }).click();
@@ -334,7 +343,7 @@ test("Movie Maker can persist mixed image and video clips from Vault", async ({ 
   await expect(assetText(page, "asset-image-1")).toBeVisible();
   const range = page.locator('input[type="range"]');
   await range.evaluate((input) => {
-    input.value = "5.5";
+    input.value = "1";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
@@ -355,9 +364,8 @@ test("Movie Maker source picker preserves Vault source assets", async ({ page })
   await page.goto("/vault");
   await page.getByRole("button", { name: /Preview Vault/i }).click();
   await page.getByRole("button", { name: /Commit Vault/i }).click();
-  const addButtons = page.getByRole("button", { name: /Add to Collection/i });
-  await addButtons.nth(0).click();
-  await addButtons.nth(1).click();
+  await addAssetToCollection(page, "asset-video-1");
+  await addAssetToCollection(page, "asset-image-1");
   await waitForNewCollectionItems(page, 2);
   await page.goto("/movie");
   await page.getByRole("button", { name: /New Movie/i }).first().click();
@@ -457,8 +465,8 @@ test("Ops shows Vault proof and does not mark Worker health as object proof", as
   await expect(page.getByLabel(/Health endpoint verified/i)).toBeVisible();
   await expect(page.getByLabel(/Worker host 127\.0\.0\.1/i)).toBeVisible();
   await expect(page.getByLabel(/Key prefix grok-powertools\/v1/i)).toBeVisible();
-  await expect(page.getByLabel(/R2 preview 3 assets/i)).toBeVisible();
-  await expect(page.getByLabel(/Committed locally 3 assets/i)).toBeVisible();
+  await expect(page.getByLabel(/R2 preview 4 assets/i)).toBeVisible();
+  await expect(page.getByLabel(/Committed locally 4 assets/i)).toBeVisible();
   await expect(page.getByLabel(/Metadata proof 2 prompts/i)).toBeVisible();
   await expect(page.getByLabel(/Latest import committed/i)).toBeVisible();
   await expect(page.getByLabel(/Open gaps 2 gaps/i)).toBeVisible();

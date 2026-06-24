@@ -1,6 +1,6 @@
 "use client";
 
-import { Grid2X2, List } from "lucide-react";
+import { Film, Grid2X2, List } from "lucide-react";
 import Button from "@/components/ui/Button";
 import type { VaultAsset, VaultMediaType, VaultOverlay, VaultSourceStatus } from "@/lib/vault-types";
 import VaultMediaCard from "./VaultMediaCard";
@@ -32,6 +32,7 @@ export default function VaultGrid({
   onAddToCollection,
   onAddToMovie,
   onOverlayChange,
+  onBuildMovies,
 }: {
   assets: VaultAsset[];
   allAssetsCount: number;
@@ -56,6 +57,7 @@ export default function VaultGrid({
   onAddToCollection: (asset: VaultAsset) => void;
   onAddToMovie: (asset: VaultAsset) => void;
   onOverlayChange: (assetId: string, patch: Partial<Pick<VaultOverlay, "favorite" | "hidden" | "notes" | "tags">>) => void;
+  onBuildMovies: () => void;
 }) {
   const selectedCount = selectedAssetIds.size;
 
@@ -120,10 +122,20 @@ export default function VaultGrid({
           {selectedCount > 0 && (
             <div className="flex flex-wrap items-center gap-2">
               <span>{selectedCount} selected</span>
+              <Button size="sm" variant="primary" onClick={onBuildMovies}>
+                <Film className="h-3.5 w-3.5" />
+                Build Movies
+              </Button>
               <Button size="sm" onClick={onBulkFavorite}>Favorite selected</Button>
               <Button size="sm" variant="danger" onClick={onBulkHide}>Hide selected locally</Button>
               <Button size="sm" variant="ghost" onClick={onClearSelection}>Clear selection</Button>
             </div>
+          )}
+          {selectedCount === 0 && (
+            <Button size="sm" variant="secondary" onClick={onBuildMovies}>
+              <Film className="h-3.5 w-3.5" />
+              Build Movies
+            </Button>
           )}
         </div>
       </div>

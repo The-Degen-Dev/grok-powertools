@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/Toast";
 import VaultLoadPanel from "./VaultLoadPanel";
 import VaultGrid from "./VaultGrid";
 import VaultMediaViewer from "./VaultMediaViewer";
+import VaultMovieDraftModal from "./VaultMovieDraftModal";
 import VaultRepairWorkbench from "./VaultRepairWorkbench";
 import { createCollection, createMovie, getAllCollections, getAllMovies, getDB, updateCollection, updateMovie } from "@/lib/local-storage";
 import { commitVaultPreview, getVaultAssets, getVaultOverlays, putVaultOverlay } from "@/lib/vault-storage";
@@ -75,6 +76,7 @@ export default function VaultPage() {
   const [statusFilter, setStatusFilter] = useState<VaultSourceStatus | "all">("all");
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>("visible");
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(() => new Set());
+  const [showMovieDraftModal, setShowMovieDraftModal] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -258,9 +260,18 @@ export default function VaultPage() {
           onAddToCollection={handleAddToCollection}
           onAddToMovie={handleAddToMovie}
           onOverlayChange={handleOverlayChange}
+          onBuildMovies={() => setShowMovieDraftModal(true)}
         />
       </section>
       <VaultMediaViewer asset={viewerAsset} onClose={() => setViewerAsset(null)} />
+      <VaultMovieDraftModal
+        open={showMovieDraftModal}
+        onClose={() => setShowMovieDraftModal(false)}
+        assets={assets}
+        overlays={overlays}
+        filteredAssetIds={filteredAssets.map((asset) => asset.assetId)}
+        selectedAssetIds={[...selectedAssetIds]}
+      />
     </div>
   );
 }

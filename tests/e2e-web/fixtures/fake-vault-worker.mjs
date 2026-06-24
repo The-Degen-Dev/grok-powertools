@@ -28,6 +28,27 @@ const fixtureAssets = [
     updatedAt: "2026-06-18T00:00:00.000Z",
   },
   {
+    assetId: "asset-video-2",
+    mediaType: "video",
+    canonicalObjectKey: "grok-powertools/v1/users/greymaker/media/by-asset/asset-video-2.mp4",
+    legacyObjectKeys: [],
+    contentType: "video/mp4",
+    sizeBytes: 1024,
+    etag: "etag-video-2",
+    sha256: "sha-video-2",
+    sourceUrl: "https://grok.com/imagine/post/post-video-2",
+    grokPostId: "post-video-2",
+    promptId: "prompt-1",
+    promptText: "A cinematic neon canyon flythrough.",
+    durationSeconds: 5,
+    firstSeenAt: "2026-06-18T00:00:02.000Z",
+    lastSeenAt: "2026-06-18T00:00:02.000Z",
+    verificationStatus: "verified",
+    gapCodes: [],
+    createdAt: "2026-06-18T00:00:02.000Z",
+    updatedAt: "2026-06-18T00:00:02.000Z",
+  },
+  {
     assetId: "asset-image-1",
     mediaType: "image",
     canonicalObjectKey: "grok-powertools/v1/users/greymaker/media/by-asset/asset-image-1.png",
@@ -87,8 +108,8 @@ const fixturePrompts = [
     id: "prompt-1",
     text: "A cinematic neon canyon flythrough.",
     tags: ["vault"],
-    sourceAssetIds: ["asset-video-1"],
-    usageCount: 1,
+    sourceAssetIds: ["asset-video-1", "asset-video-2"],
+    usageCount: 2,
     createdAt: "2026-06-18T00:00:00.000Z",
   },
   {
@@ -166,7 +187,7 @@ const server = http.createServer((req, res) => {
       ok: true,
       items: fixtureAssets,
       nextCursor: "page-2",
-      counts: { assets: 3, images: 1, videos: 1, verified: 3, blocked: 0, failed: 0, unproven: 0 },
+      counts: { assets: 4, images: 1, videos: 2, verified: 4, blocked: 0, failed: 0, unproven: 0 },
     });
   }
 
