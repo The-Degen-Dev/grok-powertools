@@ -9,30 +9,52 @@ const DB_VERSION = 5;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
+function ensureIndex(
+  store: { indexNames: DOMStringList; createIndex: (name: string, keyPath: string) => unknown },
+  name: string,
+  keyPath: string,
+): void {
+  if (!store.indexNames.contains(name)) {
+    store.createIndex(name, keyPath);
+  }
+}
+
 export function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
-        if (oldVersion < 1) {
+      upgrade(db, _oldVersion, _newVersion, transaction) {
+        if (!db.objectStoreNames.contains("collections")) {
           const collectionStore = db.createObjectStore("collections", {
             keyPath: "id",
           });
           collectionStore.createIndex("by-status", "status");
           collectionStore.createIndex("by-updated", "updatedAt");
+        } else {
+          const collectionStore = transaction.objectStore("collections");
+          ensureIndex(collectionStore, "by-status", "status");
+          ensureIndex(collectionStore, "by-updated", "updatedAt");
+        }
+        if (!db.objectStoreNames.contains("settings")) {
           db.createObjectStore("settings");
         }
-        if (oldVersion < 2) {
+        if (!db.objectStoreNames.contains("movies")) {
           const movieStore = db.createObjectStore("movies", { keyPath: "id" });
           movieStore.createIndex("by-updated", "updatedAt");
+        } else {
+          const movieStore = transaction.objectStore("movies");
+          ensureIndex(movieStore, "by-updated", "updatedAt");
         }
-        if (oldVersion < 3) {
+        if (!db.objectStoreNames.contains("prompts")) {
           const promptStore = db.createObjectStore("prompts", { keyPath: "id" });
           promptStore.createIndex("by-created", "createdAt");
+        } else {
+          const promptStore = transaction.objectStore("prompts");
+          ensureIndex(promptStore, "by-created", "createdAt");
+        }
+        if (!db.objectStoreNames.contains("sync_meta")) {
           db.createObjectStore("sync_meta");
         }
-        if (oldVersion < 5) {
-          upgradeVaultStores(db);
-        }
+        upgradeVaultStores(db);
       },
     });
   }
