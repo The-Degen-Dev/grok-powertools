@@ -354,13 +354,33 @@
                         <td class="pending">Needs reload and rerun</td>
                     </tr>
                     <tr>
+                        <td>Live canonical URL run, fourth pass</td>
+                        <td>
+                            After reload, the overlay accepted
+                            <code>https://grok.com/imagine/post/9171bd6b-496d-49ee-a91e-e82c9e392b6c</code>
+                            as a Grok post video URL and advanced from chat into Imagine submission.
+                            Grok generated
+                            <code>https://grok.com/imagine/post/ce2f882b-ac4c-4ca5-b4b8-bf081915000f</code>.
+                            The generated video was playable at
+                            <code>readyState:4</code>, <code>duration:10.041667</code>,
+                            <code>videoWidth:416</code>, <code>videoHeight:752</code>, with an
+                            authenticated <code>assets.grok.com/.../generated_video.mp4?cache=1</code>
+                            URL. The source overlay remained stuck at
+                            <code>imagine: Submitting prompt and waiting for generated video...</code>
+                            because the original Imagine-step message stayed pending after Grok
+                            navigated the submission tab to the post.
+                        </td>
+                        <td class="pending">Controller patched</td>
+                    </tr>
+                    <tr>
                         <td>Current live blocker</td>
                         <td>
                             Chrome-control policy blocks direct navigation to
                             <code>chrome://extensions/</code>, so the unpacked extension must be
-                            manually reloaded before the patched background/content scripts can be
-                            proven live. Local tests cover the exact channel-closed failure and the
-                            opened-post playable-video verifier path.
+                            manually reloaded before the latest post-navigation recovery patch can be
+                            proven live. Local tests cover the channel-closed failure, the pending
+                            Imagine message with post-navigation recovery, and the opened-post
+                            playable-video verifier path.
                         </td>
                         <td class="blocked">Manual reload needed</td>
                     </tr>
@@ -491,7 +511,7 @@
             <ul>
                 <li>
                     After manual extension reload, rerun the canonical URL flow and verify the overlay
-                    reaches <code>Generated video ready.</code> on the post-validation fallback path.
+                    reaches <code>Generated video ready.</code> on the post-navigation recovery path.
                 </li>
                 <li>
                     Confirm the run ledger entry for the successful video run includes source hash,
@@ -538,7 +558,7 @@
                     </tr>
                     <tr>
                         <td><code>npm run test:unit</code></td>
-                        <td class="pass">Passed, 297 tests after contact-sheet sampling and post-navigation recovery patches</td>
+                        <td class="pass">Passed, 298 tests after contact-sheet sampling and post-navigation recovery patches</td>
                     </tr>
                     <tr>
                         <td>
@@ -548,6 +568,14 @@
                             Passed focused regression tests covering opened-post video validation,
                             authenticated Grok video URLs, prompt capture hint, contact-sheet sampling,
                             and message-channel recovery.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>npm run test:unit -- --runInBand tests/unit/recreateWorkflowBackground.test.js</code></td>
+                        <td class="pass">
+                            Passed after adding a regression for the live fourth-pass failure where
+                            the Imagine submit message stayed pending but the tab had already
+                            navigated to a generated post.
                         </td>
                     </tr>
                     <tr>
@@ -562,7 +590,7 @@
                         <td><code>npm run package:extension -- --out /tmp/grok-power-tools-video-gif-recreate.zip</code></td>
                         <td class="pass">
                             Passed. Artifact SHA-256:
-                            <code>dc405bfe9d46d8659a5ee5cc4bdd632ec88a05619fe87ea5adc7d5689f5f1b8f</code>
+                            <code>7bc86d757f2d811718c7fdc452fb452c9103d98e86afe62c8a74fd6d88338ea3</code>
                         </td>
                     </tr>
                     <tr>
@@ -596,9 +624,11 @@
                     Live Grok generated playable videos on
                     <code>https://grok.com/imagine/post/ccbf27fa-13ae-48cc-82e1-4716b1fc730c</code>
                     and
-                    <code>https://grok.com/imagine/post/39296bd5-388e-45c0-9f18-c16d4d51d7f7</code>.
+                    <code>https://grok.com/imagine/post/39296bd5-388e-45c0-9f18-c16d4d51d7f7</code>,
+                    plus patched-runtime discovery produced playable
+                    <code>https://grok.com/imagine/post/ce2f882b-ac4c-4ca5-b4b8-bf081915000f</code>.
                 </li>
-                <li class="pending">Extension overlay must report <code>Generated video ready.</code> after reload and rerun.</li>
+                <li class="pending">Extension overlay must report <code>Generated video ready.</code> after reload and rerun with the post-navigation recovery patch.</li>
                 <li class="pending">Draft PR opened with green CI; merge is pending manual reload and final live validation.</li>
             </ul>
         </main>

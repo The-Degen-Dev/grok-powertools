@@ -204,10 +204,11 @@
             });
         }
 
-        async function waitForImaginePostReady(tabId, errorCode, phase) {
+        async function waitForImaginePostReady(tabId, errorCode, phase, options = {}) {
             const startedAt = now();
+            const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : tabReadyTimeoutMs;
 
-            while (now() - startedAt <= tabReadyTimeoutMs) {
+            while (now() - startedAt <= timeoutMs) {
                 const tab = await tabsGet(tabId, errorCode, phase);
                 if (tab && tab.status === 'complete' && isGrokImaginePostUrl(tab.url)) return tab;
                 await wait(tabReadyPollMs);
@@ -215,7 +216,7 @@
 
             throw createPhaseError(errorCode, phase, {
                 reason: 'post_navigation_timeout',
-                timeoutMs: tabReadyTimeoutMs
+                timeoutMs
             });
         }
 
@@ -471,6 +472,19 @@
             });
         }
 
+        async function recoverFromOpenedImaginePost(run, referenceKind, generatedPrompt, generatedMediaLabel) {
+            await waitForImaginePostReady(run.imagineTabId, 'imagine_tab_unavailable', 'imagine', {
+                timeoutMs: messageTimeoutMs
+            });
+            await sendStatus(run, 'imagine', `Validating opened Grok post ${generatedMediaLabel}...`, 'info');
+            ensureActive(run);
+            return await validateOpenedImaginePost(run, referenceKind, generatedPrompt);
+        }
+
+        function ignoreFailedPostRecovery(promise) {
+            return promise.catch(() => new Promise(() => {}));
+        }
+
         async function start(request = {}, context = {}) {
             if (activeRun) {
                 return buildFailure(activeRun, 'workflow', 'workflow_active');
@@ -570,15 +584,26 @@
                 ensureActive(run);
 
                 let imagineResponse;
+                const imagineMessage = {
+                    action: 'GPT_RECREATE_IMAGINE_STEP',
+                    runId: run.runId,
+                    generatedPrompt,
+                    targetMode: referenceKind,
+                    referenceKind,
+                    autoSubmit: true
+                };
+                const imagineSubmitPromise = tabsSendMessage(
+                    run.imagineTabId,
+                    imagineMessage,
+                    'imagine_tab_unavailable',
+                    'imagine'
+                );
+                const openedPostRecoveryPromise = ignoreFailedPostRecovery(
+                    recoverFromOpenedImaginePost(run, referenceKind, generatedPrompt, generatedMediaLabel)
+                );
+
                 try {
-                    imagineResponse = await tabsSendMessage(run.imagineTabId, {
-                        action: 'GPT_RECREATE_IMAGINE_STEP',
-                        runId: run.runId,
-                        generatedPrompt,
-                        targetMode: referenceKind,
-                        referenceKind,
-                        autoSubmit: true
-                    }, 'imagine_tab_unavailable', 'imagine');
+                    imagineResponse = await Promise.race([imagineSubmitPromise, openedPostRecoveryPromise]);
                 } catch (error) {
                     if (!isMessageChannelClosedError(error)) throw error;
                     await sendStatus(run, 'imagine', `Validating opened Grok post ${generatedMediaLabel}...`, 'info');

@@ -674,6 +674,95 @@ describe('recreate background controller', () => {
         }));
     });
 
+    test('recovers when Imagine submit message stays pending but tab navigates to a post', async () => {
+        const { chromeApi, createdTabs, messages } = createChromeHarness();
+        let imagineTabUrl = 'https://grok.com/imagine';
+        chromeApi.tabs.get = jest.fn((tabId, callback) => {
+            if (tabId === 11) {
+                callback({ id: tabId, url: imagineTabUrl, status: 'complete' });
+                return;
+            }
+            callback(createdTabs.find((tab) => tab.id === tabId) || {
+                id: tabId,
+                url: 'https://grok.com/imagine/post/source-video',
+                status: 'complete'
+            });
+        });
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, callback) => {
+            messages.push({ tabId, message });
+            if (message.action === 'GPT_RECREATE_CHAT_STEP') {
+                callback({
+                    ok: true,
+                    runId: message.runId,
+                    generatedPrompt: 'A handheld 10-second embrace.'
+                });
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_IMAGINE_STEP') {
+                imagineTabUrl = 'https://grok.com/imagine/post/live-pending-video-proof';
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_IMAGINE_POST_VALIDATION_STEP') {
+                callback({
+                    ok: true,
+                    runId: message.runId,
+                    mediaKind: 'video',
+                    submitted: true,
+                    resultReady: true,
+                    result: {
+                        mediaKind: 'video',
+                        sourceKind: 'trusted-grok-video',
+                        url: 'https://assets.grok.com/users/test/generated/live-pending-video-proof/generated_video.mp4?cache=1',
+                        openableSurface: 'opened-post-playable-video'
+                    }
+                });
+                return;
+            }
+            callback({ ok: true });
+        });
+        const controller = createRecreateWorkflowController({
+            chromeApi,
+            utils,
+            messageTimeoutMs: 50,
+            receiverRetryDelayMs: 0,
+            tabReadyPollMs: 0
+        });
+
+        const result = await controller.start(createStartRequest({
+            reference: {
+                name: 'sample.mp4',
+                kind: 'video',
+                mimeType: 'video/mp4',
+                dataUrl: 'data:video/mp4;base64,aGVsbG8=',
+                source: 'local'
+            }
+        }), {
+            sourceTabId: 1,
+            sourceTabUrl: 'https://grok.com/imagine/post/source-video'
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            ok: true,
+            referenceKind: 'video',
+            submitted: true,
+            resultReady: true
+        }));
+        expect(createdTabs.map((tab) => tab.url)).toEqual(['https://grok.com/', 'https://grok.com/imagine']);
+        expect(messages.some((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP')).toBe(true);
+        expect(messages.some((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_POST_VALIDATION_STEP')).toBe(true);
+        expect(getStatusMessages(messages)).toContainEqual(expect.objectContaining({
+            phase: 'imagine',
+            message: 'Validating opened Grok post video...',
+            type: 'info'
+        }));
+        expect(getStatusMessages(messages).at(-1)).toEqual(expect.objectContaining({
+            phase: 'done',
+            message: 'Generated video ready.',
+            type: 'success'
+        }));
+        expect(controller.getActiveRunForTest()).toBeNull();
+    });
+
     test('retries a newly created tab when receiver is not ready, then succeeds', async () => {
         const { chromeApi, messages } = createChromeHarness();
         let chatAttempts = 0;
