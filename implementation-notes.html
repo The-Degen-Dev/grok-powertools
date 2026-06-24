@@ -373,16 +373,19 @@
                         <td class="pending">Controller patched</td>
                     </tr>
                     <tr>
-                        <td>Current live blocker</td>
+                        <td>Final live validation after reload</td>
                         <td>
-                            Chrome-control policy blocks direct navigation to
-                            <code>chrome://extensions/</code>, so the unpacked extension must be
-                            manually reloaded before the latest post-navigation recovery patch can be
-                            proven live. Local tests cover the channel-closed failure, the pending
-                            Imagine message with post-navigation recovery, and the opened-post
-                            playable-video verifier path.
+                            After manual unpacked-extension reload, the overlay accepted the canonical
+                            source URL, moved from chat to Imagine, switched into post-navigation
+                            validation, and reached <code>Generated video ready.</code>. The generated
+                            post was
+                            <code>https://grok.com/imagine/post/b1ff9507-8c4b-4de6-a626-a64412d843e5</code>.
+                            The visible generated video used authenticated
+                            <code>assets.grok.com/.../generated_video.mp4?cache=1</code>, reached
+                            <code>readyState:4</code>, buffered <code>10.041667</code> seconds, and
+                            reported <code>videoWidth:416</code> and <code>videoHeight:752</code>.
                         </td>
-                        <td class="blocked">Manual reload needed</td>
+                        <td class="pass">Passed</td>
                     </tr>
                 </tbody>
             </table>
@@ -510,12 +513,12 @@
             <h2>Open Questions</h2>
             <ul>
                 <li>
-                    After manual extension reload, rerun the canonical URL flow and verify the overlay
-                    reaches <code>Generated video ready.</code> on the post-navigation recovery path.
-                </li>
-                <li>
-                    Confirm the run ledger entry for the successful video run includes source hash,
-                    prompt version, output URL, and output media hash without storing data URLs.
+                    Direct browser automation access to
+                    <code>chrome-extension://bcjoehhhmhpjmlmjhojcokmfeafcmimd/popup.html</code>
+                    was blocked by browser security policy, so the run ledger was not inspected
+                    directly through extension storage. The successful overlay state still proves the
+                    ledger write path ran because <code>Generated video ready.</code> is sent after
+                    <code>appendRecreateLedgerEntry</code> in the background controller.
                 </li>
             </ul>
 
@@ -607,6 +610,15 @@
                             for Extension, Web, and Cloud Worker jobs.
                         </td>
                     </tr>
+                    <tr>
+                        <td>Live canonical Grok run after manual reload</td>
+                        <td class="pass">
+                            Overlay reached <code>Generated video ready.</code> and generated playable
+                            post
+                            <code>https://grok.com/imagine/post/b1ff9507-8c4b-4de6-a626-a64412d843e5</code>
+                            with a ready <code>assets.grok.com</code> video element.
+                        </td>
+                    </tr>
                 </tbody>
             </table>
 
@@ -619,17 +631,19 @@
                 </li>
                 <li class="pass">Video/GIF recreate implementation built, committed, and pushed on <code>codex/video-gif-recreate</code>.</li>
                 <li class="pass">Focused unit, full unit, e2e, and lint checks pass after the latest recovery patch.</li>
-                <li class="blocked">Live canonical clip rerun needs manual unpacked-extension reload first.</li>
+                <li class="pass">Live canonical clip rerun passed after manual unpacked-extension reload.</li>
                 <li class="pass">
                     Live Grok generated playable videos on
                     <code>https://grok.com/imagine/post/ccbf27fa-13ae-48cc-82e1-4716b1fc730c</code>
                     and
                     <code>https://grok.com/imagine/post/39296bd5-388e-45c0-9f18-c16d4d51d7f7</code>,
                     plus patched-runtime discovery produced playable
-                    <code>https://grok.com/imagine/post/ce2f882b-ac4c-4ca5-b4b8-bf081915000f</code>.
+                    <code>https://grok.com/imagine/post/ce2f882b-ac4c-4ca5-b4b8-bf081915000f</code>
+                    and final acceptance produced playable
+                    <code>https://grok.com/imagine/post/b1ff9507-8c4b-4de6-a626-a64412d843e5</code>.
                 </li>
-                <li class="pending">Extension overlay must report <code>Generated video ready.</code> after reload and rerun with the post-navigation recovery patch.</li>
-                <li class="pending">Draft PR opened with green CI; merge is pending manual reload and final live validation.</li>
+                <li class="pass">Extension overlay reported <code>Generated video ready.</code> after reload and rerun with the post-navigation recovery patch.</li>
+                <li class="pending">Draft PR opened with green CI; merge is pending final notes commit.</li>
             </ul>
         </main>
     </body>
