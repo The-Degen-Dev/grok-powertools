@@ -4,15 +4,15 @@ Chrome extension tools for Grok Imagine workflows, prompt management, retry auto
 
 ## Features
 
-- Floating Grok overlay with prompt history, saved prompts, batch controls, auto-retry, video goals, Quality Repeat, and Image Recreate.
-- Image Recreate workflow that accepts a local, pasted, dropped, or current Grok image, asks Grok chat for a Grok Imagine prompt, and submits that prompt back into Grok Imagine.
+- Floating Grok overlay with prompt history, saved prompts, batch controls, auto-retry, video goals, Quality Repeat, and Recreate Media.
+- Recreate Media workflow that accepts a local, pasted, dropped, or current Grok image, plus local MP4/MOV/WebM/GIF or trusted Grok video/post URLs, asks Grok chat for a Grok Imagine prompt, and submits that prompt back into Grok Imagine.
 - Prompt history and saved prompt management backed by Chrome local storage, with settings import/export support.
 - Smart media scraper and raw image handling for Grok media surfaces.
 - Optional Cloudflare R2 backup through a bring-your-own Worker, with local-only, cloud-only, and dual-write modes.
 - Web app under `web/` for collections, prompt library, clip editing, movie workflows, sharing, auth, and sync.
 - Cloud Worker under `cloud/` for R2 upload, metadata, vault, repair, and sync routes.
 
-Short video and GIF recreation are not part of v0.2.0. They are future work.
+Short video and GIF recreation depend on Grok Imagine Video availability and are validated by a playable generated video/post, not by exact visual matching.
 
 ## Install Or Update The Extension
 
@@ -26,15 +26,15 @@ Short video and GIF recreation are not part of v0.2.0. They are future work.
 
 There is no extension build step. Chrome loads the raw MV3 files directly.
 
-## Image Recreate
+## Recreate Media
 
 1. Open `https://grok.com/imagine`.
 2. Open the Grok Power Tools overlay.
-3. In Recreate Image, choose, drop, paste, or select the current Grok image.
+3. In Recreate Media, choose, drop, paste, or select the current Grok image. You can also paste a trusted Grok Imagine post URL for video recreation.
 4. Optionally enable Grok Search for extra prompt-writing context.
 5. Click Start Recreate.
 
-The workflow uses Grok chat to analyze the reference and produce one `FINAL_IMAGINE_PROMPT`, then submits that prompt into Grok Imagine. Success should be judged by an actual generated Imagine result with openable media, not only by a submitted status.
+The workflow uses Grok chat to analyze the reference and produce one final Grok Imagine prompt, then submits that prompt into Grok Imagine. Success should be judged by an actual generated Imagine result with openable media, not only by a submitted status.
 
 ## Auto-Retry And Goals
 
@@ -64,10 +64,10 @@ Setup guide: [docs/CLOUD_R2_SETUP.md](docs/CLOUD_R2_SETUP.md)
 
 - Grok UI changes can break live automation selectors.
 - The unpacked extension must be manually reloaded in Chrome after file changes or release updates.
-- Image Recreate depends on Grok chat returning the expected final prompt marker and Grok Imagine accepting the generated prompt.
+- Recreate Media depends on Grok chat returning the expected final prompt marker and Grok Imagine accepting the generated prompt.
 - Generated results are model-dependent and are not guaranteed to match the reference exactly.
-- Animated GIF files can be used as image references, but GIF recreation as a motion workflow is not shipped.
-- Short video and GIF recreation are not shipped in v0.2.0.
+- Animated GIF frame sampling is limited by browser APIs; the GIF file is still treated as a motion reference.
+- Short video generation depends on Grok Imagine Video quota and current Grok UI behavior.
 
 ## Development
 

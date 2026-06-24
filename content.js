@@ -495,7 +495,7 @@ class PromptHistoryManager {
             const submitBtn = e.target.closest('button[aria-label="Submit"]');
             if (submitBtn) {
                 console.log('GPT: Submit clicked');
-                this.captureCurrentPrompt('image', submitBtn);
+                this.captureCurrentPrompt(this.consumePromptCaptureHint() || 'image', submitBtn);
             }
         }, true); // <--- Capture Phase
 
@@ -505,10 +505,18 @@ class PromptHistoryManager {
                 const ta = e.target.closest('textarea');
                 if (ta) {
                     console.log('GPT: Enter pressed with len', ta.value.length);
-                    this.captureCurrentPrompt('image', ta);
+                    this.captureCurrentPrompt(this.consumePromptCaptureHint() || 'image', ta);
                 }
             }
         }, true); // <--- Capture Phase
+    }
+
+    consumePromptCaptureHint() {
+        const root = document.documentElement;
+        const hintedType = root?.dataset?.gptPromptCaptureType;
+        if (hintedType !== 'video' && hintedType !== 'image') return '';
+        delete root.dataset.gptPromptCaptureType;
+        return hintedType;
     }
 
     captureCurrentPrompt(type = 'image', triggerEl = null) {
@@ -681,11 +689,11 @@ class GrokOverlay {
                     </div>
 
                     <div class="gpt-section" id="gptRecreateSection">
-                        <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Recreate Image</label>
+                        <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Recreate Media</label>
                         <div id="gptRecreateDropzone" tabindex="0" style="border:1px dashed rgba(255,255,255,0.25); border-radius:6px; padding:8px; font-size:11px; color:#c9d1d9; text-align:center;">
-                            Drop, paste, choose image, or use current Grok image
+                            Drop, paste, choose image/video/GIF, or use current Grok image
                         </div>
-                        <input type="file" id="gptRecreateFileInput" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,image/bmp,image/tiff" style="display:none;">
+                        <input type="file" id="gptRecreateFileInput" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,image/bmp,image/tiff,video/mp4,video/quicktime,video/webm" style="display:none;">
                         <div class="gpt-row" style="margin-top:6px; gap:4px;">
                             <button id="gptRecreateChooseBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; font-size:11px;">Choose</button>
                             <button id="gptRecreateCurrentBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; font-size:11px;">Current</button>
@@ -1034,10 +1042,19 @@ class GrokOverlay {
         this.recreatePasteHandler = async (event) => {
             if (!this.el || this.state.minimized || !this.isRecreatePasteTarget(event)) return;
             const item = Array.from(event.clipboardData?.items || [])
-                .find((clipboardItem) => clipboardItem.type.startsWith('image/'));
-            if (!item) return;
+                .find((clipboardItem) => {
+                    const type = String(clipboardItem.type || '');
+                    return type.startsWith('image/') || type.startsWith('video/');
+                });
             try {
-                await this.setRecreateReferenceFromFile(item.getAsFile(), 'paste');
+                if (item) {
+                    await this.setRecreateReferenceFromFile(item.getAsFile(), 'paste');
+                    return;
+                }
+
+                const pastedText = String(event.clipboardData?.getData('text/plain') || '').trim();
+                if (!pastedText) return;
+                this.setRecreateReferenceFromUrl(pastedText);
             } catch (error) {
                 this.setRecreateStatus(error.message || 'reference_invalid', 'error');
             }
@@ -1522,11 +1539,20 @@ class GrokOverlay {
         const allowedTypes = Array.isArray(utils.ALLOWED_RECREATE_MIME_TYPES)
             ? utils.ALLOWED_RECREATE_MIME_TYPES
             : [];
-        const maxBytes = Number(utils.MAX_REFERENCE_BYTES) || 0;
+        const mediaKind = typeof utils.getReferenceKindFromMimeType === 'function'
+            ? utils.getReferenceKindFromMimeType(file.type)
+            : (String(file.type || '').startsWith('video/') ? 'video' : 'image');
+        const maxBytes = mediaKind === 'video'
+            ? Number(utils.MAX_VIDEO_REFERENCE_BYTES) || 0
+            : Number(utils.MAX_REFERENCE_BYTES) || 0;
 
         if (!allowedTypes.includes(file.type) || file.size <= 0 || (maxBytes > 0 && file.size > maxBytes)) {
             throw new Error('reference_invalid');
         }
+    }
+
+    getRecreateReferenceKind() {
+        return this.recreateReference && this.recreateReference.kind === 'video' ? 'video' : 'image';
     }
 
     isRecreatePasteTarget(event) {
@@ -1590,7 +1616,7 @@ class GrokOverlay {
         this.recreateReference = await actions.readFileAsRecreateReference(file, source);
         const byteLength = Number(this.recreateReference && this.recreateReference.byteLength) || 0;
         const sizeText = byteLength > 0 ? ` (${Math.round(byteLength / 1024)} KB)` : '';
-        this.setRecreateStatus(`Selected ${this.recreateReference.name}${sizeText}`, 'success');
+        this.setRecreateStatus(`Selected ${this.getRecreateReferenceKind()}: ${this.recreateReference.name}${sizeText}`, 'success');
     }
 
     async setRecreateReferenceFromCurrentImage() {
@@ -1602,11 +1628,37 @@ class GrokOverlay {
         this.setRecreateStatus('Selected current Grok image.', 'success');
     }
 
+    setRecreateReferenceFromUrl(url) {
+        this.recreateReference = null;
+        const utils = this.getRecreateUtils();
+        const value = String(url || '').trim();
+        if (
+            !value ||
+            !(
+                typeof utils.isTrustedGrokPostUrl === 'function' && utils.isTrustedGrokPostUrl(value) ||
+                typeof utils.isTrustedGrokVideoUrl === 'function' && utils.isTrustedGrokVideoUrl(value)
+            )
+        ) {
+            throw new Error('reference_invalid');
+        }
+
+        const source = typeof utils.isTrustedGrokPostUrl === 'function' && utils.isTrustedGrokPostUrl(value)
+            ? 'grok-post-url'
+            : 'grok-video-url';
+        this.recreateReference = utils.normalizeRecreateReference({
+            kind: 'video',
+            name: source === 'grok-post-url' ? 'grok-post-video.mp4' : 'grok-reference-video.mp4',
+            url: value,
+            source
+        });
+        this.setRecreateStatus(source === 'grok-post-url' ? 'Selected Grok post video URL.' : 'Selected Grok video URL.', 'success');
+    }
+
     async startRecreateWorkflow() {
         if (this.recreateRunning) return;
 
         if (!this.recreateReference) {
-            this.setRecreateStatus('Select a reference image first.', 'error');
+            this.setRecreateStatus('Select a reference media file first.', 'error');
             return;
         }
 
@@ -1633,7 +1685,8 @@ class GrokOverlay {
             }
 
             if (response && response.ok) {
-                this.setRecreateStatus('Generated image ready.', 'success');
+                const label = response.referenceKind === 'video' || this.getRecreateReferenceKind() === 'video' ? 'video' : 'image';
+                this.setRecreateStatus(`Generated ${label} ready.`, 'success');
             } else {
                 this.setRecreateStatus(this.formatRecreateStatus(response), 'error');
             }
@@ -2884,7 +2937,13 @@ function isSensitiveRecreateDiagnosticKey(key) {
 }
 
 function scrubRecreateDiagnosticValue(value) {
-    if (typeof value === 'string' && value.trimStart().startsWith('data:image/')) return undefined;
+    if (
+        typeof value === 'string' &&
+        (
+            value.trimStart().startsWith('data:image/') ||
+            value.trimStart().startsWith('data:video/')
+        )
+    ) return undefined;
 
     if (Array.isArray(value)) {
         return value.map((entry) => scrubRecreateDiagnosticValue(entry)).filter((entry) => typeof entry !== 'undefined');
@@ -2936,10 +2995,19 @@ class RecreateWorkflowContentBridge {
                 this.runAsyncStep(async () => {
                     const response = await this.getAction('runImagineSubmitStep')(request);
                     if (response && response.ok && request.generatedPrompt) {
-                        this.recordGeneratedPrompt(request.generatedPrompt);
+                        this.recordGeneratedPrompt(request.generatedPrompt, request.targetMode || request.referenceKind || response.mediaKind);
                     }
                     return response;
                 }, sendResponse, request.runId);
+                return true;
+            }
+
+            if (request.action === 'GPT_RECREATE_IMAGINE_POST_VALIDATION_STEP') {
+                this.runAsyncStep(
+                    () => this.getAction('runImaginePostValidationStep')(request),
+                    sendResponse,
+                    request.runId
+                );
                 return true;
             }
 
@@ -2968,9 +3036,9 @@ class RecreateWorkflowContentBridge {
         throw error;
     }
 
-    recordGeneratedPrompt(prompt) {
+    recordGeneratedPrompt(prompt, mediaKind = 'image') {
         if (this.historyManager && typeof this.historyManager.add === 'function') {
-            this.historyManager.add(prompt, 'image');
+            this.historyManager.add(prompt, mediaKind === 'video' ? 'video' : 'image');
         }
     }
 
