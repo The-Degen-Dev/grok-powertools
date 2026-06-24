@@ -788,6 +788,21 @@
                             lint, and build gates passed.
                         </td>
                     </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Task 3 added the Movie Maker <code>Build from Vault</code> entry point.
+                        </td>
+                        <td>
+                            Commit <code>26609db</code> loads committed Vault assets from IndexedDB
+                            on <code>/movie</code>, opens the existing draft modal, and defaults
+                            that entry point to open the first created draft. Evidence: the new
+                            failing-first Playwright test initially timed out waiting for
+                            <code>Build from Vault</code>; after implementation,
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-movie-drafts.spec.js</code>
+                            passed four tests, and web lint/build passed.
+                        </td>
+                    </tr>
                 </tbody>
             </table>
 
