@@ -144,7 +144,7 @@ function collectEligible(input: VaultDraftBuildInput, options: VaultDraftBuildOp
       skipped.push({ assetId: asset.assetId, reason: "not favorite" });
       continue;
     }
-    if (overlay?.hidden && options.scope !== "visible-verified") {
+    if (overlay?.hidden) {
       skipped.push({ assetId: asset.assetId, reason: "hidden by local overlay" });
       continue;
     }

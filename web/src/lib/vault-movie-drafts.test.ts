@@ -107,12 +107,12 @@ describe("buildVaultMovieDrafts", () => {
     expect(result.movies[0].clips.map((clip) => clip.sourceAssetId)).toEqual(["asset-video-2"]);
   });
 
-  it("skips hidden assets unless the all visible verified scope is not hiding them", () => {
+  it("skips hidden assets for visible verified scope", () => {
     const result = buildVaultMovieDrafts(
       input([video("asset-video-1"), video("asset-video-2")], [overlay("asset-video-1", { hidden: true })]),
       {
         recipe: "recent",
-        scope: "filtered",
+        scope: "visible-verified",
         maxClipsPerMovie: 10,
         maxMovies: 2,
       },
