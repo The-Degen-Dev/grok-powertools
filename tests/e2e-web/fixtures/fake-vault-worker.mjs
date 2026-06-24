@@ -1,9 +1,14 @@
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const port = Number(process.env.FAKE_VAULT_WORKER_PORT || 43117);
 const apiKey = process.env.FAKE_VAULT_WORKER_API_KEY || "client-sample";
 const headerName = "x-gpt-api-key";
 const requestLog = [];
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const playableVideo = fs.readFileSync(path.join(__dirname, "tiny-video.mp4"));
 
 const fixtureAssets = [
   {
@@ -260,7 +265,7 @@ const server = http.createServer((req, res) => {
       return res.end(png);
     }
     res.writeHead(200, { "content-type": "video/mp4", "cache-control": "no-store" });
-    return res.end(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 109, 112, 52, 50]));
+    return res.end(playableVideo);
   }
 
   return sendJson(res, 404, { ok: false, error: `Unhandled ${url.pathname}` });
