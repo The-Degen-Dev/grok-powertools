@@ -803,6 +803,23 @@
                             passed four tests, and web lint/build passed.
                         </td>
                     </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Task 4 stabilized Movie Maker preview playback for generated Vault
+                            videos.
+                        </td>
+                        <td>
+                            Commit <code>a2fce6b</code> added a 13 KB playable MP4 fixture, made the
+                            fake Vault worker serve real video bytes, labeled transport buttons,
+                            stopped restarting playback on every time tick, throttled video seeks,
+                            and cached last drawn video frames. Evidence: the new playback
+                            stability spec failed first on the unlabeled play button and black
+                            scrub frame, then passed two tests after the fix. Existing
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js -g "Movie Maker"</code>,
+                            web lint, and web build also passed.
+                        </td>
+                    </tr>
                 </tbody>
             </table>
 
