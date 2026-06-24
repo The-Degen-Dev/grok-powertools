@@ -757,6 +757,37 @@
                             <code>npm --prefix web run build</code> all passed.
                         </td>
                     </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Task 2 Vault draft UI was completed after taking over a partial
+                            subagent patch.
+                        </td>
+                        <td>
+                            Commit <code>9b16ddd</code> added the Vault Build Movies modal,
+                            persistence helper, fake second video asset, and browser coverage for
+                            selected, filtered, and favorite draft creation. Evidence:
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-movie-drafts.spec.js</code>
+                            passed three tests, and
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>
+                            passed eleven tests.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Deviation: controller added an IndexedDB upgrade hardening commit while
+                            validating Task 2.
+                        </td>
+                        <td>
+                            Commit <code>8dfd7a2</code> makes base local stores/indexes presence
+                            checked during upgrades. This was not in the original Task 2 file list,
+                            but validation exposed a real browser crash when an empty version-1
+                            IndexedDB existed before the app opened its version-5 schema. Evidence:
+                            the focused failing Vault UI path passed after the fix; web unit,
+                            lint, and build gates passed.
+                        </td>
+                    </tr>
                 </tbody>
             </table>
 
