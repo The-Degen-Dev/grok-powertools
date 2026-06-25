@@ -25,6 +25,7 @@ Product shape:
 - popup.js/popup.html/popup.css are the extension popup settings and cloud controls.
 - cloud/ is a Cloudflare Worker with R2 presign, metadata snapshot, D1, and JWT sync endpoints.
 - web/ is a Next.js 16 + React 19 web app for dashboards, collections, prompt library, clip editing, movie maker, sharing, auth, and sync.
+- Planned ChatGPT Images support is scoped in docs/superpowers/specs/2026-06-25-chatgpt-images-provider-design.md. It is provider-aware design work, not a shipped feature until implementation and live validation land.
 
 Important extension gotchas:
 - There is no hot reload. After editing extension files, reload the extension in chrome://extensions and refresh the Grok tab.
@@ -41,6 +42,7 @@ Validation commands:
 - Web app: cd web && npm install && npm run build && npm run lint. Dev server is npm run dev on port 3001.
 - Worker: cd cloud && npm install && npm run typecheck. Deploy is npm run deploy after secrets/env are configured.
 - For extension behavior, perform live Chrome validation on grok.com/imagine when possible.
+- For provider-aware work, perform live Chrome validation on the relevant provider page: grok.com/imagine for Grok or chatgpt.com/images for ChatGPT Images. Use narrow inspection and avoid scraping unrelated private gallery content.
 
 Env/config hygiene:
 - Do not ask for or commit local secret values.

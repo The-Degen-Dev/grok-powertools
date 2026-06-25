@@ -18,6 +18,11 @@ This repo has three product surfaces:
 - Web app: Next.js app under `web/` for collections, prompt library, clip editing, movie maker, sharing, auth, and sync.
 - Cloud backend: Cloudflare Worker under `cloud/` for R2 presigned uploads, metadata snapshots, and D1/JWT sync.
 
+Provider work:
+
+- The extension is currently Grok-first. Planned ChatGPT Images support is scoped in `docs/superpowers/specs/2026-06-25-chatgpt-images-provider-design.md`; do not claim ChatGPT support is shipped until the implementation and live validation are complete.
+- Provider-aware changes should keep Grok-only controls off ChatGPT pages instead of reusing Grok labels or workflows by default.
+
 Key extension files:
 
 - `content.js`: main in-page overlay, prompt history, saved prompts, auto-retry/goals, Quality Repeat, batch automation, scraper.
@@ -64,7 +69,7 @@ npm install
 npm run typecheck
 ```
 
-For extension behavior, unit and mocked Playwright tests are not enough. Validate the relevant path in Chrome on `grok.com/imagine` when the change touches selectors, cookies, downloads, or live Grok DOM behavior.
+For extension behavior, unit and mocked Playwright tests are not enough. Validate the relevant path in Chrome on `grok.com/imagine` or `chatgpt.com/images` when the change touches selectors, cookies, downloads, or live provider DOM behavior.
 - For Vault/R2 work, do not treat a single preview page or default limit as the full dataset. Verify pagination, final unique asset count, and media access for an item beyond the first page before calling the Vault loaded.
 
 ## Branch And Safety Notes
