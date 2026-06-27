@@ -27,10 +27,10 @@
     "r2ByteHashes": "not_run",
     "d1": "not_run",
     "metadata": "not_run",
-    "localFiles": "not_run",
+    "localFiles": "verified",
     "workerRoutes": "not_run",
     "webRoutes": "not_run",
-    "localSystem": "not_run",
+    "localSystem": "verified",
     "liveGrok": "not_run",
     "reconciliation": "not_run"
   },
@@ -77,6 +77,21 @@
       "updatedAt": "2026-06-27T20:28:16.049Z"
     },
     {
+      "path": "inventory/local-media-summary.json",
+      "bytes": 195073,
+      "updatedAt": "2026-06-27T20:53:29.853Z"
+    },
+    {
+      "path": "inventory/local-parent-media-files.csv",
+      "bytes": 3359462,
+      "updatedAt": "2026-06-27T20:53:29.841Z"
+    },
+    {
+      "path": "inventory/local-vault-files.csv",
+      "bytes": 793280,
+      "updatedAt": "2026-06-27T20:53:29.825Z"
+    },
+    {
       "path": "inventory/preflight-d1-schema.json",
       "bytes": 3587,
       "updatedAt": "2026-06-27T20:47:32.909Z"
@@ -107,9 +122,24 @@
       "updatedAt": "2026-06-27T20:47:32.913Z"
     },
     {
+      "path": "logs/cloud-test-acceptance.txt",
+      "bytes": 2183,
+      "updatedAt": "2026-06-27T20:55:17.720Z"
+    },
+    {
+      "path": "logs/cloud-typecheck.txt",
+      "bytes": 57,
+      "updatedAt": "2026-06-27T20:55:08.514Z"
+    },
+    {
       "path": "logs/d1-preflight-schema-smoke.json",
       "bytes": 4807,
       "updatedAt": "2026-06-27T20:47:32.909Z"
+    },
+    {
+      "path": "logs/local-checks-summary.json",
+      "bytes": 1569,
+      "updatedAt": "2026-06-27T20:55:39.268Z"
     },
     {
       "path": "logs/preflight-git-branch.json",
@@ -162,6 +192,21 @@
       "updatedAt": "2026-06-27T20:47:25.337Z"
     },
     {
+      "path": "logs/root-lint.txt",
+      "bytes": 64,
+      "updatedAt": "2026-06-27T20:54:37.235Z"
+    },
+    {
+      "path": "logs/root-test-e2e.txt",
+      "bytes": 4267,
+      "updatedAt": "2026-06-27T20:54:31.347Z"
+    },
+    {
+      "path": "logs/root-test-unit.txt",
+      "bytes": 25765,
+      "updatedAt": "2026-06-27T20:54:22.526Z"
+    },
+    {
       "path": "logs/route-safety-source.json",
       "bytes": 1020,
       "updatedAt": "2026-06-27T20:47:25.337Z"
@@ -173,8 +218,18 @@
     },
     {
       "path": "logs/validate-artifacts.json",
-      "bytes": 5174,
-      "updatedAt": "2026-06-27T20:49:00.184Z"
+      "bytes": 4833,
+      "updatedAt": "2026-06-27T20:56:03.556Z"
+    },
+    {
+      "path": "logs/web-build.txt",
+      "bytes": 1396,
+      "updatedAt": "2026-06-27T20:54:49.477Z"
+    },
+    {
+      "path": "logs/web-lint.txt",
+      "bytes": 28,
+      "updatedAt": "2026-06-27T20:54:58.333Z"
     },
     {
       "path": "logs/wrangler-d1-execute-help.json",
@@ -223,8 +278,8 @@
     },
     {
       "path": "report.md",
-      "bytes": 2527,
-      "updatedAt": "2026-06-27T20:47:43.661Z"
+      "bytes": 2862,
+      "updatedAt": "2026-06-27T20:56:03.502Z"
     },
     {
       "path": "screenshots/.gitkeep",
@@ -238,13 +293,13 @@
     },
     {
       "path": "scripts/audit-production-r2-vault.mjs",
-      "bytes": 70685,
-      "updatedAt": "2026-06-27T20:48:52.253Z"
+      "bytes": 71160,
+      "updatedAt": "2026-06-27T20:55:50.667Z"
     }
   ],
   "finalVerdicts": {
     "productionR2InternalCorrectness": "blocked",
     "currentGrokSavedCompleteness": "inconclusive",
-    "localSystemHealth": "inconclusive"
+    "localSystemHealth": "clean"
   }
 }

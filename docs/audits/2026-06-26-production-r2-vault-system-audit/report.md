@@ -2,15 +2,15 @@
 
 Plan date: 2026-06-26
 Execution started: 2026-06-27T16:28:22-04:00
-Report generated: 2026-06-27T20:47:43.659Z
+Report generated: 2026-06-27T20:56:03.500Z
 
 ## Split Verdicts
 
 | Verdict | Status | Evidence |
 | ------- | ------ | -------- |
-| Production R2 internal correctness | blocked | Raw R2: not_run; hashes: not_run; D1: not_run; metadata: not_run; local: not_run; Worker: not_run; reconciliation: not_run. |
+| Production R2 internal correctness | blocked | Raw R2: not_run; hashes: not_run; D1: not_run; metadata: not_run; local: verified; Worker: not_run; reconciliation: not_run. |
 | Current Grok Saved completeness | inconclusive | Full Saved completeness requires an authoritative current Saved enumeration; visual samples alone do not prove it. |
-| Local system health | inconclusive | Local checks: not_run; local files: not_run. |
+| Local system health | clean | Local checks: verified; local files: verified. |
 
 ## Identity Proof
 
@@ -28,7 +28,7 @@ Report generated: 2026-06-27T20:47:43.659Z
 - Raw R2 metadata objects: not_run
 - R2 hash attempts: not_run
 - R2 hash failures: not_run
-- Local media/files inventoried: not_run
+- Local media/files inventoried: 8532
 
 ## Duplicate Findings
 
@@ -61,6 +61,16 @@ Status: not_run. Evidence goes in `browser-samples/live-grok-samples.md`.
 ## Extension Status
 
 Status: not_run. Evidence goes in `browser-samples/live-grok-samples.md`.
+
+## Local System Checks
+
+- rootUnit: passed (logs/root-test-unit.txt)
+- rootE2E: passed (logs/root-test-e2e.txt)
+- rootLint: passed (logs/root-lint.txt)
+- webBuild: passed (logs/web-build.txt)
+- webLint: passed (logs/web-lint.txt)
+- cloudTypecheck: passed (logs/cloud-typecheck.txt)
+- cloudAcceptance: passed (logs/cloud-test-acceptance.txt)
 
 ## Blockers
 

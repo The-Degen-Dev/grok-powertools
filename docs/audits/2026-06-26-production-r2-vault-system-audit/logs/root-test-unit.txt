@@ -1,0 +1,518 @@
+
+> chrome-extension-powertools@0.2.0 test:unit
+> jest
+
+PASS tests/unit/acceptanceRunContract.test.js
+  acceptance run contract
+    ✓ validates a strict manifest without reading sensitive values (4 ms)
+    ✓ rejects production prefixes and missing identity fields (3 ms)
+    ✓ redacts sensitive values, signed URLs, browser headers, and prompt text recursively (1 ms)
+    ✓ classifies verdicts with contamination taking precedence
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+PASS tests/unit/acceptancePreflight.test.js
+  acceptance preflight classifiers
+    ✓ blocks when a web port is owned by another workspace (2 ms)
+    ✓ blocks R2 acceptance setup on Cloudflare authentication code 10000
+    ✓ blocks R2 preflight when Cloudflare account ID is missing
+    ✓ supports an alternate acceptance web port
+    ✓ blocks invalid acceptance web ports (1 ms)
+    ✓ summarizes any preflight blocker as blocked
+    ✓ blocks CDP unless it is connected to the existing Chrome session
+    ✓ redacts sensitive command output
+
+PASS tests/unit/recreateWorkflowBackground.test.js
+  recreate background controller
+    ✓ runs chat step before imagine step (8 ms)
+    ✓ threads video references through chat and Imagine video mode (1 ms)
+    ✓ reuses source Imagine tab when context source URL is https://grok.com/imagine
+    ✓ opens a new Imagine tab when source tab is not Imagine (2 ms)
+    ✓ opens a new Imagine tab when source tab is an Imagine post detail page (1 ms)
+    ✓ invalid reference fails safely without reference payload leaking (1 ms)
+    ✓ abort marks active workflow aborted while chat step is pending (2 ms)
+    ✓ requires chat response to include a non-empty generated prompt before Imagine step (6 ms)
+    ✓ chat phase upload input failure is returned without continuing to Imagine (2 ms)
+    ✓ content phase chat failure is returned without continuing to Imagine (1 ms)
+    ✓ requires Imagine response to confirm submission (2 ms)
+    ✓ requires Imagine response to confirm generated result readiness (2 ms)
+    ✓ returns content result validation failures without treating submit as success (1 ms)
+    ✓ maps Chrome chat tab create failures to named chat errors
+    ✓ maps Chrome Imagine tab send failures to named Imagine errors (2 ms)
+    ✓ recovers when Imagine submit navigates and closes the message channel (1 ms)
+    ✓ recovers when Imagine submit message stays pending but tab navigates to a post
+    ✓ retries a newly created tab when receiver is not ready, then succeeds (3 ms)
+    ✓ chat send timeout fails with named chat error instead of hanging (33 ms)
+    ✓ Imagine send timeout fails with named Imagine error instead of hanging (6 ms)
+
+  console.log
+    VideoRetryManager: Clicked Make Video.
+
+      at VideoRetryManager.clickMakeVideo (content.js:2700:21)
+
+PASS tests/unit/cloudSyncUtils.test.js
+  cloudSyncUtils
+    ✓ validates workers.dev URLs with one or more subdomain labels (5 ms)
+    ✓ normalizes worker URLs to canonical origin (6 ms)
+    ✓ normalizes cloud config defaults and explicit mode (1 ms)
+    ✓ falls back to legacy enabled flag when mode is missing (1 ms)
+    ✓ supports cloud_only mode normalization and local download toggle (1 ms)
+    ✓ returns capped retry delay schedule (1 ms)
+    ✓ builds media object key from local final path
+    ✓ UPLOAD_STAGES has expected stage identifiers (1 ms)
+    ✓ isValidMediaSourceUrl accepts valid imagine-public.x.ai URLs (1 ms)
+    ✓ isValidMediaSourceUrl rejects HTTP, unknown domains, null/empty
+    ✓ buildTestUploadObjectKey returns correct users/_system/ path (1 ms)
+    ✓ buildTestUploadObjectKey sanitizes prefix
+    ✓ builds metadata object keys for latest snapshots and backfill manifests
+    ✓ builds versioned backfill manifest keys by content hash only when requested
+    ✓ builds canonical by-asset media keys from Grok media UUIDs (1 ms)
+    ✓ uses content hash canonical identity when no stable media id exists (2 ms)
+    ✓ uses the media UUID, not the user UUID, for assets.grok.com generated video URLs (1 ms)
+    ✓ media dedupe key is stable across date-folder reruns for same media UUID (1 ms)
+
+  console.log
+    VideoRetryManager: Retrying... Attempt 1
+
+      at VideoRetryManager.attemptRetry (content.js:2667:17)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    VideoRetryManager: SUCCESS detected.
+
+      at VideoRetryManager.checkAndAct (content.js:2615:25)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+PASS tests/unit/ciWorkflow.test.js
+  GitHub Actions CI workflow
+    ✓ has separate extension, web, and cloud jobs (4 ms)
+    ✓ extension job uses current actions, Node 24, root cache, and root validation commands (2 ms)
+    ✓ web job uses current actions, Node 24, web cache, and web validation commands
+    ✓ cloud job uses current actions, Node 24, cloud cache, and cloud validation commands (1 ms)
+
+  console.log
+    VideoRetryManager: Goal Reached.
+
+      at VideoRetryManager.checkAndAct (content.js:2622:29)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+PASS tests/unit/acceptanceEvidenceWorkbook.test.js
+  acceptance evidence workbook
+    ✓ orders events and redacts unsafe fields (46 ms)
+    ✓ renders a small HTML review artifact
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+PASS tests/unit/backgroundRecreateWorkflow.test.js
+  background recreate workflow wiring
+    ✓ uses a live-safe controller message timeout (42 ms)
+    ✓ fetches public Imagine references as normalized data URLs (19 ms)
+    ✓ fetches public Grok result media from images-public host (3 ms)
+    ✓ fetches public Grok shared videos as normalized video data URLs (4 ms)
+    ✓ dispatches native clicks through the Chrome debugger API (11 ms)
+    ✓ handles native click runtime messages from the sender tab (13 ms)
+
+PASS tests/unit/r2UploadPipeline.test.js
+  detectContentTypeFromUrl
+    ✓ detects image/png for .png URLs (4 ms)
+    ✓ detects image/jpeg for .jpg and .jpeg URLs
+    ✓ detects video/mp4 for .mp4 URLs
+    ✓ detects video/webm for .webm URLs
+    ✓ detects image/webp for .webp URLs
+    ✓ detects image/gif for .gif URLs (1 ms)
+    ✓ defaults to image/png for unknown extensions
+    ✓ strips query string before detecting extension
+    ✓ handles null, undefined, empty string
+    ✓ case insensitive extension matching
+  buildMediaObjectKeyFromFinalPath
+    ✓ constructs correct key from standard GrokVault path (1 ms)
+    ✓ constructs correct key for .mp4 video files
+    ✓ uses fallbackUserId when path has fewer than 3 segments
+    ✓ handles empty/null finalPath gracefully
+    ✓ handles path with extra slashes
+    ✓ preserves file extension from finalPath
+    ✓ sanitizes userId with special characters
+  path sanitization
+    ✓ buildMediaObjectKey prevents directory traversal in userId (1 ms)
+    ✓ buildMediaObjectKey prevents directory traversal in dateFolder
+    ✓ buildMediaObjectKey prevents slash injection in filename
+    ✓ sanitizeKeyPrefix strips leading and trailing slashes
+    ✓ key always starts with keyPrefix/users/
+  buildMetadataObjectKey
+    ✓ savedPrompts produces correct key
+    ✓ promptHistory produces correct key
+    ✓ processedIds produces correct key
+    ✓ backfillManifest uses latest filename by default
+    ✓ throws on unsupported kind (12 ms)
+    ✓ userId defaults to Shared_Account when missing
+    ✓ latest metadata keys overwrite (same key each time)
+    ✓ backfillManifest version keys differ by content hash only when requested (1 ms)
+  isValidMediaSourceUrl
+    ✓ accepts standard imagine-public.x.ai image URLs
+    ✓ accepts imagine-public.x.ai video URLs
+    ✓ accepts URLs with query parameters (1 ms)
+    ✓ rejects HTTP (non-HTTPS) URLs
+    ✓ rejects unknown hostnames
+    ✓ accepts assets.grok.com (trusted Grok video CDN — requires session cookies, fetched via bridge.js)
+    ✓ rejects blob URLs
+    ✓ rejects data URLs
+  media element selectors on Grok detail page
+    image-only posts (the failing case)
+      ✓ OLD selector img[alt="Generated image"] does NOT match (12 ms)
+      ✓ NEW selector img[src*="imagine-public.x.ai"] matches the image (9 ms)
+      ✓ extracting src gives the full CDN URL (14 ms)
+    video posts
+      ✓ OLD selector video source does NOT match (no <source> children) (6 ms)
+      ✓ NEW selector img[src*="imagine-public.x.ai"] matches sizing image (2 ms)
+      ✓ NEW selector video[src] matches the video element (4 ms)
+      ✓ full selector chain prioritizes imagine-public image (16 ms)
+    gallery/list view (unchanged)
+      ✓ gallery selector img[alt="Generated image"] still works in list view (7 ms)
+      ✓ new selector also works in gallery view (1 ms)
+    edge case: no media on page
+      ✓ all selectors return null gracefully
+    edge case: video without src attribute
+      ✓ video[src] does not match empty video (1 ms)
+      ✓ plain video fallback still matches
+  end-to-end: source URL to R2 storage
+    ✓ PNG image URL produces valid media object key and correct content type (1 ms)
+    ✓ MP4 video URL produces valid media object key and correct content type (1 ms)
+    ✓ JPG image URL produces correct content type
+    ✓ dedupeKey for media items uses canonical asset identity, not date folder
+    ✓ dedupeKey for metadata items uses metadata: prefix + userId + kind
+    ✓ queue item for media has all required fields (2 ms)
+    ✓ queue item for metadata has all required fields
+    ✓ worker presign request body has all required fields (1 ms)
+    ✓ worker metadata snapshot request body has all required fields
+  cloud mode configuration
+    ✓ dual_write enables cloud AND local download (1 ms)
+    ✓ cloud_only enables cloud but disables local download
+    ✓ local_only disables cloud (1 ms)
+    ✓ unconfigured state defaults to disabled
+  retry schedule
+    ✓ matches documented retry schedule (1 ms)
+    ✓ caps at max delay for attempts beyond schedule
+    ✓ MAX_RETRY_ATTEMPTS is 6
+    ✓ total retry window is approximately 16 hours
+  upload stage error wrapping
+    ✓ all expected stages are defined
+    ✓ stage labels are parseable from error messages (1 ms)
+  known media hosts
+    ✓ includes imagine-public.x.ai
+    ✓ includes assets.grok.com (video CDN; fetched through bridge.js with session cookies)
+  worker URL validation
+    ✓ accepts valid workers.dev URLs
+    ✓ rejects bare workers.dev
+    ✓ rejects non-HTTPS (1 ms)
+    ✓ normalizeWorkerUrl strips path/query/fragment (1 ms)
+  storage keys
+    ✓ all storage keys are defined (1 ms)
+  R2 key format matches worker isValidObjectKey requirements
+    ✓ media keys pass worker validation
+    ✓ metadata keys pass worker validation
+    ✓ backfill manifest keys pass worker validation
+    ✓ test upload key passes worker validation
+    ✓ key with malicious userId still passes after sanitization (1 ms)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+PASS tests/unit/retryManager.test.js
+  VideoRetryManager
+    ✓ subscribes to settings updates and starts observer (22 ms)
+    ✓ clickMakeVideo clicks button and enters verifying state (44 ms)
+    ✓ attemptRetry increments retry and invokes click (3 ms)
+    ✓ attemptRetry stops when max retries are hit (2 ms)
+    ✓ checkAndAct returns early when auto retry disabled and goal not running (20 ms)
+    ✓ checkAndAct marks goal complete after verified success (19 ms)
+    ✓ detectBatchContext resolves detail on imagine post URL (12 ms)
+    ✓ detectBatchContext resolves gallery when card selectors exist (7 ms)
+    ✓ startBatch(prompted) routes to gallery flow on gallery context (36 ms)
+    ✓ startBatch(prompted) routes to detail flow on detail context (4 ms)
+    ✓ updateCounters shows gallery label during prompted gallery batch (3 ms)
+    ✓ updateBatchButtons works without prompted selector row (3 ms)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+  console.log
+    Grok Downloader Background Service Started
+
+      at Object.<anonymous> (background.js:205:9)
+
+PASS tests/unit/cloudSyncUtilsAcceptance.test.js
+  CloudSync acceptance context
+    ✓ normalizes a valid acceptance context (1 ms)
+    ✓ rejects production prefixes (3 ms)
+    ✓ builds acceptance headers without credential material
+    ✓ returns empty headers outside acceptance mode
+
+  console.log
+    No thumbnails found. Assuming single item.
+
+      at GrokScraper.executeDetailView (content.js:3532:21)
+
+PASS tests/unit/playwrightWebConfig.test.js
+  web Playwright config
+    ✓ uses an isolated web server instead of reusing port 3001 (2 ms)
+
+PASS tests/unit/grokScraperBackup.test.js
+  Grok backup media selection
+    ✓ selects the large generated detail image instead of profile and UI images (16 ms)
+    ✓ prefers the active video element when a detail page has video media (2 ms)
+    ✓ accepts visible generated videos from the assets videos path (1 ms)
+    ✓ ignores tiny stale videos before choosing a generated image (2 ms)
+    ✓ prefers a visible generated video over a generated image (4 ms)
+    ✓ ignores small rendered thumbnails even when they report large natural dimensions (5 ms)
+  Grok backup background processed ID persistence
+    ✓ persists backup processed IDs only after R2-present statuses (47 ms)
+    ✓ does not save history again for an already persisted backup ID (2 ms)
+    ✓ persists queued backup IDs only after queued upload proves R2 presence (3 ms)
+    ✓ builds direct upload responses with parsed backup processed ID (34 ms)
+    ✓ awaits queued backup persistence while preserving latest storage and background IDs (4 ms)
+    ✓ does not persist queued backup IDs before R2-present status (13 ms)
+    ✓ builds full backup init options by default (7 ms)
+    ✓ carries requested canary mode, limit, and options to content init (6 ms)
+    ✓ preserves acceptance metadata in R2 backup init messages (3 ms)
+    ✓ derives acceptance metadata for popup canaries from acceptance config (3 ms)
+    ✓ treats canary completion as a successful R2 backup completion (5 ms)
+    ✓ adds acceptance headers to presign requests (10 ms)
+    ✓ adds acceptance headers to verify and metadata snapshot requests (3 ms)
+    ✓ adds derived acceptance headers to cloud test presign and verify requests (9 ms)
+  Grok backup scan exhaustion
+    ✓ does not exhaust while the gallery scroll position is still advancing (1 ms)
+    ✓ does not exhaust at the bottom when newly loaded card identities changed
+    ✓ exhausts only after repeated stable no-new scans at the gallery bottom
+  Grok backup upload stats
+    ✓ tracks uploaded, already-present, and queued statuses separately
+    ✓ does not persist processed IDs for queued uploads before R2 success is proven
+    ✓ preserves background-persisted processed IDs when content records backup success
+    ✓ merges response backup processed ID with clean URL ID during content persistence
+    ✓ completes canary only after the first R2-present media status
+    ✓ stops canary as incomplete after one queued or failed media attempt
+  Grok backup canary flow
+    ✓ builds hard-capped canary options for page-origin canary commands
+    ✓ rejects page-origin full backup commands (4 ms)
+    ✓ does not start backup from unsafe page-origin full backup commands (1 ms)
+    ✓ does not start duplicate R2 backup while config validation is pending
+    ✓ starts hard-capped canary from page-origin canary command
+    ✓ stops before navigating back after one successful canary media attempt (2 ms)
+  Grok backup acceptance context propagation
+    ✓ page command options preserve acceptance run metadata for canaries
+    ✓ page command ignores acceptance metadata for full backup commands
+  Grok backup popup status text
+    ✓ labels scan-limit stops as paused instead of complete
+    ✓ shows uploaded, already-present, queued, and error counts separately
+    ✓ labels canary completion distinctly
+    ✓ labels incomplete canary distinctly
+
+PASS tests/unit/recreateWorkflowUtils.test.js
+  recreate workflow utils
+    ✓ parses valid image data URLs (9 ms)
+    ✓ rejects invalid or unsupported data URLs (5 ms)
+    ✓ rejects oversized base64 before decoding (125 ms)
+    ✓ normalizes local reference payloads
+    ✓ normalizes video and gif references as video media (7 ms)
+    ✓ normalizes trusted Grok video URL references without a data URL (1 ms)
+    ✓ extracts only prompt text after the strict marker (1 ms)
+    ✓ strips Grok sources and agent chatter after the final prompt marker (1 ms)
+    ✓ fails when final prompt marker is absent
+    ✓ builds chat instruction with and without Grok search wording
+    ✓ builds and extracts Grok Imagine video prompts
+    ✓ chooses visible generated image nearest viewport center
+    ✓ trusts current Grok image result hosts (4 ms)
+    ✓ trusts Grok Imagine shared video URLs only on the public video path (7 ms)
+    ✓ ignores generated image candidates outside the viewport (5 ms)
+    ✓ builds safe failure responses without payloads (1 ms)
+    ✓ scrubs compound and nested sensitive diagnostic keys (1 ms)
+
+PASS tests/unit/reproducibleInstall.test.js
+  reproducible npm installs
+    ✓ root, web, and cloud lockfiles are tracked (58 ms)
+    ✓ root gitignore does not ignore npm package lockfiles (45 ms)
+    ✓ all package lockfiles parse as npm lockfile v3 (6 ms)
+
+PASS tests/unit/releasePackage.test.js
+  release extension package allowlist
+    ✓ includes every manifest-referenced runtime file (76 ms)
+    ✓ excludes local, test, and secret-bearing paths (61 ms)
+
+  console.log
+    GPT: Submit clicked
+
+      at content.js:497:25
+
+PASS tests/unit/promptHistoryManager.test.js
+  PromptHistoryManager
+    ✓ uses recreate prompt capture hint for submit history type (29 ms)
+
+PASS tests/unit/savedPrompts.test.js
+  saved prompt helpers
+    ✓ normalizes legacy saved prompts to v2 schema (2 ms)
+    ✓ filters saved prompts by type and search query
+    ✓ appends prompt text with delimiter and suppresses duplicate token
+    ✓ inserts snippet at cursor using smart delimiters
+  prompted batch input source
+    ✓ uses current input bar text and does not depend on selector row (176 ms)
+    ✓ rejects prompted batch when input bar is empty (25 ms)
+
+PASS tests/unit/recreateWorkflowContent.test.js
+  recreate content helpers
+    ✓ reads local files into normalized references (9 ms)
+    ✓ reads local video files into normalized video references (2 ms)
+    ✓ stores sampled local video contact sheets when a frame sampler is available (3 ms)
+    ✓ fails when a reference file is missing (2 ms)
+    ✓ reads blobs as data URLs (2 ms)
+    ✓ recreates a File from normalized reference data
+    ✓ recreates a File from normalized video reference data
+    ✓ collects visible generated image candidates (121 ms)
+    ✓ collects visible generated video candidates (6 ms)
+    ✓ selects the current generated image using shared scoring (3 ms)
+    ✓ selects a public Grok post image when its alt text is the prompt (4 ms)
+    ✓ resolves a Grok post URL to its shared video reference (6 ms)
+    ✓ throws reference_missing when no current generated image is available
+    ✓ fetches trusted Grok media through the existing bridge event (2 ms)
+    ✓ fetches trusted Grok media data URLs through the data URL bridge event
+    ✓ sourceToDataUrl dispatches __gpt_fetch_media_data_url and resolves the returned data URL (3 ms)
+    ✓ fetchViaBackgroundAsDataUrl requests public Imagine media through the extension runtime (2 ms)
+    ✓ fetchPublicImageAsDataUrl reads public Imagine media directly (2 ms)
+    ✓ sourceToDataUrl falls back to background fetch before the page bridge for public Imagine media (2 ms)
+    ✓ sourceToDataUrl reports public Imagine fetch failures distinctly (1 ms)
+    ✓ maps trusted media bridge failures to reference_capture_failed (1 ms)
+    ✓ rejects malformed trusted media data URL bridge results (1 ms)
+    ✓ times out trusted media data URL bridge fetches
+    ✓ waitForCondition resolves when predicate becomes true (2 ms)
+    ✓ waitForCondition times out while an async predicate is still pending (12 ms)
+  recreate content DOM actions
+    ✓ sets files on a hidden file input and dispatches change (2 ms)
+    ✓ injects editor text through textarea input events (8 ms)
+    ✓ injects editor text through bridge event for contenteditable editors (6 ms)
+    ✓ does not inject into unrelated textarea or contenteditable editors (6 ms)
+    ✓ does not inject into zero-size Grok-labeled editors (13 ms)
+    ✓ clicks enabled visible submit buttons only by aria-label (7 ms)
+    ✓ verifies active Grok Search without clicking when already active (8 ms)
+    ✓ clicks Grok Search only when needed and verifies active state (4 ms)
+    ✓ fails when Grok Search cannot be verified as active (4 ms)
+    ✓ ignores global Search outside the visible composer region (2 ms)
+    ✓ uploads a reference file and detects upload preview (3 ms)
+    ✓ uploads a video reference file and detects video upload preview (4 ms)
+    ✓ uploads to Grok input instead of the extension overlay file input (1 ms)
+    ✓ upload preview detection ignores images outside the Grok composer (3 ms)
+    ✓ upload preview detection accepts small Grok thumbnails near attach control (2 ms)
+    ✓ throws named errors for missing upload input and missing prompt marker (1 ms)
+    ✓ extracts assistant answer text with final prompt marker (1 ms)
+    ✓ runChatPromptStep uploads, injects, submits, and extracts generated prompt (8 ms)
+    ✓ runChatPromptStep uses video instructions and extracts video prompt marker (7 ms)
+    ✓ runChatPromptStep lets native Grok submit clicks pass through the overlay (10 ms)
+    ✓ runChatPromptStep verifies contenteditable bridge text before submit (4 ms)
+    ✓ runChatPromptStep falls back when the contenteditable bridge does not update text (4 ms)
+    ✓ runChatPromptStep waits for delayed Grok upload input (11 ms)
+    ✓ runChatPromptStep fails when upload preview is missing (13 ms)
+    ✓ runChatPromptStep ignores preexisting matching upload previews (11 ms)
+    ✓ runChatPromptStep fails when editor is missing (102 ms)
+    ✓ runChatPromptStep fails when submit is missing (16 ms)
+    ✓ runChatPromptStep fails when assistant answer never appears (19 ms)
+    ✓ submits Imagine prompt after editor injection enables submit (7 ms)
+    ✓ runImagineSubmitStep waits through low-resolution placeholder result cards (54 ms)
+    ✓ runImagineSubmitStep succeeds when placeholder cards hydrate to Grok media (9 ms)
+    ✓ runImagineSubmitStep selects video mode and verifies generated video bytes (6 ms)
+    ✓ runImagineSubmitStep verifies blob video bytes on an opened Imagine post (6 ms)
+    ✓ runImaginePostValidationStep verifies playable authenticated Grok video on an opened Imagine post (3 ms)
+    ✓ runImagineSubmitStep opens full-size data result cards before accepting them (955 ms)
+    ✓ runImagineSubmitStep rejects full-size Grok media that cannot be fetched as image bytes (25 ms)
+    ✓ runImagineSubmitStep does not accept stale result cards that existed before submit (9 ms)
+    ✓ runImagineSubmitStep fails when submit stays disabled (11 ms)
+    ✓ runImagineSubmitStep fails when Imagine editor is missing
+    ✓ runImagineSubmitStep maps submit click failures (2 ms)
+  recreate content bridge
+    ✓ async catch responses use content phase and page diagnostics without payload leakage (1 ms)
+    ✓ records recreated video prompts as video history
+    ✓ async catch responses do not expose arbitrary generic error messages
+
+Test Suites: 18 passed, 18 total
+Tests:       298 passed, 298 total
+Snapshots:   0 total
+Time:        2.589 s
+Ran all test suites.

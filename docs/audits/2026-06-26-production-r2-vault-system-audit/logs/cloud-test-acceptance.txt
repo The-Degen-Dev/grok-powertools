@@ -1,0 +1,38 @@
+
+> grok-r2-backup-worker@0.1.0 test:acceptance
+> rm -rf .tmp-test && tsc -p tsconfig.test.json && node --test .tmp-test/tests/*.test.js
+
+✔ buildAcceptanceIdentity returns redacted acceptance diagnostics (0.507125ms)
+✔ validateAcceptanceWrite rejects production prefixes in acceptance mode (1.014333ms)
+✔ validateAcceptanceWrite rejects missing run and correlation IDs (0.479833ms)
+✔ validateAcceptanceWrite accepts armed run-scoped writes (0.267417ms)
+✔ Vault identity is auth protected (8.96825ms)
+✔ Vault identity returns redacted target proof (2.904667ms)
+✔ Vault inventory prefers D1 index rows without R2 listing or D1 writes (1.315459ms)
+✔ Vault inventory falls back to R2 list when D1 has no rows (1.521625ms)
+✔ Vault inventory falls back to R2 list when D1 read fails (0.655125ms)
+✔ Vault metadata returns saved prompt snapshots (0.28975ms)
+✔ Vault media streams object bytes for server-side proxy (0.462708ms)
+✔ Vault media assetId lookup follows inventory pagination (0.268417ms)
+✔ Vault media streams exact objectKey without inventory lookup (0.2095ms)
+✔ Vault media rejects invalid objectKey (0.207209ms)
+✔ Object HEAD proof is read-only and does not write to D1 (0.223709ms)
+✔ Sync push rejects invalid JWT before vault overlay writes (0.315833ms)
+✔ Sync push writes vault overlays without source-fact writes (3.95725ms)
+✔ Sync pull returns vault overlays for the authenticated user (0.517459ms)
+✔ redactedApiKeyFingerprint returns a stable non-secret fingerprint (9.141625ms)
+✔ mediaTypeFromContentType classifies images and videos (0.324333ms)
+✔ normalizeVaultObject falls back to object key extension when content type is missing (2.044792ms)
+✔ normalizeVaultObject creates stable asset records from R2 object metadata (0.454958ms)
+✔ buildVaultIdentity redacts secrets (1.984084ms)
+✔ acceptance identity endpoint is auth protected (8.940209ms)
+✔ acceptance identity endpoint returns redacted diagnostics (0.631125ms)
+✔ presign rejects production keys before signing in acceptance mode (0.484792ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 156.382542

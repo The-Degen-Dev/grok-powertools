@@ -1,12 +1,11 @@
 {
-  "generatedAt": "2026-06-27T20:49:00.182Z",
+  "generatedAt": "2026-06-27T20:56:03.552Z",
   "ok": false,
   "missing": [
     "inventory/r2-objects-summary.json",
     "inventory/r2-pages.json",
     "inventory/metadata-objects.json",
     "inventory/metadata-references.json",
-    "inventory/local-media-summary.json",
     "reconciliations/r2-d1-delta.json",
     "reconciliations/r2-metadata-delta.json",
     "reconciliations/r2-local-delta.json",
@@ -34,10 +33,6 @@
     {
       "path": "inventory/metadata-references.json",
       "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/metadata-references.json'"
-    },
-    {
-      "path": "inventory/local-media-summary.json",
-      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/local-media-summary.json'"
     },
     {
       "path": "reconciliations/r2-d1-delta.json",

@@ -45,7 +45,7 @@
 
   <h2>Tradeoffs</h2>
   <ul>
-    <li>The secret scan has expected false positives in policy prose and redaction code, plus the structured Cloudflare scope name <code>secrets_store:write</code>. Manual review found no raw keys, bearer tokens, signed URLs, cookies, passwords, or private prompt dumps in current audit artifacts.</li>
+    <li>The secret scan has expected false positives in policy prose, redaction code, and root test names that mention cookies without containing cookie values. Manual review found no raw keys, bearer tokens, signed URLs, cookies, passwords, or private prompt dumps in current audit artifacts.</li>
   </ul>
 
   <h2>Open Questions</h2>

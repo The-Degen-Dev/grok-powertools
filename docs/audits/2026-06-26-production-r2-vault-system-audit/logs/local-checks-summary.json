@@ -1,0 +1,62 @@
+{
+  "generatedAt": "2026-06-27T20:55:39.267Z",
+  "status": "verified",
+  "checks": [
+    {
+      "name": "rootUnit",
+      "command": "mise exec node@24 -- npm run test:unit",
+      "log": "logs/root-test-unit.txt",
+      "exitCode": 0,
+      "status": "passed",
+      "bytes": 25765
+    },
+    {
+      "name": "rootE2E",
+      "command": "mise exec node@24 -- npm run test:e2e",
+      "log": "logs/root-test-e2e.txt",
+      "exitCode": 0,
+      "status": "passed",
+      "bytes": 4267
+    },
+    {
+      "name": "rootLint",
+      "command": "mise exec node@24 -- npm run lint",
+      "log": "logs/root-lint.txt",
+      "exitCode": 0,
+      "status": "passed",
+      "bytes": 64
+    },
+    {
+      "name": "webBuild",
+      "command": "mise exec node@24 -- npm --prefix web run build",
+      "log": "logs/web-build.txt",
+      "exitCode": 0,
+      "status": "passed",
+      "bytes": 1396
+    },
+    {
+      "name": "webLint",
+      "command": "mise exec node@24 -- npm --prefix web run lint",
+      "log": "logs/web-lint.txt",
+      "exitCode": 0,
+      "status": "passed",
+      "bytes": 28
+    },
+    {
+      "name": "cloudTypecheck",
+      "command": "mise exec node@24 -- npm --prefix cloud run typecheck",
+      "log": "logs/cloud-typecheck.txt",
+      "exitCode": 0,
+      "status": "passed",
+      "bytes": 57
+    },
+    {
+      "name": "cloudAcceptance",
+      "command": "mise exec node@24 -- npm --prefix cloud run test:acceptance",
+      "log": "logs/cloud-test-acceptance.txt",
+      "exitCode": 0,
+      "status": "passed",
+      "bytes": 2183
+    }
+  ]
+}

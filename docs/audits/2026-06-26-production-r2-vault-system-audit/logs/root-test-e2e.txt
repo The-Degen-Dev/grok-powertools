@@ -1,0 +1,47 @@
+
+> chrome-extension-powertools@0.2.0 test:e2e
+> playwright test tests/e2e
+
+
+Running 14 tests using 6 workers
+
+(node:92765) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92764) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92768) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92766) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92767) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92769) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92764) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92765) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92766) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92768) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92767) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:92769) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   5 [chromium] › tests/e2e/extension.spec.js:237:5 › Grok Power Tools E2E › Recreate helper globals should be available before content script (329ms)
+  ✓   3 [chromium] › tests/e2e/extension.spec.js:167:5 › Grok Power Tools E2E › Overlay should render on the page (410ms)
+  ✓   6 [chromium] › tests/e2e/extension.spec.js:249:5 › Grok Power Tools E2E › Recreate content bridge should handle status messages (420ms)
+  ✓   4 [chromium] › tests/e2e/extension.spec.js:216:5 › Grok Power Tools E2E › Page-origin R2 canary command is bounded and carries acceptance metadata (452ms)
+  ✓   2 [chromium] › tests/e2e/extension.spec.js:202:5 › Grok Power Tools E2E › Page-origin full R2 backup command should fail closed (454ms)
+  ✓   7 [chromium] › tests/e2e/extension.spec.js:266:5 › Grok Power Tools E2E › Recreate Image controls should render (288ms)
+  ✓   8 [chromium] › tests/e2e/extension.spec.js:283:5 › Grok Power Tools E2E › Recreate Image controls should start from mocked local file selection (257ms)
+  ✓   9 [chromium] › tests/e2e/extension.spec.js:314:5 › Grok Power Tools E2E › Recreate Image controls should send explicit Grok Search opt-in (314ms)
+  ✓   1 [chromium] › tests/e2e/extension.spec.js:180:5 › Grok Power Tools E2E › Minimize button should work (799ms)
+  ✓  12 [chromium] › tests/e2e/extension.spec.js:379:5 › Grok Power Tools E2E › Recreate Image paste should only apply inside recreate controls (250ms)
+  ✓  14 [chromium] › tests/e2e/extension.spec.js:454:5 › Grok Power Tools E2E › Recreate content bridge should dispatch mocked chat and imagine actions (205ms)
+  ✓  13 [chromium] › tests/e2e/extension.spec.js:413:5 › Grok Power Tools E2E › Recreate Image stop should wait for pending start to settle (307ms)
+  ✓  10 [chromium] › tests/e2e/extension.spec.js:339:5 › Grok Power Tools E2E › Recreate Image controls should reject oversized files before reading (745ms)
+  ✓  11 [chromium] › tests/e2e/extension.spec.js:353:5 › Grok Power Tools E2E › Recreate Image controls should clear prior reference after invalid reselection (795ms)
+
+  14 passed (2.3s)

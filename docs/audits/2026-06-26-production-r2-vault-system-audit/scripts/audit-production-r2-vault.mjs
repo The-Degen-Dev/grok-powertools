@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1281,8 +1281,13 @@ async function scanMediaRoot(root, options) {
 }
 
 async function hashFile(filePath) {
-  const data = await fs.readFile(filePath);
-  return createHash('sha256').update(data).digest('hex');
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
 }
 
 function mediaTypeFromPath(filePath) {
@@ -1690,6 +1695,7 @@ async function generateReport() {
   const manifest = await readManifest();
   const r2SummaryJson = await optionalJson(path.join(auditRoot, 'inventory', 'r2-objects-summary.json'));
   const localSummaryJson = await optionalJson(path.join(auditRoot, 'inventory', 'local-media-summary.json'));
+  const localChecksJson = await optionalJson(path.join(auditRoot, 'logs', 'local-checks-summary.json'));
   const duplicateJson = await optionalJson(path.join(auditRoot, 'reconciliations', 'duplicate-groups.json'));
   const unresolvedJson = await optionalJson(path.join(auditRoot, 'reconciliations', 'unresolved-items.json'));
   const statuses = manifest.subsystems || {};
@@ -1764,6 +1770,10 @@ Status: ${statuses.liveGrok}. Evidence goes in \`browser-samples/live-grok-sampl
 ## Extension Status
 
 Status: ${statuses.liveGrok}. Evidence goes in \`browser-samples/live-grok-samples.md\`.
+
+## Local System Checks
+
+${localChecksJson?.checks?.length ? localChecksJson.checks.map((check) => `- ${check.name}: ${check.status} (${check.log})`).join('\n') : 'Not run.'}
 
 ## Blockers
 

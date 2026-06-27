@@ -1,0 +1,53 @@
+
+> web@0.1.0 build
+> next build
+
+▲ Next.js 16.1.6 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 1644.4ms
+  Running TypeScript ...
+  Collecting page data using 11 workers ...
+  Generating static pages using 11 workers (0/28) ...
+  Generating static pages using 11 workers (7/28)
+  Generating static pages using 11 workers (14/28)
+  Generating static pages using 11 workers (21/28)
+✓ Generating static pages using 11 workers (28/28) in 112.3ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /api/auth/[...nextauth]
+├ ƒ /api/gih-import
+├ ƒ /api/ops/health
+├ ƒ /api/sync/pull
+├ ƒ /api/sync/push
+├ ƒ /api/vault/gap-fill/plan
+├ ƒ /api/vault/gap-fill/run
+├ ƒ /api/vault/gaps
+├ ƒ /api/vault/identity
+├ ƒ /api/vault/inventory
+├ ƒ /api/vault/media/[assetId]
+├ ƒ /api/vault/metadata/[kind]
+├ ƒ /api/vault/preview
+├ ƒ /api/vault/reconcile/index
+├ ƒ /api/vault/repair/approve
+├ ƒ /api/vault/repair/plan
+├ ƒ /api/vault/repair/proof
+├ ƒ /api/vault/repair/run
+├ ƒ /api/vault/repair/scan
+├ ƒ /api/video-meta
+├ ƒ /api/video-proxy
+├ ○ /collections
+├ ƒ /collections/[id]
+├ ○ /edit
+├ ○ /movie
+├ ○ /ops
+├ ○ /share
+└ ○ /vault
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand

@@ -1,0 +1,3357 @@
+{
+  "generatedAt": "2026-06-27T20:53:29.842Z",
+  "counts": {
+    "vaultFiles": 1853,
+    "parentCandidates": 6679,
+    "total": 8532,
+    "image": 6893,
+    "video": 1638,
+    "nonMedia": 1
+  },
+  "totalBytes": 8838330346,
+  "zeroByteFiles": [],
+  "duplicateFilenameGroups": [
+    {
+      "key": "[redacted sha256:2811975763b4ce07 length:40]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/de7b50f1-69d5-4f99-a048-780b0be72a2f.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/de7b50f1-69d5-4f99-a048-780b0be72a2f.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7e1e0698b2484d93 length:40]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/425e531a-76eb-4f42-ba7f-df44aa664406.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/425e531a-76eb-4f42-ba7f-df44aa664406.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f1fb7bf1742691ef length:40]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/8ca12fe0-ee90-4865-9fdf-e095dcd8e57a.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/8ca12fe0-ee90-4865-9fdf-e095dcd8e57a.png"
+      ]
+    }
+  ],
+  "duplicateHashGroups": [
+    {
+      "key": "[redacted sha256:4734df24214dba29 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/de7b50f1-69d5-4f99-a048-780b0be72a2f.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/de7b50f1-69d5-4f99-a048-780b0be72a2f.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:cd030d1d32a10ed4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/e6427d2c-f4a8-48b1-a5b6-408f7285f53f_hd (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/e6427d2c-f4a8-48b1-a5b6-408f7285f53f_hd.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bf853d7d9966ed08 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/0d66aea3-2884-401f-9e1a-e28c2197eec8.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/572ea0e4-760b-475d-be9f-ca26698115f7.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2d6b23cbd87a93af length:64]",
+      "count": 4,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/1aca74f9-0ee8-48be-8659-835c02731f48.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/58e53c6e-30eb-4549-9012-d0e921f47c34.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/af6b47e7-ca5e-429c-9974-8577d036dd07.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/cf7db0b4-f04d-46bc-bba8-5ff0133e3bd9.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d24f7a0178e81a89 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/21228656-6d1b-46ad-8493-987a81fc28a7.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-c9fda882-2166-4a44-b8eb-0f59ec9b6ea2.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8a0f4e0f3349776d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/425e531a-76eb-4f42-ba7f-df44aa664406.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/425e531a-76eb-4f42-ba7f-df44aa664406.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f17430bb27a5396f length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/5e889fee-17bb-4ae6-b025-f05dc2fe9c52.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/61ed2f96-f7a6-47dd-83f1-34445935b0cc.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:66dee4ff4b6a3566 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/6d4d4e07-bcf6-4f92-b2f0-a61ddf4b7ad3.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/a83964fb-e00f-451f-85db-5557a88e562f.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ff6f3c1b70747fda length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/8ca12fe0-ee90-4865-9fdf-e095dcd8e57a.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/8ca12fe0-ee90-4865-9fdf-e095dcd8e57a.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9716576891c08d87 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/95ffbbfd-fcfb-454a-addd-7b068833fe81.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-c7c4ef25-6427-4571-a835-1c50ecb623fd.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f93e45b088f238a6 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/9d1cadba-e428-4cc9-88e7-d825deccc988.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-dba2d015-7101-4fd3-b26c-32ea6e460f2d.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:dc61bb89a7b10c0b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-20_Auto/de724a12-5d0a-4c3b-a00e-1b0c399503bf.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-e05c9b2a-acbb-49ad-9dc9-cb61cef2b72d.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:92b9760e96fced56 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-21_Auto/d41cbddf-6c32-4014-9be4-8db06e554fde.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-21_Auto/fc195315-8e87-4411-81f3-e4fe9b18b270.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:4fdee26102d6feff length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/01ac952d-c67e-44d2-af39-3b56a091fa28.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-01ac952d-c67e-44d2-af39-3b56a091fa28.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6b609ece4686bdcb length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/130e0de9-4152-40c2-bac8-b7f0556bf7a7.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-130e0de9-4152-40c2-bac8-b7f0556bf7a7.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9d9d3f4815a4d137 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/19d71900-7f1f-4954-854c-a82b82f36a49 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/19d71900-7f1f-4954-854c-a82b82f36a49.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:492a6a964be36cfb length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/21e64bb3-4888-4830-b162-6af0be686b76.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-21e64bb3-4888-4830-b162-6af0be686b76.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e4a2e3503ad53701 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/34b272fa-28af-479c-8b4c-046786f2137a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/34b272fa-28af-479c-8b4c-046786f2137a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7b79b4f33b0f5b1c length:64]",
+      "count": 3,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/5851b0fa-87b3-4833-b8b1-5dfe011026d6 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/5851b0fa-87b3-4833-b8b1-5dfe011026d6 (2).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/5851b0fa-87b3-4833-b8b1-5dfe011026d6.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f0806cd9a6aacfd1 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/6da3608d-1b98-4d74-a579-36472ced2cee.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-6da3608d-1b98-4d74-a579-36472ced2cee.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ab07774f1cdad240 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/701dc125-1b4d-4c90-8d54-7726345501b6.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-701dc125-1b4d-4c90-8d54-7726345501b6.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f0f6d99da063d041 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/9b8fe679-e0b3-4723-aa9e-d06f639b6811.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9b8fe679-e0b3-4723-aa9e-d06f639b6811.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:39305796efe30e39 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/bcda75db-734b-4e5f-9f11-e597c10e72b6.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-bcda75db-734b-4e5f-9f11-e597c10e72b6.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c802a0b4c559a3c3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/c934711c-e1c9-4b6d-bb80-6cd4fd49e134.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c934711c-e1c9-4b6d-bb80-6cd4fd49e134.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:716163b3e406a2e8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/cb708d71-6624-4518-a77c-3b35bd2b1c6a.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-7d1fc91f-a1a9-405c-bc40-083256b18ffd.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:179e73b6df4811ab length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/ChatGPT Image Jun 18, 2026, 04_46_40 PM.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/ChatGPT Image Jun 18, 2026, 10_51_16 AM.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9d9b190fa8e0f6f2 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/e257af9f-38f6-484b-b078-cbc19847f6c1.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f392d03a-d4c2-44a1-be3c-5b0618573f90 (2).mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:32f66df0cbd9464f length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/e984b2ba-9ea4-4ece-9896-d633846e2ece.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e984b2ba-9ea4-4ece-9896-d633846e2ece.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:dd28d2da818257a7 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/ef569128-fcd1-45e6-bab1-17a3a79f5673 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/ef569128-fcd1-45e6-bab1-17a3a79f5673.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8f011bd77c8ab780 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/Gemini_Generated_Image_5xepk35xepk35xep (1).png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/Gemini_Generated_Image_5xepk35xepk35xep.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ff80226f67a5ed24 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/generated_video (2).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-ebcb1fd9-17af-459e-8ee3-dc576add31e1.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:795685dfd1acce17 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/generated_video (3).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-1f5ef5e3-00b4-4bec-8ab9-6808847e2a76.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:271c4bc18684c872 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-001788ae-f942-4967-b340-7b4979186fac (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-001788ae-f942-4967-b340-7b4979186fac.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:cecc5b30e8a91e6c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0151c8e1-17c5-413a-b67d-beb564d40155 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0151c8e1-17c5-413a-b67d-beb564d40155.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b299dc29517e7aa4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-01e48364-3cda-4f93-a5a0-4bb8b752226b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-01e48364-3cda-4f93-a5a0-4bb8b752226b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:cf35587b7b741c9b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-02391fec-3fca-456b-8949-440cf00e5b08 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-02391fec-3fca-456b-8949-440cf00e5b08.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2de5f9015428115c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-02433e33-26fb-4571-8b52-2835f068f449 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-02433e33-26fb-4571-8b52-2835f068f449.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:250989eedc529350 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-05f51663-7b3e-4ec5-b42d-2372b7962e33 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-05f51663-7b3e-4ec5-b42d-2372b7962e33.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:a86189d062472408 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0810ba62-e265-4b59-a06d-367193b0f4c4 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0810ba62-e265-4b59-a06d-367193b0f4c4.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6d3ba98b313095bd length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-083e98bf-99f3-43b0-9234-81e3fd64d96d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-083e98bf-99f3-43b0-9234-81e3fd64d96d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ec19601b749f22ea length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-08b1f2f2-6a19-4648-80ac-7dbd2e5a38d6 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-08b1f2f2-6a19-4648-80ac-7dbd2e5a38d6.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7589a9b4d6b3835b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-08d7b54f-ddd2-485b-9c87-a539b387bc71 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-08d7b54f-ddd2-485b-9c87-a539b387bc71.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:86a61602d483dac3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0b18968f-3767-49ba-a60b-53f0064f9a5c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0b18968f-3767-49ba-a60b-53f0064f9a5c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2059d767c8577552 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0b4ca39b-4ec0-4c08-83aa-bfe7859e2728 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0b4ca39b-4ec0-4c08-83aa-bfe7859e2728.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e0ce188c02f551c3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0bcc016a-e524-430a-b798-2ea3a058616b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0bcc016a-e524-430a-b798-2ea3a058616b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:157bff74f130d499 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0c7981f3-8b4a-41d5-a36e-d2cd1f4d6474 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0c7981f3-8b4a-41d5-a36e-d2cd1f4d6474.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3eefa29660e5b0d0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0cca0610-9e86-470a-acc8-9210786c8b7a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0cca0610-9e86-470a-acc8-9210786c8b7a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:50dcf7d86f3c37c2 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0d9185a1-1193-4249-a52a-546f430f3e38 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0d9185a1-1193-4249-a52a-546f430f3e38.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:47d4e4f98ab17d60 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0fef1b6b-d831-4a49-908e-7e7bf720aa12 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-0fef1b6b-d831-4a49-908e-7e7bf720aa12.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b3c266efc94c1493 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-103e44bc-eec9-45b7-bc9a-12c56b355e58 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-103e44bc-eec9-45b7-bc9a-12c56b355e58.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:eb0ca0bca2dab046 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-10cf1699-711a-4785-a592-c4ddb529ca92 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-10cf1699-711a-4785-a592-c4ddb529ca92.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:1f93f2b35d023c6b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-10eaceaa-dbbb-43b0-8c7c-e882e2129e90 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-10eaceaa-dbbb-43b0-8c7c-e882e2129e90.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c978b0e16afc9109 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-12071b36-6fb9-4e57-a0fa-43b89397d65a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-12071b36-6fb9-4e57-a0fa-43b89397d65a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9d9a8dbbc12acdad length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-121d9210-2862-4049-b5ff-386b0f96fcec (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-121d9210-2862-4049-b5ff-386b0f96fcec.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:15ecc2bb5b4b1aa0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-14340384-a8d7-4b19-9469-368649c4ff2b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-14340384-a8d7-4b19-9469-368649c4ff2b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:aaa05c62ae4c4af0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-14386dfc-fffa-46d3-a685-a50766efdbfb (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-14386dfc-fffa-46d3-a685-a50766efdbfb.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:69dcbfcf8ca743a0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1473542f-0b30-4860-a0de-8c0966a0cc2a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1473542f-0b30-4860-a0de-8c0966a0cc2a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d1a84409478bd20d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-16e1dea5-1906-489f-bd89-f9ae3c60a90c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-16e1dea5-1906-489f-bd89-f9ae3c60a90c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:0bec62812c29a328 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-17be4fe6-5c1f-4b64-b8e2-7fe9e39b4a33 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-17be4fe6-5c1f-4b64-b8e2-7fe9e39b4a33.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:87721e39e0724382 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1874bb67-7d87-44b7-afea-4de6c2aa0ef3 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1874bb67-7d87-44b7-afea-4de6c2aa0ef3.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7023c1c21df21ab9 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1a2f2bf3-ef86-4d4e-883c-dbcf22ad097d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1a2f2bf3-ef86-4d4e-883c-dbcf22ad097d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c154eeb1438f1da0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1b4387c3-0357-4366-938d-b5d06153724e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1b4387c3-0357-4366-938d-b5d06153724e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:df9412bc1991a717 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1ca8ba17-9651-45ff-95ca-47fbd7646073 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1ca8ba17-9651-45ff-95ca-47fbd7646073.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:fd362793e795cf2a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1cb32142-b88e-4a51-8f3b-954f756fd30e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1cb32142-b88e-4a51-8f3b-954f756fd30e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e874679277081d91 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1d39d911-7742-4bc7-a030-58c96a813e46 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-1d39d911-7742-4bc7-a030-58c96a813e46.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:cb5ff43ba9f932a3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2010c90f-6efa-44f0-9ffb-01c8269af355 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2010c90f-6efa-44f0-9ffb-01c8269af355.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:11b04fdf7372d2cf length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-20c3373e-4593-412c-bd89-50ed9007f41a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-20c3373e-4593-412c-bd89-50ed9007f41a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:49d9960ee2ffc804 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-20f1187c-c20b-4de8-bc92-898d285aefd0 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-20f1187c-c20b-4de8-bc92-898d285aefd0.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:194087317928cc49 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-222f81d1-3d90-4c6d-ba45-392d7fac040a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-222f81d1-3d90-4c6d-ba45-392d7fac040a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:206d837075a61d4a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-23e0fcf3-1c85-40c4-b42c-4cb9e347b7dc (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-23e0fcf3-1c85-40c4-b42c-4cb9e347b7dc.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:37bf862e0c0eadc6 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-26a56e45-13bd-498b-81c7-b7ca6944dcec (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-26a56e45-13bd-498b-81c7-b7ca6944dcec.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:938acfc38894947e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-28145a0b-870b-444b-88d6-8798144b44a7 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-28145a0b-870b-444b-88d6-8798144b44a7.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:01b51bb1944a307e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2a653788-bbb5-46c8-9e6d-57a477d53236 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2a653788-bbb5-46c8-9e6d-57a477d53236.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:83b8f79c7019a331 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2b2d3c1c-706f-4bd0-9568-8b2fcd46e5ed (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2b2d3c1c-706f-4bd0-9568-8b2fcd46e5ed.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:910e461eb5cfa062 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2bddaa81-bcb4-4bed-b2f4-6b81ba24a3b6 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2bddaa81-bcb4-4bed-b2f4-6b81ba24a3b6.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ba7e50eb54bde5ce length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2ddd5126-11fb-4917-8167-69e0d43d22b2 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2ddd5126-11fb-4917-8167-69e0d43d22b2.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:17bb74d55c27c8e7 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2f7930ba-c9b0-4283-abdf-761653796448 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-2f7930ba-c9b0-4283-abdf-761653796448.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:cdbbe6895df75524 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-30a12eb8-4640-4474-9a8f-1ef8edd34352 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-30a12eb8-4640-4474-9a8f-1ef8edd34352.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e890426777e22357 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3135a73c-362a-414a-abf6-202ad257dd94 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3135a73c-362a-414a-abf6-202ad257dd94.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:55e06e3565f2fe18 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-31e3f405-e692-45dc-9f34-df47b8d85811 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-31e3f405-e692-45dc-9f34-df47b8d85811.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:90ce06d643307216 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-31ff6ff4-0d53-4f4a-bf12-2ce929cd2c42 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-31ff6ff4-0d53-4f4a-bf12-2ce929cd2c42.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:62de42717c0681bb length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-32efdbf4-f0f1-496a-8235-1434c2d16ddd (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-32efdbf4-f0f1-496a-8235-1434c2d16ddd.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:1ee1d48fd7b90a2e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-33272e7d-cc36-40ce-b367-c9849b37481a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-33272e7d-cc36-40ce-b367-c9849b37481a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:633b7970bc9490ea length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-349ea3cd-ccee-4610-9ec8-6b5f7b6293c4 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-349ea3cd-ccee-4610-9ec8-6b5f7b6293c4.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:32669beef6f5f990 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-355a4d79-e796-4dc1-902e-ee1e81c1b4fc (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-355a4d79-e796-4dc1-902e-ee1e81c1b4fc.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:329b266401855eca length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-35a93fe9-df1a-4997-a3d2-1f8e235a53da (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-35a93fe9-df1a-4997-a3d2-1f8e235a53da.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:77cd7b09790876f5 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3740174e-83b5-42c4-8bbc-09ef22620ee5 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3740174e-83b5-42c4-8bbc-09ef22620ee5.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bd1e840b24ea8936 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3748802b-87c3-4cc9-8c89-d487516f401d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3748802b-87c3-4cc9-8c89-d487516f401d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d02d2835bcbb8528 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-386ffbd6-247d-4c5b-8c33-e7a7a4641ba7 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-386ffbd6-247d-4c5b-8c33-e7a7a4641ba7.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:44c9541310f50d26 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-38e453f8-9d75-4e77-9283-9245af0c318e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-38e453f8-9d75-4e77-9283-9245af0c318e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:fba66691e88557e7 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3931f2d9-7fe0-481c-a42e-672ed7d64311 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3931f2d9-7fe0-481c-a42e-672ed7d64311.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3c8a8fa3bd123037 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-394456c3-4fe7-4d1a-886d-30d10f53e46c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-394456c3-4fe7-4d1a-886d-30d10f53e46c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f8e02476ae76ea97 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-39b7d454-5f45-4dd8-92f6-9a8f4c3b5a2d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-39b7d454-5f45-4dd8-92f6-9a8f4c3b5a2d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8889fa19611a5152 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-39ec62c3-01cf-45bb-b014-b4f10b4dc812 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-39ec62c3-01cf-45bb-b014-b4f10b4dc812.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:4f408d8142acef25 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3a55a476-2d96-4124-9aef-bd1de103d149 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3a55a476-2d96-4124-9aef-bd1de103d149.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bc3b96eddf138868 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3b35983b-ca90-4622-97e7-023759599b99 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3b35983b-ca90-4622-97e7-023759599b99.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:75ebded7e52bddfc length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3c38ff96-06fe-478c-9dd2-f450c11bf092 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3c38ff96-06fe-478c-9dd2-f450c11bf092.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:026830503fa9b1cd length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3da44ff8-1b11-4d07-896d-ffab6e59d0ff (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3da44ff8-1b11-4d07-896d-ffab6e59d0ff.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:35810158dc2abfd3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3e0d0ce0-1533-4b30-a746-e294e761d673 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-3e0d0ce0-1533-4b30-a746-e294e761d673.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:26acc79a45bf8993 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-404c3633-f11d-4ab7-ac76-6c3b2c7c7cfc (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-404c3633-f11d-4ab7-ac76-6c3b2c7c7cfc.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:894694dabe82d05b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-435b9645-6b96-49f7-8002-a4fae110ba6f (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-435b9645-6b96-49f7-8002-a4fae110ba6f.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:adf7484648af7d4c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-46f20cce-b640-4ec5-a6ae-1b8c7591979a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-46f20cce-b640-4ec5-a6ae-1b8c7591979a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:887e097b6492b2d8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-470c35c6-175c-4377-8d34-b322a8cc2cb5 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-470c35c6-175c-4377-8d34-b322a8cc2cb5.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:235a4bdf2e721704 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-475771af-d605-4de0-83cb-47eae62eb3d8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-475771af-d605-4de0-83cb-47eae62eb3d8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:0bd2b04e7d9aafe1 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-47c0ad78-74ef-40f5-9317-dfa2039e15e0 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-47c0ad78-74ef-40f5-9317-dfa2039e15e0.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b4098e368be8e62c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-48173ff9-6e76-4cf6-96a3-6b92a69ef639 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-48173ff9-6e76-4cf6-96a3-6b92a69ef639.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:eb975a135875be07 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-48ce645d-681e-41e8-9352-bba4e962b603 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-48ce645d-681e-41e8-9352-bba4e962b603.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b61aee655f365678 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-49b72c65-4e43-4f0e-a243-07cd73e0faec (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-49b72c65-4e43-4f0e-a243-07cd73e0faec.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:634bfa26ce4a2608 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4a35117e-0027-49e9-a7d0-047e4cd5094e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4a35117e-0027-49e9-a7d0-047e4cd5094e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:aebf808bdf9cf7ae length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4ab34655-b2e2-4bc2-9910-db81e5bc918d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4ab34655-b2e2-4bc2-9910-db81e5bc918d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e105ccdd2cee86f4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4baad6d4-31e9-406b-8087-8df599ba52e6 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4baad6d4-31e9-406b-8087-8df599ba52e6.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:57ddde512108de61 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4ddd83b6-a803-4347-a4dd-3ad953d5fd53 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4ddd83b6-a803-4347-a4dd-3ad953d5fd53.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6521d22bdd206870 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4e93012f-e474-43b2-8a40-a8761d9dc86b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-4e93012f-e474-43b2-8a40-a8761d9dc86b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2aebd0c0c5462d30 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-50b4b074-74b7-457c-bc7d-6313f1df1b75 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-50b4b074-74b7-457c-bc7d-6313f1df1b75.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ccc3555035e79b39 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-51fa54c5-f19a-413f-88b0-23b03e8377d8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-51fa54c5-f19a-413f-88b0-23b03e8377d8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:87666505130e73e8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-536b8f69-9f7b-4d9f-bc18-19de228241f7 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-536b8f69-9f7b-4d9f-bc18-19de228241f7.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e6eafcd63c96294b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5701c8d3-1ce3-4f42-9c6a-1c4a386410c0 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5701c8d3-1ce3-4f42-9c6a-1c4a386410c0.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:5a88034bfcb3a482 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5b947adc-d081-4285-aef4-565dd6c6111c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5b947adc-d081-4285-aef4-565dd6c6111c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7e209827c66d7245 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5c013734-5d60-4e9c-b500-cd211cf0f0df (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5c013734-5d60-4e9c-b500-cd211cf0f0df.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:45de938b99438146 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5c9ceec7-cd10-4328-ab55-98e944b80305 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5c9ceec7-cd10-4328-ab55-98e944b80305.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:aa276f57c1177b4f length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5d4ae9fd-4abf-4711-8049-2ee28241e82b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5d4ae9fd-4abf-4711-8049-2ee28241e82b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b2e86e62e1464618 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5d609310-d0a7-429e-b771-3834b0f02719 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5d609310-d0a7-429e-b771-3834b0f02719.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6ded000d0796ead3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5f571edf-9cd1-4099-b876-d4e2e42ca6bb (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-5f571edf-9cd1-4099-b876-d4e2e42ca6bb.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:930b95acd8a009c7 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-602eec53-b2ef-4523-a437-19050c9ec234 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-602eec53-b2ef-4523-a437-19050c9ec234.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d49637473f73cdb8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-64136785-0184-458a-bb1e-012bf50a2985 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-64136785-0184-458a-bb1e-012bf50a2985.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ef4ac51a383ed9ae length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-69c70c01-ea99-4e1e-981d-f3084eca06fd (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-69c70c01-ea99-4e1e-981d-f3084eca06fd.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c1f6f1fe438d89ac length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-6ab146e6-283f-4352-a855-a042c368f3a5 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-6ab146e6-283f-4352-a855-a042c368f3a5.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:49879c94413f5be0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-6ae24d31-28ff-4dc9-a993-850a40da428f (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-6ae24d31-28ff-4dc9-a993-850a40da428f.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6b4ff3f8d89eeee3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-6bb74a93-cbea-4609-b0fa-dcd7bb81dcfe (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-6bb74a93-cbea-4609-b0fa-dcd7bb81dcfe.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:76a07ce15338067b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-6f1a22ed-7cb6-4c3c-847a-25c9babb688a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-6f1a22ed-7cb6-4c3c-847a-25c9babb688a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d2482f57e3205f61 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7031f4c1-1d89-49b5-bfff-9378d019ca01 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7031f4c1-1d89-49b5-bfff-9378d019ca01.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:98615186181f1698 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7060669f-bb46-4efd-8102-e5747a5caa81 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7060669f-bb46-4efd-8102-e5747a5caa81.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c53e6c3555737bce length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-74b13256-fe8a-4516-b2a2-6d57bd26bb33 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-74b13256-fe8a-4516-b2a2-6d57bd26bb33.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:54c9b640c2e5925e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-755cd7f2-8e7c-4c26-9b43-da0efcea4d74 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-755cd7f2-8e7c-4c26-9b43-da0efcea4d74.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:48f143812e89643c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-760eb7b9-d7c8-40e0-91ee-13c28c45d660 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-760eb7b9-d7c8-40e0-91ee-13c28c45d660.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:26159b2f08cc3774 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-763b5ed6-93cd-423f-ab4d-63c57840d6be (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-763b5ed6-93cd-423f-ab4d-63c57840d6be.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3b83e0f31d442057 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-76ef5b0e-e6db-4099-bce2-43092f03b56f (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-76ef5b0e-e6db-4099-bce2-43092f03b56f.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b91be590159dfd33 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-789b8e59-e07b-4ba8-8509-854bf0ff6f82 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-789b8e59-e07b-4ba8-8509-854bf0ff6f82.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e528ad5633d50628 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7a255010-086c-4ac6-b03e-1ef0d751edd8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7a255010-086c-4ac6-b03e-1ef0d751edd8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:95ee2145f7d03d0c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7abc56f1-9b3b-4f81-9866-f0904ce3f048 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7abc56f1-9b3b-4f81-9866-f0904ce3f048.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f1107e81fba3e921 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7c1ddbf7-8588-48e2-9b36-15eb864161d5 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7c1ddbf7-8588-48e2-9b36-15eb864161d5.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:744eb6a0f590b0a6 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7d203874-bcc4-45c8-8b01-b23d273dd126 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7d203874-bcc4-45c8-8b01-b23d273dd126.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:fc409d95b8e0c1fc length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7d761055-1933-4143-85dc-f47646658595 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7d761055-1933-4143-85dc-f47646658595.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:acfd9bc4c3290306 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7e011c90-fb3f-4641-9a36-292bde24651e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7e011c90-fb3f-4641-9a36-292bde24651e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9e282b8097f732d9 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7eedc7a4-6d8a-4501-bdb1-3475cbe3ee5f (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-7eedc7a4-6d8a-4501-bdb1-3475cbe3ee5f.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ba0797f450e9f4df length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-813bf9b2-49cf-4ffa-abb1-eb9782a8ca78 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-813bf9b2-49cf-4ffa-abb1-eb9782a8ca78.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:876e2cb4d20db3f2 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-89b7f48a-2592-48b4-baba-72c952948b5c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-89b7f48a-2592-48b4-baba-72c952948b5c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:0dd94eafbc8d5932 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8aee14ec-0915-47d4-bab7-38384206fe14 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8aee14ec-0915-47d4-bab7-38384206fe14.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3bfbac0114eae779 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8c65f32f-0b31-44c8-9ddb-7d0208aedb1c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8c65f32f-0b31-44c8-9ddb-7d0208aedb1c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6aeb85f3ce713c0b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8d0d5704-c5bc-4034-b7de-462fed84b173 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8d0d5704-c5bc-4034-b7de-462fed84b173.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:746cab72210de6bb length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8d29356f-c3b0-429d-8d3b-f09d4975bbd4 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8d29356f-c3b0-429d-8d3b-f09d4975bbd4.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bc0d702c6f96a729 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8d566f44-ceda-43d7-84a4-5cf0ec7b8ee4 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8d566f44-ceda-43d7-84a4-5cf0ec7b8ee4.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:620124c00380b7f1 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8ddb9713-4bd4-49dd-b184-4a959162f58d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8ddb9713-4bd4-49dd-b184-4a959162f58d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:015e543cb1502727 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8e6695a7-ccdb-4fc6-8ed5-cbe371381add (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8e6695a7-ccdb-4fc6-8ed5-cbe371381add.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:4b8f5cd013b9b022 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8e839276-edd0-40ec-b89b-f3b99067d8f2 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-8e839276-edd0-40ec-b89b-f3b99067d8f2.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:714a0894af50dae5 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-90486899-eeb7-447e-bb3a-0b30b304a7c6 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-90486899-eeb7-447e-bb3a-0b30b304a7c6.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2f2bace1bd6adec1 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-90979a3d-c7e9-4117-8158-93eaf949799b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-90979a3d-c7e9-4117-8158-93eaf949799b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e2b5158cac1167af length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-91d62178-a464-4885-86a1-4d8060d1ff6b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-91d62178-a464-4885-86a1-4d8060d1ff6b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9f573905f01f438c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-921ee6af-1a5a-42db-a5d8-eb266331a375 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-921ee6af-1a5a-42db-a5d8-eb266331a375.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6d09c4fd616f632f length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-97797f68-f0c3-4125-bd8c-10763a8e59c9 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-97797f68-f0c3-4125-bd8c-10763a8e59c9.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9f802d3b7ad7ca8d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-977cc165-0b8b-4d84-9c3d-ee5afcde7f6e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-977cc165-0b8b-4d84-9c3d-ee5afcde7f6e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:98520c9ec4877fff length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-981c95a2-38f8-4cb7-877c-ae22932fce7d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-981c95a2-38f8-4cb7-877c-ae22932fce7d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:35e7cff099f2ae2e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-98b93473-1018-4671-9c60-7dfbf20bb7fe (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-98b93473-1018-4671-9c60-7dfbf20bb7fe.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:628d6592ccaabf64 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9b2da0df-795e-4a12-8ab2-73e54b69cff7 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9b2da0df-795e-4a12-8ab2-73e54b69cff7.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:32155386807ec100 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9b6d8481-b8f6-4878-b75c-b16c493598a0 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9b6d8481-b8f6-4878-b75c-b16c493598a0.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d63d5d8f4f625689 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9d8117de-2509-49ef-885f-70d3ac37e09b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9d8117de-2509-49ef-885f-70d3ac37e09b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9310c020d4eb3c94 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9d81d333-4e33-423d-aace-cc7071b83ad1 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9d81d333-4e33-423d-aace-cc7071b83ad1.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e554bee42bbd14ca length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9e2fbc10-c6c7-45a7-a085-9f1c90a7db9d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9e2fbc10-c6c7-45a7-a085-9f1c90a7db9d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:a5622ba321546b4c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9fe749d6-959a-4fda-b36e-9ee50e13ae50 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-9fe749d6-959a-4fda-b36e-9ee50e13ae50.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:57ced2e546debafc length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a0cc5ab6-31f1-4d4e-b261-78e1e2a578e5 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a0cc5ab6-31f1-4d4e-b261-78e1e2a578e5.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:51a5ffec904b6aef length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a2a4540e-2cbb-4e69-825d-ad0f0cae8bff (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a2a4540e-2cbb-4e69-825d-ad0f0cae8bff.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:4600659f7b856384 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a2c7824e-5c9b-411b-8fac-33e76b698bc8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a2c7824e-5c9b-411b-8fac-33e76b698bc8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:535c8f37ae2602a6 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a30539b0-e9f4-4f7a-9f38-61dec8cf53b4 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a30539b0-e9f4-4f7a-9f38-61dec8cf53b4.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:56ddb1cfaa8bfc38 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a3087afb-c5d9-44d2-bc6a-b2d21c993f3c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a3087afb-c5d9-44d2-bc6a-b2d21c993f3c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:516cce84ad2af2de length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a49d9f5a-cd1f-45bb-b4de-715aedd0e62c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a49d9f5a-cd1f-45bb-b4de-715aedd0e62c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:725415f3f6c161a4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a525add6-703d-4ca2-a545-7516a93e6518 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a525add6-703d-4ca2-a545-7516a93e6518.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:5fa60b2954212b2a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a57276a0-a9ae-447e-b1a0-4d2523e94f3b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a57276a0-a9ae-447e-b1a0-4d2523e94f3b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:451fdc3cbb30b412 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a6023627-dcfa-45c4-9241-3b28cebcab98 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a6023627-dcfa-45c4-9241-3b28cebcab98.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:67cd36f1d4ce1664 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a606f8f3-d5c2-4fca-882a-3495e9fd9fd0 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a606f8f3-d5c2-4fca-882a-3495e9fd9fd0.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:eebcadca3edde5b2 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a613c1a3-96db-478a-a1b1-6611635b5b82 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a613c1a3-96db-478a-a1b1-6611635b5b82.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:95e569b570122991 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a732e0e8-aef0-4b4f-8f8c-fa45a7573e13 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a732e0e8-aef0-4b4f-8f8c-fa45a7573e13.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f8b4e09f0e0e64e8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a940c963-61fd-4371-ad90-40852b8f19be (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-a940c963-61fd-4371-ad90-40852b8f19be.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:403619effe49bb37 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-abbb0347-e281-4ad3-a477-96b156a09e70 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-abbb0347-e281-4ad3-a477-96b156a09e70.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f370f2c6a3a59e15 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ae4bd14e-5f9a-4afa-8b81-ecae0686f7a8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ae4bd14e-5f9a-4afa-8b81-ecae0686f7a8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8ba43246e88edb14 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-aff56efb-dfba-4486-80fe-5cecc4cc8153 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-aff56efb-dfba-4486-80fe-5cecc4cc8153.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8332cfbc76d93ce4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b133e7d0-667e-4382-816b-c50cc4be3c7e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b133e7d0-667e-4382-816b-c50cc4be3c7e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:468cb18b1ac0aa30 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b276a040-74d7-4830-9726-38f44297a4df (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b276a040-74d7-4830-9726-38f44297a4df.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:1a4ee301e07ba589 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b33d7223-1c11-4ee2-a897-54ff9ab3a062 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b33d7223-1c11-4ee2-a897-54ff9ab3a062.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:5f5de73c5be82c90 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b41eb609-76e1-43da-a72a-09961129f12d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b41eb609-76e1-43da-a72a-09961129f12d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:74ffb3a5705634c2 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b491e2b9-6b5e-4277-b5a3-35750ecb481a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b491e2b9-6b5e-4277-b5a3-35750ecb481a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d8ba2c0500002b00 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b4a9da16-70c2-4ff8-9212-42075f9498dc (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b4a9da16-70c2-4ff8-9212-42075f9498dc.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bab50c36d753bed2 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b6317edb-ca94-46eb-8fbf-b756e2c2f75c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b6317edb-ca94-46eb-8fbf-b756e2c2f75c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f1b9a44c524fa01d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b7376976-3f81-4398-87cf-9bdf9154a16b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b7376976-3f81-4398-87cf-9bdf9154a16b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2f729061c3709f33 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b838e00f-ef03-4400-9adc-ffb0d92074ec (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b838e00f-ef03-4400-9adc-ffb0d92074ec.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:30f77573ec2118bb length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b85b6446-31e5-4fe3-9f86-174923826124 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b85b6446-31e5-4fe3-9f86-174923826124.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ebc00fdf5ce82066 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b8af252f-fb29-4b0a-a5e8-aa90ad1477e0 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b8af252f-fb29-4b0a-a5e8-aa90ad1477e0.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:1b004db2b0101936 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b8b7ac51-cf0e-45a7-8544-4c13f629af3b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b8b7ac51-cf0e-45a7-8544-4c13f629af3b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:5a92c10572ff0df3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b9f23a4c-5b1b-47c1-af29-cd3bacf34ad0 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-b9f23a4c-5b1b-47c1-af29-cd3bacf34ad0.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3bbe75a04d8ce537 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-bab961b5-5e19-4ce1-9ef1-8b898c71eac0 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-bab961b5-5e19-4ce1-9ef1-8b898c71eac0.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9a9c04501c8cadb4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-bda04690-f7d7-408d-b87a-449d7c2561bb (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-bda04690-f7d7-408d-b87a-449d7c2561bb.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d6ff2d4b27bf2148 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-bdd9d2c0-5214-4004-bba7-0637887696e8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-bdd9d2c0-5214-4004-bba7-0637887696e8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:304f17d54f55b1a5 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-bf9bd951-8229-49e8-a011-e750eda31bc0 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-bf9bd951-8229-49e8-a011-e750eda31bc0.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7576eb50d9211932 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c3207236-d63c-4a43-be1a-65841b5d801c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c3207236-d63c-4a43-be1a-65841b5d801c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:72fc3020f69b22fe length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c4c1c97f-4148-4aec-9e9b-8c8bfc16f9f4 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c4c1c97f-4148-4aec-9e9b-8c8bfc16f9f4.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b9787295fe79f963 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c5494008-07bf-46f1-be19-cedff12993cc (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c5494008-07bf-46f1-be19-cedff12993cc.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:4c5f33cd3e5172b7 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c6130f50-08ef-4774-8b88-c60f969749a8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c6130f50-08ef-4774-8b88-c60f969749a8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c3318b198032ffb6 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c6d3120b-0da9-4761-bd78-5963a5bc4444 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c6d3120b-0da9-4761-bd78-5963a5bc4444.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:91d521bd875b56cf length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c7e04b2d-b6ce-4683-9c6d-5fa9798dc10e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c7e04b2d-b6ce-4683-9c6d-5fa9798dc10e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:5aa3e70df0de7d25 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c7fd8147-48ad-4709-b690-53010a26a754 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-c7fd8147-48ad-4709-b690-53010a26a754.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:19b1e9bdad84f8bd length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cb8a10b7-c77c-4249-b4f6-6761807d9e70 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cb8a10b7-c77c-4249-b4f6-6761807d9e70.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e16097400e13e949 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cc53554b-ddbe-4afb-b95e-776b67bb11bc (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cc53554b-ddbe-4afb-b95e-776b67bb11bc.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:417b2b2d2611f02b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cc53df14-f397-4457-9a69-a06815484992 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cc53df14-f397-4457-9a69-a06815484992.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f1001d7cb83ac622 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cd1f6f88-a2b8-4a4c-b075-c085f8bbd5ee (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cd1f6f88-a2b8-4a4c-b075-c085f8bbd5ee.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3be6a98bb1b51026 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ce680a8d-abb8-4be0-9e76-a80f3ef6548a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ce680a8d-abb8-4be0-9e76-a80f3ef6548a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3ab602648448821b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cf13b44a-3680-42ed-9550-a6bd525f9e17 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cf13b44a-3680-42ed-9550-a6bd525f9e17.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e5eeaf761bfa0a9a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cfc8e7fb-2bb8-4c9a-927c-ac7fde3f88bc (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-cfc8e7fb-2bb8-4c9a-927c-ac7fde3f88bc.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:63656af86aea5d74 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d017bfcc-f6e9-40d1-a8ae-e9a9b05cb05f (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d017bfcc-f6e9-40d1-a8ae-e9a9b05cb05f.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:aaf32ba9aa12e87a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d122d59c-2646-458f-9c34-e766afe63103 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d122d59c-2646-458f-9c34-e766afe63103.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2d3f8d7d4e18c10d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d25c37a7-dbab-4b0f-aecf-e01f4838bec8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d25c37a7-dbab-4b0f-aecf-e01f4838bec8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:5f265d3c75dfc518 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d38c7c4b-f00e-41b1-87f7-cee5b94a5a20 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d38c7c4b-f00e-41b1-87f7-cee5b94a5a20.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:caae4c98ca4950fc length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d3f1d70d-37e1-4e0e-be44-a18ca9549ff4 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d3f1d70d-37e1-4e0e-be44-a18ca9549ff4.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:99b1b810d1845855 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d40a2f87-02e2-489d-bda0-94006a2ef10a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d40a2f87-02e2-489d-bda0-94006a2ef10a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:a29bed1b433c2aff length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d4fe7dd8-cca5-412f-9b53-15f85eef529c (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d4fe7dd8-cca5-412f-9b53-15f85eef529c.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2ed2897f2faabbee length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d570c68c-14fc-4685-a3f6-fe9458d899ae (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d570c68c-14fc-4685-a3f6-fe9458d899ae.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7e332a35ee507383 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d62bc0c4-4018-4988-a679-283b76c1edc3 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d62bc0c4-4018-4988-a679-283b76c1edc3.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b2ccb967d785274f length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d79c6860-ab58-408f-952c-7a5ab73d98e8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d79c6860-ab58-408f-952c-7a5ab73d98e8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:dfb13d530bef5ca4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d8668ad4-e38c-4fa1-a8bd-47228e8c095a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d8668ad4-e38c-4fa1-a8bd-47228e8c095a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:5204725c5ebe10fa length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d8c18e10-152d-4cd7-a5fe-826b6fcc792a (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-d8c18e10-152d-4cd7-a5fe-826b6fcc792a.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3c1da499b1270509 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-db18e3a8-f9a2-42ac-b6a7-f7513da851c1 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-db18e3a8-f9a2-42ac-b6a7-f7513da851c1.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:89317b027b668a4c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-dc17ddb9-6d66-4bba-9cc0-29e848660217 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-dc17ddb9-6d66-4bba-9cc0-29e848660217.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:817b60f579622e96 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-dd393694-516b-49b4-a72e-7e509e6a8920 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-dd393694-516b-49b4-a72e-7e509e6a8920.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:177da59c730cfe27 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ded1a38f-3355-4655-af19-65292103b497 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ded1a38f-3355-4655-af19-65292103b497.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:64442b3b5be0fa65 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ded8a07e-66d3-4d5f-8c5a-772c765855a2 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ded8a07e-66d3-4d5f-8c5a-772c765855a2.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:730b7ccf51d902d9 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-def48d83-2802-4f71-a655-cac6c2b8b70d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-def48d83-2802-4f71-a655-cac6c2b8b70d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:74efb8561dd4f4e1 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-df7921db-bde0-4611-ad28-058576fb5c3b (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-df7921db-bde0-4611-ad28-058576fb5c3b.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:cf16b7026e4cd328 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e09e1055-f579-42e4-90f7-8c3780653225 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e09e1055-f579-42e4-90f7-8c3780653225.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6ce197a938ebac88 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e11c5f60-a8d4-4226-9d70-5a7099d971dd (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e11c5f60-a8d4-4226-9d70-5a7099d971dd.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:377f13c1e445d71a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e14a20ff-2101-4615-8cc3-810dc13e4b1e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e14a20ff-2101-4615-8cc3-810dc13e4b1e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:08b5dd5ea427f439 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e2c156a3-9a1d-4795-bbd6-57ca69eccab6 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e2c156a3-9a1d-4795-bbd6-57ca69eccab6.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b95b5413adce470c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e445ad18-015b-4d5d-95dc-faba78ed2b9f (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e445ad18-015b-4d5d-95dc-faba78ed2b9f.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:cfd10676adbb6c9a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e5b89f35-0151-4bd0-9a9a-4bf503efeeb2 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e5b89f35-0151-4bd0-9a9a-4bf503efeeb2.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:203b1cae47ef24ec length:64]",
+      "count": 3,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e676ce41-8f3d-4d82-a796-a54c81f1d772 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e676ce41-8f3d-4d82-a796-a54c81f1d772 (2).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e676ce41-8f3d-4d82-a796-a54c81f1d772.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:32516f8f9d841637 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e6db871c-f427-42c7-ba17-c109c17d59c3 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e6db871c-f427-42c7-ba17-c109c17d59c3.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bfdd35650986d506 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e70d175c-a5dd-4dc0-8a96-15d60d66c184 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e70d175c-a5dd-4dc0-8a96-15d60d66c184.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6ceea720b5096229 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e7887b56-9feb-4336-b061-68783c1a384e (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e7887b56-9feb-4336-b061-68783c1a384e.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6ff5dc0c461211c4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e82fc1f6-718e-4afd-9f0e-a1240449e008 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-e82fc1f6-718e-4afd-9f0e-a1240449e008.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d76c34dcd20d042f length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ea31ab49-c73b-4342-9760-96cbc5eaf3ad (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ea31ab49-c73b-4342-9760-96cbc5eaf3ad.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9eac622841ac4588 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ebaea8ef-87f6-4af3-85aa-a4cf62714794 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ebaea8ef-87f6-4af3-85aa-a4cf62714794.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2e73eb55b455e8ad length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ee302447-3074-4750-b5fc-5d4cdfa359d2 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ee302447-3074-4750-b5fc-5d4cdfa359d2.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b3dbabb89ee8c013 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ef7699d2-1bba-4d4d-8ab2-faa2677c63f2 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-ef7699d2-1bba-4d4d-8ab2-faa2677c63f2.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:286cdc6b7534bcb2 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-f1ac17a9-0c58-4ae0-8734-250a60f68ca3 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-f1ac17a9-0c58-4ae0-8734-250a60f68ca3.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bc564bbc604cd2ab length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-f213b0ea-dc5b-4f8a-96f9-a1169e054ee6 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-f213b0ea-dc5b-4f8a-96f9-a1169e054ee6.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:a06534dde23ab8cb length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-f60c38ad-1430-4157-a7b7-00daa4df28e8 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-f60c38ad-1430-4157-a7b7-00daa4df28e8.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:4fe3adb3c2524728 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-f923fc68-3d54-4ef7-984a-36af61628c45 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-f923fc68-3d54-4ef7-984a-36af61628c45.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:62d3b2acc36f63b8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fa223846-bf6c-4d49-9a1d-413eac0eb66d (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fa223846-bf6c-4d49-9a1d-413eac0eb66d.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:648256c2381f9b9e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fa8c1f47-ca88-4eaa-84de-cd401f0d5614 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fa8c1f47-ca88-4eaa-84de-cd401f0d5614.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:1c1343f8cfc63b7c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fd61ca3f-c4d4-491d-bd00-90074b4329b3 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fd61ca3f-c4d4-491d-bd00-90074b4329b3.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9054cc88a30d843e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fda9f36d-cbd7-4495-a881-9f2fedd6e058 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fda9f36d-cbd7-4495-a881-9f2fedd6e058.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f61e51ed8d3bb809 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fef05359-cba7-4011-9172-273fac52a920 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fef05359-cba7-4011-9172-273fac52a920.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:0bf97ca897e1485f length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fef25868-5b1e-4280-bf19-c9aa632f0823 (1).jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-image-fef25868-5b1e-4280-bf19-c9aa632f0823.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:50160e7c2acfde40 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-powertools_v1_users_73e01e47-8b4d-4560-8d6e-d72f00b02b82_media_2026-03-31_Auto_1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-powertools_v1_users_73e01e47-8b4d-4560-8d6e-d72f00b02b82_media_2026-04-04_Auto_1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:48faac49be497eb1 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-0b18968f-3767-49ba-a60b-53f0064f9a5c (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-0b18968f-3767-49ba-a60b-53f0064f9a5c.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:45e9124310440a96 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-0c7981f3-8b4a-41d5-a36e-d2cd1f4d6474 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-0c7981f3-8b4a-41d5-a36e-d2cd1f4d6474.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9626adc9fd194f5d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-0d70b73c-e690-426a-8cea-8d2734a6989d (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-0d70b73c-e690-426a-8cea-8d2734a6989d.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d14593b51706602f length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-1008a8b6-a975-4fea-8c2b-fa6a5ed326ed (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-1008a8b6-a975-4fea-8c2b-fa6a5ed326ed.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:da957b612cf7113d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-11dac492-2941-4974-97f4-06cecd237693 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-11dac492-2941-4974-97f4-06cecd237693.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:82d2c935db62f3d0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-1a2f2bf3-ef86-4d4e-883c-dbcf22ad097d (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-1a2f2bf3-ef86-4d4e-883c-dbcf22ad097d.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bdb10376aadf8e9b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-1ae748af-f640-4274-be4f-defb2deeedbc (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-1ae748af-f640-4274-be4f-defb2deeedbc.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:0b898693cf5fb8dc length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-1cd52bcf-de63-4aae-a52b-4e8a55ea973a (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-1cd52bcf-de63-4aae-a52b-4e8a55ea973a.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:15d13805c557222b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-24b930d7-bd01-477b-ae6c-c2e4fd85ce27 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-24b930d7-bd01-477b-ae6c-c2e4fd85ce27.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e402ef688dd1e740 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-28145a0b-870b-444b-88d6-8798144b44a7 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-28145a0b-870b-444b-88d6-8798144b44a7.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c97bf42dbb72d753 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2a25390e-744e-46a1-bf1d-735ba3c186c4 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2a25390e-744e-46a1-bf1d-735ba3c186c4.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7b00c88d96426020 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2aac724d-761e-4784-9e17-2be17ca07214 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2aac724d-761e-4784-9e17-2be17ca07214.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f7e4ad8571d3e7f3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2c405b86-c6ff-4098-9329-6ef5c13ac58c (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2c405b86-c6ff-4098-9329-6ef5c13ac58c.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:42a6de780cc7042a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2cbb4170-90be-448b-9078-20b5c76fdfee (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2cbb4170-90be-448b-9078-20b5c76fdfee.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:35751e6b677ae8f0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2ddd5126-11fb-4917-8167-69e0d43d22b2 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-2ddd5126-11fb-4917-8167-69e0d43d22b2.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6eebe6a1f066daf8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-4c7ace1a-cd92-4325-8d55-1928e6de5a5f (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-4c7ace1a-cd92-4325-8d55-1928e6de5a5f.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3bf58dd3cab8d7ad length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-536b8f69-9f7b-4d9f-bc18-19de228241f7 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-536b8f69-9f7b-4d9f-bc18-19de228241f7.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c4c5d209ca085a05 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-542670d7-b8c8-4d59-9ef3-9c61ce9daf4a (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-542670d7-b8c8-4d59-9ef3-9c61ce9daf4a.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:707b65447191f545 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-5981ce5c-d76f-4145-9044-d9a85f7371ef (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-5981ce5c-d76f-4145-9044-d9a85f7371ef.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:123c855bd393d9d6 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-5f49a004-2b05-4caf-aea9-88367bbe62ff (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-5f49a004-2b05-4caf-aea9-88367bbe62ff.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:4690822089efe425 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-65ad82df-0431-4985-8404-e52f90df9f17 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-65ad82df-0431-4985-8404-e52f90df9f17.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:70170f8f118f628c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-682b686d-1588-494b-88f7-392ed2509174 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-682b686d-1588-494b-88f7-392ed2509174.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:976dc7e22d8ce32c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-79e67912-0331-4116-ad02-4b67dffb0d38 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-79e67912-0331-4116-ad02-4b67dffb0d38.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:0e27eb3932e9bdde length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-7a49de80-8557-4878-ab09-76dee8f685e3 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-7a49de80-8557-4878-ab09-76dee8f685e3.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3247dfb28afe2c95 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-81ef7bc7-aae9-47c8-9fb3-85715ae449c0 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-81ef7bc7-aae9-47c8-9fb3-85715ae449c0.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:14a48ed1eadcf3be length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8b299fa9-66c7-4dad-b63f-2546bb21542a (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8b299fa9-66c7-4dad-b63f-2546bb21542a.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ec40bf025f36b7c6 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8c547682-bfc7-46f4-ab0c-c131904bb697 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8c547682-bfc7-46f4-ab0c-c131904bb697.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2baf725cc1a771dc length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8d490599-f054-4e22-b0f8-84e02f835577 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8d490599-f054-4e22-b0f8-84e02f835577.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:854bf806ce910fc0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8e839276-edd0-40ec-b89b-f3b99067d8f2 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-8e839276-edd0-40ec-b89b-f3b99067d8f2.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:9f490200dd30c40d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-9811595e-5c2f-4044-90c0-a1e07dbed38a (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-9811595e-5c2f-4044-90c0-a1e07dbed38a.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:3797486783797c42 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-9e71c8d5-3b35-4422-ac67-0cc86876f42c (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-9e71c8d5-3b35-4422-ac67-0cc86876f42c.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b3489efef38cba45 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-a02d98d0-78f7-4c7a-bd6c-8a72f07af2e9 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-a02d98d0-78f7-4c7a-bd6c-8a72f07af2e9.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f6c02e47a0746286 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-a485aa0a-2ccf-422f-9c22-4313191e8c63 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-a485aa0a-2ccf-422f-9c22-4313191e8c63.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2f4c9d8a7e8f2538 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-a732e0e8-aef0-4b4f-8f8c-fa45a7573e13 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-a732e0e8-aef0-4b4f-8f8c-fa45a7573e13.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:aea1931052864ffb length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-ae4bd14e-5f9a-4afa-8b81-ecae0686f7a8 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-ae4bd14e-5f9a-4afa-8b81-ecae0686f7a8.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:943b424b038f0908 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-b276a040-74d7-4830-9726-38f44297a4df (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-b276a040-74d7-4830-9726-38f44297a4df.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:4166564ae49da112 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-b6317edb-ca94-46eb-8fbf-b756e2c2f75c (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-b6317edb-ca94-46eb-8fbf-b756e2c2f75c.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:4f076c1a609b9cc2 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-ba2f179b-5b01-43ce-8577-56f45026fdc7 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-ba2f179b-5b01-43ce-8577-56f45026fdc7.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8c46dc734b6c719a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-bda04690-f7d7-408d-b87a-449d7c2561bb (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-bda04690-f7d7-408d-b87a-449d7c2561bb.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:fb56b1ab689301a2 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-c7c6e3c4-74c2-4f92-ae4e-6dff586baf16 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-c7c6e3c4-74c2-4f92-ae4e-6dff586baf16.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:59be32f20c0fdf2e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-ca72587b-a0ce-4124-8747-4eaa18fc1ba9 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-ca72587b-a0ce-4124-8747-4eaa18fc1ba9.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:81f07f496496e4d7 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-cba25857-e95d-4334-8072-c71c84a76c1d (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-cba25857-e95d-4334-8072-c71c84a76c1d.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7ff10e7aa821dd11 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-cd623d3d-294b-4b25-a342-952d0c961b6a (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-cd623d3d-294b-4b25-a342-952d0c961b6a.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:78473ff732bc20a1 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d122d59c-2646-458f-9c34-e766afe63103 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d122d59c-2646-458f-9c34-e766afe63103.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e01935350ded00b9 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d25c37a7-dbab-4b0f-aecf-e01f4838bec8 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d25c37a7-dbab-4b0f-aecf-e01f4838bec8.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:a99149fcbe02ba02 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d2906a9e-09eb-46dc-8d0c-46bf9eba76e6 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d2906a9e-09eb-46dc-8d0c-46bf9eba76e6.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:23e72bf60eaeb852 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d44b8bcf-3cde-4339-b5ef-da014494386b (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d44b8bcf-3cde-4339-b5ef-da014494386b.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f57f0db624db0ea0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d570c68c-14fc-4685-a3f6-fe9458d899ae (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d570c68c-14fc-4685-a3f6-fe9458d899ae.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:915c93f19d6c8275 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d79c6860-ab58-408f-952c-7a5ab73d98e8 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d79c6860-ab58-408f-952c-7a5ab73d98e8.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:185f6873419a620e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d8668ad4-e38c-4fa1-a8bd-47228e8c095a (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d8668ad4-e38c-4fa1-a8bd-47228e8c095a.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bdb8bf8685ef94e0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d8920b29-c010-4885-bc6c-5cbce0f0f5ab (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-d8920b29-c010-4885-bc6c-5cbce0f0f5ab.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:84fab5db8d1d0f8b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-de95e7b1-e772-4b05-a414-65d044b2e6b3 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-de95e7b1-e772-4b05-a414-65d044b2e6b3.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:0cf3211c1961988c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-e4867c29-a4fd-494c-9193-4ccb32a5bfa3 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-e4867c29-a4fd-494c-9193-4ccb32a5bfa3.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8437de35b573bbd1 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-e9ab72ae-3ef6-4d99-ad14-be23cb72f4cb (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-e9ab72ae-3ef6-4d99-ad14-be23cb72f4cb.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:33cce61940591922 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-eb336955-e614-4d2e-a941-25bb1c107c88 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-eb336955-e614-4d2e-a941-25bb1c107c88.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b80c94d8e0fba7b1 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f0ba6401-851c-417a-98d2-eefac805e72d (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f0ba6401-851c-417a-98d2-eefac805e72d.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ca5dd2d36279e5c8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f392d03a-d4c2-44a1-be3c-5b0618573f90 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f392d03a-d4c2-44a1-be3c-5b0618573f90.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:caa2616bc7442398 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f4a5b376-66ab-46bb-8b34-96533e4c9f2a (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f4a5b376-66ab-46bb-8b34-96533e4c9f2a.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:558cc614a77ca745 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f51bbdb3-a425-4200-9854-b1983ec7ab56 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f51bbdb3-a425-4200-9854-b1983ec7ab56.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:a7f21c4ffd8cd841 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f760f00e-b764-490a-add9-4d04a5e61196 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-f760f00e-b764-490a-add9-4d04a5e61196.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:de51c720ac7739cb length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-fdaf3a11-d69e-4441-a469-5a21a4c121db (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/grok-video-fdaf3a11-d69e-4441-a469-5a21a4c121db.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7bbf02a83b235c0c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/Multimodal_AI_Week_#56 (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/Multimodal_AI_Week_#56.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:618a2f1e901305a0 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/raindrop-demo (1).mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/raindrop-demo.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:45de01ab6edfbf40 length:64]",
+      "count": 3,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f1e8-1f1f5.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f1eb-1f1f7.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f1f2-1f1eb.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:40d805ece084ba5c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f1f3-1f1f4.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f1f8-1f1ef.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c7e6a5ecf0b20bad length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f46b-1f3fd.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9d1-1f3fd-200d-1f91d-200d-1f9d1-1f3fd.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:69727bb9cd30cb86 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f46b-1f3ff.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9d1-1f3ff-200d-1f91d-200d-1f9d1-1f3ff.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:829f1df640baa7c3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f46b.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9d1-200d-1f91d-200d-1f9d1.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:eb816f509894554d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f93d-200d-2642-fe0f.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f93d.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c5ca7591c591ba1c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9cd-1f3fc-200d-2642-fe0f.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9cd-1f3fc.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:c55eba820891c6e9 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9da-1f3fb-200d-2640-fe0f.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9da-1f3fb.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:068a2cc76baaf8e8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9da-1f3fc-200d-2640-fe0f.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9da-1f3fc.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:52d3ffd31e7820c5 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9da-1f3fd-200d-2640-fe0f.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9da-1f3fd.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:72e969b6d52f4578 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9da-200d-2640-fe0f.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/assets/images/twemoji/v/latest/72x72/1f9da.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e9858a34de6361c9 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1716857077920870919-cQlkc8cHWb9rPEzLJJwyLSC5Wgw0b6r-L8N3aP04c0AdDm6i1D.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1717311627450576907-QEMOTpfOf-BsqPYQnSd8JY6EIko6fbVo0lszB6K103ydsKQwnV.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:b6c877006d8cd809 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1788409325049811105-jLIguV0Y.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1788409834632532348-D42c66xC.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d5431ac6a4fc7fa5 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1855088438996869291-JOyezR8A.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1857220218046632027-ti1be5eA.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:85373883a68c8222 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1859217136205357347-af_vqsrS.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1859218964854784012-2ASt_awF.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:07d6cff3b98b3478 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1863627513190117420-tsaSDxmVO2-xPX1TdFbazpnVltk8qhnyNCcIwNq_dyYEQejKr5.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1863977988284657935-4jBTvkJhocDwJUvMFOyvb3_XjwbDMuAaSrMZSmkTi_1fX6tRYI.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8b5ce60c3a2c2048 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1869174705913278740-AhMoDzs2.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1869174893159305354-kFbEgxLt.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:afc5a5cd87290641 length:64]",
+      "count": 16,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1882386677559361651-t69RAZLJ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1883446814533427377-Bwb167bG.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1883812243353313400-irOy-64n.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1883818737536786542-QgNatJ1h.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1883848916422238386-19X-PEx7.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1884195059899461931-65HuJV3C.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1884927295330431130-AQPDAOmM.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1885319528500047938-_eUmfw5Q.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1887498143329390744-cIi1x9uj.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1887526394793742725-Tu5796mv.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1892257117840822759-ZqhAfIih.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1894000904078004655-yTFLlCrc.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1894044008961487332-lsqu-JKZ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1894404765246693535-HC0gCgxB.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1894800006475034746-9luClgtY.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1895515300755562999-27bK6cjb.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:603455e8663f0f96 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1894437674049490974-nFYhkI1G.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1894437973703205348-n3RazL0W.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:a20ffc44fea9662b length:64]",
+      "count": 26,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909446355808141653-nHj27lna.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909449377443402006-zoLZY8fS.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909831103990710707-aRkFNarf.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909854968594747711-PUaIby6s.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909855444140806313-joZqEzdP.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909855969733210491-CY6qbDCy.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909858790947828223-Fe7rAaeQ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909858879359635552-wdPlnWiz.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909859241462317189-jWkosR1j.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909859413487411319-ScD5e3t0.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909859893630374341-MqD2yQ7w.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909862490936426666-0jIfYgpz.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909862590299488652-JPzIDub4.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909862910056448147-V4HSfrU3.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909863381169062166-ryhSpZ0i.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909863410160054723-s0RTXX0U.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909863464056873399-7le0jyWH.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909863624933622180-LhZ0hdJe.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909874986854367348-1WX3uWso.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910193652376510659-EOi7jcZV.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910194868300992524-Rg1hT0X2.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910217141732913416-0MDmaXto.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910222164240011723-yWW1-Haw.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910222215356035345-wgIBX7HJ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910223632636477567-aIHTLhzh.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910223739658338524-MSNcGlIe.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8b85b508b0797569 length:64]",
+      "count": 3,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909584642598191271-QE8dXKR9.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909584928712671472-E4x9LGS8.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909585640876130744-1dr7CD_i.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d1e0404e73d96e2e length:64]",
+      "count": 10,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909605642824008172-__cEdrrh.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909608846383104444-hpMmBOzc.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909608981712253110-EpOUJwxw.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909615374775337060-UAEn1WL_.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909622565141963071-Y6yAkutZ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909920514522648785-uL2wQgB3.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909922449350942794-65p1CzUp.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909931529029210319-yAU8yUtZ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909933717151424736-m9wqDBAZ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1909965030340399458-NnF5JlLJ.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:45b713490a94cecf length:64]",
+      "count": 32,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910231942878171514-O6y82BMn.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910233376658993476-I0lLDikI.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910236483757461841-ix1dOp8a.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910236531518046429-QulAg4Y8.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910574825627935124-dHehs-xC.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910586722829951462-RVPM-2VO.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910586876102402470-JB5MZ6_d.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910589968273334704-qjJcH3X9.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910590348180726122-YfHMLIZd.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910590477260513308-MsplCJvz.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910590568281104503-osI_bKBG.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910591220398936222-yBjll1pv.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910599954521088449-sQRxxhbe.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910600638704345246-sMB16pNV.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910607699412476124-pDDslQUu.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910608948618813699-FamCNgcZ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910609157964915063-AHpIWX-K.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910609186129609191-7W1yQdj6.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910609457744433366-TFIwq8zb.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910609518599561223-_4nUptTg.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910963010639978778-VXsiSCRP.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910963598073139523-gtw7tqE0.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910964327181594687-GM4MIaHa.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910974842842816844-Pmh0FoDx.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910975480553218060-gg1UrZO7.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910976234013749273-drS_ctLG.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910991357784817766-dXBECqJz.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910992208012165285-O7nzcDIj.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910992414904578171-w6834-4I.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910992472488255524-3nfljpd5.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910992804727476272-mUnfJgir.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1910992890194694388-6wabweBN.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:6f5d4a23fda5208b length:64]",
+      "count": 4,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911213682836840911-BlCsAnQd.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911213683952525413-O6DrcmK_.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911213752663577084-phC-cqIf.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911213753183642092-U9JR7Pn1.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:42386fbe89d841af length:64]",
+      "count": 69,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911675798647656600-8TdFnGAQ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911676440665616408-1aPuVBEr.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911676766890136013-pOOy_dmD.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911677222185992258-YG13mLzK.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911677243086209162-MFdpYEXt.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911684298383773906-0hHG2ItN.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911684490285764654-ELabQq3A.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911691796796858509-AAGfNXv1.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911699669887197406-j0O6VRIJ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911699810509574604-0MufxBFG.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911700545653621185-Gl04dbJC.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911702033016799316-wh0mU1JB.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1911702251120611747-ls8Z9GUU.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912055138812105153-y36CYoXC.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912055584683384986-zKdiHubq.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912055863256498427-Wo_IQZ-p.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912069596397646285-ZlqkNh3m.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912069636897845406-CVs6aFbT.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912070388768747582-XXhx5je2.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912070589197746608-3UYkdLah.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912070612836851826-w0hjoXDW.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912070878755705238-sZNEHoD8.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912070878889927127-6AqYERZQ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912070958313361899-4pdjvZTs.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912074402872869345-9sTBI7bS.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912074867551388083-a_AT1Ws8.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912104027544068111-KBjPsPYO.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912119721207677098-FHs38sbM.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912119885473386619-gQ1b7i54.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912416386066051538-yAEp7vlP.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912421753474937261-A2WCsdbC.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912422435158376777-4zkjie9N.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912423409780486384-pAepM4Sp.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912426475619512624-dlivWL2s.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912428833564934487-m35Me0c7.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912429077014909392-wnT5o6z7.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912429281546027371-sAwpWjuC.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912429457845154093-vpO0Joui.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912429690293481812-VCa1Musc.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912430206343868425-gFP0dKbN.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912433781975445581-JBijcyY7.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912433897734054223-ISOUcJ-3.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912434449805111590-CX3p77M_.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912474739534410210-QiFAo9aR.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912475237171753417-yXYJShb_.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912475298421174438-eERXaMVE.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912481233734643722-sqX5qikV.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912481612299923969-qx3EwLtD.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912481946904719519-SWeWJmmL.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912483486436585684-j8Stz-bb.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912483777475153976--CKYsVuU.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1912484052994781459-VNy15uLU.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914282158728065450-7n5Cw7KM.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914282418468683864-7aT2dRBf.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914282722971037746-L05KxWjM.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914282913413443998-X_ve4JHm.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914283103377670253-X3ySG-Rv.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914283190912692321-C9iBrhWZ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914971185563283683-IqhJbO7R.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914971344527356012-BglFNO4Z.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914971364697817524-O2aZZptG.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914971476694040745-x5sTfc5D.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914971655329501534-f6ay_8ZE.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914972203189489876-3-iIhbpW.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914972579657613648-17s6fP1N.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914976003413483695-2ShGqgLz.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914976414870430124-rEITabjM.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914976692202078580-bhpI5s2u.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1914976923383689319-DphUVC2N.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:22dafd1c5807866b length:64]",
+      "count": 20,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913042019741835697-Eku9mB5D.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913043686503653536-R7-VX_sh.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913043774529511684-ijiBgeYn.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913044964260610479-ta0g3Sgn.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913046483466854888-LWsyDYmr.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913051363011170782-sp8r5MQ_.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913054771491295345--equunIH.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913401593472708762-05c5tqXg.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913402663171142033-xaa1WmFq.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913403501407002971-RhtfLKto.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913404647454507162-LPCcG1n8.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913407015982146031-R1QkaBn2.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913419983029481728-exSGuGj6.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913421088211816895-YDttThBe.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913421229056466969-zsm4skTO.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913423748667179340-hJXuLQ2z.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913428558497890672-eBSaC5xs.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913435963227099361-YsW0yQ_k.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913438600605376769-9jGmJ5tV.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1913443582113108416-q3RDnogF.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:89e45a6e824b713a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1915075602983551454-F8CjfujU.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1915076987787583767-Iz8tP99F.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:ec11ee50e51bcbcd length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1920135083455082912-BAOG1euoM9IMbV6mofuCLuwgj2xBf84oj4rFqKOpY34.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1920238886485426455-PkcVMyY43fqrBrzFQw1R95tfcbQRWrSaQ6QWKni04nc.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8df9724e95a575c4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1920301445213270332-HyRziVB3qOmlg1P3attgwPaVZ8qdvxajQy0DHBCwO8U.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1920367393060368431-Ra1yRvRj8QfJC5OEg4HG_E5oDgCo5wgolyoBokPc3g8.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7c3b37746f6f9d93 length:64]",
+      "count": 3,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1920444866590617848-u-a1OMl1SKjySo7wL1bLMOnEEPAGq8jwPyHfZEM0okc.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1920508567179948296-LV_GosbTeOnCH5cSDJE0kDPvty7CXiUOgJhV8JMglb0.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1920510734775300160-lVxX8fYdaBD21yZnVQQgounyru5Uq1_ep6p-aB8hJYk.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:90c8fbb9017e2c2a length:64]",
+      "count": 11,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927386212085444820-6DgSsKRS.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927387028989067552-PQkMw-Ip.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927388975196471389-xfak7DSx.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927390413834350623-MUJWVtyf.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927395669888663997-TE4LHgfb.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927396663120871939-lrOEI72t.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927814867278495916-kiSLD3JA.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927815077207625835-uGNhT__L.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927815170132431019-COu5peWM.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927815639152087166-XePIA-P9.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1927817307134513180-QRRj7hyM.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7fe5b04ac0be4997 length:64]",
+      "count": 6,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1929898410397855758-jxaqrVA7.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1929901752779976905-68MB9617.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1929906559964065979-1JUd0bjy.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1929923450480800017-5mWfoXIt.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1929946935793988089-FZlGdMEx.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1929948853635297748-nMwXJ5r2.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:5dd97555d65a4676 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1931431635284885967-e_WudASjVudfr6nX6rA1ppS5W3iY3Hx5oAIPyv1RE18.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1931519971655659665-K-1uD6mf9tikj_GX_fDzHTautZjRBGL4iZkRCSehzvM.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:69ecd4f6826a4ee0 length:64]",
+      "count": 4,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1933583262938771723-3P7cqwTm.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1934257479778783729-t0qjyd2y.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1934974285594120584-tyTQgz_9.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1940749800615383288-_UicdtCE.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:f0644529357f806c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1934775302741533047-Q2f8GQ2z.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1935480556978061787-aEhD4sUO.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d05de60b56eda13a length:64]",
+      "count": 4,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1937177799749697994-ZcHvLaC6.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1937247088288628859--2zptQvF.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1937261149365629373-KP94tvQG.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1937581473663713313-C9Kykn85.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:224c454317c0faab length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1938898788657307794-RsuaYh0d.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1938899573172514908-kDunHXza.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:df760a956e7719db length:64]",
+      "count": 6,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1939737301669880055-tiQFD4wT.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1940772967371161762-mOfZg4sz.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1941850303315206592-skDdbzHP.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1944364504214618557-6ohWj2sK.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1944706051305009240-euBT-xgB.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1945490085387923608-dK8gblMs.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:29d1ea8c4b1dddcc length:64]",
+      "count": 5,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1941074500788855069-2dsapVlS.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1942184608822350135-eSXc76QU.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1942934982030213378-wv-kxiW3.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1942939234714665112-4d13JUzn.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1946150403202334868-AZyLkqfC.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:dca2501bbcfadd25 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1943286627599626464-NVFpOJ5M.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1943287988026229180-M2NKUDke.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:36c339c711655bd8 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1943658038876844483-TZTa0b73.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1943663057797849284-Ju2lSGYI.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:633c6062cb467591 length:64]",
+      "count": 5,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1944344151400882309-VxjtaLzO.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1944344721259630684-jBV2Hqpr.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1945062887090700417-RUjRmwmp.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1946601832484159813-KbRIyMTL.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_group_media/1946879691253592459-n_CJpaXT.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:8cee90e81f6d5009 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1844096516983751078-8OHD2RCA.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1852965016397324552-M2mx_P1z.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:57623637b2727b8b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1849074212935532553-wRj5l5yF.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1850487598218654169-Fv1em_jU.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:92648c48f57c4b06 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1890098795461112285-_1nQRjeJ.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1894642973985706038-C90wISRM.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:5b7547744fbe60ed length:64]",
+      "count": 18,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1895949779072590266-HrNflGCg.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1895959328185782563-qgl9i5eu.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1896939233388188084-ifZJPxtM.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1897143178685493541-u8v2v6St.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1897292440681504837-cvQbpwfk.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1897385989053800962-2QfnkWpd.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1898124576523259992-VMbVqt7D.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1898641420476399869-e4t3taTn.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1900371642498388419-xyLj3TSI.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1900732713201791436-diEBEYYD.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1900809670983643165-8YZcu_l6.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1900873207877693506-iSJYZF5v.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1900940525462843734-xEuObBJh.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1901073420659683806-ownwhDWp.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1901210478455804222-qWdrWUs1.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1901645854164865476-6kOiTP_M.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1902001761231249617-SNZl6Abm.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1902423601892225402-7gscIIKE.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:abd027b1fc5d52f5 length:64]",
+      "count": 7,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1926233943604335025-XOwe-oIh.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1927587020404121704-amtwaPU4.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1929104481977070056-znciK84g.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1929195794042962079-GIQ_EtGg.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1929712992469635262-Z0NX5N6l.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1929833413391143166-ar-NwsVm.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/1930330368143700189-GSEHWGnV.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:99fed77ee1483ae4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/2001257805995499977-fSzYkCEv.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/direct_messages_media/2016862363115209177-r8mZj3Ue.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:0a256e78d8762406 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/grok_chat_media/1911264268734857216-1911264268734857216.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/grok_chat_media/1911265597406552064-1911265597406552064.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:136b4dc38883d850 length:64]",
+      "count": 3,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1644183494208151552-FtFQF25WcAMdSHB.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1679967908225781762-F1Bx5_dakAUBLsL.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1774714855422820467-GKENwIhX0AAUQc1.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:7b4c55f7b4d0f68f length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1722767784847851679-F-iAKvUWQAA19eo.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1831094756845531600-GWla-U8XEAAzgE-.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bbe4010185cec445 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1724856761549533589-F-_sFUqXsAAnUbT.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1724856868009345321-F-_sLhEXcAELhx1.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:abb41adfcbe37cd3 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1737706912936821036-GB2TMSnXMAAfl-Z.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1737707294060695838-GB2TMSnXMAAfl-Z.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d73650fc8f7a6acb length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1737706912936821036-GB2TMSoWgAADi04.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1737707294060695838-GB2TMSoWgAADi04.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bc795f4bf126cb12 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1737706912936821036-GB2TMSqWkAA-GPb.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1737707294060695838-GB2TMSqWkAA-GPb.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:d77d55656c4465da length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1737706912936821036-GB2TMSuWoAAb552.png",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1737707294060695838-GB2TMSuWoAAb552.png"
+      ]
+    },
+    {
+      "key": "[redacted sha256:cf3a7717fdf04b0b length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1774638547095495148-GKDIWlyXEAEAtjs.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1774638683661987985-GKDIWlyXEAEAtjs.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:1cc4c104e782ebe5 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1908246383666081838-Gntyy6dXUAAJosj.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1908246471130177736-Gntyy6dXUAAJosj.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:bc3bad2076db9a7c length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1935045132262265143-GtqnzNwaQAMUFf2.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1935046825347793190-GtqnzNwaQAMUFf2.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:e7f08ea11a825c9e length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1998144317194752039-734C_c_PI-EJhYLJ.mp4",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/1998148738603163673-RmcOqGaQh2uot9Vm.mp4"
+      ]
+    },
+    {
+      "key": "[redacted sha256:dae5bee2c8d410d4 length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/2000694850027401448-G8PlDxhXsAEpz7x.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/2000695682357715373-G8PmFNGWAA4S_8W.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:331503c77ce01b7a length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/2038975966400168198-HEvlzWpWgAAnG7_.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/2038976021861392441-HEvlzWpWgAAnG7_.jpg"
+      ]
+    },
+    {
+      "key": "[redacted sha256:2b75f7b23194570d length:64]",
+      "count": 2,
+      "items": [
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/2049736063325712829-HHIgFlrXgAAMcfU.jpg",
+        "/Users/philipbankier/Content/Grok IMagine/greymaker/twitter-2026-06-16-e67ced2e1b022454eea1c20fddb0799cf5c0419fd0e471eb4424106abeb347c2/data/tweets_media/2049737941086282117-HHIhy4aXsAApZ9V.jpg"
+      ]
+    }
+  ],
+  "suspiciousMediaSignatures": "[redacted-empty]"
+}
