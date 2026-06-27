@@ -1,0 +1,8 @@
+{
+  "generatedAt": "2026-06-27T21:06:36.533Z",
+  "context": "after local evidence checkpoint before route-safety cleanup changes",
+  "branch": "codex/production-r2-vault-audit",
+  "commit": "ab345858d3453f93ba21caff31b7fa61a6a64ff5",
+  "gitStatusShort": "",
+  "note": "This snapshot records the clean committed checkpoint before subsequent route-safety cleanup artifacts were added."
+}

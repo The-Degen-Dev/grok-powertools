@@ -1,0 +1,107 @@
+web/src/lib/vault-server.ts:30:export async function workerJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+web/src/lib/vault-server.ts:35:  const res = await fetch(`${workerUrl}${path}`, {
+web/src/lib/vault-preview-server.ts:1:import { getWorkerHost, workerJson } from "@/lib/vault-server";
+web/src/lib/vault-preview-server.ts:21:  scanTruncated: boolean;
+web/src/lib/vault-preview-server.ts:65:async function fetchAllInventoryPages(): Promise<{ assets: VaultAsset[]; warnings: string[]; truncated: boolean }> {
+web/src/lib/vault-preview-server.ts:74:    const inventory = await workerJson<unknown>(`/v1/vault/inventory?${search.toString()}`);
+web/src/lib/vault-preview-server.ts:88:    if (!cursor) return { assets: dedupeAssets(assets), warnings, truncated: false };
+web/src/lib/vault-preview-server.ts:92:  return { assets: dedupeAssets(assets), warnings, truncated: true };
+web/src/lib/vault-preview-server.ts:117:export async function loadVaultPreviewFromWorker(): Promise<VaultPreviewWithObjectKey> {
+web/src/lib/vault-preview-server.ts:119:    workerJson<unknown>("/v1/vault/identity"),
+web/src/lib/vault-preview-server.ts:121:    workerJson<unknown>("/v1/vault/metadata/savedPrompts"),
+web/src/lib/vault-preview-server.ts:122:    workerJson<unknown>("/v1/vault/metadata/promptHistory"),
+web/src/lib/vault-preview-server.ts:123:    workerJson<unknown>("/v1/vault/gaps"),
+web/src/lib/vault-preview-server.ts:155:    scanTruncated: inventory.truncated,
+web/src/app/api/vault/media/[assetId]/route.ts:3:export async function GET(request: Request, { params }: { params: Promise<{ assetId: string }> }) {
+web/src/app/api/vault/media/[assetId]/route.ts:10:  const res = await fetch(`${workerUrl}/v1/vault/media?${workerSearch.toString()}`, {
+web/src/app/api/vault/repair/run/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/repair/run/route.ts:15:export async function POST(request: Request) {
+web/src/app/api/vault/repair/run/route.ts:17:  const plan = body.plan;
+web/src/app/api/vault/repair/run/route.ts:18:  const run = body.run;
+web/src/app/api/vault/repair/run/route.ts:20:  if (!isRecord(plan) || !isRecord(run) || run.status !== "approved") {
+web/src/app/api/vault/repair/run/route.ts:21:    return NextResponse.json({ ok: false, error: "REPAIR_APPROVAL_REQUIRED" }, { status: 409 });
+web/src/app/api/vault/repair/run/route.ts:23:  if (run.planHash !== plan.planHash) {
+web/src/app/api/vault/repair/run/route.ts:24:    return NextResponse.json({ ok: false, error: "REPAIR_PLAN_HASH_STALE" }, { status: 409 });
+web/src/app/api/vault/repair/run/route.ts:26:  if (run.targetCount !== plan.targetCount || !arraysMatch(run.writeClasses, plan.writeClasses)) {
+web/src/app/api/vault/repair/run/route.ts:27:    return NextResponse.json({ ok: false, error: "REPAIR_APPROVAL_STALE" }, { status: 409 });
+web/src/app/api/vault/repair/run/route.ts:29:  if (Array.isArray(plan.writeClasses) && plan.writeClasses.some((writeClass: string) => writeClass !== "none")) {
+web/src/app/api/vault/repair/run/route.ts:30:    return NextResponse.json({ ok: false, error: "REPAIR_WRITE_NOT_ARMED" }, { status: 409 });
+web/src/app/api/vault/repair/run/route.ts:33:  return NextResponse.json({
+web/src/app/api/vault/repair/run/route.ts:35:    run: {
+web/src/app/api/vault/repair/run/route.ts:36:      ...run,
+web/src/app/api/vault/repair/approve/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/repair/approve/route.ts:15:export async function POST(request: Request) {
+web/src/app/api/vault/repair/approve/route.ts:17:  const plan = body.plan;
+web/src/app/api/vault/repair/approve/route.ts:18:  const approvedPlanHash = body.approvedPlanHash;
+web/src/app/api/vault/repair/approve/route.ts:19:  const approvedTargetCount = body.approvedTargetCount;
+web/src/app/api/vault/repair/approve/route.ts:20:  const approvedWriteClasses = body.approvedWriteClasses;
+web/src/app/api/vault/repair/approve/route.ts:22:  if (!isRecord(plan) || typeof plan.planHash !== "string" || typeof plan.planId !== "string") {
+web/src/app/api/vault/repair/approve/route.ts:23:    return NextResponse.json({ ok: false, error: "REPAIR_PLAN_REQUIRED" }, { status: 400 });
+web/src/app/api/vault/repair/approve/route.ts:25:  if (approvedPlanHash !== plan.planHash) {
+web/src/app/api/vault/repair/approve/route.ts:26:    return NextResponse.json({ ok: false, error: "REPAIR_PLAN_HASH_STALE" }, { status: 409 });
+web/src/app/api/vault/repair/approve/route.ts:28:  if (approvedTargetCount !== plan.targetCount) {
+web/src/app/api/vault/repair/approve/route.ts:29:    return NextResponse.json({ ok: false, error: "REPAIR_TARGET_COUNT_CHANGED" }, { status: 409 });
+web/src/app/api/vault/repair/approve/route.ts:31:  if (!arraysMatch(approvedWriteClasses, plan.writeClasses)) {
+web/src/app/api/vault/repair/approve/route.ts:32:    return NextResponse.json({ ok: false, error: "REPAIR_WRITE_CLASSES_CHANGED" }, { status: 409 });
+web/src/app/api/vault/repair/approve/route.ts:35:  return NextResponse.json({
+web/src/app/api/vault/repair/approve/route.ts:37:    run: {
+web/src/app/api/vault/repair/approve/route.ts:38:      runId: `repair-run-${Date.now()}`,
+web/src/app/api/vault/repair/approve/route.ts:39:      planId: plan.planId,
+web/src/app/api/vault/repair/approve/route.ts:40:      planHash: plan.planHash,
+web/src/app/api/vault/repair/approve/route.ts:41:      targetCount: plan.targetCount,
+web/src/app/api/vault/repair/approve/route.ts:42:      writeClasses: plan.writeClasses,
+web/src/app/api/vault/repair/approve/route.ts:43:      status: "approved",
+web/src/app/api/vault/repair/scan/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/repair/scan/route.ts:5:export async function POST() {
+web/src/app/api/vault/repair/scan/route.ts:7:  return NextResponse.json({
+web/src/app/api/vault/repair/plan/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/repair/plan/route.ts:4:export async function POST(request: Request) {
+web/src/app/api/vault/repair/plan/route.ts:10:      return NextResponse.json({ ok: false, error: "REPAIR_PLAN_INVALID_JSON" }, { status: 400 });
+web/src/app/api/vault/repair/plan/route.ts:13:    const plan = await buildRepairPlan(parsed);
+web/src/app/api/vault/repair/plan/route.ts:14:    return NextResponse.json({ ok: true, plan });
+web/src/app/api/vault/repair/plan/route.ts:16:    const message = error instanceof Error ? error.message : "REPAIR_PLAN_INVALID";
+web/src/app/api/vault/repair/plan/route.ts:17:    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+web/src/app/api/vault/repair/proof/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/repair/proof/route.ts:11:export async function GET(request: Request) {
+web/src/app/api/vault/repair/proof/route.ts:15:    return NextResponse.json({ ok: false, error: "REPAIR_PROOF_OBJECT_KEY_INVALID" }, { status: 400 });
+web/src/app/api/vault/repair/proof/route.ts:20:  const res = await fetch(`${workerUrl}/v1/objects/verify?${workerSearch.toString()}`, {
+web/src/app/api/vault/repair/proof/route.ts:21:    method: "HEAD",
+web/src/app/api/vault/repair/proof/route.ts:27:    return NextResponse.json({ ok: true, exists: false, objectKey });
+web/src/app/api/vault/repair/proof/route.ts:30:    return NextResponse.json({ ok: false, error: "REPAIR_PROOF_FAILED" }, { status: res.status });
+web/src/app/api/vault/repair/proof/route.ts:34:  return NextResponse.json({
+web/src/app/api/vault/metadata/[kind]/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/metadata/[kind]/route.ts:2:import { workerJson } from "@/lib/vault-server";
+web/src/app/api/vault/metadata/[kind]/route.ts:4:export async function GET(_request: Request, { params }: { params: Promise<{ kind: string }> }) {
+web/src/app/api/vault/metadata/[kind]/route.ts:6:  const data = await workerJson(`/v1/vault/metadata/${encodeURIComponent(kind)}`);
+web/src/app/api/vault/metadata/[kind]/route.ts:7:  return NextResponse.json(data);
+web/src/app/api/vault/preview/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/preview/route.ts:4:export async function GET() {
+web/src/app/api/vault/preview/route.ts:5:  return NextResponse.json(await loadVaultPreviewFromWorker());
+web/src/app/api/vault/identity/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/identity/route.ts:2:import { getWorkerHost, workerJson } from "@/lib/vault-server";
+web/src/app/api/vault/identity/route.ts:4:export async function GET() {
+web/src/app/api/vault/identity/route.ts:6:    const data = await workerJson<Record<string, unknown>>("/v1/vault/identity");
+web/src/app/api/vault/identity/route.ts:7:    return NextResponse.json({ ...data, workerHost: typeof data.workerHost === "string" ? data.workerHost : getWorkerHost() });
+web/src/app/api/vault/identity/route.ts:10:    return NextResponse.json(
+web/src/app/api/vault/gap-fill/plan/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/gap-fill/plan/route.ts:3:export async function POST(request: Request) {
+web/src/app/api/vault/gap-fill/plan/route.ts:8:  return NextResponse.json({
+web/src/app/api/vault/gap-fill/plan/route.ts:10:    plan: {
+web/src/app/api/vault/gap-fill/plan/route.ts:17:        status: "planned",
+web/src/app/api/vault/gap-fill/run/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/gap-fill/run/route.ts:3:export async function POST() {
+web/src/app/api/vault/gap-fill/run/route.ts:4:  return NextResponse.json(
+web/src/app/api/vault/gap-fill/run/route.ts:5:    { ok: false, error: "LIVE_GROK_REPAIR_NOT_ARMED" },
+web/src/app/api/vault/gaps/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/gaps/route.ts:2:import { workerJson } from "@/lib/vault-server";
+web/src/app/api/vault/gaps/route.ts:4:export async function GET() {
+web/src/app/api/vault/gaps/route.ts:5:  return NextResponse.json(await workerJson("/v1/vault/gaps"));
+web/src/app/api/vault/inventory/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/inventory/route.ts:2:import { workerJson } from "@/lib/vault-server";
+web/src/app/api/vault/inventory/route.ts:4:export async function GET(request: Request) {
+web/src/app/api/vault/inventory/route.ts:7:  const data = await workerJson(workerPath);
+web/src/app/api/vault/inventory/route.ts:8:  return NextResponse.json(data);
+web/src/app/api/vault/reconcile/index/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/reconcile/index/route.ts:3:export async function POST() {
+web/src/app/api/vault/reconcile/index/route.ts:4:  return NextResponse.json(
+web/src/app/api/vault/reconcile/index/route.ts:5:    { ok: false, error: "RECONCILE_INDEX_NOT_ARMED" },

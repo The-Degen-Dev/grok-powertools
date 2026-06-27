@@ -2,7 +2,7 @@
 
 Plan date: 2026-06-26
 Execution started: 2026-06-27T16:28:22-04:00
-Report generated: 2026-06-27T20:56:03.500Z
+Report generated: 2026-06-27T21:06:03.925Z
 
 ## Split Verdicts
 
@@ -53,6 +53,12 @@ See `reconciliations/r2-local-delta.json`.
 ## Worker And Product Route Mismatches
 
 See `reconciliations/worker-raw-delta.json`.
+
+## Route Safety Evidence
+
+- Worker route source proof: `logs/route-safety-source.txt`
+- Next route source proof: `logs/next-route-safety-source.txt`
+- Production write routes remain denied until a separate approved repair plan.
 
 ## Live Grok Samples
 

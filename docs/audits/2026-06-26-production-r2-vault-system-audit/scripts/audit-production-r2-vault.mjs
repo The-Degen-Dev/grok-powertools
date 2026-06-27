@@ -380,6 +380,13 @@ async function preflight() {
     'cloud/src',
     'web/src/app/api/vault'
   ]);
+  const nextRouteSafety = await runCommand('next-route-safety-source', 'rg', [
+    '-n',
+    'export async function|workerJson|fetch\\(|NextResponse|REPAIR_|LIVE_GROK|RECONCILE_|GAP|approve|run|plan|HEAD|POST|GET',
+    'web/src/app/api/vault',
+    'web/src/lib/vault-preview-server.ts',
+    'web/src/lib/vault-server.ts'
+  ]);
   const wranglerToml = await fs.readFile(path.join(repoRoot, 'cloud', 'wrangler.toml'), 'utf8');
   await writeText(path.join(auditRoot, 'logs', 'production-wrangler-config.txt'), wranglerToml);
   await writeCommandTextLog('preflight-git.txt', {
@@ -418,6 +425,7 @@ async function preflight() {
   await writeCommandTextLog('wrangler-r2-object-help.txt', wranglerR2Help);
   await writeCommandTextLog('wrangler-d1-execute-help.txt', wranglerD1Help);
   await writeText(path.join(auditRoot, 'logs', 'route-safety-source.txt'), routeSafety.stdout || routeSafety.stderr || '');
+  await writeText(path.join(auditRoot, 'logs', 'next-route-safety-source.txt'), nextRouteSafety.stdout || nextRouteSafety.stderr || '');
 
   const r2Proof = await preflightR2Proof();
   const d1Proof = await preflightD1Proof();
@@ -465,7 +473,8 @@ async function preflight() {
       wranglerVersion: wranglerVersion.ok,
       wranglerR2Help: wranglerR2Help.ok,
       wranglerD1Help: wranglerD1Help.ok,
-      routeSafety: routeSafety.ok
+      routeSafety: routeSafety.ok,
+      nextRouteSafety: nextRouteSafety.ok
     },
     authenticatedProof: {
       r2: r2Proof,
@@ -1762,6 +1771,12 @@ See \`reconciliations/r2-local-delta.json\`.
 ## Worker And Product Route Mismatches
 
 See \`reconciliations/worker-raw-delta.json\`.
+
+## Route Safety Evidence
+
+- Worker route source proof: \`logs/route-safety-source.txt\`
+- Next route source proof: \`logs/next-route-safety-source.txt\`
+- Production write routes remain denied until a separate approved repair plan.
 
 ## Live Grok Samples
 
