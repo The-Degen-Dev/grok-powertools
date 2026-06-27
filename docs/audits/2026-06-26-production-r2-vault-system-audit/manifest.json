@@ -1,0 +1,250 @@
+{
+  "auditName": "Production R2 Vault system audit",
+  "auditPlanDate": "2026-06-26",
+  "executionStartedAt": "2026-06-27T16:28:22-04:00",
+  "status": "blocked",
+  "repo": {
+    "path": "/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools",
+    "branch": "codex/production-r2-vault-audit",
+    "commit": "74e4007d39cd54c39f594b4b46511dd1fe6c1c8f",
+    "gitStatusShort": " M docs/superpowers/specs/2026-06-26-production-r2-vault-audit-design.md\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/\n?? docs/superpowers/plans/2026-06-26-production-r2-vault-audit-implementation-planning-notes.html\n?? docs/superpowers/plans/2026-06-26-production-r2-vault-audit.md\n"
+  },
+  "productionTarget": {
+    "r2Bucket": "grok-gallery-001",
+    "d1Database": "grok-powertools-db",
+    "d1DatabaseId": "ad89e4bb-0b68-4c72-93d9-b90e6eb45aa6",
+    "keyPrefix": "grok-powertools/v1",
+    "workerName": "grok-r2-backup-worker",
+    "accountIdFromConfig": "ba5339fd86e87c226bdc306347636042"
+  },
+  "localRoots": {
+    "vault": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault",
+    "parent": "/Users/philipbankier/Content/Grok IMagine/greymaker"
+  },
+  "subsystems": {
+    "preflight": "blocked",
+    "rawR2": "not_run",
+    "r2ByteHashes": "not_run",
+    "d1": "not_run",
+    "metadata": "not_run",
+    "localFiles": "not_run",
+    "workerRoutes": "not_run",
+    "webRoutes": "not_run",
+    "localSystem": "not_run",
+    "liveGrok": "not_run",
+    "reconciliation": "not_run"
+  },
+  "blockers": [
+    {
+      "mode": "preflight",
+      "recordedAt": "2026-06-27T20:47:32.910Z",
+      "reason": "CLOUDFLARE_ACCOUNT_ID missing or does not match production account from cloud/wrangler.toml",
+      "expected": "ba5339fd86e87c226bdc306347636042",
+      "actualPresent": false,
+      "neededUserDecision": "Provide read-only production Cloudflare/R2 environment for this shell or approve an alternate account-proof method."
+    },
+    {
+      "mode": "preflight",
+      "recordedAt": "2026-06-27T20:47:32.911Z",
+      "reason": "Authenticated R2 bucket/prefix proof failed",
+      "commandOrApiPath": "S3 HeadBucket and ListObjectsV2 MaxKeys=1",
+      "error": "missing required R2 env",
+      "neededUserDecision": "Provide read-only production R2 credentials or approve a different read-only bucket/prefix proof."
+    },
+    {
+      "mode": "preflight",
+      "recordedAt": "2026-06-27T20:47:32.912Z",
+      "reason": "Cloudflare Wrangler auth token appears broader than read-only",
+      "command": "wrangler whoami",
+      "evidence": "whoami output includes write or admin scopes",
+      "neededUserDecision": "Provide a read-only Cloudflare token for D1 proof, or explicitly approve using the current broad token for SELECT-only D1 audit reads."
+    }
+  ],
+  "evidenceIndex": [
+    {
+      "path": "browser-samples/.gitkeep",
+      "bytes": 1,
+      "updatedAt": "2026-06-27T20:28:16.050Z"
+    },
+    {
+      "path": "implementation-notes.html",
+      "bytes": 2875,
+      "updatedAt": "2026-06-27T20:48:32.648Z"
+    },
+    {
+      "path": "inventory/.gitkeep",
+      "bytes": 1,
+      "updatedAt": "2026-06-27T20:28:16.049Z"
+    },
+    {
+      "path": "inventory/preflight-d1-schema.json",
+      "bytes": 3587,
+      "updatedAt": "2026-06-27T20:47:32.909Z"
+    },
+    {
+      "path": "inventory/preflight-identity.json",
+      "bytes": 2127,
+      "updatedAt": "2026-06-27T20:47:32.910Z"
+    },
+    {
+      "path": "logs/.gitkeep",
+      "bytes": 1,
+      "updatedAt": "2026-06-27T20:28:16.049Z"
+    },
+    {
+      "path": "logs/blocker-preflight-1782593252910-uevt7p2sj.json",
+      "bytes": 396,
+      "updatedAt": "2026-06-27T20:47:32.911Z"
+    },
+    {
+      "path": "logs/blocker-preflight-1782593252911-uevt836yi.json",
+      "bytes": 359,
+      "updatedAt": "2026-06-27T20:47:32.911Z"
+    },
+    {
+      "path": "logs/blocker-preflight-1782593252912-uevt8uvgc.json",
+      "bytes": 403,
+      "updatedAt": "2026-06-27T20:47:32.913Z"
+    },
+    {
+      "path": "logs/d1-preflight-schema-smoke.json",
+      "bytes": 4807,
+      "updatedAt": "2026-06-27T20:47:32.909Z"
+    },
+    {
+      "path": "logs/preflight-git-branch.json",
+      "bytes": 278,
+      "updatedAt": "2026-06-27T20:46:57.528Z"
+    },
+    {
+      "path": "logs/preflight-git-diff-check.json",
+      "bytes": 240,
+      "updatedAt": "2026-06-27T20:46:57.564Z"
+    },
+    {
+      "path": "logs/preflight-git-head.json",
+      "bytes": 278,
+      "updatedAt": "2026-06-27T20:46:57.544Z"
+    },
+    {
+      "path": "logs/preflight-git-status.json",
+      "bytes": 539,
+      "updatedAt": "2026-06-27T20:46:57.506Z"
+    },
+    {
+      "path": "logs/preflight-git.txt",
+      "bytes": 629,
+      "updatedAt": "2026-06-27T20:47:25.338Z"
+    },
+    {
+      "path": "logs/preflight-node-version.json",
+      "bytes": 239,
+      "updatedAt": "2026-06-27T20:46:57.585Z"
+    },
+    {
+      "path": "logs/preflight-node24-version.json",
+      "bytes": 290,
+      "updatedAt": "2026-06-27T20:46:57.731Z"
+    },
+    {
+      "path": "logs/preflight-npm-version.json",
+      "bytes": 235,
+      "updatedAt": "2026-06-27T20:46:57.703Z"
+    },
+    {
+      "path": "logs/preflight-runtime.txt",
+      "bytes": 223,
+      "updatedAt": "2026-06-27T20:47:25.338Z"
+    },
+    {
+      "path": "logs/production-wrangler-config.txt",
+      "bytes": 450,
+      "updatedAt": "2026-06-27T20:47:25.337Z"
+    },
+    {
+      "path": "logs/route-safety-source.json",
+      "bytes": 1020,
+      "updatedAt": "2026-06-27T20:47:25.337Z"
+    },
+    {
+      "path": "logs/route-safety-source.txt",
+      "bytes": 568,
+      "updatedAt": "2026-06-27T20:47:25.340Z"
+    },
+    {
+      "path": "logs/validate-artifacts.json",
+      "bytes": 5174,
+      "updatedAt": "2026-06-27T20:49:00.184Z"
+    },
+    {
+      "path": "logs/wrangler-d1-execute-help.json",
+      "bytes": 2043,
+      "updatedAt": "2026-06-27T20:47:25.326Z"
+    },
+    {
+      "path": "logs/wrangler-d1-execute-help.txt",
+      "bytes": 1848,
+      "updatedAt": "2026-06-27T20:47:25.340Z"
+    },
+    {
+      "path": "logs/wrangler-r2-object-help.json",
+      "bytes": 1354,
+      "updatedAt": "2026-06-27T20:47:18.923Z"
+    },
+    {
+      "path": "logs/wrangler-r2-object-help.txt",
+      "bytes": 1172,
+      "updatedAt": "2026-06-27T20:47:25.339Z"
+    },
+    {
+      "path": "logs/wrangler-version.json",
+      "bytes": 316,
+      "updatedAt": "2026-06-27T20:47:12.725Z"
+    },
+    {
+      "path": "logs/wrangler-version.txt",
+      "bytes": 171,
+      "updatedAt": "2026-06-27T20:47:25.339Z"
+    },
+    {
+      "path": "logs/wrangler-whoami.json",
+      "bytes": 1862,
+      "updatedAt": "2026-06-27T20:47:06.582Z"
+    },
+    {
+      "path": "logs/wrangler-whoami.txt",
+      "bytes": 910,
+      "updatedAt": "2026-06-27T20:47:25.339Z"
+    },
+    {
+      "path": "reconciliations/.gitkeep",
+      "bytes": 1,
+      "updatedAt": "2026-06-27T20:28:16.049Z"
+    },
+    {
+      "path": "report.md",
+      "bytes": 2527,
+      "updatedAt": "2026-06-27T20:47:43.661Z"
+    },
+    {
+      "path": "screenshots/.gitkeep",
+      "bytes": 1,
+      "updatedAt": "2026-06-27T20:28:16.050Z"
+    },
+    {
+      "path": "scripts/.gitkeep",
+      "bytes": 1,
+      "updatedAt": "2026-06-27T20:28:16.050Z"
+    },
+    {
+      "path": "scripts/audit-production-r2-vault.mjs",
+      "bytes": 70685,
+      "updatedAt": "2026-06-27T20:48:52.253Z"
+    }
+  ],
+  "finalVerdicts": {
+    "productionR2InternalCorrectness": "blocked",
+    "currentGrokSavedCompleteness": "inconclusive",
+    "localSystemHealth": "inconclusive"
+  }
+}

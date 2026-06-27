@@ -1,0 +1,13 @@
+{
+  "name": "preflight-git-branch",
+  "command": "git",
+  "args": [
+    "branch",
+    "--show-current"
+  ],
+  "startedAt": "2026-06-27T20:46:57.513Z",
+  "finishedAt": "2026-06-27T20:46:57.527Z",
+  "exitCode": 0,
+  "stdout": "codex/production-r2-vault-audit\n",
+  "stderr": ""
+}

@@ -1,0 +1,12 @@
+{
+  "name": "preflight-node-version",
+  "command": "node",
+  "args": [
+    "--version"
+  ],
+  "startedAt": "2026-06-27T20:46:57.564Z",
+  "finishedAt": "2026-06-27T20:46:57.584Z",
+  "exitCode": 0,
+  "stdout": "v23.11.0\n",
+  "stderr": ""
+}

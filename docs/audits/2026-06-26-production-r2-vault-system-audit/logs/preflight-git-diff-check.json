@@ -1,0 +1,13 @@
+{
+  "name": "preflight-git-diff-check",
+  "command": "git",
+  "args": [
+    "diff",
+    "--check"
+  ],
+  "startedAt": "2026-06-27T20:46:57.544Z",
+  "finishedAt": "2026-06-27T20:46:57.563Z",
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": ""
+}

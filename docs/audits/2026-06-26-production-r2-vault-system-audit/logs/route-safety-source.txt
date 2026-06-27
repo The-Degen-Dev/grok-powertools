@@ -1,0 +1,7 @@
+cloud/src/index.ts:432:            'POST /v1/presign',
+cloud/src/index.ts:433:            'POST /v1/objects/verify',
+cloud/src/index.ts:434:            'HEAD /v1/objects/verify?objectKey=...',
+cloud/src/index.ts:435:            'POST /v1/metadata/snapshot',
+cloud/src/index.ts:672:            if (request.method === 'POST' && url.pathname === '/v1/sync/push') {
+cloud/src/index.ts:700:        if (request.method === 'POST' && url.pathname === '/v1/presign') {
+cloud/src/index.ts:753:        if (request.method === 'POST' && url.pathname === '/v1/metadata/snapshot') {

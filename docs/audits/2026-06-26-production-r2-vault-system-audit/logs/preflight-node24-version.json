@@ -1,0 +1,16 @@
+{
+  "name": "preflight-node24-version",
+  "command": "mise",
+  "args": [
+    "exec",
+    "node@24",
+    "--",
+    "node",
+    "--version"
+  ],
+  "startedAt": "2026-06-27T20:46:57.703Z",
+  "finishedAt": "2026-06-27T20:46:57.731Z",
+  "exitCode": 0,
+  "stdout": "v24.16.0\n",
+  "stderr": ""
+}

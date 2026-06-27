@@ -1,0 +1,8 @@
+{
+  "mode": "preflight",
+  "recordedAt": "2026-06-27T20:47:32.910Z",
+  "reason": "CLOUDFLARE_ACCOUNT_ID missing or does not match production account from cloud/wrangler.toml",
+  "expected": "ba5339fd86e87c226bdc306347636042",
+  "actualPresent": false,
+  "neededUserDecision": "Provide read-only production Cloudflare/R2 environment for this shell or approve an alternate account-proof method."
+}

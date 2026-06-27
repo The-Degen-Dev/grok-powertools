@@ -1,0 +1,8 @@
+{
+  "mode": "preflight",
+  "recordedAt": "2026-06-27T20:47:32.912Z",
+  "reason": "Cloudflare Wrangler auth token appears broader than read-only",
+  "command": "wrangler whoami",
+  "evidence": "whoami output includes write or admin scopes",
+  "neededUserDecision": "Provide a read-only Cloudflare token for D1 proof, or explicitly approve using the current broad token for SELECT-only D1 audit reads."
+}

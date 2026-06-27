@@ -1,0 +1,68 @@
+{
+  "expected": {
+    "accountId": "ba5339fd86e87c226bdc306347636042",
+    "bucket": "grok-gallery-001",
+    "prefix": "grok-powertools/v1",
+    "d1Database": "grok-powertools-db",
+    "d1DatabaseId": "ad89e4bb-0b68-4c72-93d9-b90e6eb45aa6",
+    "workerName": "grok-r2-backup-worker"
+  },
+  "envPresence": {
+    "CLOUDFLARE_ACCOUNT_ID": false,
+    "AUDIT_R2_BUCKET": false,
+    "AUDIT_R2_PREFIX": false,
+    "R2_ACCESS_KEY_ID": false,
+    "R2_SECRET_ACCESS_KEY": false,
+    "WORKER_URL": false,
+    "WORKER_API_KEY": false,
+    "CLIENT_API_KEY": false
+  },
+  "envMatches": {
+    "CLOUDFLARE_ACCOUNT_ID": false,
+    "AUDIT_R2_BUCKET": true,
+    "AUDIT_R2_PREFIX": true
+  },
+  "methods": {
+    "rawR2Listing": "S3-compatible ListObjectsV2 with read-only credential expectation",
+    "rawR2Hashing": "S3-compatible GetObject stream into SHA-256 digest, bytes discarded",
+    "d1Read": "wrangler d1 execute --remote --json --command with SELECT-only statements",
+    "workerRead": "GET /v1/vault/* and HEAD /v1/objects/verify only"
+  },
+  "redactionRules": [
+    "keys containing key, token, secret, cookie, authorization, signature, credential, password, uploadUrl, signedUrl, or promptText are hashed and redacted",
+    "private prompt/text fields are not written verbatim",
+    "signed URLs and bearer/API-key strings are hashed and redacted"
+  ],
+  "commandStatus": {
+    "gitStatus": true,
+    "gitBranch": true,
+    "gitHead": true,
+    "nodeVersion": true,
+    "npmVersion": true,
+    "node24Version": true,
+    "gitDiffCheck": true,
+    "wranglerWhoami": true,
+    "wranglerVersion": true,
+    "wranglerR2Help": true,
+    "wranglerD1Help": true,
+    "routeSafety": true
+  },
+  "authenticatedProof": {
+    "r2": {
+      "ok": false,
+      "reason": "missing required R2 env",
+      "missing": [
+        "CLOUDFLARE_ACCOUNT_ID",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY"
+      ]
+    },
+    "d1": {
+      "ok": true,
+      "method": "wrangler d1 execute remote schema SELECT",
+      "database": "grok-powertools-db",
+      "databaseId": "ad89e4bb-0b68-4c72-93d9-b90e6eb45aa6",
+      "rowCount": 18
+    }
+  }
+}

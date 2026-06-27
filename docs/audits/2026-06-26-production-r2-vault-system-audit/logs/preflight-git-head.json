@@ -1,0 +1,13 @@
+{
+  "name": "preflight-git-head",
+  "command": "git",
+  "args": [
+    "rev-parse",
+    "HEAD"
+  ],
+  "startedAt": "2026-06-27T20:46:57.529Z",
+  "finishedAt": "2026-06-27T20:46:57.543Z",
+  "exitCode": 0,
+  "stdout": "74e4007d39cd54c39f594b4b46511dd1fe6c1c8f\n",
+  "stderr": ""
+}

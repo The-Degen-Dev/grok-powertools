@@ -1,0 +1,18 @@
+{
+  "name": "wrangler-version",
+  "command": "mise",
+  "args": [
+    "exec",
+    "node@24",
+    "--",
+    "npx",
+    "--yes",
+    "wrangler@latest",
+    "--version"
+  ],
+  "startedAt": "2026-06-27T20:47:06.582Z",
+  "finishedAt": "2026-06-27T20:47:12.725Z",
+  "exitCode": 0,
+  "stdout": "4.105.0\n",
+  "stderr": ""
+}

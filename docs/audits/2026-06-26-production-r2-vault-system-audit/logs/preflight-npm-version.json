@@ -1,0 +1,12 @@
+{
+  "name": "preflight-npm-version",
+  "command": "npm",
+  "args": [
+    "--version"
+  ],
+  "startedAt": "2026-06-27T20:46:57.585Z",
+  "finishedAt": "2026-06-27T20:46:57.702Z",
+  "exitCode": 0,
+  "stdout": "10.9.2\n",
+  "stderr": ""
+}

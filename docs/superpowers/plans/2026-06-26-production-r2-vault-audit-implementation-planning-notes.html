@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Production R2 Vault Audit Implementation Planning Notes</title>
+  <style>
+    body {
+      color: #1f2328;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      margin: 40px auto;
+      max-width: 980px;
+    }
+    h1,
+    h2 {
+      line-height: 1.2;
+    }
+    code {
+      background: #f6f8fa;
+      border-radius: 4px;
+      padding: 0.1em 0.3em;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th,
+    td {
+      border: 1px solid #d0d7de;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f6f8fa;
+    }
+    .done {
+      color: #1a7f37;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>Production R2 Vault Audit Implementation Planning Notes</h1>
+  <p>
+    Running notes for planning
+    <code>docs/superpowers/plans/2026-06-26-production-r2-vault-audit.md</code>
+    from
+    <code>docs/superpowers/specs/2026-06-26-production-r2-vault-audit-design.md</code>.
+    This file records how planning interpreted the spec before execution begins.
+  </p>
+
+  <h2>Status</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Planning item</th>
+        <th>Status</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Spec translated into task plan</td>
+        <td class="done">Done</td>
+        <td>Plan saved as <code>docs/superpowers/plans/2026-06-26-production-r2-vault-audit.md</code>.</td>
+      </tr>
+      <tr>
+        <td>User clarifications incorporated</td>
+        <td class="done">Done</td>
+        <td>The plan assumes read-only R2 byte hashing is allowed, split verdicts are required, and no local roots outside <code>/Users/philipbankier/Content/Grok IMagine/greymaker</code> are in scope.</td>
+      </tr>
+      <tr>
+        <td>Execution safety gates reflected</td>
+        <td class="done">Done</td>
+        <td>The plan blocks production writes, broad Chrome tab discovery, route mutation, and final clean claims without raw evidence.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Design Decisions</h2>
+  <ul>
+    <li>The plan remains one audit plan instead of separate R2, D1, local, web, and Grok plans. The audit's value depends on cross-source joins and conflict reporting.</li>
+    <li>Audit helper scripts are scoped to <code>docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/</code>. This keeps audit machinery close to the evidence and avoids changing product code.</li>
+    <li>The plan uses a single audit runner contract with modes for scaffold, preflight, R2, D1, metadata, local, Worker, reconciliation, report, and artifact validation. This reduces command drift across tasks while keeping output artifacts separated.</li>
+    <li>S3-compatible R2 listing and reads are the preferred raw R2 method because current Wrangler object commands do not expose raw listing. Cloudflare R2 read API or a proven raw Worker binding route remain fallback methods.</li>
+    <li>D1 export is planned through <code>wrangler d1 execute --remote --json --command</code> under Node 24 because current command help confirms that surface.</li>
+    <li>The final report has three verdicts: production R2 internal correctness, current Grok Saved completeness, and local system health. A visual Grok sample cannot prove full current Saved completeness.</li>
+    <li>Local parent-folder inventory is filtered to likely Grok/R2 media candidates. The parent contains unrelated repositories and dependency folders, so scanning every media-like file would create noisy false gaps.</li>
+  </ul>
+
+  <h2>Deviations</h2>
+  <ul>
+    <li>The spec allows Cloudflare R2 objects API, S3-compatible listing, or a proven raw Worker/R2 endpoint. The plan starts with S3-compatible listing because it can list, head, and stream objects through one read-only path.</li>
+    <li>The plan does not add or modify product route code during audit execution. If existing routes are insufficient, the audit records a blocker instead of adding a new production data path.</li>
+    <li>The plan allows dry-run Next scan and plan routes only after code inspection confirms no production writes. It still excludes approve, run, gap-fill run, and reconcile index routes because the audit does not need approval or execution semantics.</li>
+    <li>The plan does not attempt to prove every current Grok Saved item unless a stable export, API, or other authoritative enumeration appears during execution. It keeps Grok visual inspection as sample evidence by default.</li>
+  </ul>
+
+  <h2>Tradeoffs</h2>
+  <ul>
+    <li>Alternative considered: use the web Vault preview as the main source. Rejected because preview dedupes and normalizes records, which can hide raw R2 duplicates.</li>
+    <li>Alternative considered: rely on D1 content SHA-256 fields for duplicate proof. Rejected for final duplicate proof because object metadata can drift from actual bytes. The plan hashes R2 media bytes read-only.</li>
+    <li>Alternative considered: download a full local copy of production R2. Rejected because the user approved hashing, not creating a second media corpus. The plan streams or downloads only to hash and discards bytes.</li>
+    <li>Alternative considered: scan every file under the parent media root. Rejected because the parent root contains unrelated app source trees and dependencies. The plan inventories <code>GrokVault</code> fully and parent media candidates selectively.</li>
+    <li>Alternative considered: inspect the live Grok tab first. Rejected because the spec makes raw R2 and local inventory the first proof layer, and live Grok should not be driven until raw inventories are complete or blocked.</li>
+  </ul>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li>No planning question blocks execution. Execution must still stop if read-only R2/D1 auth cannot be proven, if raw R2 listing is unexpectedly huge or points outside the prefix, or if browser automation cannot prove it controls the visible Grok tab.</li>
+    <li>If production R2 byte hashing is large enough to trigger rate, cost, or local disk risk, the execution worker should stop and ask whether to continue, sample, or split into a separate hashing run.</li>
+  </ul>
+</body>
+</html>

@@ -4,7 +4,7 @@ Date: 2026-06-26
 
 Repo: `/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools`
 
-Status: design spec for user review.
+Status: hardened design spec for user review.
 
 Do not move to execution planning until this file is reviewed and approved.
 
@@ -47,6 +47,7 @@ The current app already has Worker Vault routes, Next Vault broker routes, local
 These decisions are already approved and remain active constraints:
 
 - Production R2 reads are allowed.
+- Read-only streaming or downloading production R2 media solely to compute SHA-256 is allowed, with bytes discarded after hashing and no local media corpus created.
 - Production R2 writes require a separate approved plan.
 - Production D1 writes require a separate approved plan.
 - Existing production media is preserve-only during this audit.
@@ -57,6 +58,8 @@ These decisions are already approved and remain active constraints:
 - Product Vault preview is not duplicate proof because preview can normalize and dedupe.
 - Acceptance resources are for write-capable tests only. Production audit evidence must be read-only.
 - Secrets, cookies, bearer tokens, signed URLs, raw API keys, and raw private prompt dumps must not be written into tracked artifacts.
+- The final report must split two verdicts: production R2 internal correctness, and current Grok Saved completeness. The first can be proven from R2/D1/metadata/local evidence; the second is only proven if a stable current Grok Saved export/API is found.
+- The only local media root in scope is `/Users/philipbankier/Content/Grok IMagine/greymaker`, including `GrokVault` and parent-folder media candidates under that root.
 
 ## Archaeology Result
 
@@ -90,6 +93,8 @@ Do not use prior work this way:
 - Do not reset or modify extension processed IDs.
 - Do not generate new Grok media unless a later approved plan adds a canary phase.
 - Do not scrape the entire live Grok Saved UI before R2 and local inventory are understood.
+- Do not call write-capable Worker endpoints against production, including `POST /v1/objects/verify`, `POST /v1/metadata/snapshot`, `POST /v1/presign`, sync push routes, or any repair run route.
+- Do not call Next Vault routes that represent approval, run, reconciliation, or gap-fill execution actions unless a later approved plan explicitly scopes a dry-run validation. This audit may use read-only GET routes plus dry-run scan/plan/proof routes after code inspection confirms no production writes.
 
 ## Source Hierarchy
 
@@ -116,7 +121,8 @@ Verify:
 
 - Current git branch, commit, and dirty state.
 - Current docs and code state for R2, Vault, Worker, web, and extension.
-- Tool availability: `node`, `npm`, `npx`, `wrangler`, `gh`, `peekaboo`, `agent-browser`, `plwr`, and browser automation fallback.
+- Tool availability: ambient `node`, `npm`, `npx`, `mise exec node@24 -- ...`, `wrangler`, `gh`, `peekaboo`, `agent-browser`, `plwr`, and browser automation fallback.
+- Cloudflare command runtime. Current Wrangler requires Node 22 or newer, so Cloudflare/Wrangler commands should run under `mise exec node@24 -- ...` unless the shell runtime is already proven compatible.
 - Cloudflare account identity and whether it matches `cloud/wrangler.toml`.
 - R2 bucket identity for `grok-gallery-001`.
 - D1 database identity for `grok-powertools-db`.
@@ -131,6 +137,14 @@ If production R2/D1 authority cannot be proven, stop before live Grok actions an
 ## Phase 2: Raw Production R2 Inventory
 
 Build a raw, paginated R2 object inventory to exhaustion.
+
+Acceptable raw object-listing methods are:
+
+- Cloudflare R2 objects API using read-only credentials.
+- S3-compatible `ListObjectsV2` against the production bucket using read-only credentials.
+- A Worker/R2 binding endpoint only if the code path is proven read-only, non-normalizing, non-deduping, and paginated to exhaustion before use.
+
+Wrangler `r2 bucket list` and `r2 bucket info` can prove bucket identity, but Wrangler `r2 object` must not be assumed to provide raw object listing unless current help output proves it. Current `wrangler@latest` exposes `r2 object get`, `put`, and `delete`; it does not expose an object list command.
 
 Record for every object when available:
 
@@ -150,13 +164,25 @@ Record for every object when available:
 Pagination proof must include:
 
 - page size
-- cursor chain or Wrangler listing method
+- cursor chain, continuation token chain, or exact listing method
 - total pages
 - final cursor or truncation state
 - timestamp
 - command or API path used
 
 The raw R2 inventory must not dedupe records during capture. Deduping is a later analysis step.
+
+For every production R2 media object, compute actual content SHA-256 by read-only streaming or downloading the object, then discard the bytes. Record:
+
+- object key
+- bytes read
+- computed SHA-256
+- hash command or API path
+- hash timestamp
+- read status
+- error text if hashing failed
+
+Stop and ask if the object count, byte count, API rate, auth scope, or local disk behavior is unexpectedly large or unsafe. If any media object cannot be hashed, the report cannot claim byte-level duplicate proof for all R2 media.
 
 ## Phase 3: Raw Production D1 And Index Inventory
 
@@ -187,6 +213,8 @@ If D1 access is unavailable, record the command, account, database ID/name, exit
 ## Phase 4: Metadata And Sidecar Inventory
 
 Inventory production metadata objects separately from media objects.
+
+Raw metadata inventory must list all matching R2 keys under `${KEY_PREFIX}/users/*/metadata/*` and all prompt sidecar locations discovered under media paths. Worker `/v1/vault/metadata/:kind` is a cross-check only, because the current Worker code reads the `users/greymaker/metadata/` path directly.
 
 Required metadata kinds:
 
@@ -228,7 +256,14 @@ Use current read-only Worker and Next routes as a second source:
 - `/api/vault/inventory`
 - `/api/vault/preview`
 - `/api/vault/media/:assetId`
-- `/api/vault/repair/scan`
+- `/api/vault/repair/proof`
+- `POST /api/vault/repair/scan`, dry-run classification only
+- `POST /api/vault/repair/plan`, dry-run plan construction only
+- `POST /api/vault/gap-fill/plan`, dry-run live-Grok plan construction only
+
+Do not use `POST /v1/objects/verify` for production audit evidence. It can update D1 index rows. Use only `HEAD /v1/objects/verify` for object HEAD proof.
+
+Do not use `/api/vault/repair/approve`, `/api/vault/repair/run`, `/api/vault/gap-fill/run`, or `/api/vault/reconcile/index` in this audit. Current code makes some of these inert or fail-closed, but the audit does not need approval/run semantics.
 
 The cross-check must answer:
 
@@ -249,6 +284,8 @@ Build a fresh local inventory for both:
 
 - `GrokVault`
 - parent `greymaker` media files outside `GrokVault`
+
+The parent inventory is scoped to media candidates under `/Users/philipbankier/Content/Grok IMagine/greymaker`. It must exclude dependency, repo, build, cache, and archive internals unless a file is directly named or referenced like a Grok/R2 media artifact. At minimum, exclude `.git`, `node_modules`, `.next`, `dist`, `build`, `.wrangler`, cache folders, package-manager stores, and extracted app source trees unless an object-key, UUID, sidecar, or metadata reference pulls a file back into scope.
 
 Record:
 
@@ -332,7 +369,7 @@ After raw production and local inventories are captured, run local system checks
 - Vault page preview and commit into local IndexedDB, if Worker env is available
 - Ops proof screen
 - media playback or image display through the media proxy
-- Repair Workbench scan and plan creation, no run
+- Repair Workbench scan and plan creation, no approve or run
 
 If environment variables are missing, record exact missing names. Do not copy secrets out of Chrome extension storage without explicit approval.
 
@@ -366,6 +403,7 @@ docs/audits/2026-06-26-production-r2-vault-system-audit/
   report.md
   inventory/
     r2-objects.jsonl
+    r2-media-hashes.jsonl
     r2-objects-summary.json
     r2-pages.json
     d1-r2-dedupe-index.jsonl
@@ -398,7 +436,7 @@ Artifacts must be parseable where practical. Prefer JSONL for large inventories 
 
 The final `report.md` must include:
 
-- executive verdict: clean, dirty, blocked, or inconclusive
+- executive verdicts: production R2 internal correctness, current Grok Saved completeness, and local system health. Each verdict is clean, dirty, blocked, or inconclusive.
 - production R2 identity proof
 - production D1 identity proof
 - total raw R2 object count
@@ -408,6 +446,7 @@ The final `report.md` must include:
 - total local media count
 - image/video/unknown counts for each source
 - duplicate findings
+- byte-level R2 hash coverage and any unhashable objects
 - missing media findings
 - missing metadata findings
 - malformed key findings
@@ -418,22 +457,26 @@ The final `report.md` must include:
 - blockers and exact next decision needed
 - recommended next actions grouped as P0 data correctness, P1 backup pipeline reliability, and P2 product visibility and operator UX
 
-The report must not say production R2 is perfect unless:
+The report must not say production R2 is internally clean unless:
 
 - raw R2 listing is complete
 - raw D1/index export is complete or D1 absence is proven irrelevant
 - metadata inventory is complete
 - local inventory is complete
+- R2 media byte hashing is complete, or every unhashable object is explained and removed from byte-level duplicate claims
 - duplicates are zero or explicitly allowed
 - no unresolved media or metadata correctness gaps remain
 - media access is proven for samples beyond the first page
 - no source conflicts remain unexplained
+
+The report must not say every current Grok Saved item is backed up unless the audit finds a stable current Grok Saved export/API or another authoritative Saved enumeration. Live visual samples alone can support a sample verdict, not a full Saved completeness verdict.
 
 ## Validation Gates
 
 Before production inventory:
 
 - prove account, bucket, prefix, and database identity
+- prove the raw R2 listing method and object hashing method are read-only
 - confirm all planned production operations are read-only
 - confirm evidence redaction rules
 
@@ -479,6 +522,7 @@ The audit is complete when:
 - production D1/index inventory is captured or the exact blocker is recorded
 - production metadata inventory is captured or the exact blocker is recorded
 - local Vault and parent media inventories are captured
+- production R2 media byte hashes are captured or exact unhashable blockers are recorded
 - Worker and web Vault routes are cross-checked against raw evidence
 - duplicate groups are classified
 - R2/local/metadata/D1 deltas are written
@@ -489,5 +533,11 @@ The audit is complete when:
 ## Open Questions
 
 No open question blocks writing the execution plan.
+
+Approved clarifications:
+
+- Read-only production R2 media byte hashing is allowed with a stop gate for unexpectedly large, unsafe, or rate-limited reads.
+- The report must split production R2 internal correctness from current Grok Saved completeness.
+- No local media roots outside `/Users/philipbankier/Content/Grok IMagine/greymaker` are in scope.
 
 The execution plan should still verify how to authenticate read-only production R2/D1 access in the current shell before any live browser action. If that cannot be proven, it must stop and ask.

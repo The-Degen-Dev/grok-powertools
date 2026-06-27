@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Production R2 Vault Audit Implementation Notes</title>
+  <style>
+    body {
+      color: #1f2328;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      margin: 40px auto;
+      max-width: 980px;
+    }
+    code {
+      background: #f6f8fa;
+      border-radius: 4px;
+      padding: 0.1em 0.3em;
+    }
+    li {
+      margin: 0.35em 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Production R2 Vault Audit Implementation Notes</h1>
+  <p>
+    Running execution notes for
+    <code>docs/audits/2026-06-26-production-r2-vault-system-audit/</code>.
+    This audit is read-only against production and records blockers instead of repair work.
+  </p>
+
+  <h2>Design Decisions</h2>
+  <ul>
+    <li>The evidence folder keeps the approved plan date in its path, <code>2026-06-26</code>, while <code>manifest.json</code> records the actual execution start date, <code>2026-06-27</code>.</li>
+    <li>The audit was moved to branch <code>codex/production-r2-vault-audit</code> from the existing audit-design commit because the previous branch name, <code>codex/chatgpt-images-design</code>, no longer described this work.</li>
+    <li>The user approved moving from spec and implementation planning into Codex Goal execution before this audit run. The runner still treats production identity proof as a hard gate before raw inventory.</li>
+    <li>Subagent review tightened preflight by requiring authenticated R2 bucket/prefix proof and D1 schema proof before raw R2 inventory.</li>
+    <li>The raw <code>wrangler whoami</code> output is not persisted. The audit records only the expected account ID and a structured summary of scope classes so the broad-credential blocker is evidenced without storing account email or token text.</li>
+  </ul>
+
+  <h2>Deviations</h2>
+  <ul>
+    <li>The audit generated a blocked current-state report before completing downstream inventory phases. This does not relax final success criteria; it preserves the exact hard-gate state for handoff.</li>
+  </ul>
+
+  <h2>Tradeoffs</h2>
+  <ul>
+    <li>The secret scan has expected false positives in policy prose and redaction code, plus the structured Cloudflare scope name <code>secrets_store:write</code>. Manual review found no raw keys, bearer tokens, signed URLs, cookies, passwords, or private prompt dumps in current audit artifacts.</li>
+  </ul>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li>Provide read-only R2 environment variables for <code>CLOUDFLARE_ACCOUNT_ID</code>, <code>R2_ACCESS_KEY_ID</code>, and <code>R2_SECRET_ACCESS_KEY</code>, or approve an alternate read-only R2 proof method.</li>
+    <li>Provide a read-only Cloudflare token for D1 proof, or explicitly approve using the currently authenticated broad Wrangler token for SELECT-only D1 reads.</li>
+  </ul>
+</body>
+</html>

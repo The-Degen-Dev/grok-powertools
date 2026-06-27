@@ -1,0 +1,83 @@
+{
+  "generatedAt": "2026-06-27T20:49:00.182Z",
+  "ok": false,
+  "missing": [
+    "inventory/r2-objects-summary.json",
+    "inventory/r2-pages.json",
+    "inventory/metadata-objects.json",
+    "inventory/metadata-references.json",
+    "inventory/local-media-summary.json",
+    "reconciliations/r2-d1-delta.json",
+    "reconciliations/r2-metadata-delta.json",
+    "reconciliations/r2-local-delta.json",
+    "reconciliations/worker-raw-delta.json",
+    "reconciliations/duplicate-groups.json",
+    "reconciliations/malformed-keys.json",
+    "reconciliations/unresolved-items.json",
+    "reconciliations/sample-set.json",
+    "inventory/r2-objects.jsonl",
+    "inventory/r2-media-hashes.jsonl"
+  ],
+  "parseFailures": [
+    {
+      "path": "inventory/r2-objects-summary.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/r2-objects-summary.json'"
+    },
+    {
+      "path": "inventory/r2-pages.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/r2-pages.json'"
+    },
+    {
+      "path": "inventory/metadata-objects.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/metadata-objects.json'"
+    },
+    {
+      "path": "inventory/metadata-references.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/metadata-references.json'"
+    },
+    {
+      "path": "inventory/local-media-summary.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/local-media-summary.json'"
+    },
+    {
+      "path": "reconciliations/r2-d1-delta.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/r2-d1-delta.json'"
+    },
+    {
+      "path": "reconciliations/r2-metadata-delta.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/r2-metadata-delta.json'"
+    },
+    {
+      "path": "reconciliations/r2-local-delta.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/r2-local-delta.json'"
+    },
+    {
+      "path": "reconciliations/worker-raw-delta.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/worker-raw-delta.json'"
+    },
+    {
+      "path": "reconciliations/duplicate-groups.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/duplicate-groups.json'"
+    },
+    {
+      "path": "reconciliations/malformed-keys.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/malformed-keys.json'"
+    },
+    {
+      "path": "reconciliations/unresolved-items.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/unresolved-items.json'"
+    },
+    {
+      "path": "reconciliations/sample-set.json",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/sample-set.json'"
+    },
+    {
+      "path": "inventory/r2-objects.jsonl",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/r2-objects.jsonl'"
+    },
+    {
+      "path": "inventory/r2-media-hashes.jsonl",
+      "error": "ENOENT: no such file or directory, open '/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools/docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/r2-media-hashes.jsonl'"
+    }
+  ]
+}

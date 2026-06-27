@@ -1,0 +1,11 @@
+$ runtime node --version npm --version mise exec node@24 -- node --version
+startedAt: 2026-06-27T20:46:57.564Z
+finishedAt: 2026-06-27T20:46:57.731Z
+exitCode: 0
+
+stdout:
+node: v23.11.0
+npm: 10.9.2
+node@24: v24.16.0
+
+stderr:

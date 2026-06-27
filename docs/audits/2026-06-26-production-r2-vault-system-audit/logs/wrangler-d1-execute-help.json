@@ -1,0 +1,20 @@
+{
+  "name": "wrangler-d1-execute-help",
+  "command": "mise",
+  "args": [
+    "exec",
+    "node@24",
+    "--",
+    "npx",
+    "--yes",
+    "wrangler@latest",
+    "d1",
+    "execute",
+    "--help"
+  ],
+  "startedAt": "2026-06-27T20:47:18.923Z",
+  "finishedAt": "2026-06-27T20:47:25.324Z",
+  "exitCode": 0,
+  "stdout": "wrangler d1 execute <database>\n\nExecute a command or SQL file\n\nPOSITIONALS\n  database  The name or binding of the DB  [string] [required]\n\nGLOBAL FLAGS\n  -c, --config          Path to Wrangler configuration file  [string]\n      --cwd             Run as if Wrangler was started in the specified directory instead of the current working directory  [string]\n  -e, --env             Environment to use for operations, and for selecting .env and .dev.vars files  [string]\n      --env-file        Path to an .env file to load - can be specified multiple times - values from earlier files are overridden by values in later files  [array]\n  -h, --help            Show help  [boolean]\n      --install-skills  Install Cloudflare skills for detected AI coding agents before running the command  [boolean] [default: false]\n  -v, --version         Show version number  [boolean]\n\nOPTIONS\n      --command     The SQL query you wish to execute, or multiple queries separated by ';'  [string]\n      --file        A .sql file to ingest  [string]\n  -y, --yes         Answer \"yes\" to any prompts  [boolean]\n      --local       Execute commands/files against a local DB for use with wrangler dev  [boolean]\n      --remote      Execute commands/files against a remote D1 database for use with remote bindings or your deployed Worker  [boolean]\n      --persist-to  Specify directory to use for local persistence (for use with --local)  [string]\n      --json        Return output as JSON  [boolean] [default: false]\n      --preview     Execute commands/files against a preview D1 database  [boolean] [default: false]\n\nYou must provide either --command or --file for this command to run successfully.\n",
+  "stderr": ""
+}

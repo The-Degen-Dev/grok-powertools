@@ -1,0 +1,48 @@
+{
+  "name": "wrangler-whoami",
+  "command": "mise",
+  "args": [
+    "exec",
+    "node@24",
+    "--",
+    "npx",
+    "--yes",
+    "wrangler@latest",
+    "whoami"
+  ],
+  "startedAt": "2026-06-27T20:46:57.731Z",
+  "finishedAt": "2026-06-27T20:47:06.580Z",
+  "exitCode": 0,
+  "ok": true,
+  "stdout": "{\n  \"wranglerAuthenticated\": true,\n  \"accountIds\": [\n    \"ba5339fd86e87c226bdc306347636042\"\n  ],\n  \"expectedAccountPresent\": true,\n  \"credentialScopeClasses\": [\n    \"admin\",\n    \"read\",\n    \"run\",\n    \"unknown\",\n    \"write\"\n  ],\n  \"writeOrAdminScopes\": [\n    \"workers:write\",\n    \"workers_kv:write\",\n    \"workers_routes:write\",\n    \"workers_scripts:write\",\n    \"d1:write\",\n    \"pages:write\",\n    \"ssl_certs:write\",\n    \"ai:write\",\n    \"ai-search:write\",\n    \"agent-memory:write\",\n    \"queues:write\",\n    \"pipelines:write\",\n    \"secrets_store:write\",\n    \"artifacts:write\",\n    \"flagship:write\",\n    \"containers:write\",\n    \"cloudchamber:write\",\n    \"connectivity:admin\",\n    \"email_routing:write\",\n    \"email_sending:write\",\n    \"browser:write\"\n  ]\n}",
+  "stderr": "",
+  "scopeSummary": {
+    "accountIds": [
+      "ba5339fd86e87c226bdc306347636042"
+    ],
+    "expectedAccountPresent": true,
+    "writeOrAdminScopes": [
+      "workers:write",
+      "workers_kv:write",
+      "workers_routes:write",
+      "workers_scripts:write",
+      "d1:write",
+      "pages:write",
+      "ssl_certs:write",
+      "ai:write",
+      "ai-search:write",
+      "agent-memory:write",
+      "queues:write",
+      "pipelines:write",
+      "secrets_store:write",
+      "artifacts:write",
+      "flagship:write",
+      "containers:write",
+      "cloudchamber:write",
+      "connectivity:admin",
+      "email_routing:write",
+      "email_sending:write",
+      "browser:write"
+    ]
+  }
+}
