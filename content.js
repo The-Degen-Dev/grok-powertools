@@ -1,10 +1,51 @@
 // Grok Power Tools - Content Script
 
+const ProviderRegistry = (typeof globalThis !== 'undefined' && globalThis.GrokPowerToolsProviderRegistry)
+    ? globalThis.GrokPowerToolsProviderRegistry
+    : (typeof require === 'function' ? require('./providerRegistry.js') : null);
+const ChatGPTImagesActions = (typeof globalThis !== 'undefined' && globalThis.ChatGPTImagesContentActions)
+    ? globalThis.ChatGPTImagesContentActions
+    : (typeof require === 'function' ? require('./chatgptImagesContent.js') : null);
+const ProviderRunLedger = (typeof globalThis !== 'undefined' && globalThis.GrokPowerToolsProviderRunLedger)
+    ? globalThis.GrokPowerToolsProviderRunLedger
+    : (typeof require === 'function' ? require('./providerRunLedger.js') : null);
+
+function detectCurrentProvider(value) {
+    if (ProviderRegistry && typeof ProviderRegistry.detectProvider === 'function') {
+        return ProviderRegistry.detectProvider(value || (typeof location !== 'undefined' ? location.href : ''));
+    }
+
+    return {
+        id: 'grok-imagine',
+        label: 'Grok Imagine',
+        capabilities: {
+            canRunTextPrompt: true,
+            canUseReferenceImage: true,
+            canUseReferenceVideo: true,
+            canUseProviderSearch: true,
+            canUseCurrentProviderMedia: true,
+            canRunBatch: true,
+            canRunVideoGoals: true,
+            canCaptureGeneratedImages: true,
+            canDownloadGeneratedImages: true
+        }
+    };
+}
+
+function isGrokProvider(provider) {
+    return provider && provider.id === 'grok-imagine';
+}
+
+function isChatGptImagesProvider(provider) {
+    return provider && provider.id === 'chatgpt-images';
+}
+
 // --- PAGE-WORLD BRIDGE ---
 // Loads bridge.js in the page's MAIN world (bypasses CSP since it's a file, not inline).
 // bridge.js provides access to TipTap editor and Grok's fetch via custom DOM events.
 (function injectPageWorldBridge() {
     if (typeof module !== 'undefined') return;
+    if (!isGrokProvider(detectCurrentProvider())) return;
 
     const script = document.createElement('script');
     script.src = chrome.runtime.getURL('bridge.js');
@@ -598,11 +639,14 @@ class PromptHistoryManager {
 // --- MAIN OVERLAY ---
 
 class GrokOverlay {
-    constructor(scraper, retryManager, settingsManager, historyManager) {
+    constructor(scraper, retryManager, settingsManager, historyManager, options = {}) {
         this.scraper = scraper;
         this.retryManager = retryManager;
         this.settingsManager = settingsManager;
         this.historyManager = historyManager;
+        this.provider = options.provider || detectCurrentProvider();
+        this.chatGptActions = options.chatGptActions || ChatGPTImagesActions;
+        this.providerRunLedger = options.providerRunLedger || ProviderRunLedger;
 
         this.logViewer = null;
         this.toast = new ToastManager();
@@ -614,6 +658,7 @@ class GrokOverlay {
         this.recreateRunning = false;
         this.recreateAbortRequested = false;
         this.recreatePasteHandler = null;
+        this.chatGptImageRunning = false;
 
         if (typeof document !== 'undefined') {
             this.render();
@@ -686,6 +731,16 @@ class GrokOverlay {
                             <span style="font-size:12px; font-weight:600; color:#e7e9ea">STATUS</span>
                             <span id="gptStatusBadge" class="gpt-badge gpt-badge-success">Ready</span>
                         </div>
+                        <div id="gptProviderLabel" style="font-size:11px; color:#71767b; margin-top:6px;">Provider: Grok Imagine</div>
+                    </div>
+
+                    <div class="gpt-section" id="gptChatGptImageSection" style="display:none;">
+                        <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Create Image</label>
+                        <textarea id="gptChatGptPrompt" class="gpt-history-search" rows="3" placeholder="Describe a new image" style="min-height:72px; resize:vertical;"></textarea>
+                        <div class="gpt-row" style="margin-top:6px; gap:4px;">
+                            <button id="gptChatGptGenerateBtn" class="gpt-btn gpt-btn-primary" style="flex:1; background:#0ea5e9; font-size:11px;">Generate Image</button>
+                        </div>
+                        <div id="gptChatGptStatus" style="font-size:10px; color:#71767b; margin-top:4px;">Ready</div>
                     </div>
 
                     <div class="gpt-section" id="gptRecreateSection">
@@ -712,7 +767,7 @@ class GrokOverlay {
                         <div id="gptRecreateStatus" style="font-size:10px; color:#71767b; margin-top:4px;">No reference selected.</div>
                     </div>
 
-                    <div class="gpt-section">
+                    <div class="gpt-section" id="gptAutoRetrySection">
                         <div class="gpt-row">
                              <span>Auto-Retry</span>
                              <label class="gpt-toggle-switch">
@@ -749,7 +804,7 @@ class GrokOverlay {
                         </div>
                     </div>
 
-                    <div class="gpt-section">
+                    <div class="gpt-section" id="gptTemplateBatchSection">
                         <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Template Batch</label>
                         <div class="gpt-row" style="gap:6px; align-items:center;">
                             <select id="gptTemplateSelect" style="flex:1; padding:4px 6px; border-radius:4px; border:1px solid #555; background:#222; color:#fff; font-size:11px;">
@@ -765,7 +820,7 @@ class GrokOverlay {
                         <div id="gptTemplateBatchStatus" style="font-size:10px; color:#71767b; margin-top:4px;"></div>
                     </div>
 
-                    <div class="gpt-section">
+                    <div class="gpt-section" id="gptQualityRepeatSection">
                         <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Quality Repeat</label>
                         <div class="gpt-row" style="gap:6px; align-items:center;">
                             <span style="font-size:11px;">Repeats:</span>
@@ -779,7 +834,7 @@ class GrokOverlay {
                         <div id="gptQualityRepeatStatus" style="font-size:10px; color:#71767b; margin-top:4px;"></div>
                     </div>
 
-                    <div class="gpt-section">
+                    <div class="gpt-section" id="gptGalleryDownloadSection">
                         <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Gallery Download</label>
                         <div class="gpt-row" style="margin-top:6px; gap:4px;">
                             <button id="gptScrapeDownloadBtn" class="gpt-btn gpt-btn-primary" style="flex:1; background:#22c55e; font-size:11px;">Download Gallery</button>
@@ -892,6 +947,36 @@ class GrokOverlay {
             `;
         document.body.appendChild(container);
         this.el = container;
+        this.applyProviderUi();
+    }
+
+    hasProviderCapability(name) {
+        if (ProviderRegistry && typeof ProviderRegistry.hasProviderCapability === 'function') {
+            return ProviderRegistry.hasProviderCapability(this.provider, name);
+        }
+        return !!(this.provider && this.provider.capabilities && this.provider.capabilities[name]);
+    }
+
+    applyProviderUi() {
+        if (!this.el) return;
+
+        this.el.dataset.providerId = this.provider.id || 'unknown';
+        const label = this.el.querySelector('#gptProviderLabel');
+        if (label) label.textContent = `Provider: ${this.provider.label || 'Unsupported page'}`;
+
+        const isChatGpt = isChatGptImagesProvider(this.provider);
+        const isGrok = isGrokProvider(this.provider);
+        const show = (selector, visible) => {
+            const element = this.el.querySelector(selector);
+            if (element) element.style.display = visible ? '' : 'none';
+        };
+
+        show('#gptChatGptImageSection', isChatGpt && this.hasProviderCapability('canRunTextPrompt'));
+        show('#gptRecreateSection', isGrok && this.hasProviderCapability('canUseReferenceImage'));
+        show('#gptAutoRetrySection', isGrok && this.hasProviderCapability('canRunVideoGoals'));
+        show('#gptTemplateBatchSection', isGrok && this.hasProviderCapability('canRunBatch'));
+        show('#gptQualityRepeatSection', isGrok && this.hasProviderCapability('canRunBatch'));
+        show('#gptGalleryDownloadSection', isGrok && this.hasProviderCapability('canDownloadGeneratedImages'));
     }
 
     setupListeners() {
@@ -998,6 +1083,12 @@ class GrokOverlay {
         this.el.querySelector('#gptClearHistoryBtn').addEventListener('click', () => {
             if (confirm('Clear all prompt history?')) this.historyManager.clear();
         });
+        const chatGptGenerateBtn = this.el.querySelector('#gptChatGptGenerateBtn');
+        if (chatGptGenerateBtn) {
+            chatGptGenerateBtn.addEventListener('click', () => {
+                this.startChatGptImageWorkflow();
+            });
+        }
 
         this.el.querySelectorAll('.gpt-settings-view .gpt-tab').forEach(t => {
             t.addEventListener('click', () => {
@@ -1265,6 +1356,102 @@ class GrokOverlay {
         const badge = this.el.querySelector('#gptStatusBadge');
         if (badge) { badge.textContent = msg; badge.className = `gpt-badge gpt-badge-${type}`; }
         if (this.logViewer) this.logViewer.addLog(msg, type);
+    }
+
+    setChatGptStatus(text, type = 'neutral') {
+        const status = this.el.querySelector('#gptChatGptStatus');
+        const colors = {
+            error: '#f4212e',
+            success: '#22c55e',
+            info: '#1d9bf0',
+            neutral: '#71767b'
+        };
+        if (status) {
+            status.textContent = text || '';
+            status.style.color = colors[type] || colors.neutral;
+        }
+    }
+
+    setChatGptRunning(running) {
+        this.chatGptImageRunning = !!running;
+        const btn = this.el.querySelector('#gptChatGptGenerateBtn');
+        if (btn) {
+            btn.disabled = !!running;
+            btn.textContent = running ? 'Generating...' : 'Generate Image';
+        }
+    }
+
+    async appendProviderRun(entry) {
+        if (!this.providerRunLedger || typeof this.providerRunLedger.appendProviderRunLedgerEntry !== 'function') {
+            return null;
+        }
+        return this.providerRunLedger.appendProviderRunLedgerEntry(entry);
+    }
+
+    async startChatGptImageWorkflow() {
+        if (!isChatGptImagesProvider(this.provider) || this.chatGptImageRunning) return;
+
+        const promptInput = this.el.querySelector('#gptChatGptPrompt');
+        const prompt = sanitizeSavedPromptText(promptInput ? promptInput.value : '');
+        if (!prompt) {
+            this.setChatGptStatus('Enter a prompt first.', 'error');
+            this.toast.show('Enter a prompt first.', 'error');
+            return;
+        }
+
+        const actions = this.chatGptActions;
+        if (!actions || typeof actions.runChatGptImagePrompt !== 'function') {
+            this.setChatGptStatus('workflow_unavailable', 'error');
+            return;
+        }
+
+        const runId = this.providerRunLedger && typeof this.providerRunLedger.createProviderRunId === 'function'
+            ? this.providerRunLedger.createProviderRunId()
+            : `provider_run_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+
+        this.setChatGptRunning(true);
+        this.setChatGptStatus('Submitting...', 'info');
+        this.setStatus('Submitting', 'neutral');
+
+        try {
+            await this.appendProviderRun({
+                runId,
+                providerId: 'chatgpt-images',
+                workflow: 'text-to-image',
+                prompt,
+                status: 'submitted'
+            });
+
+            const result = await actions.runChatGptImagePrompt({ prompt, runId });
+            this.historyManager.add(prompt, 'image');
+            await this.appendProviderRun({
+                runId,
+                providerId: 'chatgpt-images',
+                workflow: 'text-to-image',
+                prompt,
+                status: 'generated',
+                result: result && result.result ? result.result : null,
+                diagnostics: {
+                    submitted: !!(result && result.submitted)
+                }
+            });
+            this.setChatGptStatus('Generated image ready', 'success');
+            this.setStatus('Generated image ready', 'success');
+        } catch (error) {
+            const failureCode = error && (error.code || error.message) ? (error.code || error.message) : 'chatgpt_generation_failed';
+            await this.appendProviderRun({
+                runId,
+                providerId: 'chatgpt-images',
+                workflow: 'text-to-image',
+                prompt,
+                status: failureCode === 'chatgpt_blocked' ? 'blocked' : 'failed',
+                failureCode
+            });
+            this.setChatGptStatus(failureCode, 'error');
+            this.setStatus('Failed', 'error');
+        } finally {
+            this.setChatGptRunning(false);
+        }
     }
 
     async loadSavedPrompts() {
@@ -3710,15 +3897,36 @@ class GrokScraper {
 
 if (typeof module === 'undefined') {
     // Always initialize the Overlay and Managers on supported sites (defined in manifest)
+    const provider = detectCurrentProvider();
     const settings = new SettingsManager();
     const history = new PromptHistoryManager(settings);
-    const scraper = new GrokScraper();
-    const retry = new VideoRetryManager(null, settings, history);
-    const overlay = new GrokOverlay(scraper, retry, settings, history);
-    const recreateBridge = new RecreateWorkflowContentBridge(overlay, history);
-    recreateBridge.setupListeners();
-    retry.overlay = overlay;
-    scraper.setOverlay(overlay);
+    if (isChatGptImagesProvider(provider)) {
+        const noopScraper = {
+            start: () => { },
+            stop: () => { },
+            setOverlay: () => { }
+        };
+        const noopRetry = {
+            overlay: null,
+            goalRunning: false,
+            batchRunning: false,
+            startGoal: () => { },
+            startBatch: async () => { },
+            startQualityRepeat: () => { },
+            stopBatch: () => { },
+            stopQualityRepeat: () => { }
+        };
+        const overlay = new GrokOverlay(noopScraper, noopRetry, settings, history, { provider });
+        noopRetry.overlay = overlay;
+    } else {
+        const scraper = new GrokScraper();
+        const retry = new VideoRetryManager(null, settings, history);
+        const overlay = new GrokOverlay(scraper, retry, settings, history, { provider });
+        const recreateBridge = new RecreateWorkflowContentBridge(overlay, history);
+        recreateBridge.setupListeners();
+        retry.overlay = overlay;
+        scraper.setOverlay(overlay);
+    }
 } else {
     module.exports = {
         SettingsManager,

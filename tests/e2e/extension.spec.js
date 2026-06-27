@@ -4,10 +4,16 @@ const fs = require('fs');
 const path = require('path');
 
 // Read content.js and CSS
+const providerRegistryJsPath = path.join(__dirname, '../../providerRegistry.js');
+const providerRunLedgerJsPath = path.join(__dirname, '../../providerRunLedger.js');
+const chatGptImagesContentJsPath = path.join(__dirname, '../../chatgptImagesContent.js');
 const utilsJsPath = path.join(__dirname, '../../recreateWorkflowUtils.js');
 const contentActionsJsPath = path.join(__dirname, '../../recreateWorkflowContent.js');
 const contentJsPath = path.join(__dirname, '../../content.js');
 const styleCssPath = path.join(__dirname, '../../overlay.css');
+const providerRegistryJs = fs.readFileSync(providerRegistryJsPath, 'utf8');
+const providerRunLedgerJs = fs.readFileSync(providerRunLedgerJsPath, 'utf8');
+const chatGptImagesContentJs = fs.readFileSync(chatGptImagesContentJsPath, 'utf8');
 const utilsJs = fs.readFileSync(utilsJsPath, 'utf8');
 const contentActionsJs = fs.readFileSync(contentActionsJsPath, 'utf8');
 const contentJs = fs.readFileSync(contentJsPath, 'utf8');
@@ -15,12 +21,18 @@ const styleCss = fs.readFileSync(styleCssPath, 'utf8');
 const { MAX_REFERENCE_BYTES } = require('../../recreateWorkflowUtils.js');
 
 async function evaluateExtensionContent(page) {
+    await page.evaluate(providerRegistryJs);
+    await page.evaluate(providerRunLedgerJs);
+    await page.evaluate(chatGptImagesContentJs);
     await page.evaluate(utilsJs);
     await page.evaluate(contentActionsJs);
     await page.evaluate(contentJs);
 }
 
 async function evaluateExtensionContentWithMockedRecreateActions(page) {
+    await page.evaluate(providerRegistryJs);
+    await page.evaluate(providerRunLedgerJs);
+    await page.evaluate(chatGptImagesContentJs);
     await page.evaluate(utilsJs);
     await page.evaluate(contentActionsJs);
     await page.evaluate(() => {
@@ -79,6 +91,11 @@ async function evaluateExtensionContentWithMockedRecreateActions(page) {
     await page.evaluate(contentJs);
 }
 
+async function gotoMockProviderPage(page, url) {
+    await page.goto(url);
+    await page.addStyleTag({ content: styleCss });
+}
+
 async function dispatchRuntimeMessage(page, message) {
     return page.evaluate(async (runtimeMessage) => {
         const responses = [];
@@ -110,8 +127,29 @@ test.describe('Grok Power Tools E2E', () => {
     test.beforeEach(async ({ page }) => {
         // Mock Chrome API in the browser context
         await page.addInitScript(() => {
+            const localState = {};
+            const syncState = {};
+            const readStorage = (state, keys) => {
+                if (keys === null || typeof keys === 'undefined') return { ...state };
+                if (Array.isArray(keys)) {
+                    return keys.reduce((acc, key) => {
+                        acc[key] = state[key];
+                        return acc;
+                    }, {});
+                }
+                if (typeof keys === 'string') return { [keys]: state[keys] };
+                if (typeof keys === 'object') {
+                    return Object.keys(keys).reduce((acc, key) => {
+                        acc[key] = Object.prototype.hasOwnProperty.call(state, key) ? state[key] : keys[key];
+                        return acc;
+                    }, {});
+                }
+                return {};
+            };
             window.__chromeRuntimeMessages = [];
             window.__chromeMessageListeners = [];
+            window.__chromeStorageLocalState = localState;
+            window.__chromeStorageSyncState = syncState;
             window.chrome = {
                 runtime: {
                     getURL: (resourcePath) => resourcePath,
@@ -135,20 +173,24 @@ test.describe('Grok Power Tools E2E', () => {
                     },
                     local: {
                         get: (keys, cb) => {
-                            if (cb) cb({});
-                            return Promise.resolve({});
+                            const result = readStorage(localState, keys);
+                            if (cb) cb(result);
+                            return Promise.resolve(result);
                         },
                         set: (data, cb) => {
+                            Object.assign(localState, data || {});
                             if (cb) cb();
                             return Promise.resolve();
                         }
                     },
                     sync: {
                         get: (keys, cb) => {
-                            if (cb) cb({});
-                            return Promise.resolve({});
+                            const result = readStorage(syncState, keys);
+                            if (cb) cb(result);
+                            return Promise.resolve(result);
                         },
                         set: (data, cb) => {
+                            Object.assign(syncState, data || {});
                             if (cb) cb();
                             return Promise.resolve();
                         }
@@ -157,16 +199,17 @@ test.describe('Grok Power Tools E2E', () => {
             };
         });
 
-        // Load a blank page
-        await page.goto('about:blank');
+        await page.route('**/*', (route) => route.fulfill({
+            status: 200,
+            contentType: 'text/html',
+            body: '<!doctype html><html><head><title>Mock Provider</title></head><body></body></html>'
+        }));
 
-        // Inject CSS
-        await page.addStyleTag({ content: styleCss });
+        await gotoMockProviderPage(page, 'https://grok.com/imagine/favorites');
     });
 
     test('Overlay should render on the page', async ({ page }) => {
         // Evaluate the content scripts
-        // about:blank hostname is "", so it falls into the else block (Main Mode) automatically
         await evaluateExtensionContent(page);
 
         // Check if overlay exists
@@ -234,16 +277,85 @@ test.describe('Grok Power Tools E2E', () => {
         }));
     });
 
-    test('Recreate helper globals should be available before content script', async ({ page }) => {
+    test('Provider and recreate helper globals should be available before content script', async ({ page }) => {
+        await page.evaluate(providerRegistryJs);
+        await page.evaluate(providerRunLedgerJs);
+        await page.evaluate(chatGptImagesContentJs);
         await page.evaluate(utilsJs);
         await page.evaluate(contentActionsJs);
 
         const globals = await page.evaluate(() => ({
+            hasProviderRegistry: !!window.GrokPowerToolsProviderRegistry,
+            hasProviderRunLedger: !!window.GrokPowerToolsProviderRunLedger,
+            hasChatGptImagesActions: !!window.ChatGPTImagesContentActions,
             hasUtils: !!window.GrokRecreateWorkflowUtils,
             hasContentActions: !!window.GrokRecreateContentActions
         }));
 
-        expect(globals).toEqual({ hasUtils: true, hasContentActions: true });
+        expect(globals).toEqual({
+            hasProviderRegistry: true,
+            hasProviderRunLedger: true,
+            hasChatGptImagesActions: true,
+            hasUtils: true,
+            hasContentActions: true
+        });
+    });
+
+    test('ChatGPT Images overlay should submit a current-run image and write provider history', async ({ page }) => {
+        await gotoMockProviderPage(page, 'https://chatgpt.com/images/');
+        await page.evaluate(() => {
+            const existing = document.createElement('img');
+            existing.src = 'https://cdn.example.com/existing-gallery.png';
+            existing.alt = 'existing gallery image';
+            Object.defineProperty(existing, 'naturalWidth', { configurable: true, value: 1024 });
+            Object.defineProperty(existing, 'naturalHeight', { configurable: true, value: 1024 });
+            existing.getBoundingClientRect = () => ({ left: 20, top: 240, width: 320, height: 320 });
+            document.body.appendChild(existing);
+
+            const input = document.createElement('textarea');
+            input.name = 'prompt-textarea';
+            input.placeholder = 'Describe a new image';
+            document.body.appendChild(input);
+
+            const send = document.createElement('button');
+            send.dataset.testid = 'send-button';
+            send.setAttribute('aria-label', 'Send prompt');
+            send.textContent = 'Send prompt';
+            send.getBoundingClientRect = () => ({ left: 20, top: 20, width: 120, height: 40 });
+            send.addEventListener('click', () => {
+                const generated = document.createElement('img');
+                generated.src = 'https://cdn.example.com/gpt-img-provider-001.png';
+                generated.alt = 'generated canary image';
+                Object.defineProperty(generated, 'naturalWidth', { configurable: true, value: 1024 });
+                Object.defineProperty(generated, 'naturalHeight', { configurable: true, value: 1024 });
+                generated.getBoundingClientRect = () => ({ left: 20, top: 90, width: 320, height: 320 });
+                document.body.appendChild(generated);
+            });
+            document.body.appendChild(send);
+        });
+
+        await evaluateExtensionContent(page);
+
+        const overlay = page.locator('#grok-powertools-overlay');
+        await expect(overlay).toBeVisible();
+        await expect(page.locator('#gptProviderLabel')).toHaveText('Provider: ChatGPT Images');
+        await expect(page.locator('#gptChatGptImageSection')).toBeVisible();
+        await expect(page.locator('#gptRecreateSection')).toBeHidden();
+        await expect(page.locator('#gptAutoRetrySection')).toBeHidden();
+
+        await page.locator('#gptChatGptPrompt').fill('GPT-IMG-PROVIDER-001 harmless blue glass cube');
+        await page.locator('#gptChatGptGenerateBtn').click();
+        await expect(page.locator('#gptChatGptStatus')).toHaveText('Generated image ready');
+
+        const storageState = await page.evaluate(() => window.__chromeStorageLocalState);
+        expect(storageState.providerRunHistory[0]).toEqual(expect.objectContaining({
+            providerId: 'chatgpt-images',
+            workflow: 'text-to-image',
+            prompt: 'GPT-IMG-PROVIDER-001 harmless blue glass cube',
+            status: 'generated',
+            resultMediaUrl: 'https://cdn.example.com/gpt-img-provider-001.png'
+        }));
+        expect(storageState.providerRunHistory[0].resultMediaUrl).not.toBe('https://cdn.example.com/existing-gallery.png');
     });
 
     test('Recreate content bridge should handle status messages', async ({ page }) => {

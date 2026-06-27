@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>ChatGPT Images Provider Implementation Notes</title>
+</head>
+<body>
+    <h1>ChatGPT Images Provider Implementation Notes</h1>
+    <section>
+        <h2>Design Decisions</h2>
+        <ul>
+            <li>Use the narrower <code>https://chatgpt.com/images*</code> manifest match for V1. The design spec mentions <code>chatgpt.com/*</code>, but the implementation plan and V1 scope are limited to the Images route. This avoids injecting the overlay into unrelated ChatGPT pages.</li>
+            <li>Preserve existing Grok-compatible manifest routes, including <code>*.x.com</code>, <code>*.grok.x.ai</code>, and <code>imagine-public.x.ai</code>, as Grok provider routes so existing behavior is not hidden on those pages.</li>
+            <li>Add package allowlist coverage for new provider helper scripts because the release packager is static and would otherwise omit manifest-referenced files.</li>
+        </ul>
+    </section>
+    <section>
+        <h2>Deviations</h2>
+        <ul>
+            <li>Do not call <code>applyProviderUi()</code> at the exact insertion point shown in the plan. Current <code>content.js</code> assigns <code>this.el</code> after appending the overlay, so provider UI must run after <code>this.el</code> is assigned.</li>
+            <li>Guard Grok-only bridge and manager behavior on ChatGPT instead of merely hiding Grok UI controls. The plan focuses on UI gating, but pre-coding review found the current bridge, retry manager, and scraper are initialized unconditionally.</li>
+        </ul>
+    </section>
+    <section>
+        <h2>Tradeoffs</h2>
+        <ul>
+            <li>Narrow ChatGPT route matching means V1 will not route users from other ChatGPT pages to Images. That is an intentional tradeoff for tighter permissions and less unrelated UI injection.</li>
+        </ul>
+    </section>
+    <section>
+        <h2>Open Questions</h2>
+        <ul>
+            <li>Live validation still needs to confirm ChatGPT Images accepts content-script textarea control without a MAIN-world bridge.</li>
+        </ul>
+    </section>
+    <section>
+        <h2>Paused State</h2>
+        <ul>
+            <li>Paused before live Chrome validation because the Mac is being restarted.</li>
+            <li>Completed local validation before pause: focused provider unit tests, full <code>npm run test:unit</code>, <code>npm run test:e2e</code>, and <code>npm run lint</code> all passed.</li>
+            <li>Remaining gate: reload the unpacked extension in the user's Chrome profile, run no-generation ChatGPT selector preflight, pause for approval before the first live ChatGPT canary generation, then confirm generated status and <code>providerRunHistory</code> evidence plus a Grok overlay smoke check.</li>
+        </ul>
+    </section>
+</body>
+</html>
