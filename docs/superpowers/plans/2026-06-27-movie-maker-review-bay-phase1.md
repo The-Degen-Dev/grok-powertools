@@ -18,6 +18,7 @@ Keep this plan to Phase 1. Do not implement Phase 2 prompt spine scoring, duplic
 
 ## Current Repo Facts
 
+- Last audited against merged `origin/main` on 2026-06-28. Recheck these facts before executing if `main` moves again.
 - Worktree: `/Users/philipbankier/.codex/worktrees/vault-movie-drafts-exec/chrome-extension-powertools`
 - Branch: `codex/vault-movie-drafts-exec`
 - Spec: `docs/superpowers/specs/2026-06-26-movie-maker-review-bay-upgrade-design.md`
@@ -32,6 +33,12 @@ Keep this plan to Phase 1. Do not implement Phase 2 prompt spine scoring, duplic
 - Existing FFmpeg wrapper and clip export args: `web/src/lib/useFFmpeg.ts`, `web/src/lib/ffmpeg-commands.ts`
 - Existing web test runner: `npm --prefix web run test:unit`
 - Existing web E2E config: `npx playwright test -c playwright.web.config.js`
+- `web/package.json` currently uses Next 16.1.6, React 19.2.3, `@ffmpeg/ffmpeg` 0.12.15, `@ffmpeg/util` 0.12.2, and `idb` 8.0.3.
+- `web/package-lock.json` currently contains transitive `zod` 4.3.6, but `web/package.json` does not list `zod` as a direct dependency.
+- `web/src/lib/local-storage.ts` currently uses `DB_VERSION = 5`; Review Bay storage must bump from the current value, not from an assumed older value.
+- `web/src/lib/useFFmpeg.ts` currently hard-codes `@ffmpeg/core@0.12.6`; this is stale relative to the verified current `@ffmpeg/core` package version 0.12.10 and must be updated during export work.
+- Local `ffmpeg` and `ffprobe` are available at `/opt/homebrew/bin/ffmpeg` and `/opt/homebrew/bin/ffprobe` for fixture generation and output verification.
+- Planned lucide icons `Focus`, `Grid2X2`, `ListVideo`, `Clapperboard`, `Check`, `Diamond`, `Music`, `Scissors`, `Square`, `VolumeX`, and `X` are exported by the installed `lucide-react` package.
 
 ## File Structure
 
@@ -53,8 +60,9 @@ Keep this plan to Phase 1. Do not implement Phase 2 prompt spine scoring, duplic
 - Create `web/src/lib/movie-timeline-model.test.ts`: timeline and export-safe tests.
 - Create `web/src/lib/movie-export-args.ts`: FFmpeg argument builder for MP4 with audio and WebM fallback.
 - Create `web/src/lib/movie-export-args.test.ts`: verifies MP4/WebM filter graphs and audio handling.
-- Create `web/src/lib/movie-director.ts`: Director request/response schemas, rule-based fallback, OpenAI-compatible provider client, proposal validation.
+- Create `web/src/lib/movie-director.ts`: Director request/response schemas, rule-based fallback, provider request builder, proposal validation, and proposal application. This file must not read secrets or call provider APIs directly from browser code.
 - Create `web/src/lib/movie-director.test.ts`: fake provider, invalid output rejection, partial accept, no direct mutation.
+- Create `web/src/app/api/movie/director/route.ts`: server-side OpenAI-compatible Director provider route for CLIProxyAPI/local providers. Secrets stay server-side.
 
 ### Hooks And Components
 
@@ -85,6 +93,7 @@ Keep this plan to Phase 1. Do not implement Phase 2 prompt spine scoring, duplic
 - Modify `tests/e2e-web/fixtures/fake-vault-worker.mjs`: expose enough video fixture metadata for audio/export tests and keep existing Vault tests stable.
 - Add `tests/e2e-web/fixtures/tiny-video-with-audio.mp4`: use an actual short MP4 with an AAC audio track.
 - Create `tests/e2e-web/movie-review-bay.spec.js`: Review/Triage, Focus/Loupe, Assemble, keyboard, Inspector, Clip Strip.
+- Create `tests/e2e-web/support/movie-fixtures.js`: shared seeded movie helpers for Review Bay, Director, and export E2E.
 - Create `tests/e2e-web/movie-director.spec.js`: fake Director proposals, preview proposed cut, partial accept, no direct mutation.
 - Create `tests/e2e-web/movie-export.spec.js`: pre-flight gate, MP4 export with audio proof, WebM fallback.
 - Modify `tests/e2e-web/movie-player-stability.spec.js`: keep coverage against seek spam and canvas nonblank behavior through the new preview.
@@ -122,12 +131,12 @@ Create and maintain `implementation-notes.html` at repo root during execution. A
 Run:
 
 ```bash
-npm --prefix web install zod@4.3.4
+npm --prefix web install zod@4.4.3
 ```
 
 Expected:
 
-- `web/package.json` contains `"zod": "^4.3.4"` under dependencies.
+- `web/package.json` contains `"zod": "^4.4.3"` under dependencies.
 - `web/package-lock.json` changes.
 - No root `package.json` changes.
 
@@ -269,7 +278,6 @@ Create `web/src/lib/movie-review-types.ts`:
 
 ```ts
 import { z } from "zod";
-import type { MovieClip } from "./types";
 
 export const movieModeSchema = z.enum(["review", "focus", "assemble"]);
 export type MovieMode = z.infer<typeof movieModeSchema>;
@@ -280,50 +288,80 @@ export type ClipLifecycle = z.infer<typeof clipLifecycleSchema>;
 export const clipFlagSchema = z.enum(["trimmed", "has-source-audio", "muted-in-mix", "export-safe", "needs-attention"]);
 export type ClipFlag = z.infer<typeof clipFlagSchema>;
 
-export interface ReviewClip extends MovieClip {
-  lifecycle: ClipLifecycle;
-  flags: ClipFlag[];
-  volume: number;
-  muted: boolean;
-  solo: boolean;
-  hasSourceAudio: boolean | "unknown";
-  audioDetectionError?: string;
-  mediaError?: string;
+export const transitionSchema = z.object({
+  type: z.enum(["cut", "fade", "crossfade"]),
+  duration: z.number().min(0),
+});
+
+export const reviewClipSchema = z.object({
+  id: z.string(),
+  type: z.enum(["video", "image", "title"]),
+  videoUrl: z.string().optional(),
+  imageUrl: z.string().optional(),
+  sourceCollectionId: z.string().optional(),
+  sourceAssetId: z.string().optional(),
+  trimStart: z.number().min(0).optional(),
+  trimEnd: z.number().positive().optional(),
+  stillDuration: z.number().positive().optional(),
+  titleText: z.string().optional(),
+  titleSubtext: z.string().optional(),
+  titleDuration: z.number().positive().optional(),
+  titleBgColor: z.string().optional(),
+  titleTextColor: z.string().optional(),
+  transition: transitionSchema,
+  position: z.number().int().min(0),
+  lifecycle: clipLifecycleSchema,
+  flags: z.array(clipFlagSchema),
+  volume: z.number().min(0).max(2),
+  muted: z.boolean(),
+  solo: z.boolean(),
+  hasSourceAudio: z.union([z.boolean(), z.literal("unknown")]),
+  audioDetectionError: z.string().optional(),
+  mediaError: z.string().optional(),
+});
+export type ReviewClip = z.infer<typeof reviewClipSchema>;
+
+export const selectedTargetSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("clip"), clipId: z.string() }),
+  z.object({ type: z.literal("candidate"), clipId: z.string() }),
+  z.object({ type: z.literal("proposal"), proposalId: z.string() }),
+]);
+export type SelectedTarget = z.infer<typeof selectedTargetSchema>;
+
+export function selectedTargetClipId(target: SelectedTarget | null): string | null {
+  return target && target.type !== "proposal" ? target.clipId : null;
 }
 
-export interface SelectedTarget {
-  type: "clip" | "candidate" | "proposal";
-  clipId: string;
-}
+export const movieReviewProjectSchema = z.object({
+  id: z.string(),
+  movieId: z.string(),
+  mode: movieModeSchema,
+  selectedTarget: selectedTargetSchema.nullable(),
+  candidates: z.array(reviewClipSchema),
+  committedClips: z.array(reviewClipSchema),
+  activeFilter: z.enum(["proposed", "kept", "rejected", "needs-attention", "all"]),
+  masterAudio: z.object({
+    volume: z.number().min(0).max(2),
+    muted: z.boolean(),
+    solo: z.boolean(),
+    duckUnderSource: z.boolean(),
+  }),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type MovieReviewProject = z.infer<typeof movieReviewProjectSchema>;
 
-export interface MovieReviewProject {
-  id: string;
-  movieId: string;
-  mode: MovieMode;
-  selectedTarget: SelectedTarget | null;
-  candidates: ReviewClip[];
-  committedClips: ReviewClip[];
-  activeFilter: "proposed" | "kept" | "rejected" | "needs-attention" | "all";
-  masterAudio: {
-    volume: number;
-    muted: boolean;
-    solo: boolean;
-    duckUnderSource: boolean;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface MovieVersion {
-  id: string;
-  movieId: string;
-  projectId: string;
-  name: string;
-  description: string;
-  clips: ReviewClip[];
-  createdAt: string;
-  updatedAt: string;
-}
+export const movieVersionSchema = z.object({
+  id: z.string(),
+  movieId: z.string(),
+  projectId: z.string(),
+  name: z.string().min(1),
+  description: z.string(),
+  clips: z.array(reviewClipSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type MovieVersion = z.infer<typeof movieVersionSchema>;
 
 export const directorChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("keep-clip"), clipId: z.string() }),
@@ -351,37 +389,39 @@ export const directorProposalSchema = z.object({
 });
 export type DirectorProposal = z.infer<typeof directorProposalSchema>;
 
-export interface MovieExportRun {
-  id: string;
-  movieId: string;
-  projectId: string;
-  status: "queued" | "running" | "complete" | "failed" | "cancelled";
-  format: "mp4" | "webm";
-  startedAt: string;
-  completedAt?: string;
-  failureReason?: string;
-  hasAudioTrack: boolean;
-  bytes?: number;
-  outputName?: string;
-}
+export const movieExportRunSchema = z.object({
+  id: z.string(),
+  movieId: z.string(),
+  projectId: z.string(),
+  status: z.enum(["queued", "running", "complete", "failed", "cancelled"]),
+  format: z.enum(["mp4", "webm"]),
+  startedAt: z.string(),
+  completedAt: z.string().optional(),
+  failureReason: z.string().optional(),
+  hasAudioTrack: z.boolean(),
+  bytes: z.number().int().nonnegative().optional(),
+  outputName: z.string().optional(),
+});
+export type MovieExportRun = z.infer<typeof movieExportRunSchema>;
 
-export interface MovieReviewNote {
-  id: string;
-  movieId: string;
-  projectId: string;
-  clipId?: string;
-  proposalId?: string;
-  body: string;
-  timeSeconds?: number;
-  createdAt: string;
-}
+export const movieReviewNoteSchema = z.object({
+  id: z.string(),
+  movieId: z.string(),
+  projectId: z.string(),
+  clipId: z.string().optional(),
+  proposalId: z.string().optional(),
+  body: z.string().min(1),
+  timeSeconds: z.number().min(0).optional(),
+  createdAt: z.string(),
+});
+export type MovieReviewNote = z.infer<typeof movieReviewNoteSchema>;
 
-export interface DirectorProviderConfig {
-  enabled: boolean;
-  baseUrl: string;
-  model: string;
-  apiKeyEnvName: string;
-}
+export const directorProviderConfigSchema = z.object({
+  enabled: z.boolean(),
+  mode: z.enum(["rule-based", "server"]),
+  modelLabel: z.string().optional(),
+});
+export type DirectorProviderConfig = z.infer<typeof directorProviderConfigSchema>;
 ```
 
 Modify `web/src/lib/types.ts` by adding these optional fields to `MovieClip` and `Movie` without removing existing fields:
@@ -793,7 +833,8 @@ export interface MovieReviewProjectWithAnnouncement extends MovieReviewProject {
 }
 
 function selectedClipId(project: MovieReviewProject): string | null {
-  return project.selectedTarget?.clipId ?? null;
+  const target = project.selectedTarget;
+  return target && target.type !== "proposal" ? target.clipId : null;
 }
 
 export function nextSelectableId(items: ReviewClip[], currentId: string): string | null {
@@ -810,6 +851,14 @@ function resequence(clips: ReviewClip[]): ReviewClip[] {
 
 function updateClip(clips: ReviewClip[], clipId: string, update: (clip: ReviewClip) => ReviewClip): ReviewClip[] {
   return clips.map((clip) => (clip.id === clipId ? update(clip) : clip));
+}
+
+function updateProjectClip(project: MovieReviewProject, clipId: string, update: (clip: ReviewClip) => ReviewClip): MovieReviewProject {
+  return {
+    ...project,
+    candidates: updateClip(project.candidates, clipId, update),
+    committedClips: updateClip(project.committedClips, clipId, update),
+  };
 }
 
 export function applyReviewCommand(project: MovieReviewProject, command: ReviewCommand): MovieReviewProjectWithAnnouncement {
@@ -865,19 +914,19 @@ export function applyReviewCommand(project: MovieReviewProject, command: ReviewC
   }
 
   if (command.type === "set-volume") {
-    return { ...project, committedClips: updateClip(project.committedClips, command.clipId, (clip) => ({ ...clip, volume: command.volume })) };
+    return updateProjectClip(project, command.clipId, (clip) => ({ ...clip, volume: command.volume }));
   }
 
   if (command.type === "set-muted") {
-    return { ...project, committedClips: updateClip(project.committedClips, command.clipId, (clip) => ({ ...clip, muted: command.muted })) };
+    return updateProjectClip(project, command.clipId, (clip) => ({ ...clip, muted: command.muted }));
   }
 
   if (command.type === "set-solo") {
-    return { ...project, committedClips: updateClip(project.committedClips, command.clipId, (clip) => ({ ...clip, solo: command.solo })) };
+    return updateProjectClip(project, command.clipId, (clip) => ({ ...clip, solo: command.solo }));
   }
 
   if (command.type === "set-trim") {
-    return { ...project, committedClips: updateClip(project.committedClips, command.clipId, (clip) => ({ ...clip, trimStart: command.trimStart, trimEnd: command.trimEnd, flags: Array.from(new Set([...clip.flags, "trimmed"])) })) };
+    return updateProjectClip(project, command.clipId, (clip) => ({ ...clip, trimStart: command.trimStart, trimEnd: command.trimEnd, flags: Array.from(new Set([...clip.flags, "trimmed"])) }));
   }
 
   return project;
@@ -992,11 +1041,12 @@ git add web/src/lib/movie-review-reducer.ts web/src/lib/movie-review-reducer.tes
 git commit -m "feat(web): add movie review state model"
 ```
 
-## Task 3: Add Director Schemas, Rule Fallback, And OpenAI-Compatible Adapter
+## Task 3: Add Director Schemas, Rule Fallback, And Server-Side Provider Route
 
 **Files:**
 - Create: `web/src/lib/movie-director.ts`
 - Create: `web/src/lib/movie-director.test.ts`
+- Create: `web/src/app/api/movie/director/route.ts`
 
 - [ ] **Step 1: Write failing Director tests**
 
@@ -1004,7 +1054,7 @@ Create `web/src/lib/movie-director.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { applyDirectorChanges, createRuleBasedProposal, requestDirectorProposal, validateDirectorPayload } from "./movie-director";
+import { applyDirectorChanges, buildDirectorChatRequest, createRuleBasedProposal, validateDirectorPayload } from "./movie-director";
 import type { MovieReviewProject, ReviewClip } from "./movie-review-types";
 
 function clip(id: string): ReviewClip {
@@ -1071,21 +1121,14 @@ describe("movie director", () => {
     expect(base.committedClips.map((clip) => clip.id)).toEqual(["a", "b"]);
   });
 
-  it("uses an OpenAI-compatible chat completions payload for configured providers", async () => {
-    const calls: unknown[] = [];
-    const response = await requestDirectorProposal(project(), {
-      enabled: true,
+  it("builds an OpenAI-compatible chat completions payload without carrying an API key", () => {
+    const request = buildDirectorChatRequest(project(), {
       baseUrl: "http://127.0.0.1:8317/v1",
       model: "fake-model",
-      apiKeyEnvName: "CLIENT_API_KEY",
-    }, async (url, init) => {
-      calls.push({ url, init });
-      return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ title: "Keep A", rationale: "Strongest clip.", confidence: 0.7, changes: [{ type: "keep-clip", clipId: "a" }] }) } }],
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }, "client-sample");
-    expect(response.status).toBe("pending");
-    expect(calls[0]).toMatchObject({ url: "http://127.0.0.1:8317/v1/chat/completions" });
+    });
+    expect(request.url).toBe("http://127.0.0.1:8317/v1/chat/completions");
+    expect(request.body.model).toBe("fake-model");
+    expect(JSON.stringify(request)).not.toContain("Bearer");
   });
 });
 ```
@@ -1107,10 +1150,8 @@ Create `web/src/lib/movie-director.ts`:
 ```ts
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
-import type { DirectorChange, DirectorProposal, DirectorProviderConfig, MovieReviewProject, ReviewClip } from "./movie-review-types";
+import type { DirectorChange, DirectorProposal, MovieReviewProject, ReviewClip } from "./movie-review-types";
 import { directorChangeSchema, directorProposalSchema } from "./movie-review-types";
-
-type Fetcher = typeof fetch;
 
 const providerResponseSchema = z.object({
   title: z.string().min(1),
@@ -1118,6 +1159,20 @@ const providerResponseSchema = z.object({
   confidence: z.number().min(0).max(1),
   changes: z.array(directorChangeSchema).min(1),
 });
+
+export interface DirectorChatConfig {
+  baseUrl: string;
+  model: string;
+}
+
+export interface DirectorChatRequest {
+  url: string;
+  body: {
+    model: string;
+    messages: Array<{ role: "system" | "user"; content: string }>;
+    temperature: number;
+  };
+}
 
 function nowIso(now?: string): string {
   return now ?? new Date().toISOString();
@@ -1135,6 +1190,16 @@ function baseProposal(project: MovieReviewProject, now?: string): Omit<DirectorP
 
 function describeClip(clip: ReviewClip): string {
   return `${clip.id} ${clip.sourceAssetId ?? "unknown-source"} ${clip.lifecycle} volume=${clip.volume} muted=${clip.muted}`;
+}
+
+function directorPrompt(project: MovieReviewProject): string {
+  return [
+    "You are Director for a local movie review tool.",
+    "Return JSON only with title, rationale, confidence, and changes.",
+    "Never mutate current state directly. Propose a reviewable changeset.",
+    `Committed clips: ${project.committedClips.map(describeClip).join("; ")}`,
+    `Candidate clips: ${project.candidates.map(describeClip).join("; ")}`,
+  ].join("\n");
 }
 
 export function createRuleBasedProposal(project: MovieReviewProject, now?: string): DirectorProposal {
@@ -1170,43 +1235,18 @@ export function validateDirectorPayload(payload: unknown, project: MovieReviewPr
   return directorProposalSchema.parse({ ...baseProposal(project), ...parsed.data });
 }
 
-export async function requestDirectorProposal(
-  project: MovieReviewProject,
-  config: DirectorProviderConfig,
-  fetcher: Fetcher = fetch,
-  apiKey?: string,
-): Promise<DirectorProposal> {
-  if (!config.enabled) return createRuleBasedProposal(project);
-  if (!apiKey) throw new Error("DIRECTOR_API_KEY_MISSING");
-  const url = `${config.baseUrl.replace(/\/$/, "")}/chat/completions`;
-  const prompt = [
-    "You are Director for a local movie review tool.",
-    "Return JSON only with title, rationale, confidence, and changes.",
-    "Never mutate current state directly. Propose a reviewable changeset.",
-    `Committed clips: ${project.committedClips.map(describeClip).join("; ")}`,
-    `Candidate clips: ${project.candidates.map(describeClip).join("; ")}`,
-  ].join("\n");
-  const response = await fetcher(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
+export function buildDirectorChatRequest(project: MovieReviewProject, config: DirectorChatConfig): DirectorChatRequest {
+  return {
+    url: `${config.baseUrl.replace(/\/$/, "")}/chat/completions`,
+    body: {
       model: config.model,
       messages: [
         { role: "system", content: "Return valid JSON only." },
-        { role: "user", content: prompt },
+        { role: "user", content: directorPrompt(project) },
       ],
       temperature: 0.2,
-    }),
-  });
-  if (!response.ok) throw new Error(`DIRECTOR_PROVIDER_HTTP_${response.status}`);
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") return validateDirectorPayload(data, project);
-  try {
-    return validateDirectorPayload(JSON.parse(content), project);
-  } catch {
-    return validateDirectorPayload(content, project);
-  }
+    },
+  };
 }
 
 export function applyDirectorChanges(project: MovieReviewProject, proposal: DirectorProposal, changeIndexes: number[]): MovieReviewProject {
@@ -1247,7 +1287,85 @@ export function applyDirectorChanges(project: MovieReviewProject, proposal: Dire
 }
 ```
 
-- [ ] **Step 4: Run Director tests**
+- [ ] **Step 4: Add server-side provider route**
+
+Create `web/src/app/api/movie/director/route.ts`:
+
+```ts
+import { NextResponse } from "next/server";
+import { buildDirectorChatRequest, validateDirectorPayload } from "@/lib/movie-director";
+import { movieReviewProjectSchema, type MovieReviewProject } from "@/lib/movie-review-types";
+
+function getDirectorConfig() {
+  const baseUrl = (process.env.DIRECTOR_BASE_URL || process.env.CLIPROXYAPI_BASE_URL || "http://127.0.0.1:8317/v1").replace(/\/+$/, "");
+  const model = process.env.DIRECTOR_MODEL || "grok-4.3";
+  const apiKey = process.env.DIRECTOR_API_KEY || process.env.CLIPROXYAPI_API_KEY || "";
+  if (!apiKey) throw new Error("DIRECTOR_API_KEY_MISSING");
+  return { baseUrl, model, apiKey };
+}
+
+function proposalFromProviderData(data: unknown, project: MovieReviewProject) {
+  const content =
+    typeof data === "object" &&
+    data !== null &&
+    "choices" in data &&
+    Array.isArray(data.choices) &&
+    typeof data.choices[0]?.message?.content === "string"
+      ? data.choices[0].message.content
+      : data;
+  if (typeof content !== "string") return validateDirectorPayload(content, project);
+  try {
+    return validateDirectorPayload(JSON.parse(content), project);
+  } catch {
+    return validateDirectorPayload(content, project);
+  }
+}
+
+export async function GET() {
+  try {
+    const { model } = getDirectorConfig();
+    return NextResponse.json({ ok: true, configured: true, model });
+  } catch {
+    return NextResponse.json({ ok: true, configured: false, model: null });
+  }
+}
+
+export async function POST(request: Request) {
+  let project: MovieReviewProject;
+  try {
+    const body = await request.json();
+    project = movieReviewProjectSchema.parse(body.project);
+  } catch {
+    return NextResponse.json({ ok: false, error: "DIRECTOR_PROJECT_REQUIRED" }, { status: 400 });
+  }
+
+  try {
+    const { apiKey, ...config } = getDirectorConfig();
+    const chatRequest = buildDirectorChatRequest(project, config);
+    const response = await fetch(chatRequest.url, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(chatRequest.body),
+    });
+    const data: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return NextResponse.json({ ok: false, error: `DIRECTOR_PROVIDER_HTTP_${response.status}` }, { status: 502 });
+    }
+    return NextResponse.json({ ok: true, proposal: proposalFromProviderData(data, project) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "DIRECTOR_PROVIDER_FAILED";
+    return NextResponse.json({ ok: false, error: message }, { status: message === "DIRECTOR_API_KEY_MISSING" ? 409 : 502 });
+  }
+}
+```
+
+Do not expose `DIRECTOR_API_KEY`, `CLIPROXYAPI_API_KEY`, bearer tokens, or raw provider headers to client components, logs, screenshots, or `implementation-notes.html`.
+
+- [ ] **Step 5: Run Director tests**
 
 Run:
 
@@ -1257,12 +1375,12 @@ npm --prefix web run test:unit -- movie-director
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 3**
+- [ ] **Step 6: Commit Task 3**
 
 Run:
 
 ```bash
-git add web/src/lib/movie-director.ts web/src/lib/movie-director.test.ts
+git add web/src/lib/movie-director.ts web/src/lib/movie-director.test.ts web/src/app/api/movie/director/route.ts
 git commit -m "feat(web): add movie director proposals"
 ```
 
@@ -1445,6 +1563,7 @@ git commit -m "feat(web): add movie export args"
 - Create: `web/src/components/movie/review/MovieReviewHeader.tsx`
 - Create: `web/src/components/movie/review/MovieStatusBadges.tsx`
 - Create: `tests/e2e-web/movie-review-bay.spec.js`
+- Create: `tests/e2e-web/support/movie-fixtures.js`
 
 - [ ] **Step 1: Write failing Review Bay E2E shell test**
 
@@ -1452,23 +1571,34 @@ Create `tests/e2e-web/movie-review-bay.spec.js`:
 
 ```js
 const { test, expect } = require("@playwright/test");
+const { seedReviewMovie } = require("./support/movie-fixtures");
+```
 
-async function seedReviewMovie(page) {
+Create `tests/e2e-web/support/movie-fixtures.js`:
+
+```js
+async function seedReviewMovie(page, options = {}) {
   await page.goto("/movie");
-  return page.evaluate(async () => {
+  return page.evaluate(async ({ useAudioFixture }) => {
     const db = await new Promise((resolve, reject) => {
       const request = indexedDB.open("grok-power-tools");
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });
     const now = new Date().toISOString();
+    const assetOneUrl = useAudioFixture
+      ? "/api/vault/media/asset-video-audio-1?objectKey=grok-powertools%2Fv1%2Fusers%2Fgreymaker%2Fmedia%2Fby-asset%2Fasset-video-audio-1.mp4"
+      : "/api/vault/media/asset-video-1?objectKey=grok-powertools%2Fv1%2Fusers%2Fgreymaker%2Fmedia%2Fby-asset%2Fasset-video-1.mp4";
+    const assetTwoUrl = useAudioFixture
+      ? "/api/vault/media/asset-video-audio-2?objectKey=grok-powertools%2Fv1%2Fusers%2Fgreymaker%2Fmedia%2Fby-asset%2Fasset-video-audio-2.mp4"
+      : "/api/vault/media/asset-video-2?objectKey=grok-powertools%2Fv1%2Fusers%2Fgreymaker%2Fmedia%2Fby-asset%2Fasset-video-2.mp4";
     const movie = {
       id: "review-bay-movie",
       name: "Review Bay Fixture",
       resolution: { w: 320, h: 240 },
       clips: [
-        { id: "clip-a", type: "video", videoUrl: "/api/vault/media/asset-video-1?objectKey=grok-powertools%2Fv1%2Fusers%2Fgreymaker%2Fmedia%2Fby-asset%2Fasset-video-1.mp4", sourceAssetId: "asset-video-1", transition: { type: "cut", duration: 0 }, position: 0 },
-        { id: "clip-b", type: "video", videoUrl: "/api/vault/media/asset-video-2?objectKey=grok-powertools%2Fv1%2Fusers%2Fgreymaker%2Fmedia%2Fby-asset%2Fasset-video-2.mp4", sourceAssetId: "asset-video-2", transition: { type: "cut", duration: 0 }, position: 1 },
+        { id: "clip-a", type: "video", videoUrl: assetOneUrl, sourceAssetId: "asset-video-1", transition: { type: "cut", duration: 0 }, position: 0 },
+        { id: "clip-b", type: "video", videoUrl: assetTwoUrl, sourceAssetId: "asset-video-2", transition: { type: "cut", duration: 0 }, position: 1 },
       ],
       createdAt: now,
       updatedAt: now,
@@ -1482,8 +1612,15 @@ async function seedReviewMovie(page) {
     });
     db.close();
     return movie.id;
-  });
+  }, options);
 }
+
+module.exports = { seedReviewMovie };
+```
+
+Append the tests to `tests/e2e-web/movie-review-bay.spec.js`:
+
+```js
 
 test("Movie Maker opens as Review Bay with mode controls and typed regions", async ({ page }) => {
   const movieId = await seedReviewMovie(page);
@@ -1865,15 +2002,16 @@ Create `web/src/components/movie/review/MovieCandidatesGrid.tsx`:
 "use client";
 
 import { applyReviewCommand } from "@/lib/movie-review-reducer";
-import type { MovieReviewProject } from "@/lib/movie-review-types";
+import { selectedTargetClipId, type MovieReviewProject } from "@/lib/movie-review-types";
 import { MovieLifecycleBadge } from "./MovieStatusBadges";
 
 export default function MovieCandidatesGrid({ project, onProjectChange }: { project: MovieReviewProject; onProjectChange: (project: MovieReviewProject) => void }) {
+  const selectedClipId = selectedTargetClipId(project.selectedTarget);
   return (
     <section role="region" aria-label="Candidates Grid" className="min-h-0 overflow-auto border border-neutral-800 bg-neutral-950 p-3" data-keyboard-context="grid">
       <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2">
         {project.candidates.map((clip) => {
-          const selected = project.selectedTarget?.clipId === clip.id;
+          const selected = selectedClipId === clip.id;
           return (
             <button key={clip.id} type="button" role="option" aria-selected={selected} aria-label={`${clip.sourceAssetId ?? clip.id}, ${clip.lifecycle}, ${clip.flags.join(", ") || "no flags"}`} onClick={() => onProjectChange(applyReviewCommand(project, { type: "select", target: { type: "candidate", clipId: clip.id } }))} onDoubleClick={() => onProjectChange(applyReviewCommand(project, { type: "keep-current" }))} className={`relative aspect-video border bg-neutral-900 text-left ${selected ? "border-cyan-300" : "border-neutral-800"}`}>
               {clip.videoUrl ? <video src={clip.videoUrl} muted preload="metadata" className="h-full w-full object-cover" /> : null}
@@ -1894,10 +2032,11 @@ Create `web/src/components/movie/review/MovieFocusLoupe.tsx`:
 "use client";
 
 import { applyReviewCommand } from "@/lib/movie-review-reducer";
-import type { MovieReviewProject } from "@/lib/movie-review-types";
+import { selectedTargetClipId, type MovieReviewProject } from "@/lib/movie-review-types";
 
 export default function MovieFocusLoupe({ project, onProjectChange }: { project: MovieReviewProject; onProjectChange: (project: MovieReviewProject) => void }) {
-  const selected = [...project.candidates, ...project.committedClips].find((clip) => clip.id === project.selectedTarget?.clipId) ?? project.candidates[0] ?? project.committedClips[0];
+  const selectedClipId = selectedTargetClipId(project.selectedTarget);
+  const selected = [...project.candidates, ...project.committedClips].find((clip) => clip.id === selectedClipId) ?? project.candidates[0] ?? project.committedClips[0];
   return (
     <section role="region" aria-label="Focus Loupe" className="min-h-0 border border-neutral-800 bg-neutral-950 p-3" data-keyboard-context="loupe">
       {selected ? <video src={selected.videoUrl} controls className="h-full max-h-[70vh] w-full object-contain" /> : <p className="text-sm text-neutral-500">No clip selected.</p>}
@@ -1952,11 +2091,12 @@ Create `web/src/components/movie/review/MovieAssembleView.tsx`:
 ```tsx
 "use client";
 
-import type { MovieReviewProject } from "@/lib/movie-review-types";
+import { selectedTargetClipId, type MovieReviewProject } from "@/lib/movie-review-types";
 import MoviePreview from "./MoviePreview";
 
 export default function MovieAssembleView({ project }: { project: MovieReviewProject; onProjectChange: (project: MovieReviewProject) => void }) {
-  const selected = project.committedClips.find((clip) => clip.id === project.selectedTarget?.clipId) ?? project.committedClips[0] ?? null;
+  const selectedClipId = selectedTargetClipId(project.selectedTarget);
+  const selected = project.committedClips.find((clip) => clip.id === selectedClipId) ?? project.committedClips[0] ?? null;
   return (
     <section className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-3">
       <MoviePreview clip={selected} />
@@ -2000,10 +2140,10 @@ Create `web/src/components/movie/review/MovieInspector.tsx`:
 "use client";
 
 import { applyReviewCommand } from "@/lib/movie-review-reducer";
-import type { MovieReviewProject, ReviewClip } from "@/lib/movie-review-types";
+import { selectedTargetClipId, type MovieReviewProject, type ReviewClip } from "@/lib/movie-review-types";
 
 function selectedClip(project: MovieReviewProject): ReviewClip | null {
-  const clipId = project.selectedTarget?.clipId;
+  const clipId = selectedTargetClipId(project.selectedTarget);
   return [...project.candidates, ...project.committedClips].find((clip) => clip.id === clipId) ?? null;
 }
 
@@ -2271,9 +2411,10 @@ Use this source-audio detector:
 export function detectSourceAudio(video: HTMLVideoElement): boolean | "unknown" {
   const maybeMoz = video as HTMLVideoElement & { mozHasAudio?: boolean };
   const maybeWebkit = video as HTMLVideoElement & { webkitAudioDecodedByteCount?: number };
+  const maybeAudioTracks = video as HTMLVideoElement & { audioTracks?: { length: number } };
   if (typeof maybeMoz.mozHasAudio === "boolean") return maybeMoz.mozHasAudio;
   if (typeof maybeWebkit.webkitAudioDecodedByteCount === "number" && maybeWebkit.webkitAudioDecodedByteCount > 0) return true;
-  if (video.audioTracks && video.audioTracks.length > 0) return true;
+  if (maybeAudioTracks.audioTracks && maybeAudioTracks.audioTracks.length > 0) return true;
   return "unknown";
 }
 ```
@@ -2383,7 +2524,7 @@ Implement `MovieDirectorPanel.tsx`:
 
 - Provider off by default.
 - Rule-based Director button always available.
-- Optional provider controls are visible but disabled until config is present.
+- Optional model-backed Director control calls only `POST /api/movie/director` and is disabled until the server route reports usable config. Do not put provider base URLs, env var names, API keys, bearer tokens, or auth headers into browser state.
 - Proposals render as `article` with `aria-label="Director proposal ..."`.
 - Changes render with checkboxes for partial accept.
 - Preview proposed cut button shows ghost/reorder preview without changing saved project.
@@ -2459,6 +2600,8 @@ Expected:
 aac
 ```
 
+Then update `tests/e2e-web/fixtures/fake-vault-worker.mjs` so `/v1/vault/media` serves `tiny-video-with-audio.mp4` for object keys ending in `asset-video-audio-1.mp4` or `asset-video-audio-2.mp4`, while preserving the existing `tiny-video.mp4` response for the current fixture assets. Do not assume files under `tests/e2e-web/fixtures` are served by Next as static `/fixtures/*` URLs.
+
 - [ ] **Step 2: Write failing export E2E**
 
 Create `tests/e2e-web/movie-export.spec.js`:
@@ -2517,6 +2660,15 @@ Implement `MovieExportGate.tsx`:
 - include export history from `listExportRuns`.
 
 - [ ] **Step 5: Implement FFmpeg MP4/WebM export**
+
+First update `web/src/lib/useFFmpeg.ts` to stop hard-coding the stale `@ffmpeg/core@0.12.6` CDN URL. As of the 2026-06-28 audit, `npm view @ffmpeg/core version` returned `0.12.10`, while `web/package.json` has `@ffmpeg/ffmpeg` `^0.12.15` and `@ffmpeg/util` `^0.12.2`.
+
+Use an explicit constant so future audits have one value to update:
+
+```ts
+const FFMPEG_CORE_VERSION = "0.12.10";
+const BASE_URL = `https://unpkg.com/@ffmpeg/core@${FFMPEG_CORE_VERSION}/dist/umd`;
+```
 
 Implement `MovieExportButton.tsx`:
 

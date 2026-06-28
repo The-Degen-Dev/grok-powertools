@@ -146,6 +146,7 @@ Provider requirements:
 - Support OpenAI-compatible chat/completions style providers.
 - Include config that can target CLIProxyAPI.
 - Keep provider off by default.
+- Route model-backed provider calls through a server/API boundary. Browser components must never receive API keys, bearer tokens, or raw provider auth headers.
 - Include fake-provider contract tests.
 - Include optional live smoke guidance when CLIProxyAPI credentials and local proxy are available.
 
@@ -447,6 +448,7 @@ Export requirements:
 
 - MP4 is primary and must include audio when source mix has audio.
 - WebM fallback remains available.
+- FFmpeg core/runtime version must be verified during implementation. Do not preserve a stale hard-coded CDN version just because it exists in the current wrapper.
 - Export shows progress.
 - Export supports cancellation where technically possible.
 - Export failures show a specific reason and recovery path.
