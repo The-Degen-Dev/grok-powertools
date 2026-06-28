@@ -2,7 +2,7 @@
 
 Date: 2026-06-26
 
-Status: Design approved in chat. Pending `/writing-plan`.
+Status: Historical design snapshot. Superseded for full-program planning by `docs/superpowers/specs/2026-06-28-movie-maker-review-bay-full-program-spec.md`.
 
 Route surfaces: `/movie`, `/vault`
 
