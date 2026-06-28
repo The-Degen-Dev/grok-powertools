@@ -18,19 +18,21 @@ First, orient before changing code:
 4. If local CLAUDE.md files exist, treat them as stale local notes only. The tracked source of truth is AGENTS.md plus current code.
 
 Product shape:
-- Root is a Chrome MV3 extension for Grok Imagine.
+- Root is a Chrome MV3 extension for Grok Imagine and provider-aware ChatGPT Images text-to-image tracking.
 - content.js is the raw no-build extension monolith: overlay UI, prompt history, saved prompts, retry/goals, Quality Repeat, batch automation, and scraper.
 - background.js is the MV3 service worker: downloads, cloud sync queue, R2 upload pipeline, popup message routing.
 - bridge.js runs in Grok's MAIN world and communicates with content.js via DOM CustomEvents. Use it when React/TipTap state or page cookies are required.
 - popup.js/popup.html/popup.css are the extension popup settings and cloud controls.
 - cloud/ is a Cloudflare Worker with R2 presign, metadata snapshot, D1, and JWT sync endpoints.
 - web/ is a Next.js 16 + React 19 web app for dashboards, collections, prompt library, clip editing, movie maker, sharing, auth, and sync.
+- ChatGPT Images V1 is supported on chatgpt.com/images by observing the native prompt bar and native send button. Reference-image ChatGPT recreate/edit and video are separate follow-up work.
 
 Important extension gotchas:
 - There is no hot reload. After editing extension files, reload the extension in chrome://extensions and refresh the Grok tab.
 - Logs live in separate consoles: Grok page content script, extension service worker, and popup inspect console.
 - Grok UI changes often. Most automation failures are selectors. Prefer accessible labels, verify visible elements, and use full pointer-event sequences for Radix controls.
 - React controlled inputs and TipTap content usually need bridge.js, not direct content-script DOM mutation.
+- ChatGPT Images has a visible ProseMirror composer plus a hidden fallback textarea. Verify visible composer text before trusting selectors or status.
 - Authenticated media from assets.grok.com often needs page cookies, so route fetches through bridge.js when service-worker fetch fails.
 - Storage is split: chrome.storage.sync for overlay global settings; chrome.storage.local for prompts, history, processed IDs, activity logs, cloud config, and popup state.
 - Keep the extension raw JS/no-build unless intentionally changing the install story, and update README/HACKING if that changes.
@@ -41,6 +43,7 @@ Validation commands:
 - Web app: cd web && npm install && npm run build && npm run lint. Dev server is npm run dev on port 3001.
 - Worker: cd cloud && npm install && npm run typecheck. Deploy is npm run deploy after secrets/env are configured.
 - For extension behavior, perform live Chrome validation on grok.com/imagine when possible.
+- For provider-aware work, perform live Chrome validation on the relevant provider page: grok.com/imagine for Grok or chatgpt.com/images for ChatGPT Images. Use narrow inspection, verify visible composer state, and avoid scraping unrelated private gallery content.
 
 Env/config hygiene:
 - Do not ask for or commit local secret values.

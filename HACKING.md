@@ -12,12 +12,12 @@ If you've never built a Chrome extension before, start here and read top to bott
 
 1. Open `chrome://extensions/`
 2. Find "Grok Power Tools" and click the circular reload icon
-3. Reload the Grok tab (the content script gets re-injected by Chrome on navigation, not on extension reload)
+3. Reload the Grok or ChatGPT Images tab (the content script gets re-injected by Chrome on navigation, not on extension reload)
 
 If the overlay doesn't appear after reload:
 
-- Is your Grok tab already open? Refresh it. The old content script is dead but Chrome doesn't tell you.
-- Did you get an "Extension context invalidated" error in the console? That's the old content script trying to talk to a now-reloaded service worker. Refresh the Grok tab to re-inject a fresh content script.
+- Is your provider tab already open? Refresh it. The old content script is dead but Chrome doesn't tell you.
+- Did you get an "Extension context invalidated" error in the console? That's the old content script trying to talk to a now-reloaded service worker. Refresh the provider tab to re-inject a fresh content script.
 
 > **Why:** Chrome MV3 service workers can be killed at any time, and extension reloads spawn a brand new service worker. Anything the page was holding onto (message ports, content-script-scoped listeners) is orphaned. Refreshing the page is the mercy kill.
 
@@ -173,7 +173,23 @@ Grok updates their UI on an unpredictable cadence. When a batch stops working, t
 
 ---
 
-## 9. Further reading
+## 9. ChatGPT Images provider notes
+
+ChatGPT Images support is provider-aware and limited to text-to-image runs on `https://chatgpt.com/images`. The extension observes ChatGPT's native prompt bar and native send button. It should not add a second ChatGPT prompt textarea or generate button inside the overlay.
+
+Current ChatGPT Images composer shape:
+
+- Visible input: `#prompt-textarea[contenteditable="true"][role="textbox"]`
+- Hidden fallback: `textarea[name="prompt-textarea"]`
+- Native send: `button[data-testid="send-button"][aria-label="Send prompt"]`
+
+Do not treat the hidden fallback textarea as proof that text landed in the actual composer. Live validation should verify the visible contenteditable editor, the native send button state, the overlay status, a new image delta, and `providerRunHistory`.
+
+`providerRunHistory` is stored in `chrome.storage.local`. For read-only live evidence without navigating Chrome tabs, the LevelDB data lives under the loaded Chrome profile's `Local Extension Settings/<extension-id>/` directory.
+
+---
+
+## 10. Further reading
 
 - `AGENTS.md` — tracked agent guide with architecture, tool routing, validation, branch, and safety notes
 - `docs/AGENT_HANDOFF_PROMPT.md` — paste-ready onboarding prompt for another coding agent

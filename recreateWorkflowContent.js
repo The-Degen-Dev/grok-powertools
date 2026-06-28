@@ -1838,7 +1838,8 @@
     }
 
     function shouldUseNativeClick(options = {}) {
-        return typeof options.nativeClick === 'function' || !!getChromeRuntime(options);
+        const runtime = getChromeRuntime(options);
+        return typeof options.nativeClick === 'function' || !!(runtime && typeof runtime.sendMessage === 'function');
     }
 
     function getPowerToolsOverlay(documentRef = document) {

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>ChatGPT Images Provider Implementation Notes</title>
+</head>
+<body>
+    <h1>ChatGPT Images Provider Implementation Notes</h1>
+    <section>
+        <h2>Design Decisions</h2>
+        <ul>
+            <li>Use the narrower <code>https://chatgpt.com/images*</code> manifest match for V1. The design spec mentions <code>chatgpt.com/*</code>, but the implementation plan and V1 scope are limited to the Images route. This avoids injecting the overlay into unrelated ChatGPT pages.</li>
+            <li>Preserve existing Grok-compatible manifest routes, including <code>*.x.com</code>, <code>*.grok.x.ai</code>, and <code>imagine-public.x.ai</code>, as Grok provider routes so existing behavior is not hidden on those pages.</li>
+            <li>Add package allowlist coverage for new provider helper scripts because the release packager is static and would otherwise omit manifest-referenced files.</li>
+            <li>ChatGPT Images support now tracks the native ChatGPT Images prompt bar and native send button. The earlier extension-owned ChatGPT prompt textarea and <code>Generate Image</code> button were removed because they created a different workflow than Grok and duplicated the site composer.</li>
+            <li>Use the visible ChatGPT ProseMirror composer instead of the hidden fallback textarea. Live validation showed the hidden fallback can contain stale text while the actual visible input remains empty and the native send button stays disabled.</li>
+            <li>Merge provider run ledger updates by <code>runId</code> so the generated entry preserves the original submit timing while adding result evidence.</li>
+        </ul>
+    </section>
+    <section>
+        <h2>Deviations</h2>
+        <ul>
+            <li>Do not call <code>applyProviderUi()</code> at the exact insertion point shown in the plan. Current <code>content.js</code> assigns <code>this.el</code> after appending the overlay, so provider UI must run after <code>this.el</code> is assigned.</li>
+            <li>Guard Grok-only bridge and manager behavior on ChatGPT instead of merely hiding Grok UI controls. The plan focuses on UI gating, but pre-coding review found the current bridge, retry manager, and scraper are initialized unconditionally.</li>
+            <li>Depart from the plan's dedicated ChatGPT card. The accepted behavior is: type the image prompt in ChatGPT Images, click the native send button, and let the extension observe status, result delta, and provider history.</li>
+            <li>Read live provider history evidence from Chrome Profile 4's extension LevelDB instead of navigating to an extension page, because extension-page navigation caused confusing Chrome tab behavior during validation.</li>
+        </ul>
+    </section>
+    <section>
+        <h2>Tradeoffs</h2>
+        <ul>
+            <li>Narrow ChatGPT route matching means V1 will not route users from other ChatGPT pages to Images. That is an intentional tradeoff for tighter permissions and less unrelated UI injection.</li>
+            <li>ChatGPT Images V1 tracks native mouse submit. Keyboard submit is still a follow-up risk because the current listener observes clicks on the native send button.</li>
+        </ul>
+    </section>
+    <section>
+        <h2>Open Questions</h2>
+        <ul>
+            <li>Should keyboard submit on ChatGPT Images be tracked in a follow-up slice?</li>
+            <li>Should provider history get a small read-only diagnostics surface so future validation does not need Chrome profile LevelDB inspection?</li>
+        </ul>
+    </section>
+    <section>
+        <h2>Live Validation Evidence</h2>
+        <ul>
+            <li>Reloaded unpacked extension through <code>chrome://extensions/?id=bcjoehhhmhpjmlmjhojcokmfeafcmimd</code>, then opened <code>https://chatgpt.com/images/</code>.</li>
+            <li>Confirmed ChatGPT overlay state: <code>Provider: ChatGPT Images</code>, no second ChatGPT prompt/generate UI, and Grok-only controls hidden.</li>
+            <li>Ran one approved harmless canary prompt: <code>GPT-IMG-PROVIDER-20260628013650 single small blue glass cube centered on a plain white background, studio product photo, soft shadow, no text</code>.</li>
+            <li>Observed status transition from <code>Submitting</code> to <code>Generated image ready</code> and a new current-run ChatGPT image with alt text <code>Generated image: Translucent blue glass cube arrangement</code>.</li>
+            <li>Confirmed Chrome Profile 4 extension storage contains latest <code>providerRunHistory</code> entry with <code>providerId: chatgpt-images</code>, <code>workflow: text-to-image</code>, <code>status: generated</code>, preserved <code>submittedAt</code>, and a ChatGPT estuary <code>resultMediaUrl</code>.</li>
+            <li>Confirmed <code>https://grok.com/imagine</code> still renders <code>Provider: Grok Imagine</code> with Recreate, Auto-Retry, Template Batch, Quality Repeat, and Gallery controls visible.</li>
+        </ul>
+    </section>
+</body>
+</html>
