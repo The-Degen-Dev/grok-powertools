@@ -31,10 +31,16 @@ describe('ChatGPT Images content helpers', () => {
         jest.useRealTimers();
     });
 
-    test('finds and fills the ChatGPT Images prompt textarea', () => {
+    function makeVisible(element, rect = { left: 100, top: 100, width: 320, height: 40 }) {
+        element.getBoundingClientRect = () => rect;
+        return element;
+    }
+
+    test('finds and fills the visible ChatGPT Images prompt textarea', () => {
         const input = document.createElement('textarea');
         input.name = 'prompt-textarea';
         input.placeholder = 'Describe a new image';
+        makeVisible(input);
         document.body.appendChild(input);
 
         const seenEvents = [];
@@ -48,6 +54,26 @@ describe('ChatGPT Images content helpers', () => {
         expect(seenEvents).toEqual(['input', 'change']);
     });
 
+    test('prefers the visible ProseMirror composer over ChatGPT hidden fallback textarea', () => {
+        const fallback = document.createElement('textarea');
+        fallback.name = 'prompt-textarea';
+        fallback.placeholder = 'Describe a new image';
+        fallback.style.display = 'none';
+        fallback.value = 'stale hidden fallback prompt';
+        document.body.appendChild(fallback);
+
+        const editor = document.createElement('div');
+        editor.id = 'prompt-textarea';
+        editor.setAttribute('contenteditable', 'true');
+        editor.setAttribute('role', 'textbox');
+        editor.setAttribute('aria-label', 'Chat with ChatGPT');
+        editor.textContent = 'visible prompt';
+        makeVisible(editor);
+        document.body.appendChild(editor);
+
+        expect(findChatGptPromptInput()).toBe(editor);
+    });
+
     test('fails clearly when prompt input is missing', async () => {
         await expect(runChatGptImagePrompt({ prompt: 'x', timeoutMs: 5 })).rejects.toMatchObject({
             code: 'chatgpt_prompt_missing'
@@ -57,11 +83,13 @@ describe('ChatGPT Images content helpers', () => {
     test('finds the send button and ignores disabled sends', async () => {
         const input = document.createElement('textarea');
         input.name = 'prompt-textarea';
+        makeVisible(input);
         document.body.appendChild(input);
 
         const send = document.createElement('button');
         send.dataset.testid = 'send-button';
         send.setAttribute('aria-label', 'Send prompt');
+        makeVisible(send);
         document.body.appendChild(send);
 
         expect(findChatGptSendButton()).toBe(send);
@@ -74,6 +102,7 @@ describe('ChatGPT Images content helpers', () => {
     test('fails clearly when send button is missing', async () => {
         const input = document.createElement('textarea');
         input.name = 'prompt-textarea';
+        makeVisible(input);
         document.body.appendChild(input);
 
         await expect(runChatGptImagePrompt({ prompt: 'x', timeoutMs: 5 })).rejects.toMatchObject({
@@ -84,6 +113,7 @@ describe('ChatGPT Images content helpers', () => {
     test('fails before submit when a visible blocker appears', async () => {
         const input = document.createElement('textarea');
         input.name = 'prompt-textarea';
+        makeVisible(input);
         document.body.appendChild(input);
         document.body.appendChild(document.createTextNode('Upgrade your plan to continue'));
 
@@ -109,11 +139,13 @@ describe('ChatGPT Images content helpers', () => {
 
         const input = document.createElement('textarea');
         input.name = 'prompt-textarea';
+        makeVisible(input);
         document.body.appendChild(input);
 
         const send = document.createElement('button');
         send.dataset.testid = 'send-button';
         send.setAttribute('aria-label', 'Send prompt');
+        makeVisible(send);
         document.body.appendChild(send);
 
         const result = await runChatGptImagePrompt({

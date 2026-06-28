@@ -734,15 +734,6 @@ class GrokOverlay {
                         <div id="gptProviderLabel" style="font-size:11px; color:#71767b; margin-top:6px;">Provider: Grok Imagine</div>
                     </div>
 
-                    <div class="gpt-section" id="gptChatGptImageSection" style="display:none;">
-                        <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Create Image</label>
-                        <textarea id="gptChatGptPrompt" class="gpt-history-search" rows="3" placeholder="Describe a new image" style="min-height:72px; resize:vertical;"></textarea>
-                        <div class="gpt-row" style="margin-top:6px; gap:4px;">
-                            <button id="gptChatGptGenerateBtn" class="gpt-btn gpt-btn-primary" style="flex:1; background:#0ea5e9; font-size:11px;">Generate Image</button>
-                        </div>
-                        <div id="gptChatGptStatus" style="font-size:10px; color:#71767b; margin-top:4px;">Ready</div>
-                    </div>
-
                     <div class="gpt-section" id="gptRecreateSection">
                         <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Recreate Media</label>
                         <div id="gptRecreateDropzone" tabindex="0" style="border:1px dashed rgba(255,255,255,0.25); border-radius:6px; padding:8px; font-size:11px; color:#c9d1d9; text-align:center;">
@@ -964,14 +955,12 @@ class GrokOverlay {
         const label = this.el.querySelector('#gptProviderLabel');
         if (label) label.textContent = `Provider: ${this.provider.label || 'Unsupported page'}`;
 
-        const isChatGpt = isChatGptImagesProvider(this.provider);
         const isGrok = isGrokProvider(this.provider);
         const show = (selector, visible) => {
             const element = this.el.querySelector(selector);
             if (element) element.style.display = visible ? '' : 'none';
         };
 
-        show('#gptChatGptImageSection', isChatGpt && this.hasProviderCapability('canRunTextPrompt'));
         show('#gptRecreateSection', isGrok && this.hasProviderCapability('canUseReferenceImage'));
         show('#gptAutoRetrySection', isGrok && this.hasProviderCapability('canRunVideoGoals'));
         show('#gptTemplateBatchSection', isGrok && this.hasProviderCapability('canRunBatch'));
@@ -1083,12 +1072,7 @@ class GrokOverlay {
         this.el.querySelector('#gptClearHistoryBtn').addEventListener('click', () => {
             if (confirm('Clear all prompt history?')) this.historyManager.clear();
         });
-        const chatGptGenerateBtn = this.el.querySelector('#gptChatGptGenerateBtn');
-        if (chatGptGenerateBtn) {
-            chatGptGenerateBtn.addEventListener('click', () => {
-                this.startChatGptImageWorkflow();
-            });
-        }
+        this.setupChatGptNativeSubmitTracking();
 
         this.el.querySelectorAll('.gpt-settings-view .gpt-tab').forEach(t => {
             t.addEventListener('click', () => {
@@ -1359,26 +1343,11 @@ class GrokOverlay {
     }
 
     setChatGptStatus(text, type = 'neutral') {
-        const status = this.el.querySelector('#gptChatGptStatus');
-        const colors = {
-            error: '#f4212e',
-            success: '#22c55e',
-            info: '#1d9bf0',
-            neutral: '#71767b'
-        };
-        if (status) {
-            status.textContent = text || '';
-            status.style.color = colors[type] || colors.neutral;
-        }
+        this.setStatus(text, type === 'info' ? 'neutral' : type);
     }
 
     setChatGptRunning(running) {
         this.chatGptImageRunning = !!running;
-        const btn = this.el.querySelector('#gptChatGptGenerateBtn');
-        if (btn) {
-            btn.disabled = !!running;
-            btn.textContent = running ? 'Generating...' : 'Generate Image';
-        }
     }
 
     async appendProviderRun(entry) {
@@ -1388,11 +1357,37 @@ class GrokOverlay {
         return this.providerRunLedger.appendProviderRunLedgerEntry(entry);
     }
 
-    async startChatGptImageWorkflow() {
+    setupChatGptNativeSubmitTracking() {
+        if (!isChatGptImagesProvider(this.provider)) return;
+
+        document.addEventListener('click', (event) => {
+            if (this.chatGptImageRunning) return;
+            const actions = this.chatGptActions;
+            if (!actions || typeof actions.findChatGptSendButton !== 'function') return;
+
+            const clickedButton = event.target && event.target.closest
+                ? event.target.closest('button')
+                : null;
+            const sendButton = actions.findChatGptSendButton();
+            if (!clickedButton || !sendButton || clickedButton !== sendButton) return;
+            if (sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') return;
+
+            const prompt = this.readCurrentPromptInput();
+            if (!prompt) return;
+
+            const before = typeof actions.createChatGptResultSnapshot === 'function'
+                ? actions.createChatGptResultSnapshot()
+                : null;
+            setTimeout(() => {
+                this.startChatGptImageWorkflow({ prompt, before, alreadySubmitted: true });
+            }, 0);
+        }, true);
+    }
+
+    async startChatGptImageWorkflow(options = {}) {
         if (!isChatGptImagesProvider(this.provider) || this.chatGptImageRunning) return;
 
-        const promptInput = this.el.querySelector('#gptChatGptPrompt');
-        const prompt = sanitizeSavedPromptText(promptInput ? promptInput.value : '');
+        const prompt = sanitizeSavedPromptText(options.prompt || this.readCurrentPromptInput());
         if (!prompt) {
             this.setChatGptStatus('Enter a prompt first.', 'error');
             this.toast.show('Enter a prompt first.', 'error');
@@ -1422,7 +1417,9 @@ class GrokOverlay {
                 status: 'submitted'
             });
 
-            const result = await actions.runChatGptImagePrompt({ prompt, runId });
+            const result = options.alreadySubmitted && typeof actions.waitForChatGptResultDelta === 'function'
+                ? await actions.waitForChatGptResultDelta(options.before, { runId, prompt })
+                : await actions.runChatGptImagePrompt({ prompt, runId });
             this.historyManager.add(prompt, 'image');
             await this.appendProviderRun({
                 runId,
@@ -1685,6 +1682,11 @@ class GrokOverlay {
     }
 
     readCurrentPromptInput() {
+        if (isChatGptImagesProvider(this.provider) && this.chatGptActions && typeof this.chatGptActions.readChatGptPromptInput === 'function') {
+            const chatGptPrompt = this.chatGptActions.readChatGptPromptInput();
+            if (chatGptPrompt) return chatGptPrompt;
+        }
+
         const ta = document.querySelector('textarea[aria-required="true"]');
         if (ta && ta.value && ta.value.trim()) return ta.value.trim();
         const ce = document.querySelector('[contenteditable="true"]');

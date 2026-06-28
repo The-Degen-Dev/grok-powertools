@@ -104,13 +104,13 @@ Shared header:
 - Rename the product label only if needed after implementation. `Grok Power Tools` can remain for now, but the UI should not show Grok-only labels on ChatGPT pages.
 - Add a small provider status line such as `Provider: ChatGPT Images` or `Provider: Grok Imagine`.
 
-ChatGPT Images V1 card:
+ChatGPT Images V1 behavior:
 
-- Title: `Create Image`
-- Input: prompt textarea or saved prompt picker if existing prompt library wiring supports it cleanly.
-- Primary button: `Generate Image`
-- Status states: `Ready`, `Submitting`, `Generating`, `Generated image ready`, `Blocked`, `Failed`
-- Optional controls only if already shared and meaningful: prompt history and save prompt.
+- Do not add a second extension-owned prompt textarea or `Generate Image` button.
+- The user should type in ChatGPT Images' native prompt bar and click ChatGPT's native send button.
+- The extension should track that native send, record the prompt and current-run result in `providerRunHistory`, and update the shared status badge.
+- Prompt library actions may read from or append to the native ChatGPT prompt input when they already share cleanly with the existing Grok prompt helpers.
+- Status states: `Ready`, `Submitting`, `Generated image ready`, `Blocked`, `Failed`
 
 Hide on ChatGPT pages:
 

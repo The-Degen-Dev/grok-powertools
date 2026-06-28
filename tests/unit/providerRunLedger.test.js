@@ -82,4 +82,37 @@ describe('provider run ledger', () => {
             ]
         });
     });
+
+    test('merges generated status into the submitted run without resetting submit timing', async () => {
+        const storage = createStorage();
+
+        await appendProviderRunLedgerEntry({
+            runId: 'provider_run_1',
+            providerId: 'chatgpt-images',
+            workflow: 'text-to-image',
+            prompt: 'blue glass cube',
+            status: 'submitted'
+        }, { storage, now: () => 100 });
+
+        await appendProviderRunLedgerEntry({
+            runId: 'provider_run_1',
+            providerId: 'chatgpt-images',
+            workflow: 'text-to-image',
+            prompt: 'blue glass cube',
+            status: 'generated',
+            result: { src: 'https://cdn.example.com/generated.png' },
+            diagnostics: { submitted: true }
+        }, { storage, now: () => 250 });
+
+        expect(storage.state[PROVIDER_RUN_HISTORY_KEY]).toHaveLength(1);
+        expect(storage.state[PROVIDER_RUN_HISTORY_KEY][0]).toEqual(expect.objectContaining({
+            runId: 'provider_run_1',
+            status: 'generated',
+            createdAt: 100,
+            submittedAt: 100,
+            completedAt: 250,
+            resultMediaUrl: 'https://cdn.example.com/generated.png',
+            diagnostics: { submitted: true }
+        }));
+    });
 });

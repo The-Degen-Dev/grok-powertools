@@ -20,8 +20,9 @@ This repo has three product surfaces:
 
 Provider work:
 
-- The extension is currently Grok-first. Planned ChatGPT Images support is scoped in `docs/superpowers/specs/2026-06-25-chatgpt-images-provider-design.md`; do not claim ChatGPT support is shipped until the implementation and live validation are complete.
+- The extension is Grok-first and now has provider-aware ChatGPT Images text-to-image tracking on `chatgpt.com/images`. Reference-image ChatGPT recreate/edit is not part of the current slice.
 - Provider-aware changes should keep Grok-only controls off ChatGPT pages instead of reusing Grok labels or workflows by default.
+- Treat provider support as controlling each provider's native web app capabilities, not recreating provider-specific composers inside the extension; ChatGPT Images should use its native prompt/send flow and single-result semantics.
 
 Key extension files:
 
@@ -37,6 +38,7 @@ Key extension files:
 - Logs live in separate consoles: Grok page content script, extension service worker, and popup inspect console.
 - Grok UI changes often. Most automation failures are selectors. Prefer accessible labels, verify visible elements, and use full pointer-event sequences for Radix controls.
 - React controlled inputs and TipTap content usually need `bridge.js`, not direct content-script DOM mutation.
+- ChatGPT Images currently uses a visible ProseMirror composer at `#prompt-textarea[contenteditable="true"][role="textbox"]` plus a hidden fallback textarea. Do not use hidden fallback textarea content as live proof that the native composer has text.
 - Authenticated media from `assets.grok.com` often needs page cookies, so route fetches through `bridge.js` when service-worker fetch fails.
 - Storage is split: `chrome.storage.sync` for overlay global settings, `chrome.storage.local` for prompts, history, processed IDs, activity logs, cloud config, and popup state.
 - Keep the raw load-unpacked extension workflow unless explicitly asked to change it.

@@ -301,7 +301,7 @@ test.describe('Grok Power Tools E2E', () => {
         });
     });
 
-    test('ChatGPT Images overlay should submit a current-run image and write provider history', async ({ page }) => {
+    test('ChatGPT Images overlay should track native send and write provider history', async ({ page }) => {
         await gotoMockProviderPage(page, 'https://chatgpt.com/images/');
         await page.evaluate(() => {
             const existing = document.createElement('img');
@@ -312,9 +312,19 @@ test.describe('Grok Power Tools E2E', () => {
             existing.getBoundingClientRect = () => ({ left: 20, top: 240, width: 320, height: 320 });
             document.body.appendChild(existing);
 
-            const input = document.createElement('textarea');
-            input.name = 'prompt-textarea';
-            input.placeholder = 'Describe a new image';
+            const fallback = document.createElement('textarea');
+            fallback.name = 'prompt-textarea';
+            fallback.placeholder = 'Describe a new image';
+            fallback.value = 'stale hidden fallback prompt';
+            fallback.style.display = 'none';
+            document.body.appendChild(fallback);
+
+            const input = document.createElement('div');
+            input.id = 'prompt-textarea';
+            input.setAttribute('contenteditable', 'true');
+            input.setAttribute('role', 'textbox');
+            input.setAttribute('aria-label', 'Chat with ChatGPT');
+            input.getBoundingClientRect = () => ({ left: 20, top: 20, width: 320, height: 40 });
             document.body.appendChild(input);
 
             const send = document.createElement('button');
@@ -339,13 +349,15 @@ test.describe('Grok Power Tools E2E', () => {
         const overlay = page.locator('#grok-powertools-overlay');
         await expect(overlay).toBeVisible();
         await expect(page.locator('#gptProviderLabel')).toHaveText('Provider: ChatGPT Images');
-        await expect(page.locator('#gptChatGptImageSection')).toBeVisible();
+        await expect(page.locator('#gptChatGptImageSection')).toHaveCount(0);
+        await expect(page.locator('#gptChatGptPrompt')).toHaveCount(0);
+        await expect(page.locator('#gptChatGptGenerateBtn')).toHaveCount(0);
         await expect(page.locator('#gptRecreateSection')).toBeHidden();
         await expect(page.locator('#gptAutoRetrySection')).toBeHidden();
 
-        await page.locator('#gptChatGptPrompt').fill('GPT-IMG-PROVIDER-001 harmless blue glass cube');
-        await page.locator('#gptChatGptGenerateBtn').click();
-        await expect(page.locator('#gptChatGptStatus')).toHaveText('Generated image ready');
+        await page.locator('#prompt-textarea[contenteditable="true"]').fill('GPT-IMG-PROVIDER-001 harmless blue glass cube');
+        await page.locator('button[data-testid="send-button"]').click();
+        await expect(page.locator('#gptStatusBadge')).toHaveText('Generated image ready');
 
         const storageState = await page.evaluate(() => window.__chromeStorageLocalState);
         expect(storageState.providerRunHistory[0]).toEqual(expect.objectContaining({

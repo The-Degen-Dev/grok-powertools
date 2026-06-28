@@ -58,9 +58,23 @@
     async function appendProviderRunLedgerEntry(entry, options = {}) {
         const storage = getStorage(options);
         const maxEntries = Number.isFinite(options.maxEntries) ? Math.max(1, options.maxEntries) : 100;
-        const normalized = normalizeProviderRunLedgerEntry(entry, options);
         const stored = await storage.get([PROVIDER_RUN_HISTORY_KEY]);
         const existing = Array.isArray(stored[PROVIDER_RUN_HISTORY_KEY]) ? stored[PROVIDER_RUN_HISTORY_KEY] : [];
+        const previous = existing.find((item) => item && item.runId === entry.runId);
+        const merged = previous
+            ? {
+                ...previous,
+                ...entry,
+                createdAt: previous.createdAt,
+                submittedAt: previous.submittedAt || previous.createdAt,
+                completedAt: Number.isFinite(entry.completedAt) ? entry.completedAt : undefined,
+                diagnostics: {
+                    ...(previous.diagnostics || {}),
+                    ...(entry.diagnostics || {})
+                }
+            }
+            : entry;
+        const normalized = normalizeProviderRunLedgerEntry(merged, options);
         const next = [normalized, ...existing.filter((item) => item && item.runId !== normalized.runId)]
             .slice(0, maxEntries);
         await storage.set({ [PROVIDER_RUN_HISTORY_KEY]: next });

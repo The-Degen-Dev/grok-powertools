@@ -27,8 +27,11 @@
             if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
         }
         const rect = element.getBoundingClientRect();
-        if (rect.width === 0 && rect.height === 0 && rect.left === 0 && rect.top === 0) return true;
         return rect.width > 0 && rect.height > 0;
+    }
+
+    function findVisibleElement(documentRef, selector) {
+        return Array.from(documentRef.querySelectorAll(selector)).find(isVisible) || null;
     }
 
     function findChatGptPromptInput(options = {}) {
@@ -36,9 +39,10 @@
         if (!documentRef) return null;
 
         return (
-            documentRef.querySelector('textarea[name="prompt-textarea"]') ||
-            documentRef.querySelector('textarea[placeholder="Describe a new image"]') ||
-            documentRef.querySelector('[role="textbox"][aria-label="Chat with ChatGPT"]')
+            findVisibleElement(documentRef, '#prompt-textarea[contenteditable="true"][role="textbox"]') ||
+            findVisibleElement(documentRef, '[role="textbox"][aria-label="Chat with ChatGPT"]') ||
+            findVisibleElement(documentRef, 'textarea[name="prompt-textarea"]') ||
+            findVisibleElement(documentRef, 'textarea[placeholder="Describe a new image"]')
         );
     }
 
@@ -144,6 +148,13 @@
         });
     }
 
+    function readChatGptPromptInput(options = {}) {
+        const input = findChatGptPromptInput(options);
+        if (!input) return '';
+        if ('value' in input) return String(input.value || '').trim();
+        return String(input.textContent || '').trim();
+    }
+
     function assertNoVisibleBlocker(options = {}) {
         const documentRef = getDocument(options);
         if (!documentRef || !documentRef.body) return;
@@ -226,6 +237,25 @@
         };
     }
 
+    async function waitForChatGptResultDelta(snapshot, request = {}, options = {}) {
+        const result = await waitForCondition(() => {
+            const delta = diffChatGptResultCandidates(snapshot, collectChatGptImageCandidates(options));
+            return delta[0] || null;
+        }, {
+            timeoutMs: request.timeoutMs,
+            intervalMs: request.intervalMs,
+            timeoutError: 'chatgpt_result_timeout'
+        });
+
+        return {
+            ok: true,
+            providerId: 'chatgpt-images',
+            workflow: 'text-to-image',
+            submitted: true,
+            result
+        };
+    }
+
     return {
         collectChatGptImageCandidates,
         createChatGptResultSnapshot,
@@ -233,7 +263,9 @@
         fillChatGptPromptInput,
         findChatGptPromptInput,
         findChatGptSendButton,
+        readChatGptPromptInput,
         runChatGptImagePrompt,
+        waitForChatGptResultDelta,
         waitForCondition
     };
 });

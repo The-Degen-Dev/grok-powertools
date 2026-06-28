@@ -4,7 +4,9 @@
 
 **Goal:** Add provider-aware ChatGPT Images text-to-image support to the Chrome extension without regressing the existing Grok Imagine workflows.
 
-**Architecture:** Add small raw-JS helper modules for provider detection, ChatGPT Images page actions, and provider run ledger storage. Wire those helpers into the existing `content.js` overlay so Grok-only controls stay on Grok pages while `chatgpt.com/images` gets a focused text-to-image card.
+**Architecture:** Add small raw-JS helper modules for provider detection, ChatGPT Images page actions, and provider run ledger storage. Wire those helpers into the existing `content.js` overlay so Grok-only controls stay on Grok pages while `chatgpt.com/images` tracks the native ChatGPT Images prompt bar and native send button. Do not add a second ChatGPT prompt textarea or extension-owned `Generate Image` button.
+
+**Correction note:** Earlier drafts of this plan described a dedicated ChatGPT Images card. That shape was rejected during implementation because it diverged from the Grok workflow and duplicated ChatGPT's native composer. Treat any remaining historical snippets in this plan that mention `gptChatGptPrompt`, `gptChatGptGenerateBtn`, or a `Create Image` card as superseded by the native-send tracking behavior in the spec.
 
 **Tech Stack:** Chrome MV3 raw JavaScript, Jest with jsdom, Playwright extension fixture tests, Chrome storage APIs, live Chrome validation on `chatgpt.com/images` and `grok.com/imagine`.
 
@@ -39,7 +41,7 @@ Create these files:
 Modify these files:
 
 - `manifest.json`: add provider helper scripts and `https://chatgpt.com/images*` content-script match.
-- `content.js`: load helper globals/CommonJS modules, detect provider, hide provider-incompatible controls, add ChatGPT Images card, run ChatGPT prompt workflow, write ledger entries.
+- `content.js`: load helper globals/CommonJS modules, detect provider, hide provider-incompatible controls, track native ChatGPT Images send events, run current-result detection, write ledger entries.
 - `tests/e2e/extension.spec.js`: load new helper scripts and add mocked Grok and ChatGPT provider overlay tests.
 - `README.md`: document ChatGPT Images V1 text-to-image support after implementation passes.
 - `HACKING.md`: document provider registry, ChatGPT selector notes, and validation loop.
@@ -1022,63 +1024,10 @@ describe('provider-aware overlay', () => {
         delete global.chrome;
     });
 
-    test('shows ChatGPT Images provider card and hides Grok-only sections', () => {
-        const { overlay } = createOverlay('https://chatgpt.com/images/');
-
-        expect(overlay.el.dataset.providerId).toBe('chatgpt-images');
-        expect(overlay.el.querySelector('#gptProviderLabel').textContent).toBe('Provider: ChatGPT Images');
-        expect(overlay.el.querySelector('#gptChatGptImageSection').style.display).not.toBe('none');
-        expect(overlay.el.querySelector('#gptRecreateSection').style.display).toBe('none');
-        expect(overlay.el.querySelector('#gptAutoRetrySection').style.display).toBe('none');
-        expect(overlay.el.querySelector('#gptTemplateBatchSection').style.display).toBe('none');
-        expect(overlay.el.querySelector('#gptQualityRepeatSection').style.display).toBe('none');
-        expect(overlay.el.querySelector('#gptGalleryDownloadSection').style.display).toBe('none');
-    });
-
-    test('keeps Grok controls visible on Grok Imagine', () => {
-        const { overlay } = createOverlay('https://grok.com/imagine');
-
-        expect(overlay.el.dataset.providerId).toBe('grok-imagine');
-        expect(overlay.el.querySelector('#gptProviderLabel').textContent).toBe('Provider: Grok Imagine');
-        expect(overlay.el.querySelector('#gptChatGptImageSection').style.display).toBe('none');
-        expect(overlay.el.querySelector('#gptRecreateSection').style.display).not.toBe('none');
-        expect(overlay.el.querySelector('#gptAutoRetrySection').style.display).not.toBe('none');
-    });
-
-    test('runs ChatGPT image generation and writes provider run ledger entry', async () => {
-        const runChatGptImagePrompt = jest.fn(() => Promise.resolve({
-            ok: true,
-            providerId: 'chatgpt-images',
-            workflow: 'text-to-image',
-            prompt: 'a brass observatory',
-            result: {
-                src: 'https://cdn.example.com/generated.png',
-                href: 'https://chatgpt.com/images/generated'
-            }
-        }));
-        const appendProviderRunLedgerEntry = jest.fn(() => Promise.resolve({ runId: 'provider_run_1' }));
-        const { overlay, historyManager } = createOverlay('https://chatgpt.com/images/', {
-            chatGptActions: { ...ChatGPTImagesActions, runChatGptImagePrompt },
-            providerRunLedger: { ...ProviderRunLedger, appendProviderRunLedgerEntry }
-        });
-
-        overlay.el.querySelector('#gptChatGptPrompt').value = 'a brass observatory';
-        overlay.el.querySelector('#gptChatGptGenerateBtn').click();
-        await Promise.resolve();
-        await Promise.resolve();
-
-        expect(runChatGptImagePrompt).toHaveBeenCalledWith(expect.objectContaining({
-            prompt: 'a brass observatory'
-        }));
-        expect(historyManager.add).toHaveBeenCalledWith('a brass observatory', 'image');
-        expect(appendProviderRunLedgerEntry).toHaveBeenCalledWith(expect.objectContaining({
-            providerId: 'chatgpt-images',
-            workflow: 'text-to-image',
-            prompt: 'a brass observatory',
-            status: 'generated'
-        }));
-        expect(overlay.el.querySelector('#gptChatGptStatus').textContent).toBe('Generated image ready');
-    });
+    // Superseded: the shipped behavior does not render a ChatGPT Images card.
+    // Current tests assert ChatGPT uses the native visible composer, has no
+    // second extension prompt/generate UI, hides Grok-only sections, tracks the
+    // native send click, waits for a new result delta, and writes provider history.
 });
 ```
 
@@ -1140,7 +1089,7 @@ this.chatGptActions = options.chatGptActions || ChatGPTImagesActions;
 this.providerRunLedger = options.providerRunLedger || ProviderRunLedger;
 ```
 
-- [ ] **Step 5: Add provider UI elements to `render()`**
+- [ ] **Step 5: Add provider UI state to `render()`**
 
 Inside the header title block in `render()`, keep the title and add this line directly after `Grok Power Tools`:
 
@@ -1166,18 +1115,7 @@ Add IDs to existing Grok-only section wrappers:
 <div class="gpt-section" id="gptGalleryDownloadSection">
 ```
 
-Insert the ChatGPT Images card after the status section and before `gptRecreateSection`:
-
-```html
-<div class="gpt-section" id="gptChatGptImageSection" style="display:none;">
-    <label class="gpt-row" style="font-weight:600; margin-bottom:4px;">Create Image</label>
-    <textarea id="gptChatGptPrompt" class="gpt-input" rows="3" style="width:100%; min-height:64px; resize:vertical;" placeholder="Describe a new image"></textarea>
-    <div class="gpt-row" style="margin-top:6px;">
-        <button id="gptChatGptGenerateBtn" class="gpt-btn gpt-btn-primary" style="flex:1; background:#0ea5e9; font-size:11px;">Generate Image</button>
-    </div>
-    <div id="gptChatGptStatus" style="font-size:10px; color:#71767b; margin-top:4px;">Ready</div>
-</div>
-```
+Do not insert a ChatGPT Images card. The accepted V1 behavior uses ChatGPT Images' native visible composer and native send button.
 
 - [ ] **Step 6: Add provider UI methods to `GrokOverlay`**
 
@@ -1198,7 +1136,6 @@ applyProviderUi() {
     if (label) label.textContent = `Provider: ${this.provider.label || 'Unsupported page'}`;
 
     const isChatGptImages = providerId === 'chatgpt-images';
-    this.setProviderSectionVisible('gptChatGptImageSection', isChatGptImages && !!capabilities.canRunTextPrompt);
     this.setProviderSectionVisible('gptRecreateSection', !isChatGptImages && !!capabilities.canUseReferenceImage);
     this.setProviderSectionVisible('gptAutoRetrySection', !isChatGptImages && !!capabilities.canRunVideoGoals);
     this.setProviderSectionVisible('gptTemplateBatchSection', !isChatGptImages && !!capabilities.canRunBatch);
@@ -1206,56 +1143,12 @@ applyProviderUi() {
     this.setProviderSectionVisible('gptGalleryDownloadSection', !isChatGptImages && !!capabilities.canDownloadGeneratedImages);
 }
 
-setChatGptStatus(message, type = 'neutral') {
-    const status = this.el.querySelector('#gptChatGptStatus');
-    if (!status) return;
-    status.textContent = message;
-    status.style.color = type === 'error' ? '#f4212e' : type === 'success' ? '#22c55e' : '#71767b';
-}
-
-async startChatGptImageRun() {
-    const promptInput = this.el.querySelector('#gptChatGptPrompt');
-    const prompt = sanitizeSavedPromptText(promptInput ? promptInput.value : '');
-    if (!prompt) {
-        this.setChatGptStatus('Enter a prompt before generating.', 'error');
-        return;
-    }
-    if (!this.chatGptActions || typeof this.chatGptActions.runChatGptImagePrompt !== 'function') {
-        this.setChatGptStatus('chatgpt_workflow_unavailable', 'error');
-        return;
-    }
-
-    this.setChatGptStatus('Submitting...', 'neutral');
-    try {
-        const result = await this.chatGptActions.runChatGptImagePrompt({ prompt });
-        this.historyManager.add(prompt, 'image');
-        if (this.providerRunLedger && typeof this.providerRunLedger.appendProviderRunLedgerEntry === 'function') {
-            await this.providerRunLedger.appendProviderRunLedgerEntry({
-                ...result,
-                providerId: 'chatgpt-images',
-                workflow: 'text-to-image',
-                prompt,
-                status: 'generated'
-            });
-        }
-        this.setChatGptStatus('Generated image ready', 'success');
-    } catch (error) {
-        const code = error && (error.code || error.message) ? (error.code || error.message) : 'chatgpt_workflow_failed';
-        if (this.providerRunLedger && typeof this.providerRunLedger.appendProviderRunLedgerEntry === 'function') {
-            await this.providerRunLedger.appendProviderRunLedgerEntry({
-                providerId: 'chatgpt-images',
-                workflow: 'text-to-image',
-                prompt,
-                status: 'failed',
-                failureCode: code
-            });
-        }
-        this.setChatGptStatus(code, 'error');
-    }
-}
+// Superseded: ChatGPT V1 does not own a separate prompt input or generate
+// button. It observes native send, reads the native visible composer, and uses
+// the shared status badge plus providerRunHistory for run state.
 ```
 
-- [ ] **Step 7: Call `applyProviderUi()` and wire the ChatGPT button**
+- [ ] **Step 7: Call `applyProviderUi()` and wire native ChatGPT send tracking**
 
 At the end of `render()`, after `document.body.appendChild(container);`, add:
 
@@ -1263,16 +1156,7 @@ At the end of `render()`, after `document.body.appendChild(container);`, add:
 this.applyProviderUi();
 ```
 
-In `setupListeners()`, add this near the other button listeners:
-
-```js
-const chatGptGenerateBtn = this.el.querySelector('#gptChatGptGenerateBtn');
-if (chatGptGenerateBtn) {
-    chatGptGenerateBtn.addEventListener('click', () => {
-        this.startChatGptImageRun();
-    });
-}
-```
+In `setupListeners()`, add native ChatGPT send tracking. Do not add a second extension generate button.
 
 - [ ] **Step 8: Run provider overlay tests to verify they pass**
 
@@ -1368,7 +1252,7 @@ Expected text should still include `Grok Power Tools` and should now include `Pr
 Append this test to `test.describe('Grok Power Tools E2E', () => { ... })`:
 
 ```js
-test('ChatGPT Images provider renders focused card and completes mocked submit flow', async ({ page }) => {
+test('ChatGPT Images provider tracks native send and writes provider history', async ({ page }) => {
     await loadMockProviderPage(page, 'https://chatgpt.com/images/', `
         <main>
             <textarea name="prompt-textarea" placeholder="Describe a new image"></textarea>
@@ -1395,15 +1279,17 @@ test('ChatGPT Images provider renders focused card and completes mocked submit f
     const overlay = page.locator('#grok-powertools-overlay');
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText('Provider: ChatGPT Images');
-    await expect(page.locator('#gptChatGptImageSection')).toBeVisible();
+    await expect(page.locator('#gptChatGptImageSection')).toHaveCount(0);
+    await expect(page.locator('#gptChatGptPrompt')).toHaveCount(0);
+    await expect(page.locator('#gptChatGptGenerateBtn')).toHaveCount(0);
     await expect(page.locator('#gptRecreateSection')).toBeHidden();
     await expect(page.locator('#gptAutoRetrySection')).toBeHidden();
 
-    await page.locator('#gptChatGptPrompt').fill('a tiny brass observatory');
-    await page.locator('#gptChatGptGenerateBtn').click();
+    await page.locator('#prompt-textarea[contenteditable="true"]').fill('a tiny brass observatory');
+    await page.locator('button[data-testid="send-button"]').click();
 
-    await expect(page.locator('#gptChatGptStatus')).toContainText('Generated image ready');
-    const runtimePrompt = await page.locator('textarea[name="prompt-textarea"]').inputValue();
+    await expect(page.locator('#gptStatusBadge')).toContainText('Generated image ready');
+    const runtimePrompt = await page.locator('#prompt-textarea[contenteditable="true"]').innerText();
     expect(runtimePrompt).toBe('a tiny brass observatory');
 });
 ```
@@ -1479,32 +1365,20 @@ Selector anchors verified for the first slice:
 The first slice only controls text-to-image on `https://chatgpt.com/images/`. Do not reuse Grok-specific controls such as Grok Search, Recreate Media, Video Goals, Template Batch, Quality Repeat, or Grok gallery scraping on ChatGPT pages. If ChatGPT result detection changes, compare post-submit image candidates against the pre-submit snapshot instead of reading the full private gallery.
 ```
 
-- [ ] **Step 3: Update AGENTS planned-support language**
+- [ ] **Step 3: Update AGENTS shipped-support language**
 
-In `AGENTS.md`, replace:
+In `AGENTS.md`, use shipped-support language:
 
 ```md
-- The extension is currently Grok-first. Planned ChatGPT Images support is scoped in `docs/superpowers/specs/2026-06-25-chatgpt-images-provider-design.md`; do not claim ChatGPT support is shipped until the implementation and live validation are complete.
+- The extension is Grok-first and now has provider-aware ChatGPT Images text-to-image tracking on `chatgpt.com/images`. Reference-image ChatGPT recreate/edit is not part of the current slice.
 ```
 
-with:
+- [ ] **Step 4: Update handoff prompt shipped-support language**
+
+In `docs/AGENT_HANDOFF_PROMPT.md`, use shipped-support language:
 
 ```md
-- The extension is provider-aware: Grok Imagine remains the main surface, and ChatGPT Images text-to-image runs are supported on `chatgpt.com/images`. Reference-image ChatGPT recreate/edit is not part of the current slice.
-```
-
-- [ ] **Step 4: Update handoff prompt planned-support language**
-
-In `docs/AGENT_HANDOFF_PROMPT.md`, replace:
-
-```md
-- Planned ChatGPT Images support is scoped in docs/superpowers/specs/2026-06-25-chatgpt-images-provider-design.md. It is provider-aware design work, not a shipped feature until implementation and live validation land.
-```
-
-with:
-
-```md
-- Provider-aware ChatGPT Images text-to-image support lives in providerRegistry.js, chatgptImagesContent.js, providerRunLedger.js, and content.js. Reference-image ChatGPT recreate/edit is a separate follow-up slice.
+- ChatGPT Images V1 is supported on chatgpt.com/images by observing the native prompt bar and native send button. Reference-image ChatGPT recreate/edit and video are separate follow-up work.
 ```
 
 - [ ] **Step 5: Run docs grep checks**
@@ -1611,15 +1485,15 @@ Manual/live action on `https://chatgpt.com/images/`:
 
 1. Confirm the overlay appears.
 2. Confirm `Provider: ChatGPT Images`.
-3. Confirm `Create Image` is visible.
+3. Confirm there is no extension-owned ChatGPT prompt textarea or `Generate Image` button.
 4. Confirm `Recreate Media`, `Grok Search`, `Auto-Retry`, `Template Batch`, `Quality Repeat`, and `Gallery Download` are hidden.
-5. Enter this prompt in the overlay:
+5. Enter this prompt in ChatGPT Images' native prompt bar:
 
 ```text
 a small blue glass lighthouse on a white table, simple studio lighting, square image, canary marker GPT-IMG-PROVIDER-001
 ```
 
-6. Click `Generate Image`.
+6. Click ChatGPT Images' native send button.
 7. Wait for a new visible image result.
 8. Confirm the overlay status becomes `Generated image ready`.
 9. Confirm `providerRunHistory` in `chrome.storage.local` has a newest entry with `providerId: "chatgpt-images"`, `workflow: "text-to-image"`, and the canary prompt text.

@@ -1685,6 +1685,12 @@ describe('recreate content DOM actions', () => {
 
         const uninstallBridge = installContentEditableBridge();
         const uninstallMediaBridge = installMediaDataUrlBridge();
+        const nativeClick = jest.fn(async () => {
+            CLICK_EVENT_SEQUENCE.forEach((type) => {
+                submit.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+            });
+            return { ok: true };
+        });
 
         let result;
         try {
@@ -1694,7 +1700,7 @@ describe('recreate content DOM actions', () => {
                     generatedPrompt: 'A red cabin in snow.',
                     autoSubmit: true
                 },
-                { documentRef: document, timeoutMs: 100, resultTimeoutMs: 100, intervalMs: 1 }
+                { documentRef: document, timeoutMs: 100, resultTimeoutMs: 100, intervalMs: 1, nativeClick }
             );
         } finally {
             uninstallMediaBridge();
@@ -1719,6 +1725,7 @@ describe('recreate content DOM actions', () => {
                 openable: true
             })
         }));
+        expect(nativeClick).toHaveBeenCalledTimes(1);
         expect(submitEvents.map((event) => event.type)).toEqual(CLICK_EVENT_SEQUENCE);
     });
 
