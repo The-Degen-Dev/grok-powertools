@@ -58,7 +58,7 @@ Meaning:
 The user's expected product contract is:
 
 - Every real media item should correspond to `grok.com/imagine/saved`.
-- Every real metadata item should be available through the backup/Vault system.
+- Every real metadata item should be available through the backup/Vault system, including full image prompts, full video prompts, and any other metadata Grok exposes.
 - The system should not expose duplicate logical assets as separate clean records.
 - The system should not hide missing or unresolved records behind normalized preview counts.
 
@@ -85,10 +85,37 @@ Accepted roles:
 
 - Grok Saved durable evidence decides whether a logical asset should exist.
 - `grokPostId` from `/imagine/post/{uuid}` is the preferred Grok-side item identity when available.
+- Full prompts and available Grok metadata are first-class Vault data for the user's own archive.
 - R2 keys are storage locations for media or metadata bytes.
 - SHA-256 is duplicate and byte-proof evidence.
 - D1/Worker rows are current app-index evidence.
 - Local files are corroborating evidence, not the system of record.
+
+## Prompt And Metadata Storage Decision
+
+Keep this simple for now: use the existing Vault data plane, not a separate prompt vault.
+
+Decision:
+
+- Store full image prompts, full video prompts, and all available Grok metadata in Vault records.
+- Store them as fields attached to the logical `grokPostId` record and/or existing prompt sidecar objects.
+- Keep R2 as the durable raw metadata store.
+- Keep D1 primarily as an index and lookup layer unless product needs force a small number of prompt fields into D1.
+- Do not introduce a separate encrypted prompt vault, separate service, separate account, or complex access model for this owner-only phase.
+
+Risk handling without extra architecture:
+
+| Risk | Simple remediation |
+| --- | --- |
+| Raw prompts leaking into committed audit artifacts | Audit reports, plan files, and committed evidence must use prompt hashes, counts, object keys, or redacted excerpts by default. Raw prompt snapshots belong in Vault/R2 or ignored local scratch, not tracked docs. |
+| Signed or cookie-bearing media URLs leaking | Store stable Grok post URLs and media UUID evidence. Strip query strings before durable metadata unless a short-lived URL is needed only in runtime memory. Keep `sourceUrlHash` for matching. |
+| Prompt text duplicated across sidecars, saved prompt metadata, and prompt history | Preserve every source with provenance, then have the canonical view choose one display prompt per `grokPostId`. Do not dedupe by prompt text alone. |
+| Grok exposes partial or conflicting metadata | Store field-level provenance such as source, capturedAt, and confidence. Mark missing or conflicting fields as gaps instead of inventing values. |
+| D1 bloat or accidental broad API exposure | Store bulky raw metadata in R2 JSON objects first. D1 should hold pointers, hashes, counts, and selected lookup fields until the UI needs more. |
+| Console logs or debug output leaking private prompts/source URLs | Remove or gate prompt/source URL logging before implementing the enumerator. Current code has prompt/source snippets in backup logs, so treat log hygiene as a first implementation prerequisite. |
+| Local/browser automation dumps containing raw prompts | The enumerator may read raw prompt text, but durable planning docs and chat summaries should only describe schema and counts. Raw local snapshots should be ignored by git unless explicitly approved for commit. |
+
+This policy is not a security promise. It is the minimum practical hygiene for a one-user system while still preserving the full archive.
 
 ## Existence Authority Decision
 
@@ -146,7 +173,8 @@ Future build plans must preserve these invariants:
 - No treating D1 absence as proof that an R2 object is invalid.
 - No treating duplicate SHA-256 as automatic deletion approval.
 - No claiming full Grok Saved completeness without authoritative Saved enumeration.
-- No storing raw private prompt bodies, cookies, bearer tokens, signed URLs, or API keys in durable artifacts.
+- No storing cookies, bearer tokens, signed URLs, API keys, or auth headers in durable artifacts.
+- No storing raw private prompt bodies in committed audit/report/planning artifacts. Full prompt bodies are allowed in the Vault data plane.
 
 ## Recommended Phase Plan
 
@@ -161,13 +189,15 @@ Phase 1: Durable Grok Saved inventory
 - Capture a stable snapshot without generating, deleting, syncing, backing up, or repairing.
 - Open each Saved media item or otherwise read its detail route to capture `grokPostId` from `/imagine/post/{uuid}` when available.
 - Capture media URL UUIDs separately as variant/storage evidence, not as the primary logical item identity unless no `grokPostId` can be recovered.
-- Redact private prompt text unless explicitly needed and approved.
+- Capture full prompt text and all available metadata into the raw Vault inventory artifact.
+- Keep any raw local snapshot out of git unless the user explicitly approves committing it.
+- Produce a redacted/hash-only audit summary beside the raw Vault inventory so planning and review can happen safely.
 - Produce a parseable Saved inventory artifact.
 
 Phase 2: Canonical asset model
 
 - Define the schema for a logical Saved asset record.
-- Include identity evidence, media variants, metadata references, R2 storage locations, hashes, D1/Worker links, local corroboration, status, and confidence.
+- Include identity evidence, media variants, full prompts, metadata references, R2 storage locations, hashes, D1/Worker links, local corroboration, status, provenance, and confidence.
 - Treat schema as the contract before writing product code.
 
 Phase 3: Read-only reconciliation
@@ -197,18 +227,17 @@ Phase 6: Physical cleanup, optional and later
 
 These are the next grilling decisions:
 
-1. Should prompt text be hashed, redacted, or stored encrypted for canonical matching?
-2. How should image/video pairs and generated variants be represented: one asset with variants, or separate assets linked by generation context?
-3. What is the minimum confidence threshold for automatic `alternate_duplicate` classification?
-4. Where should the canonical index live first: D1, R2 JSON snapshot, both, or local-only draft?
-5. What does "clean" mean for the next audit: zero unresolved canonical objects, zero duplicate product assets, or zero physical duplicate bytes?
+1. How should image/video pairs and generated variants be represented: one asset with variants, or separate assets linked by generation context?
+2. What is the minimum confidence threshold for automatic `alternate_duplicate` classification?
+3. Where should the canonical index live first: D1, R2 JSON snapshot, both, or local-only draft?
+4. What does "clean" mean for the next audit: zero unresolved canonical objects, zero duplicate product assets, or zero physical duplicate bytes?
 
 ## Current Recommended Next Question
 
-Should prompt text be hashed, redacted, or stored encrypted for canonical matching?
+How should image/video pairs and generated variants be represented?
 
 Recommended answer to evaluate next:
 
-- Store a salted prompt hash for matching and diagnostics.
-- Store redacted prompt excerpts only when they are needed for human review.
-- Do not store full raw prompt text in the canonical index unless the user explicitly approves a separate encrypted prompt vault.
+- Treat `grokPostId` as the logical record.
+- Represent image/video outputs, thumbnails, upscales, extensions, and re-downloads as variants under that record when Grok presents them as one post.
+- Split into separate logical records only when Grok exposes separate `/imagine/post/{uuid}` identities.

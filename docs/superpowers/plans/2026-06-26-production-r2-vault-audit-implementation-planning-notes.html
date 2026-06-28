@@ -88,6 +88,7 @@
     <li>The final report has three verdicts: production R2 internal correctness, current Grok Saved completeness, and local system health. A visual Grok sample cannot prove full current Saved completeness.</li>
     <li>Local parent-folder inventory is filtered to likely Grok/R2 media candidates. The parent contains unrelated repositories and dependency folders, so scanning every media-like file would create noisy false gaps.</li>
     <li>After a read-only live Grok probe on 2026-06-28, the planning identity rule is: capture <code>grokPostId</code> from <code>/imagine/post/{uuid}</code> as the preferred Grok Saved item identifier when present. Media URL UUIDs remain variant and storage evidence because the same page can expose multiple media UUIDs for thumbnails, variants, user paths, and active media.</li>
+    <li>Prompt handling is revised after user clarification: full image prompts, full video prompts, and all available Grok metadata should be stored in the existing Vault data plane. Audit and planning artifacts should stay redacted or hash-only by default, but the Vault itself should preserve the raw prompt text.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -97,6 +98,7 @@
     <li>The plan allows dry-run Next scan and plan routes only after code inspection confirms no production writes. It still excludes approve, run, gap-fill run, and reconcile index routes because the audit does not need approval or execution semantics.</li>
     <li>The plan does not attempt to prove every current Grok Saved item unless a stable export, API, or other authoritative enumeration appears during execution. It keeps Grok visual inspection as sample evidence by default.</li>
     <li>The live identifier probe opened one visible Saved media tile and returned the tab to <code>/imagine/saved</code>. It did not run generation, selection, sync, backup, repair, download, delete, share, or post actions.</li>
+    <li>The earlier conservative idea of a separate encrypted prompt vault is intentionally dropped for this owner-only phase. Use the existing Vault/R2 metadata path first, and add more access control only if the product grows beyond a personal archive.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -107,12 +109,14 @@
     <li>Alternative considered: scan every file under the parent media root. Rejected because the parent root contains unrelated app source trees and dependencies. The plan inventories <code>GrokVault</code> fully and parent media candidates selectively.</li>
     <li>Alternative considered: inspect the live Grok tab first. Rejected because the spec makes raw R2 and local inventory the first proof layer, and live Grok should not be driven until raw inventories are complete or blocked.</li>
     <li>Alternative considered: treat the current internal <code>assetId</code> or the last UUID in a media URL as the logical Saved identity. Rejected for the canonical model because the live page can expose multiple media UUIDs around one Grok post. The canonical model should keep <code>grokPostId</code>, media UUIDs, R2 keys, and hashes as separate evidence fields.</li>
+    <li>Alternative considered: store only prompt hashes/redacted excerpts in the canonical index. Rejected because the product requirement is to archive full prompts and metadata. The safer compromise is not a separate vault, but a rule that raw prompt fields stay in Vault/R2 and do not get copied into committed reports, plans, chat summaries, or broad audit exports.</li>
   </ul>
 
   <h2>Open Questions</h2>
   <ul>
     <li>No planning question blocks execution. Execution must still stop if read-only R2/D1 auth cannot be proven, if raw R2 listing is unexpectedly huge or points outside the prefix, or if browser automation cannot prove it controls the visible Grok tab.</li>
     <li>If production R2 byte hashing is large enough to trigger rate, cost, or local disk risk, the execution worker should stop and ask whether to continue, sample, or split into a separate hashing run.</li>
+    <li>Before implementing a full Grok Saved enumerator, remove or gate logs that print prompt snippets or source URL snippets. The current backup flow has short prompt/source logging, which is acceptable for debugging but not for a raw metadata capture run.</li>
   </ul>
 </body>
 </html>
