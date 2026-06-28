@@ -15,6 +15,7 @@ const scriptsDir = path.dirname(scriptPath);
 const auditRoot = path.resolve(scriptsDir, '..');
 const repoRoot = path.resolve(auditRoot, '../../..');
 const manifestPath = path.join(auditRoot, 'manifest.json');
+const PRIVATE_DIR_SEGMENT = `${path.sep}private${path.sep}`;
 
 const MODES = [
   'scaffold',
@@ -167,6 +168,7 @@ async function updateManifest(mutator) {
 async function recordEvidence(filePath) {
   const resolved = path.resolve(filePath);
   if (!resolved.startsWith(`${auditRoot}${path.sep}`)) return;
+  if (resolved.includes(PRIVATE_DIR_SEGMENT)) return;
   if (path.basename(resolved) === 'manifest.json') return;
   const stat = await fs.stat(resolved).catch(() => null);
   if (!stat || !stat.isFile()) return;
@@ -190,6 +192,7 @@ async function refreshEvidenceIndex() {
     const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory() && entry.name === 'private') continue;
       if (entry.isDirectory()) {
         await walk(fullPath);
         continue;
@@ -2034,12 +2037,15 @@ async function validateArtifacts() {
     'reconciliations/malformed-keys.json',
     'reconciliations/unresolved-items.json',
     'reconciliations/unresolved-summary.json',
+    'reconciliations/local-canonical-index-summary.json',
+    'reconciliations/canonical-gap-report.json',
     'logs/web-vault-identity.json',
     'logs/web-vault-inventory-pages.json',
     'logs/web-vault-preview.json',
     'logs/web-repair-scan.json',
     'logs/web-route-smoke-summary.json',
     'logs/web-ui-smoke.json',
+    'logs/grok-saved-browser-control-blocker.json',
     'reconciliations/sample-set.json'
   ];
   const requiredJsonl = [

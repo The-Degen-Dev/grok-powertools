@@ -10,12 +10,12 @@
     "wrangler@latest",
     "whoami"
   ],
-  "startedAt": "2026-06-28T02:52:11.069Z",
-  "finishedAt": "2026-06-28T02:52:21.000Z",
+  "startedAt": "2026-06-28T20:52:36.983Z",
+  "finishedAt": "2026-06-28T20:52:44.017Z",
   "exitCode": 0,
   "ok": true,
   "stdout": "{\n  \"wranglerAuthenticated\": true,\n  \"accountIds\": [\n    \"ba5339fd86e87c226bdc306347636042\"\n  ],\n  \"expectedAccountPresent\": true,\n  \"credentialScopeClasses\": [\n    \"admin\",\n    \"read\",\n    \"run\",\n    \"unknown\",\n    \"write\"\n  ],\n  \"writeOrAdminScopes\": [\n    \"workers:write\",\n    \"workers_kv:write\",\n    \"workers_routes:write\",\n    \"workers_scripts:write\",\n    \"d1:write\",\n    \"pages:write\",\n    \"ssl_certs:write\",\n    \"ai:write\",\n    \"ai-search:write\",\n    \"agent-memory:write\",\n    \"queues:write\",\n    \"pipelines:write\",\n    \"secrets_store:write\",\n    \"artifacts:write\",\n    \"flagship:write\",\n    \"containers:write\",\n    \"cloudchamber:write\",\n    \"connectivity:admin\",\n    \"email_routing:write\",\n    \"email_sending:write\",\n    \"browser:write\"\n  ]\n}",
-  "stderr": "npm notice\nnpm notice New minor version of npm available! 11.13.0 -> 11.17.0\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v11.17.0\nnpm notice To update run: npm install -g npm@11.17.0\nnpm notice\n",
+  "stderr": "",
   "scopeSummary": {
     "accountIds": [
       "ba5339fd86e87c226bdc306347636042"

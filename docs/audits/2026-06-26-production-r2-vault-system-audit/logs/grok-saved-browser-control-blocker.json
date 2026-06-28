@@ -1,0 +1,9 @@
+{
+  "generatedAt": "2026-06-28T20:53:15.129Z",
+  "status": "blocked",
+  "visibleWindowPreviouslyVerified": true,
+  "visibleUrlPath": "grok.com/imagine/saved",
+  "devtoolsConnected": false,
+  "blockedRequirement": "current Grok Saved inventory from the existing authenticated Chrome tab",
+  "nextAction": "Enable Chrome remote debugging for this profile and accept the DevTools permission prompt."
+}

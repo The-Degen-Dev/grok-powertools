@@ -1,0 +1,338 @@
+{
+  "generatedAt": "2026-06-28T20:53:15.129Z",
+  "schemaVersion": 1,
+  "mode": "read_only_local_canonical_index",
+  "productionWrites": false,
+  "privateArtifacts": {
+    "localCanonicalIndexJsonl": "private/local-canonical-index.jsonl",
+    "gitIgnored": true,
+    "containsPrivateObjectKeys": true,
+    "containsRawPromptText": false
+  },
+  "sourceArtifacts": {
+    "r2Objects": "inventory/r2-objects.jsonl",
+    "r2MediaHashes": "inventory/r2-media-hashes.jsonl",
+    "d1Rows": "inventory/d1-r2-dedupe-index.jsonl",
+    "workerRows": "inventory/worker-vault-assets.jsonl",
+    "metadataReferences": "inventory/metadata-references.json",
+    "localSummary": "inventory/local-media-summary.json",
+    "grokSavedInventory": null
+  },
+  "sourceCounts": {
+    "r2Objects": 18083,
+    "r2MediaObjects": 15981,
+    "r2HashRows": 15981,
+    "d1Rows": 4648,
+    "workerRows": 4647,
+    "metadataReferences": 2100,
+    "localFiles": 8532,
+    "grokSavedRows": 0
+  },
+  "grokSavedInventoryStatus": {
+    "status": "blocked",
+    "rowCount": 0,
+    "blocker": "Chrome DevTools/browser control is not connected, so current Grok Saved enumeration cannot be proven from the visible authenticated tab."
+  },
+  "classification": {
+    "statusCounts": {
+      "orphan_candidate": 1679,
+      "needs_human_review": 5687,
+      "date_folder_mapped": 4194,
+      "canonical": 4419,
+      "alternate_duplicate": 2
+    },
+    "reasonCounts": {
+      "date_folder_media_not_linked_to_canonical_identity": 1679,
+      "retained_hash_group_candidate_without_index_or_grok_saved_evidence": 2926,
+      "same_sha256_without_accepted_identity_link": 2761,
+      "duplicate_hash_plus_identity_link_to_retained_candidate": 4196,
+      "retained_duplicate_group_candidate": 2190,
+      "canonical_media_indexed_by_d1_or_worker": 2229
+    },
+    "pathClassStatusMatrix": {
+      "legacy-date-media": {
+        "orphan_candidate": 1679,
+        "needs_human_review": 4020,
+        "date_folder_mapped": 4194
+      },
+      "canonical-media": {
+        "canonical": 4419,
+        "needs_human_review": 1667,
+        "alternate_duplicate": 2
+      }
+    }
+  },
+  "duplicateClassification": {
+    "sameHashGroupCount": 5116,
+    "sameHashObjectCount": 12073,
+    "acceptedLinkedDuplicateObjects": 4196,
+    "hashOnlyDuplicateObjects": 2761,
+    "groupSummaries": [
+      {
+        "duplicateGroupId": "04c8565d3c321c38",
+        "objectCount": 5,
+        "retainedKeyHash": "7336068f276b21cf",
+        "linkedDuplicateCount": 4,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 5
+        }
+      },
+      {
+        "duplicateGroupId": "024ef5fa8673603e",
+        "objectCount": 6,
+        "retainedKeyHash": "e73142c60e253d7b",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "e87a6af11784dc66",
+        "objectCount": 2,
+        "retainedKeyHash": "c4390f0bfea81ac2",
+        "linkedDuplicateCount": 1,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 2
+        }
+      },
+      {
+        "duplicateGroupId": "342d935c25bd5c86",
+        "objectCount": 5,
+        "retainedKeyHash": "80d519b619e305aa",
+        "linkedDuplicateCount": 4,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 5
+        }
+      },
+      {
+        "duplicateGroupId": "a39e09659b0fa6a8",
+        "objectCount": 6,
+        "retainedKeyHash": "e40cdbfa3daf09ec",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "802c1fe6b6483e1b",
+        "objectCount": 6,
+        "retainedKeyHash": "81079990fa9ec6bb",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "5240341cdf955169",
+        "objectCount": 6,
+        "retainedKeyHash": "5c2671a972a9b7cf",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "c6c2495fa8707116",
+        "objectCount": 6,
+        "retainedKeyHash": "c59b9d338c236067",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "50160e7c2acfde40",
+        "objectCount": 7,
+        "retainedKeyHash": "71d3bb860dd96237",
+        "linkedDuplicateCount": 6,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 7
+        }
+      },
+      {
+        "duplicateGroupId": "5b36011b6bcfd00c",
+        "objectCount": 5,
+        "retainedKeyHash": "b32a39f0bda31ead",
+        "linkedDuplicateCount": 4,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 5
+        }
+      },
+      {
+        "duplicateGroupId": "369f7a2cc417010c",
+        "objectCount": 2,
+        "retainedKeyHash": "fedb6db783ae7663",
+        "linkedDuplicateCount": 1,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 2
+        }
+      },
+      {
+        "duplicateGroupId": "7893f576180f5728",
+        "objectCount": 6,
+        "retainedKeyHash": "2e5fe82876781e7e",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "b07c91b950b311de",
+        "objectCount": 5,
+        "retainedKeyHash": "98e82dccf4bac58d",
+        "linkedDuplicateCount": 4,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 5
+        }
+      },
+      {
+        "duplicateGroupId": "05dfb5cc28c4bf73",
+        "objectCount": 4,
+        "retainedKeyHash": "14692079c7ee6140",
+        "linkedDuplicateCount": 0,
+        "hashOnlyDuplicateCount": 3,
+        "pathClassComposition": {
+          "legacy-date-media": 4
+        }
+      },
+      {
+        "duplicateGroupId": "4a28d38a5b769ce7",
+        "objectCount": 3,
+        "retainedKeyHash": "3555adff81d6f4fd",
+        "linkedDuplicateCount": 0,
+        "hashOnlyDuplicateCount": 2,
+        "pathClassComposition": {
+          "legacy-date-media": 3
+        }
+      },
+      {
+        "duplicateGroupId": "3d939031adf696cc",
+        "objectCount": 6,
+        "retainedKeyHash": "9f5ab568e601874a",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "6690c693c780a641",
+        "objectCount": 3,
+        "retainedKeyHash": "c50e4dc866ff0065",
+        "linkedDuplicateCount": 0,
+        "hashOnlyDuplicateCount": 2,
+        "pathClassComposition": {
+          "legacy-date-media": 3
+        }
+      },
+      {
+        "duplicateGroupId": "5f7f8a7fa3f6a189",
+        "objectCount": 2,
+        "retainedKeyHash": "1cc027dc0515085e",
+        "linkedDuplicateCount": 1,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 2
+        }
+      },
+      {
+        "duplicateGroupId": "dbf535734cee8b8a",
+        "objectCount": 6,
+        "retainedKeyHash": "83ccfc87d797fd24",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "92dcef6f9ff4451e",
+        "objectCount": 2,
+        "retainedKeyHash": "18f946e55ee1c283",
+        "linkedDuplicateCount": 1,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 2
+        }
+      },
+      {
+        "duplicateGroupId": "b8043183ddca3eb8",
+        "objectCount": 6,
+        "retainedKeyHash": "c64eb15aeff7aa03",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "1792ec6e3a6be971",
+        "objectCount": 6,
+        "retainedKeyHash": "5b976d2b38b2a155",
+        "linkedDuplicateCount": 5,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 6
+        }
+      },
+      {
+        "duplicateGroupId": "b5487e2d70865ee1",
+        "objectCount": 5,
+        "retainedKeyHash": "d6c5ee141f184225",
+        "linkedDuplicateCount": 4,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 5
+        }
+      },
+      {
+        "duplicateGroupId": "ac5e7ec7ed6df87e",
+        "objectCount": 2,
+        "retainedKeyHash": "9f0035a05e78b6a7",
+        "linkedDuplicateCount": 1,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 2
+        }
+      },
+      {
+        "duplicateGroupId": "0c239c7ec59370c3",
+        "objectCount": 2,
+        "retainedKeyHash": "bfc984eaebc38c44",
+        "linkedDuplicateCount": 1,
+        "hashOnlyDuplicateCount": 0,
+        "pathClassComposition": {
+          "legacy-date-media": 2
+        }
+      }
+    ]
+  },
+  "gapCounts": {
+    "d1MissingCanonicalMedia": 1441,
+    "workerMissingCanonicalMedia": 1441,
+    "metadataLinkedMedia": 2090,
+    "metadataUnlinkedMedia": 13891,
+    "needsHumanReview": 5687,
+    "orphanCandidates": 1679,
+    "grokSavedInventoryBlocked": 1
+  },
+  "confidenceLimits": [
+    "Current Grok Saved completeness is not proven until DevTools/browser control can enumerate the visible authenticated Saved tab.",
+    "D1 asset_id is preserved as evidence but is not treated as primary Grok identity.",
+    "Same SHA-256 without an accepted identity-link signal remains needs_human_review.",
+    "This is a local-only canonical index proposal and does not authorize production writes, object moves, deletes, or repair actions."
+  ]
+}

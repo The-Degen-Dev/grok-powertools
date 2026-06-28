@@ -1,0 +1,127 @@
+{
+  "generatedAt": "2026-06-28T20:53:15.129Z",
+  "reportType": "redacted_canonical_gap_report",
+  "productionWrites": false,
+  "grokSavedInventoryStatus": {
+    "status": "blocked",
+    "rowCount": 0,
+    "blocker": "Chrome DevTools/browser control is not connected, so current Grok Saved enumeration cannot be proven from the visible authenticated tab."
+  },
+  "counts": {
+    "r2Objects": 18083,
+    "r2MediaObjects": 15981,
+    "r2HashRows": 15981,
+    "d1Rows": 4648,
+    "workerRows": 4647,
+    "metadataReferences": 2100,
+    "localFiles": 8532,
+    "grokSavedRows": 0
+  },
+  "statusCounts": {
+    "orphan_candidate": 1679,
+    "needs_human_review": 5687,
+    "date_folder_mapped": 4194,
+    "canonical": 4419,
+    "alternate_duplicate": 2
+  },
+  "gapCounts": {
+    "d1MissingCanonicalMedia": 1441,
+    "workerMissingCanonicalMedia": 1441,
+    "metadataLinkedMedia": 2090,
+    "metadataUnlinkedMedia": 13891,
+    "needsHumanReview": 5687,
+    "orphanCandidates": 1679,
+    "grokSavedInventoryBlocked": 1
+  },
+  "duplicateClassification": {
+    "sameHashGroupCount": 5116,
+    "acceptedLinkedDuplicateObjects": 4196,
+    "hashOnlyDuplicateObjects": 2761
+  },
+  "topReasons": [
+    {
+      "reason": "duplicate_hash_plus_identity_link_to_retained_candidate",
+      "count": 4196
+    },
+    {
+      "reason": "retained_hash_group_candidate_without_index_or_grok_saved_evidence",
+      "count": 2926
+    },
+    {
+      "reason": "same_sha256_without_accepted_identity_link",
+      "count": 2761
+    },
+    {
+      "reason": "canonical_media_indexed_by_d1_or_worker",
+      "count": 2229
+    },
+    {
+      "reason": "retained_duplicate_group_candidate",
+      "count": 2190
+    },
+    {
+      "reason": "date_folder_media_not_linked_to_canonical_identity",
+      "count": 1679
+    }
+  ],
+  "sampleObjectKeyHashesByStatus": {
+    "alternate_duplicate": [
+      "a8583ed114bd08c7",
+      "469f2bc25a3f181b"
+    ],
+    "canonical": [
+      "9776f1477cda5b80",
+      "f3a0342fcd5f86b5",
+      "b0c4c494fc62ea77",
+      "f3f3e80b4377ced0",
+      "207dbd3631ed449b",
+      "446b16235463e059",
+      "48ac51f79d75da67",
+      "7f88958dd1b4771d",
+      "2674500d9ade87cf",
+      "743f7a00fa304a1e"
+    ],
+    "date_folder_mapped": [
+      "b8be027afa60441c",
+      "41e6b2db1079a0dd",
+      "b596111d6cadef20",
+      "8b77b35313bfcd49",
+      "9056cc1972ac4e7e",
+      "7b78ccadc7f8f372",
+      "a7e9a7264e0d3139",
+      "a43cb9a9971b0bfe",
+      "df1315daa5118574",
+      "dddd4c9a9d241ad0"
+    ],
+    "needs_human_review": [
+      "7336068f276b21cf",
+      "e73142c60e253d7b",
+      "c4390f0bfea81ac2",
+      "80d519b619e305aa",
+      "e40cdbfa3daf09ec",
+      "81079990fa9ec6bb",
+      "5c2671a972a9b7cf",
+      "c59b9d338c236067",
+      "71d3bb860dd96237",
+      "b32a39f0bda31ead"
+    ],
+    "orphan_candidate": [
+      "59fd62eb51071927",
+      "6b0d03d09f9a7c43",
+      "d5bbc574048b1c3d",
+      "01e0a1ae1df90569",
+      "8f4398933ffbf066",
+      "543493ad2c9baf99",
+      "b17b7d6823b476ed",
+      "af15d56ee4ed2f3f",
+      "1802032c68c8f906",
+      "376b0ff69e89c641"
+    ]
+  },
+  "residualRisks": [
+    "Current Grok Saved completeness is not proven until DevTools/browser control can enumerate the visible authenticated Saved tab.",
+    "D1 asset_id is preserved as evidence but is not treated as primary Grok identity.",
+    "Same SHA-256 without an accepted identity-link signal remains needs_human_review.",
+    "This is a local-only canonical index proposal and does not authorize production writes, object moves, deletes, or repair actions."
+  ]
+}

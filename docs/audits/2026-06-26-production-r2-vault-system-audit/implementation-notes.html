@@ -46,6 +46,8 @@
     <li>After the user confirmed the only open Chrome window was <code>grok.com/imagine/saved</code>, Computer Use verified the selected Chrome tab, visible Grok Saved route, page-injected Grok Power Tools overlay, and Grok Vault toolbar popup. The live-Grok subsystem is now verified as a read-only spot-check.</li>
     <li>Subagent reconciliation review found that D1/Worker exact-key gaps should be split by path semantics: legacy date-folder objects are not indexed by the current D1/Worker path, while canonical <code>media/by-asset</code> objects absent from D1/Worker remain unresolved raw-R2-only evidence. The report now describes those separately and avoids calling all deltas missing media.</li>
     <li>Subagent reconciliation review also found that metadata-reference and local/R2 deltas should not be described as full completeness failures. The report now treats metadata as reference coverage and local/R2 as SHA-256 overlap against the scanned macOS corpus.</li>
+    <li>The stricter canonical-index goal adds a second-stage local canonicalization pass. Raw exact-key rows are written to ignored <code>private/local-canonical-index.jsonl</code>; committed artifacts contain counts, status totals, and object-key hashes only.</li>
+    <li>The local canonicalizer applies the accepted duplicate rule: same SHA-256 plus an accepted identity-link signal can classify an alternate or mapped duplicate; same SHA-256 alone stays <code>needs_human_review</code>.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -57,16 +59,20 @@
     <li>The redacted-key R2 artifacts from the interrupted runs were deleted after the storage-key redaction bug was found. The next R2 run must regenerate raw R2 evidence from scratch.</li>
     <li>The report generator was tightened after subagent review to avoid unsafe claims: no clean production verdict, no required-metadata-loss claim from prompt-sidecar reference absence, no local corpus completeness claim, and no deletion recommendation for duplicate hash groups.</li>
     <li>The final live-Grok inspection did not attempt a full Saved scrape or generation. It records visible route, extension status, cloud settings, and popup status only.</li>
+    <li>The canonicalization pass uses a separate script, <code>scripts/build-local-canonical-index.mjs</code>, instead of adding a mode to the original validated audit runner. This keeps the original read-only inventory runner stable while adding a narrower post-audit stage for the stricter goal.</li>
+    <li>The canonicalization pass reuses the existing same-day R2/D1/Worker/local/metadata artifacts instead of rehashing all production media again. Full current-state proof still requires either a fresh approved R2 hash rerun or accepting the existing hash snapshot as the read-only source artifact for this pass.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
   <ul>
     <li>The secret scan has expected false positives in policy prose, redaction code, and root test names that mention cookies without containing cookie values. Manual review found no raw keys, bearer tokens, signed URLs, cookies, passwords, or private prompt dumps in current audit artifacts.</li>
+    <li>The local canonical index is useful for classification and gap analysis before Grok Saved enumeration is available, but it is still partial. D1 asset IDs, R2 keys, hashes, source URL hashes, and prompt sidecar links are evidence fields; they do not replace authoritative <code>grokPostId</code> identity.</li>
   </ul>
 
   <h2>Open Questions</h2>
   <ul>
-    <li>No open live-Grok blocker remains. Current Grok Saved completeness is still only <code>sample_verified</code>, not clean, because no authoritative full Saved enumeration/export/API was found.</li>
+    <li>Authoritative current Grok Saved inventory remains blocked for this stricter goal. Peekaboo proved the visible Chrome window is on <code>grok.com/imagine/saved</code>, but Chrome DevTools/browser control is not connected, and <code>agent-browser</code>/<code>plwr</code> are not installed. Do not claim current Grok Saved completeness until the existing authenticated tab can be enumerated with DOM or network-level control.</li>
+    <li>Current local canonical index artifacts: raw ignored <code>private/local-canonical-index.jsonl</code>, redacted <code>reconciliations/local-canonical-index-summary.json</code>, redacted <code>reconciliations/canonical-gap-report.json</code>, and redacted <code>report-canonical.md</code>.</li>
   </ul>
 </body>
 </html>

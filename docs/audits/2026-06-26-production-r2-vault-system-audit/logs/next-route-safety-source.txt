@@ -1,3 +1,5 @@
+web/src/lib/vault-server.ts:30:export async function workerJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+web/src/lib/vault-server.ts:35:  const res = await fetch(`${workerUrl}${path}`, {
 web/src/lib/vault-preview-server.ts:1:import { getWorkerHost, workerJson } from "@/lib/vault-server";
 web/src/lib/vault-preview-server.ts:21:  scanTruncated: boolean;
 web/src/lib/vault-preview-server.ts:65:async function fetchAllInventoryPages(): Promise<{ assets: VaultAsset[]; warnings: string[]; truncated: boolean }> {
@@ -10,8 +12,6 @@ web/src/lib/vault-preview-server.ts:121:    workerJson<unknown>("/v1/vault/metad
 web/src/lib/vault-preview-server.ts:122:    workerJson<unknown>("/v1/vault/metadata/promptHistory"),
 web/src/lib/vault-preview-server.ts:123:    workerJson<unknown>("/v1/vault/gaps"),
 web/src/lib/vault-preview-server.ts:155:    scanTruncated: inventory.truncated,
-web/src/lib/vault-server.ts:30:export async function workerJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-web/src/lib/vault-server.ts:35:  const res = await fetch(`${workerUrl}${path}`, {
 web/src/app/api/vault/media/[assetId]/route.ts:3:export async function GET(request: Request, { params }: { params: Promise<{ assetId: string }> }) {
 web/src/app/api/vault/media/[assetId]/route.ts:10:  const res = await fetch(`${workerUrl}/v1/vault/media?${workerSearch.toString()}`, {
 web/src/app/api/vault/repair/run/route.ts:1:import { NextResponse } from "next/server";
@@ -82,16 +82,16 @@ web/src/app/api/vault/inventory/route.ts:2:import { workerJson } from "@/lib/vau
 web/src/app/api/vault/inventory/route.ts:4:export async function GET(request: Request) {
 web/src/app/api/vault/inventory/route.ts:7:  const data = await workerJson(workerPath);
 web/src/app/api/vault/inventory/route.ts:8:  return NextResponse.json(data);
+web/src/app/api/vault/gaps/route.ts:1:import { NextResponse } from "next/server";
+web/src/app/api/vault/gaps/route.ts:2:import { workerJson } from "@/lib/vault-server";
+web/src/app/api/vault/gaps/route.ts:4:export async function GET() {
+web/src/app/api/vault/gaps/route.ts:5:  return NextResponse.json(await workerJson("/v1/vault/gaps"));
 web/src/app/api/vault/identity/route.ts:1:import { NextResponse } from "next/server";
 web/src/app/api/vault/identity/route.ts:2:import { getWorkerHost, workerJson } from "@/lib/vault-server";
 web/src/app/api/vault/identity/route.ts:4:export async function GET() {
 web/src/app/api/vault/identity/route.ts:6:    const data = await workerJson<Record<string, unknown>>("/v1/vault/identity");
 web/src/app/api/vault/identity/route.ts:7:    return NextResponse.json({ ...data, workerHost: typeof data.workerHost === "string" ? data.workerHost : getWorkerHost() });
 web/src/app/api/vault/identity/route.ts:10:    return NextResponse.json(
-web/src/app/api/vault/gaps/route.ts:1:import { NextResponse } from "next/server";
-web/src/app/api/vault/gaps/route.ts:2:import { workerJson } from "@/lib/vault-server";
-web/src/app/api/vault/gaps/route.ts:4:export async function GET() {
-web/src/app/api/vault/gaps/route.ts:5:  return NextResponse.json(await workerJson("/v1/vault/gaps"));
 web/src/app/api/vault/reconcile/index/route.ts:1:import { NextResponse } from "next/server";
 web/src/app/api/vault/reconcile/index/route.ts:3:export async function POST() {
 web/src/app/api/vault/reconcile/index/route.ts:4:  return NextResponse.json(

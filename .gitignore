@@ -36,3 +36,6 @@ AGENT_HANDOFF.md
 cloud/wrangler.acceptance.generated.toml
 cloud/.tmp-test/
 acceptance/runs/
+
+# Audit-private raw artifacts
+docs/audits/**/private/

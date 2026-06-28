@@ -2,12 +2,12 @@
   "auditName": "Production R2 Vault system audit",
   "auditPlanDate": "2026-06-26",
   "executionStartedAt": "2026-06-27T16:28:22-04:00",
-  "status": "complete",
+  "status": "in_progress",
   "repo": {
     "path": "/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools",
     "branch": "codex/production-r2-vault-audit",
-    "commit": "9f9830eca818260172d52aa4d14ea52b5bc9fdd0",
-    "gitStatusShort": " M docs/audits/2026-06-26-production-r2-vault-system-audit/browser-samples/live-grok-samples.md\n M docs/audits/2026-06-26-production-r2-vault-system-audit/implementation-notes.html\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/validate-artifacts.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/manifest.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/report.md\n M docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/audit-production-r2-vault.mjs\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/logs/live-grok-extension-summary-2026-06-28.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/logs/live-grok-visible-window-summary-2026-06-28.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/logs/live-grok-window-check-2026-06-28-user-confirmed.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/screenshots/live-grok-visible-window-2026-06-28.png\n",
+    "commit": "c66b86bd6208fe903b78f3cf9165dd4cd48728a7",
+    "gitStatusShort": " M .gitignore\n M docs/audits/2026-06-26-production-r2-vault-system-audit/implementation-notes.html\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/validate-artifacts.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/manifest.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/audit-production-r2-vault.mjs\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/logs/grok-saved-browser-control-blocker.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/canonical-gap-report.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/local-canonical-index-summary.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/report-canonical.md\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/build-local-canonical-index.mjs\n",
     "snapshotNote": "repo.commit records the clean checkpoint before the final live-Grok evidence commit; final Git HEAD may advance by the commit containing this manifest."
   },
   "productionTarget": {
@@ -33,9 +33,18 @@
     "webRoutes": "verified",
     "localSystem": "verified",
     "liveGrok": "verified",
-    "reconciliation": "dirty"
+    "reconciliation": "dirty",
+    "canonicalIndex": "partial",
+    "grokSavedInventory": "blocked"
   },
-  "blockers": [],
+  "blockers": [
+    {
+      "mode": "grokSavedInventory",
+      "recordedAt": "2026-06-28T20:53:15.129Z",
+      "reason": "Chrome DevTools/browser control is not connected, so current Grok Saved enumeration cannot be proven from the visible authenticated tab.",
+      "nextAction": "Enable Chrome remote debugging for this profile and accept the DevTools permission prompt."
+    }
+  ],
   "evidenceIndex": [
     {
       "path": "browser-samples/.gitkeep",
@@ -49,8 +58,8 @@
     },
     {
       "path": "implementation-notes.html",
-      "bytes": 7249,
-      "updatedAt": "2026-06-28T18:47:16.760Z"
+      "bytes": 9224,
+      "updatedAt": "2026-06-28T20:52:03.894Z"
     },
     {
       "path": "inventory/.gitkeep",
@@ -105,12 +114,12 @@
     {
       "path": "inventory/preflight-d1-schema.json",
       "bytes": 3587,
-      "updatedAt": "2026-06-28T02:52:40.395Z"
+      "updatedAt": "2026-06-28T20:53:03.112Z"
     },
     {
       "path": "inventory/preflight-identity.json",
       "bytes": 2320,
-      "updatedAt": "2026-06-28T02:52:40.396Z"
+      "updatedAt": "2026-06-28T20:53:03.112Z"
     },
     {
       "path": "inventory/r2-listing-checkpoint.json",
@@ -175,7 +184,7 @@
     {
       "path": "logs/d1-broad-token-select-only-approval.json",
       "bytes": 410,
-      "updatedAt": "2026-06-28T02:52:40.397Z"
+      "updatedAt": "2026-06-28T20:53:03.113Z"
     },
     {
       "path": "logs/d1-metadata_snapshot_index.json",
@@ -185,7 +194,7 @@
     {
       "path": "logs/d1-preflight-schema-smoke.json",
       "bytes": 782,
-      "updatedAt": "2026-06-28T02:52:40.394Z"
+      "updatedAt": "2026-06-28T20:53:03.111Z"
     },
     {
       "path": "logs/d1-r2_dedupe_index.json",
@@ -201,6 +210,11 @@
       "path": "logs/d1-vault_overlays.json",
       "bytes": 642,
       "updatedAt": "2026-06-28T03:48:05.118Z"
+    },
+    {
+      "path": "logs/grok-saved-browser-control-blocker.json",
+      "bytes": 399,
+      "updatedAt": "2026-06-28T20:53:15.214Z"
     },
     {
       "path": "logs/live-grok-extension-summary-2026-06-28.json",
@@ -235,12 +249,12 @@
     {
       "path": "logs/next-route-safety-source.json",
       "bytes": 11422,
-      "updatedAt": "2026-06-28T02:52:34.312Z"
+      "updatedAt": "2026-06-28T20:52:56.823Z"
     },
     {
       "path": "logs/next-route-safety-source.txt",
       "bytes": 10768,
-      "updatedAt": "2026-06-28T02:52:34.316Z"
+      "updatedAt": "2026-06-28T20:52:56.827Z"
     },
     {
       "path": "logs/pause-checkpoint-2026-06-27T23-36-33Z.json",
@@ -250,52 +264,52 @@
     {
       "path": "logs/preflight-git-branch.json",
       "bytes": 278,
-      "updatedAt": "2026-06-28T02:52:10.856Z"
+      "updatedAt": "2026-06-28T20:52:36.827Z"
     },
     {
       "path": "logs/preflight-git-diff-check.json",
       "bytes": 240,
-      "updatedAt": "2026-06-28T02:52:10.898Z"
+      "updatedAt": "2026-06-28T20:52:36.858Z"
     },
     {
       "path": "logs/preflight-git-head.json",
       "bytes": 278,
-      "updatedAt": "2026-06-28T02:52:10.871Z"
+      "updatedAt": "2026-06-28T20:52:36.839Z"
     },
     {
       "path": "logs/preflight-git-status.json",
-      "bytes": 3146,
-      "updatedAt": "2026-06-28T02:52:10.826Z"
+      "bytes": 1098,
+      "updatedAt": "2026-06-28T20:52:36.808Z"
     },
     {
       "path": "logs/preflight-git.txt",
-      "bytes": 3209,
-      "updatedAt": "2026-06-28T02:52:34.313Z"
+      "bytes": 1182,
+      "updatedAt": "2026-06-28T20:52:56.824Z"
     },
     {
       "path": "logs/preflight-node-version.json",
       "bytes": 239,
-      "updatedAt": "2026-06-28T02:52:10.915Z"
+      "updatedAt": "2026-06-28T20:52:36.874Z"
     },
     {
       "path": "logs/preflight-node24-version.json",
       "bytes": 290,
-      "updatedAt": "2026-06-28T02:52:11.069Z"
+      "updatedAt": "2026-06-28T20:52:36.983Z"
     },
     {
       "path": "logs/preflight-npm-version.json",
       "bytes": 235,
-      "updatedAt": "2026-06-28T02:52:11.040Z"
+      "updatedAt": "2026-06-28T20:52:36.958Z"
     },
     {
       "path": "logs/preflight-runtime.txt",
       "bytes": 223,
-      "updatedAt": "2026-06-28T02:52:34.314Z"
+      "updatedAt": "2026-06-28T20:52:56.824Z"
     },
     {
       "path": "logs/production-wrangler-config.txt",
       "bytes": 450,
-      "updatedAt": "2026-06-28T02:52:34.313Z"
+      "updatedAt": "2026-06-28T20:52:56.823Z"
     },
     {
       "path": "logs/r2-hash-resume-state.json",
@@ -325,12 +339,12 @@
     {
       "path": "logs/route-safety-source.json",
       "bytes": 1020,
-      "updatedAt": "2026-06-28T02:52:34.304Z"
+      "updatedAt": "2026-06-28T20:52:56.814Z"
     },
     {
       "path": "logs/route-safety-source.txt",
       "bytes": 568,
-      "updatedAt": "2026-06-28T02:52:34.316Z"
+      "updatedAt": "2026-06-28T20:52:56.826Z"
     },
     {
       "path": "logs/secret-scan-summary.json",
@@ -340,7 +354,7 @@
     {
       "path": "logs/validate-artifacts.json",
       "bytes": 102,
-      "updatedAt": "2026-06-28T18:55:40.930Z"
+      "updatedAt": "2026-06-28T20:53:24.953Z"
     },
     {
       "path": "logs/web-build.txt",
@@ -410,42 +424,42 @@
     {
       "path": "logs/wrangler-d1-execute-help.json",
       "bytes": 2043,
-      "updatedAt": "2026-06-28T02:52:34.293Z"
+      "updatedAt": "2026-06-28T20:52:56.804Z"
     },
     {
       "path": "logs/wrangler-d1-execute-help.txt",
       "bytes": 1848,
-      "updatedAt": "2026-06-28T02:52:34.315Z"
+      "updatedAt": "2026-06-28T20:52:56.826Z"
     },
     {
       "path": "logs/wrangler-r2-object-help.json",
       "bytes": 1354,
-      "updatedAt": "2026-06-28T02:52:29.921Z"
+      "updatedAt": "2026-06-28T20:52:52.451Z"
     },
     {
       "path": "logs/wrangler-r2-object-help.txt",
       "bytes": 1172,
-      "updatedAt": "2026-06-28T02:52:34.315Z"
+      "updatedAt": "2026-06-28T20:52:56.825Z"
     },
     {
       "path": "logs/wrangler-version.json",
       "bytes": 316,
-      "updatedAt": "2026-06-28T02:52:25.413Z"
+      "updatedAt": "2026-06-28T20:52:48.066Z"
     },
     {
       "path": "logs/wrangler-version.txt",
       "bytes": 171,
-      "updatedAt": "2026-06-28T02:52:34.314Z"
+      "updatedAt": "2026-06-28T20:52:56.825Z"
     },
     {
       "path": "logs/wrangler-whoami.json",
-      "bytes": 2079,
-      "updatedAt": "2026-06-28T02:52:21.002Z"
+      "bytes": 1862,
+      "updatedAt": "2026-06-28T20:52:44.019Z"
     },
     {
       "path": "logs/wrangler-whoami.txt",
-      "bytes": 1122,
-      "updatedAt": "2026-06-28T02:52:34.314Z"
+      "bytes": 910,
+      "updatedAt": "2026-06-28T20:52:56.825Z"
     },
     {
       "path": "reconciliations/.gitkeep",
@@ -453,9 +467,19 @@
       "updatedAt": "2026-06-27T23:20:40.076Z"
     },
     {
+      "path": "reconciliations/canonical-gap-report.json",
+      "bytes": 3559,
+      "updatedAt": "2026-06-28T20:53:15.213Z"
+    },
+    {
       "path": "reconciliations/duplicate-groups.json",
       "bytes": 3176884,
       "updatedAt": "2026-06-28T04:00:48.323Z"
+    },
+    {
+      "path": "reconciliations/local-canonical-index-summary.json",
+      "bytes": 10259,
+      "updatedAt": "2026-06-28T20:53:15.212Z"
     },
     {
       "path": "reconciliations/malformed-keys.json",
@@ -503,6 +527,11 @@
       "updatedAt": "2026-06-28T04:00:48.305Z"
     },
     {
+      "path": "report-canonical.md",
+      "bytes": 1665,
+      "updatedAt": "2026-06-28T20:53:15.214Z"
+    },
+    {
       "path": "report.md",
       "bytes": 4741,
       "updatedAt": "2026-06-28T18:48:03.195Z"
@@ -539,13 +568,18 @@
     },
     {
       "path": "scripts/audit-production-r2-vault.mjs",
-      "bytes": 82132,
-      "updatedAt": "2026-06-28T18:47:45.891Z"
+      "bytes": 82475,
+      "updatedAt": "2026-06-28T20:52:23.995Z"
+    },
+    {
+      "path": "scripts/build-local-canonical-index.mjs",
+      "bytes": 23360,
+      "updatedAt": "2026-06-28T20:51:16.139Z"
     }
   ],
   "finalVerdicts": {
     "productionR2InternalCorrectness": "dirty",
-    "currentGrokSavedCompleteness": "sample_verified",
+    "currentGrokSavedCompleteness": "blocked",
     "localSystemHealth": "clean"
   },
   "repoSnapshots": [

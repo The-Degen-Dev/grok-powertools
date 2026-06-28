@@ -1,6 +1,6 @@
 $ mise exec node@24 -- npx --yes wrangler@latest whoami
-startedAt: 2026-06-28T02:52:11.069Z
-finishedAt: 2026-06-28T02:52:21.000Z
+startedAt: 2026-06-28T20:52:36.983Z
+finishedAt: 2026-06-28T20:52:44.017Z
 exitCode: 0
 
 stdout:
@@ -43,8 +43,3 @@ stdout:
 }
 
 stderr:
-npm notice
-npm notice New minor version of npm available! 11.13.0 -> 11.17.0
-npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.17.0
-npm notice To update run: npm install -g npm@11.17.0
-npm notice

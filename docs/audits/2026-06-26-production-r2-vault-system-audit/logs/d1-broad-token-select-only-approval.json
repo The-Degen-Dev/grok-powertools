@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-28T02:52:40.396Z",
+  "generatedAt": "2026-06-28T20:53:03.113Z",
   "approvalEnv": "AUDIT_APPROVE_BROAD_WRANGLER_SELECT_ONLY",
   "approved": true,
   "scope": "Remote D1 SELECT-only audit reads against grok-powertools-db",

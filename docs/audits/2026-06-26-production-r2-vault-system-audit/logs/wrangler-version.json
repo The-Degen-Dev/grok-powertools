@@ -10,8 +10,8 @@
     "wrangler@latest",
     "--version"
   ],
-  "startedAt": "2026-06-28T02:52:21.002Z",
-  "finishedAt": "2026-06-28T02:52:25.412Z",
+  "startedAt": "2026-06-28T20:52:44.020Z",
+  "finishedAt": "2026-06-28T20:52:48.064Z",
   "exitCode": 0,
   "stdout": "4.105.0\n",
   "stderr": ""

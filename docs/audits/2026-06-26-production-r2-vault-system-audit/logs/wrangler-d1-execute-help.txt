@@ -1,6 +1,6 @@
 $ mise exec node@24 -- npx --yes wrangler@latest d1 execute --help
-startedAt: 2026-06-28T02:52:29.921Z
-finishedAt: 2026-06-28T02:52:34.292Z
+startedAt: 2026-06-28T20:52:52.451Z
+finishedAt: 2026-06-28T20:52:56.804Z
 exitCode: 0
 
 stdout:
