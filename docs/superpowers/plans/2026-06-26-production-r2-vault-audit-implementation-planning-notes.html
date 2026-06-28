@@ -91,6 +91,7 @@
     <li>A follow-up variant probe sampled one <code>/imagine/post/{uuid}</code> with two in-post thumbnail controls. Switching thumbnails changed the displayed media while the route stayed on the same post UUID, so variants under one <code>grokPostId</code> are real behavior for at least that case.</li>
     <li>Prompt handling is revised after user clarification: full image prompts, full video prompts, and all available Grok metadata should be stored in the existing Vault data plane. Audit and planning artifacts should stay redacted or hash-only by default, but the Vault itself should preserve the raw prompt text.</li>
     <li>Automatic <code>alternate_duplicate</code> classification now requires exact SHA-256 equality plus at least one identity-link signal, such as the same <code>grokPostId</code>, media UUID, canonical source URL hash, or prompt sidecar link. Same-hash-only groups stay reviewable until source relationship is known.</li>
+    <li>Physical duplicate cleanup is part of the target plan, not an optional side project. It comes after logical clean state, approved R2 canonical snapshot, D1 projection, app-view validation, and repeated clean audits.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -114,6 +115,7 @@
     <li>Alternative considered: assume adjacent Saved grid tiles with similar visuals are variants of one generation. Rejected because the verified behavior is route-local, not grid-neighbor-based. The enumerator must classify variants from the opened detail route, not from visual proximity in the Saved grid.</li>
     <li>Alternative considered: store only prompt hashes/redacted excerpts in the canonical index. Rejected because the product requirement is to archive full prompts and metadata. The safer compromise is not a separate vault, but a rule that raw prompt fields stay in Vault/R2 and do not get copied into committed reports, plans, chat summaries, or broad audit exports.</li>
     <li>Alternative considered: auto-hide all same-SHA media as duplicates. Rejected because byte equality alone does not prove both objects belong to the same logical Saved asset. The accepted rule needs byte equality plus an identity-link signal.</li>
+    <li>Alternative considered: physically clean duplicate R2 bytes as soon as same-hash groups are found. Rejected because physical cleanup must be generated from the approved canonical index and validated D1 projection, not raw hash groups alone.</li>
   </ul>
 
   <h2>Open Questions</h2>
@@ -122,6 +124,7 @@
     <li>If production R2 byte hashing is large enough to trigger rate, cost, or local disk risk, the execution worker should stop and ask whether to continue, sample, or split into a separate hashing run.</li>
     <li>Before implementing a full Grok Saved enumerator, remove or gate logs that print prompt snippets or source URL snippets. The current backup flow has short prompt/source logging, which is acceptable for debugging but not for a raw metadata capture run.</li>
     <li>The canonical-index staging plan must not stop at the R2 JSON snapshot. Current recommendation: local-only artifact during read-only reconciliation, append-only R2 JSON snapshot after write approval, D1 projection as the app-facing query layer once the schema is stable, product views reading D1, and recurring reconciliation from D1 back to the R2 snapshot and raw R2 inventory.</li>
+    <li>The clean-state decision should be staged: logical clean first, index clean second, storage clean third. Full system clean requires physical duplicate cleanup to succeed or any remaining candidate groups to be explicitly deferred with reasons.</li>
   </ul>
 </body>
 </html>

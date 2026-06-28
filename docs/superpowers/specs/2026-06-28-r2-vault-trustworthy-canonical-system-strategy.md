@@ -141,6 +141,8 @@ If R2 has more objects than Grok Saved appears to expose, do not delete or disca
 
 Make the system logically clean before making R2 physically clean.
 
+Physical duplicate cleanup is still part of the target system. It comes after logical correctness, D1 projection, app-view validation, and repeated clean audits because deleting or moving R2 objects before the canonical model is proven would make recovery harder.
+
 First repair phase:
 
 - Preserve every existing R2 object.
@@ -155,6 +157,8 @@ Physical cleanup can be considered only after:
 - A rollback/export path exists.
 - Every target object has durable classification evidence.
 - The user explicitly approves a separate destructive cleanup plan.
+
+Physical cleanup candidates must be generated from the approved canonical index, not from raw same-hash groups alone. Eligible candidates should be limited to objects that have a retained canonical copy, exact byte equality, an accepted identity-link signal, no unique metadata or prompt evidence, and no active canonical or variant reference.
 
 ## Required Classifications
 
@@ -253,34 +257,34 @@ Phase 6: Logical product cleanup
 - Duplicate/alternate/date-folder objects should be visible in diagnostics, not normal gallery views.
 - Keep a reconciliation check that can compare app-facing D1 rows back to the R2 canonical snapshot and raw R2 inventory.
 
-Phase 7: Approved repair plan
+Phase 7: Physical duplicate cleanup dry run
 
-- Only after the read-only classification and staged index writes are reviewed, design exact repair steps.
-- Prefer append-only index/ledger updates first.
-- Avoid object rewrites or deletes.
-- Use exact counts, plan hashes, rollback notes, and explicit user approval.
+- After logical state, D1 projection, and app reads validate cleanly, generate a physical cleanup manifest.
+- Include every proposed target key, retained canonical key, SHA-256, identity-link evidence, classification evidence, expected bytes saved, and reason.
+- Include a non-candidate report for hash-only duplicates, conflicts, unique metadata, missing retained copy, or any object still referenced by canonical views.
+- Run this phase as dry-run only until the user approves the exact manifest.
 
-Phase 8: Physical cleanup, optional and later
+Phase 8: Approved physical duplicate cleanup
 
-- Consider deletes or lifecycle moves only after repeated clean audits and explicit approval.
+- Execute only after explicit approval of the dry-run manifest.
+- Prefer the least destructive storage action that actually removes duplicate serving/storage paths, with a durable ledger before any delete or lifecycle move.
+- Delete or move only objects already classified as safe physical duplicates by the dry-run manifest.
+- Re-list R2, re-check hashes/counts, validate D1 against the R2 canonical snapshot, and run the audit again after cleanup.
+- The plan is not complete until physical duplicate cleanup has either succeeded or the user explicitly defers specific candidate groups with reasons.
 
 ## Open Questions
 
 These are the next grilling decisions:
 
-1. Where should the canonical index live first: D1, R2 JSON snapshot, both, or local-only draft?
-2. What does "clean" mean for the next audit: zero unresolved canonical objects, zero duplicate product assets, or zero physical duplicate bytes?
+1. What does "clean" mean for the next audit and final target: logical clean, index clean, storage clean, or all three in stages?
 
 ## Current Recommended Next Question
 
-Where should the canonical index live first?
+What does "clean" mean?
 
 Recommended answer to evaluate next:
 
-- Stage 1: During read-only reconciliation, generate a local-only canonical index artifact.
-- Stage 2: The first approved persistent write should be an append-only R2 JSON snapshot under the existing Vault metadata namespace.
-- Stage 3: Add D1 rows as a derived app-facing index from the approved R2 snapshot once the schema is stable enough to query.
-- Stage 4: Move product views to the D1 canonical index, with R2 JSON snapshots retained for audit, recovery, and diagnostics.
-- Stage 5: Keep periodic reconciliation that checks D1 back against the R2 snapshot and raw R2 inventory.
-- The canonical-index plan is not complete at the R2 JSON snapshot. D1 projection and validation are part of the staged target system.
-- Keep physical R2 media objects unchanged in the first write phase.
+- Logical clean: every Grok Saved item has one canonical logical record, every R2 media object is classified, and product views show one logical asset per canonical Saved identity.
+- Index clean: the D1 projection matches the approved R2 canonical snapshot by version, counts, canonical IDs, classifications, and query-critical fields.
+- Storage clean: physical duplicate cleanup candidates have been dry-run, approved, executed or explicitly deferred, and verified by a post-cleanup R2/D1 audit.
+- The implementation should reach logical clean first, then index clean, then storage clean. Full system clean means all three are satisfied or any remaining physical duplicate groups are explicitly deferred with documented reasons.
