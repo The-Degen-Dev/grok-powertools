@@ -42,7 +42,7 @@
     <li>The R2 runner now writes a listing checkpoint before object-head enrichment and uses bounded concurrency for <code>HeadObject</code>. This preserves full coverage while avoiding the earlier serial-head bottleneck that produced no artifact for several minutes.</li>
     <li>The R2 hash runner now resumes from existing <code>r2-media-hashes.jsonl</code> rows and hashes remaining media in small batches with bounded concurrent streams. This preserves full byte-hash coverage while allowing an interrupted hash run to continue without discarding completed hash rows.</li>
     <li>Redaction was corrected to preserve storage identifier fields such as <code>key</code>, <code>objectKey</code>, and <code>canonical_object_key</code>. The earlier broad <code>key</code> redaction made R2/D1 reconciliation evidence unusable. Secret-like fields such as API keys, access keys, tokens, cookies, signatures, signed URLs, and prompt text remain redacted.</li>
-    <li>Live Grok inspection uses the existing visible Chrome window only. Peekaboo showed the visible Chrome window was Gmail, not <code>grok.com/imagine/saved</code>, so the audit recorded a live-Grok blocker instead of broad-scanning tabs or navigating unrelated Chrome windows.</li>
+    <li>Live Grok inspection uses the existing visible Chrome window only. Peekaboo showed no visible <code>grok.com/imagine/saved</code> or Grok Vault window, so the audit recorded a live-Grok blocker instead of broad-scanning tabs or navigating unrelated Chrome windows.</li>
     <li>Subagent reconciliation review found that D1/Worker exact-key gaps should be split by path semantics: legacy date-folder objects are not indexed by the current D1/Worker path, while canonical <code>media/by-asset</code> objects absent from D1/Worker remain unresolved raw-R2-only evidence. The report now describes those separately and avoids calling all deltas missing media.</li>
     <li>Subagent reconciliation review also found that metadata-reference and local/R2 deltas should not be described as full completeness failures. The report now treats metadata as reference coverage and local/R2 as SHA-256 overlap against the scanned macOS corpus.</li>
   </ul>
@@ -64,7 +64,7 @@
 
   <h2>Open Questions</h2>
   <ul>
-    <li>Bring the existing <code>grok.com/imagine/saved</code> tab/window with Grok Vault open to the foreground, then resume the Goal for read-only live Grok and extension inspection. The audit must not use broad Chrome tab discovery or navigate over unrelated tabs unless the user explicitly approves a different narrow method.</li>
+    <li>The live-Grok targeting blocker repeated after restart in <code>logs/live-grok-window-check-2026-06-28-resume.json</code>. Bring the existing <code>grok.com/imagine/saved</code> tab/window with Grok Vault open to the foreground, then resume the Goal for read-only live Grok and extension inspection. The audit must not use broad Chrome tab discovery or navigate over unrelated tabs unless the user explicitly approves a different narrow method.</li>
   </ul>
 </body>
 </html>
