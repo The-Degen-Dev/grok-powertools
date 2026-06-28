@@ -4,6 +4,7 @@ const {
 } = require('../../content.js');
 const {
     collectGeneratedImageCandidates,
+    collectGeneratedVideoCandidates,
     dataUrlToFile,
     ensureGrokSearchEnabled,
     extractAssistantPromptFromPage,
@@ -15,7 +16,9 @@ const {
     injectEditorText,
     readBlobAsDataUrl,
     readFileAsRecreateReference,
+    resolveReferenceForUpload,
     runChatPromptStep,
+    runImaginePostValidationStep,
     runImagineSubmitStep,
     selectCurrentGeneratedImage,
     sourceToDataUrl,
@@ -64,6 +67,32 @@ function appendGeneratedImage(overrides = {}) {
     return img;
 }
 
+function appendGeneratedVideo(overrides = {}) {
+    const video = document.createElement('video');
+    video.src = overrides.src || 'https://imagine-public.x.ai/imagine-public/share-videos/sample_1080_hd.mp4';
+    Object.defineProperty(video, 'readyState', {
+        configurable: true,
+        value: Number.isFinite(overrides.readyState) ? overrides.readyState : 1
+    });
+    Object.defineProperty(video, 'duration', {
+        configurable: true,
+        value: Number.isFinite(overrides.duration) ? overrides.duration : 10
+    });
+    Object.defineProperty(video, 'videoWidth', {
+        configurable: true,
+        value: Number.isFinite(overrides.videoWidth) ? overrides.videoWidth : 720
+    });
+    Object.defineProperty(video, 'videoHeight', {
+        configurable: true,
+        value: Number.isFinite(overrides.videoHeight) ? overrides.videoHeight : 1280
+    });
+    video.getBoundingClientRect =
+        overrides.getBoundingClientRect ||
+        (() => ({ left: 320, top: 120, width: 320, height: 568 }));
+    document.body.appendChild(video);
+    return video;
+}
+
 function appendVisibleGrokEditor(container) {
     const editor = document.createElement('textarea');
     editor.setAttribute('aria-label', 'Ask Grok anything');
@@ -104,6 +133,67 @@ function installMediaDataUrlBridge(dataUrl = LARGE_IMAGE_DATA_URL, documentRef =
 
     documentRef.addEventListener('__gpt_fetch_media_data_url', handler);
     return () => documentRef.removeEventListener('__gpt_fetch_media_data_url', handler);
+}
+
+function createVideoSamplingDocument() {
+    const drawImage = jest.fn();
+    const toDataURL = jest.fn(() => `data:image/jpeg;base64,${Buffer.from('contact-sheet').toString('base64')}`);
+    const createVideo = () => {
+        const video = {
+            duration: 10.042,
+            videoWidth: 464,
+            videoHeight: 688,
+            preload: '',
+            muted: false,
+            playsInline: false,
+            onloadedmetadata: null,
+            onseeked: null,
+            onerror: null,
+            removeAttribute: jest.fn()
+        };
+        Object.defineProperty(video, 'src', {
+            set(value) {
+                this._src = value;
+                setTimeout(() => {
+                    if (typeof this.onloadedmetadata === 'function') this.onloadedmetadata();
+                }, 0);
+            },
+            get() {
+                return this._src || '';
+            }
+        });
+        Object.defineProperty(video, 'currentTime', {
+            set(value) {
+                this._currentTime = value;
+                setTimeout(() => {
+                    if (typeof this.onseeked === 'function') this.onseeked();
+                }, 0);
+            },
+            get() {
+                return this._currentTime || 0;
+            }
+        });
+        return video;
+    };
+
+    return {
+        drawImage,
+        toDataURL,
+        documentRef: {
+            createElement(tagName) {
+                if (tagName === 'video') return createVideo();
+                if (tagName === 'canvas') {
+                    return {
+                        width: 0,
+                        height: 0,
+                        getContext: jest.fn(() => ({ drawImage })),
+                        toDataURL
+                    };
+                }
+                return document.createElement(tagName);
+            }
+        }
+    };
 }
 
 function recordClickEvents(element) {
@@ -150,6 +240,66 @@ describe('recreate content helpers', () => {
         expect(reference.dataUrl).toMatch(/^data:image\/png;base64,/);
     });
 
+    test('reads local video files into normalized video references', async () => {
+        const file = new File(['video'], 'sample.mp4', { type: 'video/mp4' });
+        const reference = await readFileAsRecreateReference(file, 'local');
+
+        expect(reference).toEqual(
+            expect.objectContaining({
+                kind: 'video',
+                name: 'sample.mp4',
+                mimeType: 'video/mp4',
+                source: 'local',
+                byteLength: 5
+            })
+        );
+        expect(reference.dataUrl).toMatch(/^data:video\/mp4;base64,/);
+    });
+
+    test('stores sampled local video contact sheets when a frame sampler is available', async () => {
+        const { documentRef } = createVideoSamplingDocument();
+        const frameSampler = jest.fn(() => Promise.resolve({
+            contactSheetDataUrl: `data:image/jpeg;base64,${Buffer.from('contact-sheet').toString('base64')}`,
+            frameSampleCount: 7,
+            sampleTimesSec: [0, 1.665, 3.331, 4.996, 6.661, 8.326, 9.992],
+            contactSheetWidth: 720,
+            contactSheetHeight: 512,
+            contactSheetMimeType: 'image/jpeg'
+        }));
+        const reference = utils.normalizeRecreateReference({
+            kind: 'video',
+            name: 'sample.mp4',
+            mimeType: 'video/mp4',
+            source: 'local',
+            dataUrl: `data:video/mp4;base64,${Buffer.from('video').toString('base64')}`
+        });
+
+        const resolved = await resolveReferenceForUpload(reference, {
+            documentRef,
+            utils,
+            metadataProbeTimeoutMs: 100,
+            frameSamplingTimeoutMs: 100,
+            frameSampler
+        });
+
+        expect(resolved.metadata).toEqual(expect.objectContaining({
+            durationSec: 10.042,
+            width: 464,
+            height: 688,
+            frameSampleCount: 7,
+            frameSamplingLimited: false
+        }));
+        expect(resolved.frames).toEqual(expect.objectContaining({
+            contactSheetDataUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+            frameSampleCount: 7,
+            contactSheetMimeType: 'image/jpeg'
+        }));
+        expect(resolved.frames.sampleTimesSec).toHaveLength(7);
+        expect(frameSampler).toHaveBeenCalledWith(reference.dataUrl, expect.objectContaining({
+            frameSamplingTimeoutMs: 100
+        }));
+    });
+
     test('fails when a reference file is missing', async () => {
         await expect(readFileAsRecreateReference(null, 'local')).rejects.toThrow('reference_missing');
     });
@@ -170,6 +320,20 @@ describe('recreate content helpers', () => {
 
         expect(file.name).toBe('reference.png');
         expect(file.type).toBe('image/png');
+        expect(file.size).toBe(5);
+    });
+
+    test('recreates a File from normalized video reference data', () => {
+        const file = dataUrlToFile({
+            name: 'reference.mp4',
+            kind: 'video',
+            mimeType: 'video/mp4',
+            dataUrl: 'data:video/mp4;base64,aGVsbG8=',
+            source: 'drop'
+        });
+
+        expect(file.name).toBe('reference.mp4');
+        expect(file.type).toBe('video/mp4');
         expect(file.size).toBe(5);
     });
 
@@ -198,6 +362,29 @@ describe('recreate content helpers', () => {
                 alt: 'Generated image',
                 naturalWidth: 720,
                 naturalHeight: 720
+            })
+        );
+    });
+
+    test('collects visible generated video candidates', () => {
+        appendGeneratedVideo({
+            src: 'https://imagine-public.x.ai/imagine-public/share-videos/sample_1080_hd.mp4',
+            videoWidth: 464,
+            videoHeight: 688
+        });
+        appendGeneratedVideo({
+            src: 'https://imagine-public.x.ai/imagine-public/share-videos/hidden_1080_hd.mp4',
+            getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 568 })
+        });
+
+        const candidates = collectGeneratedVideoCandidates(document);
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0]).toEqual(
+            expect.objectContaining({
+                mediaKind: 'video',
+                src: 'https://imagine-public.x.ai/imagine-public/share-videos/sample_1080_hd.mp4',
+                videoWidth: 464,
+                videoHeight: 688
             })
         );
     });
@@ -250,6 +437,50 @@ describe('recreate content helpers', () => {
             'https://imagine-public.x.ai/imagine-public/images/post-detail.jpg',
             expect.objectContaining({ credentials: 'omit' })
         );
+    });
+
+    test('resolves a Grok post URL to its shared video reference', async () => {
+        const postUrl = 'https://grok.com/imagine/post/9171bd6b-496d-49ee-a91e-e82c9e392b6c';
+        const videoUrl = 'https://imagine-public.x.ai/imagine-public/share-videos/9171bd6b-496d-49ee-a91e-e82c9e392b6c_1080_hd.mp4';
+        global.fetch = jest.fn((url) => {
+            if (String(url) === postUrl) {
+                return Promise.resolve({
+                    ok: true,
+                    text: () => Promise.resolve([
+                        `<meta property="og:video" content="${videoUrl}">`,
+                        '<meta name="description" content="he catches up with her and embraces her slowly">'
+                    ].join('\n'))
+                });
+            }
+
+            return Promise.resolve({
+                ok: true,
+                blob: () => Promise.resolve(new Blob(['video'], { type: 'video/mp4' }))
+            });
+        });
+
+        const resolved = await resolveReferenceForUpload(
+            {
+                kind: 'video',
+                name: 'grok-post-video.mp4',
+                url: postUrl,
+                source: 'grok-post-url'
+            },
+            { documentRef: document, utils, metadataProbeTimeoutMs: 1 }
+        );
+
+        expect(resolved).toEqual(expect.objectContaining({
+            kind: 'video',
+            source: 'grok-post-url',
+            mimeType: 'video/mp4',
+            byteLength: 5
+        }));
+        expect(resolved.metadata).toEqual(expect.objectContaining({
+            sourcePostUrl: postUrl,
+            sourceVideoUrl: videoUrl,
+            sourcePrompt: 'he catches up with her and embraces her slowly'
+        }));
+        expect(resolved.dataUrl).toMatch(/^data:video\/mp4;base64,/);
     });
 
     test('throws reference_missing when no current generated image is available', async () => {
@@ -771,6 +1002,37 @@ describe('recreate content DOM actions', () => {
         expect(hasUploadPreview(document)).toBe(true);
     });
 
+    test('uploads a video reference file and detects video upload preview', () => {
+        const composer = createVisibleComposer();
+        appendVisibleGrokEditor(composer);
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'video/mp4';
+        composer.appendChild(input);
+
+        expect(
+            uploadReferenceFile(
+                {
+                    name: 'reference.mp4',
+                    kind: 'video',
+                    mimeType: 'video/mp4',
+                    dataUrl: 'data:video/mp4;base64,aGVsbG8=',
+                    source: 'local'
+                },
+                document
+            )
+        ).toBe(true);
+        expect(input.files).toHaveLength(1);
+
+        const preview = appendGeneratedVideo({
+            src: 'blob:uploaded-video-reference',
+            getBoundingClientRect: () => ({ width: 120, height: 180, left: 90, top: 430 })
+        });
+        composer.appendChild(preview);
+
+        expect(hasUploadPreview(document, null, { kind: 'video', name: 'reference.mp4' })).toBe(true);
+    });
+
     test('uploads to Grok input instead of the extension overlay file input', () => {
         const overlay = document.createElement('div');
         overlay.id = 'grok-powertools-overlay';
@@ -924,10 +1186,78 @@ describe('recreate content DOM actions', () => {
             { documentRef: document, timeoutMs: 100, intervalMs: 1 }
         );
 
-        expect(result).toEqual({ ok: true, runId: 'recreate_1', generatedPrompt: 'A red cabin in snow.' });
+        expect(result).toEqual(expect.objectContaining({
+            ok: true,
+            runId: 'recreate_1',
+            generatedPrompt: 'A red cabin in snow.',
+            referenceSummary: expect.objectContaining({
+                kind: 'image',
+                source: 'local',
+                mimeType: 'image/png',
+                sourceHash: expect.any(String)
+            })
+        }));
         expect(searchEvents.map((event) => event.type)).toEqual(CLICK_EVENT_SEQUENCE);
         expect(editor.value).toContain('FINAL_IMAGINE_PROMPT:');
         expect(submitEvents.map((event) => event.type)).toEqual(CLICK_EVENT_SEQUENCE);
+    });
+
+    test('runChatPromptStep uses video instructions and extracts video prompt marker', async () => {
+        const composer = createVisibleComposer();
+        const editor = appendVisibleGrokEditor(composer);
+
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'video/mp4';
+        input.addEventListener('change', () => {
+            const preview = appendGeneratedVideo({
+                src: 'blob:uploaded-video-reference',
+                getBoundingClientRect: () => ({ width: 120, height: 180, left: 90, top: 430 })
+            });
+            composer.appendChild(preview);
+        });
+        composer.appendChild(input);
+
+        const submit = document.createElement('button');
+        submit.setAttribute('aria-label', 'Send');
+        submit.disabled = false;
+        submit.getBoundingClientRect = () => ({ width: 40, height: 40, left: 0, top: 0 });
+        submit.addEventListener('click', () => {
+            const answer = document.createElement('div');
+            answer.setAttribute('data-testid', 'assistant-message');
+            answer.textContent = 'FINAL_IMAGINE_VIDEO_PROMPT:\nA 10-second handheld clip of two people embracing slowly.';
+            document.body.appendChild(answer);
+        });
+        document.body.appendChild(submit);
+
+        const result = await runChatPromptStep(
+            {
+                runId: 'recreate_video_1',
+                reference: {
+                    name: 'reference.mp4',
+                    kind: 'video',
+                    mimeType: 'video/mp4',
+                    dataUrl: 'data:video/mp4;base64,aGVsbG8=',
+                    source: 'local',
+                    metadata: {
+                        sourcePrompt: 'he catches up with her and embraces her slowly'
+                    }
+                },
+                bestPracticesEnabled: false
+            },
+            { documentRef: document, timeoutMs: 100, intervalMs: 1, metadataProbeTimeoutMs: 1 }
+        );
+
+        expect(result.generatedPrompt).toBe('A 10-second handheld clip of two people embracing slowly.');
+        expect(result.referenceSummary).toEqual(expect.objectContaining({
+            kind: 'video',
+            source: 'local',
+            mimeType: 'video/mp4',
+            sourceHash: expect.any(String)
+        }));
+        expect(editor.value).toContain('Grok Imagine Video');
+        expect(editor.value).toContain('FINAL_IMAGINE_VIDEO_PROMPT:');
+        expect(editor.value).toContain('Known source prompt context');
     });
 
     test('runChatPromptStep lets native Grok submit clicks pass through the overlay', async () => {
@@ -1355,6 +1685,12 @@ describe('recreate content DOM actions', () => {
 
         const uninstallBridge = installContentEditableBridge();
         const uninstallMediaBridge = installMediaDataUrlBridge();
+        const nativeClick = jest.fn(async () => {
+            CLICK_EVENT_SEQUENCE.forEach((type) => {
+                submit.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+            });
+            return { ok: true };
+        });
 
         let result;
         try {
@@ -1364,19 +1700,21 @@ describe('recreate content DOM actions', () => {
                     generatedPrompt: 'A red cabin in snow.',
                     autoSubmit: true
                 },
-                { documentRef: document, timeoutMs: 100, resultTimeoutMs: 100, intervalMs: 1 }
+                { documentRef: document, timeoutMs: 100, resultTimeoutMs: 100, intervalMs: 1, nativeClick }
             );
         } finally {
             uninstallMediaBridge();
             uninstallBridge();
         }
 
-        expect(result).toEqual({
+        expect(result).toEqual(expect.objectContaining({
             ok: true,
             runId: 'recreate_1',
+            mediaKind: 'image',
             submitted: true,
             resultReady: true,
-            result: {
+            result: expect.objectContaining({
+                mediaKind: 'image',
                 sourceKind: 'trusted-grok-media',
                 openableSurface: 'direct-media-url',
                 naturalWidth: 1024,
@@ -1385,8 +1723,9 @@ describe('recreate content DOM actions', () => {
                 renderedHeight: 320,
                 byteLength: 12288,
                 openable: true
-            }
-        });
+            })
+        }));
+        expect(nativeClick).toHaveBeenCalledTimes(1);
         expect(submitEvents.map((event) => event.type)).toEqual(CLICK_EVENT_SEQUENCE);
     });
 
@@ -1506,6 +1845,200 @@ describe('recreate content DOM actions', () => {
             uninstallMediaBridge();
             uninstallBridge();
         }
+    });
+
+    test('runImagineSubmitStep selects video mode and verifies generated video bytes', async () => {
+        const imageMode = document.createElement('button');
+        imageMode.textContent = 'Image';
+        imageMode.setAttribute('data-state', 'checked');
+        imageMode.disabled = false;
+        makeVisibleElement(imageMode);
+        document.body.appendChild(imageMode);
+
+        const videoMode = document.createElement('button');
+        videoMode.textContent = 'Video';
+        videoMode.setAttribute('data-state', 'unchecked');
+        videoMode.disabled = false;
+        makeVisibleElement(videoMode);
+        const videoModeEvents = recordClickEvents(videoMode);
+        videoMode.addEventListener('click', () => {
+            imageMode.setAttribute('data-state', 'unchecked');
+            videoMode.setAttribute('data-state', 'checked');
+        });
+        document.body.appendChild(videoMode);
+
+        const editor = document.createElement('div');
+        editor.contentEditable = 'true';
+        editor.setAttribute('aria-label', 'Ask Grok anything');
+        makeVisibleElement(editor);
+        document.body.appendChild(editor);
+
+        const submit = document.createElement('button');
+        submit.setAttribute('aria-label', 'Submit');
+        submit.disabled = false;
+        submit.getBoundingClientRect = () => ({ width: 40, height: 40, left: 0, top: 0 });
+        submit.addEventListener('click', () => {
+            appendGeneratedVideo({
+                src: 'https://imagine-public.x.ai/imagine-public/share-videos/generated_1080_hd.mp4'
+            });
+        });
+        document.body.appendChild(submit);
+
+        global.fetch = jest.fn(() =>
+            Promise.resolve({
+                ok: true,
+                blob: () => Promise.resolve(new Blob([Buffer.alloc(12 * 1024, 1)], { type: 'video/mp4' }))
+            })
+        );
+        const uninstallBridge = installContentEditableBridge();
+
+        try {
+            await expect(
+                runImagineSubmitStep(
+                    {
+                        runId: 'recreate_video_1',
+                        generatedPrompt: 'A handheld 10-second embrace.',
+                        targetMode: 'video',
+                        autoSubmit: true
+                    },
+                    { documentRef: document, timeoutMs: 100, resultTimeoutMs: 100, intervalMs: 1 }
+                )
+            ).resolves.toEqual(
+                expect.objectContaining({
+                    ok: true,
+                    mediaKind: 'video',
+                    resultReady: true,
+                    result: expect.objectContaining({
+                        mediaKind: 'video',
+                        sourceKind: 'trusted-grok-video',
+                        url: 'https://imagine-public.x.ai/imagine-public/share-videos/generated_1080_hd.mp4',
+                        byteLength: 12288,
+                        outputMediaHash: expect.any(String),
+                        openable: true
+                    })
+                })
+            );
+        } finally {
+            uninstallBridge();
+        }
+
+        expect(videoModeEvents.map((event) => event.type)).toEqual(CLICK_EVENT_SEQUENCE);
+    });
+
+    test('runImagineSubmitStep verifies blob video bytes on an opened Imagine post', async () => {
+        window.history.pushState({}, '', '/imagine/post/live-video-proof');
+
+        const imageMode = document.createElement('button');
+        imageMode.textContent = 'Image';
+        imageMode.setAttribute('data-state', 'checked');
+        imageMode.disabled = false;
+        makeVisibleElement(imageMode);
+        document.body.appendChild(imageMode);
+
+        const videoMode = document.createElement('button');
+        videoMode.textContent = 'Video';
+        videoMode.setAttribute('data-state', 'unchecked');
+        videoMode.disabled = false;
+        makeVisibleElement(videoMode);
+        videoMode.addEventListener('click', () => {
+            imageMode.setAttribute('data-state', 'unchecked');
+            videoMode.setAttribute('data-state', 'checked');
+        });
+        document.body.appendChild(videoMode);
+
+        const editor = document.createElement('div');
+        editor.contentEditable = 'true';
+        editor.setAttribute('aria-label', 'Ask Grok anything');
+        makeVisibleElement(editor);
+        document.body.appendChild(editor);
+
+        const submit = document.createElement('button');
+        submit.setAttribute('aria-label', 'Submit');
+        submit.disabled = false;
+        submit.getBoundingClientRect = () => ({ width: 40, height: 40, left: 0, top: 0 });
+        submit.addEventListener('click', () => {
+            appendGeneratedVideo({
+                src: 'blob:https://grok.com/generated-video-proof'
+            });
+        });
+        document.body.appendChild(submit);
+
+        global.fetch = jest.fn(() =>
+            Promise.resolve({
+                ok: true,
+                blob: () => Promise.resolve(new Blob([Buffer.alloc(12 * 1024, 1)], { type: 'video/mp4' }))
+            })
+        );
+        const uninstallBridge = installContentEditableBridge();
+
+        try {
+            await expect(
+                runImagineSubmitStep(
+                    {
+                        runId: 'recreate_video_blob_1',
+                        generatedPrompt: 'A handheld 10-second embrace.',
+                        targetMode: 'video',
+                        autoSubmit: true
+                    },
+                    { documentRef: document, timeoutMs: 100, resultTimeoutMs: 100, intervalMs: 1 }
+                )
+            ).resolves.toEqual(
+                expect.objectContaining({
+                    ok: true,
+                    mediaKind: 'video',
+                    resultReady: true,
+                    result: expect.objectContaining({
+                        mediaKind: 'video',
+                        sourceKind: 'blob-url',
+                        byteLength: 12288,
+                        outputMediaHash: expect.any(String),
+                        openable: true,
+                        openableSurface: 'opened-post-blob-video'
+                    })
+                })
+            );
+        } finally {
+            uninstallBridge();
+        }
+    });
+
+    test('runImaginePostValidationStep verifies playable authenticated Grok video on an opened Imagine post', async () => {
+        window.history.pushState({}, '', '/imagine/post/live-assets-video-proof');
+
+        const trustedVideoUrl = 'https://assets.grok.com/users/test/generated/live-assets-video-proof/generated_video.mp4?cache=1';
+        appendGeneratedVideo({
+            src: trustedVideoUrl,
+            readyState: 4,
+            videoWidth: 416,
+            videoHeight: 752,
+            duration: 10
+        });
+
+        await expect(
+            runImaginePostValidationStep(
+                {
+                    runId: 'recreate_video_post_1',
+                    targetMode: 'video',
+                    referenceKind: 'video'
+                },
+                { documentRef: document, resultTimeoutMs: 100, intervalMs: 1 }
+            )
+        ).resolves.toEqual(
+            expect.objectContaining({
+                ok: true,
+                mediaKind: 'video',
+                resultReady: true,
+                result: expect.objectContaining({
+                    mediaKind: 'video',
+                    sourceKind: 'trusted-grok-video',
+                    url: trustedVideoUrl,
+                    byteLength: 0,
+                    outputMediaHash: null,
+                    openable: true,
+                    openableSurface: 'opened-post-playable-video'
+                })
+            })
+        );
     });
 
     test('runImagineSubmitStep opens full-size data result cards before accepting them', async () => {
@@ -1798,7 +2331,8 @@ describe('recreate content bridge', () => {
         error.code = 'chat_upload_input_missing';
         error.phase = 'chat';
         error.diagnostics = {
-            dataUrl: 'data:image/png;base64,bGVhaw=='
+            dataUrl: 'data:image/png;base64,bGVhaw==',
+            videoDataUrl: 'data:video/mp4;base64,bGVhaw=='
         };
         const request = {
             action: 'GPT_RECREATE_CHAT_STEP',
@@ -1847,7 +2381,52 @@ describe('recreate content bridge', () => {
             }
         });
         expect(JSON.stringify(response)).not.toContain('data:image/png');
+        expect(JSON.stringify(response)).not.toContain('data:video/mp4');
         expect(JSON.stringify(response)).not.toContain('source.png');
+    });
+
+    test('records recreated video prompts as video history', async () => {
+        const listeners = [];
+        const request = {
+            action: 'GPT_RECREATE_IMAGINE_STEP',
+            runId: 'recreate_video_1',
+            generatedPrompt: 'A handheld 10-second embrace.',
+            targetMode: 'video'
+        };
+        const actions = {
+            runImagineSubmitStep: jest.fn(async () => ({
+                ok: true,
+                runId: 'recreate_video_1',
+                mediaKind: 'video',
+                submitted: true,
+                resultReady: true
+            }))
+        };
+        const historyManager = {
+            add: jest.fn()
+        };
+        const chromeRuntime = {
+            onMessage: {
+                addListener: jest.fn((listener) => {
+                    listeners.push(listener);
+                })
+            }
+        };
+        const bridge = new RecreateWorkflowContentBridge(null, historyManager, {
+            actions,
+            chromeRuntime,
+            documentRef: { title: 'Grok Imagine' },
+            locationRef: { href: 'https://grok.com/imagine' }
+        });
+
+        bridge.setupListeners();
+        const response = await new Promise((resolve) => {
+            const keepAlive = listeners[0](request, {}, resolve);
+            expect(keepAlive).toBe(true);
+        });
+
+        expect(response).toEqual(expect.objectContaining({ ok: true, mediaKind: 'video' }));
+        expect(historyManager.add).toHaveBeenCalledWith('A handheld 10-second embrace.', 'video');
     });
 
     test('async catch responses do not expose arbitrary generic error messages', async () => {

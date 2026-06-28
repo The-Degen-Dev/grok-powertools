@@ -1,11 +1,11 @@
 # Grok Power Tools v0.2.0 Release Notes
 
-This release ships the current Grok Power Tools extension with Image Recreate, prompt and retry workflow updates, R2 backup support, and the current web/cloud companion surfaces.
+This release ships the current Grok Power Tools extension with Recreate Media, prompt and retry workflow updates, R2 backup support, and the current web/cloud companion surfaces.
 
 ## Shipped In v0.2.0
 
-- Image Recreate in the Grok overlay. It accepts a local, dropped, pasted, or current Grok image, sends it through Grok chat for a Grok Imagine prompt, and submits the prompt back into Grok Imagine.
-- Optional Grok Search context for the Image Recreate prompt-generation step.
+- Recreate Media in the Grok overlay. It accepts a local, dropped, pasted, or current Grok image, plus local MP4/MOV/WebM/GIF and trusted Grok video/post URLs, sends the reference through Grok chat for a Grok Imagine prompt, and submits the prompt back into Grok Imagine.
+- Optional Grok Search context for the Recreate Media prompt-generation step.
 - Prompt history and saved prompt controls in the overlay, plus settings import/export support.
 - Auto-Retry, Video Goal, Template Batch, Prompted Batch, Quick Batch, and Quality Repeat controls for Grok Imagine workflows. Retry behavior is based on failed generation attempts, not a single fixed error string.
 - Smart media scraping and raw image handling for Grok media surfaces.
@@ -36,16 +36,17 @@ The final release must be published only after these gates are recorded in `impl
 - `npm run typecheck --prefix cloud`
 - `npm run test:acceptance --prefix cloud`
 - `npx playwright test -c playwright.web.config.js`
-- Live Grok Image Recreate validation that reaches a new Grok Imagine result with openable generated media.
+- Live Grok Recreate Media validation that reaches a new Grok Imagine result with openable generated media.
+- Live Grok video recreation validation with the canonical clip that reaches a new playable generated video/post after the unpacked extension is reloaded.
 
 ## Known Limitations
 
 - Grok UI changes can break live automation and may require selector updates.
 - The extension has no hot reload. Reload it from `chrome://extensions/` and refresh Grok tabs after updates.
-- Image Recreate is validated by generated openable media, not by exact visual matching.
-- Animated GIF files can be used as image references, but GIF recreation as a motion workflow is not included.
-- Short video and GIF recreation are not included in v0.2.0.
+- Recreate Media is validated by generated openable media, not by exact visual matching.
+- Animated GIF frame sampling is limited by browser APIs; the GIF file is still treated as a motion reference.
+- Short video generation depends on Grok Imagine Video quota and current Grok UI behavior.
 
 ## Future Work
 
-Short video and GIF recreation should be designed separately. That work needs frame sampling, motion prompt strategy, playable media validation, and a measurement ledger before UI implementation.
+Future work should add stronger visual similarity measurement, richer GIF frame extraction, and operator-facing run comparison tools.

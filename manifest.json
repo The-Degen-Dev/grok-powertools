@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Grok Power Tools",
   "version": "0.2.0",
-  "description": "Grok Imagine workflow tools for prompts, retries, media backup, and image recreation.",
+  "description": "Grok Imagine workflow tools for prompts, retries, media backup, and media recreation.",
   "permissions": [
     "storage",
     "activeTab",
@@ -43,9 +43,13 @@
         "*://*.grok.x.ai/*",
         "*://grok.com/*",
         "*://*.grok.com/*",
-        "*://imagine-public.x.ai/*"
+        "*://imagine-public.x.ai/*",
+        "https://chatgpt.com/images*"
       ],
       "js": [
+        "providerRegistry.js",
+        "providerRunLedger.js",
+        "chatgptImagesContent.js",
         "recreateWorkflowUtils.js",
         "recreateWorkflowContent.js",
         "content.js"

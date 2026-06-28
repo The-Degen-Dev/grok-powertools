@@ -18,6 +18,12 @@ This repo has three product surfaces:
 - Web app: Next.js app under `web/` for collections, prompt library, clip editing, movie maker, sharing, auth, and sync.
 - Cloud backend: Cloudflare Worker under `cloud/` for R2 presigned uploads, metadata snapshots, and D1/JWT sync.
 
+Provider work:
+
+- The extension is Grok-first and now has provider-aware ChatGPT Images text-to-image tracking on `chatgpt.com/images`. Reference-image ChatGPT recreate/edit is not part of the current slice.
+- Provider-aware changes should keep Grok-only controls off ChatGPT pages instead of reusing Grok labels or workflows by default.
+- Treat provider support as controlling each provider's native web app capabilities, not recreating provider-specific composers inside the extension; ChatGPT Images should use its native prompt/send flow and single-result semantics.
+
 Key extension files:
 
 - `content.js`: main in-page overlay, prompt history, saved prompts, auto-retry/goals, Quality Repeat, batch automation, scraper.
@@ -32,6 +38,7 @@ Key extension files:
 - Logs live in separate consoles: Grok page content script, extension service worker, and popup inspect console.
 - Grok UI changes often. Most automation failures are selectors. Prefer accessible labels, verify visible elements, and use full pointer-event sequences for Radix controls.
 - React controlled inputs and TipTap content usually need `bridge.js`, not direct content-script DOM mutation.
+- ChatGPT Images currently uses a visible ProseMirror composer at `#prompt-textarea[contenteditable="true"][role="textbox"]` plus a hidden fallback textarea. Do not use hidden fallback textarea content as live proof that the native composer has text.
 - Authenticated media from `assets.grok.com` often needs page cookies, so route fetches through `bridge.js` when service-worker fetch fails.
 - Storage is split: `chrome.storage.sync` for overlay global settings, `chrome.storage.local` for prompts, history, processed IDs, activity logs, cloud config, and popup state.
 - Keep the raw load-unpacked extension workflow unless explicitly asked to change it.
@@ -64,7 +71,7 @@ npm install
 npm run typecheck
 ```
 
-For extension behavior, unit and mocked Playwright tests are not enough. Validate the relevant path in Chrome on `grok.com/imagine` when the change touches selectors, cookies, downloads, or live Grok DOM behavior.
+For extension behavior, unit and mocked Playwright tests are not enough. Validate the relevant path in Chrome on `grok.com/imagine` or `chatgpt.com/images` when the change touches selectors, cookies, downloads, or live provider DOM behavior.
 - For Vault/R2 work, do not treat a single preview page or default limit as the full dataset. Verify pagination, final unique asset count, and media access for an item beyond the first page before calling the Vault loaded.
 
 ## Branch And Safety Notes

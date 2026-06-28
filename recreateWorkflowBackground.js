@@ -62,6 +62,19 @@
         }
     }
 
+    function isGrokImaginePostUrl(value) {
+        try {
+            const url = new URL(String(value || ''));
+            return (
+                url.protocol === 'https:' &&
+                url.hostname === 'grok.com' &&
+                url.pathname.includes('/imagine/post/')
+            );
+        } catch {
+            return false;
+        }
+    }
+
     function normalizeErrorCode(error) {
         if (error && error.code) return error.code;
         if (error && error.message) return error.message;
@@ -71,6 +84,11 @@
     function isReceiverNotReadyError(error) {
         const message = String((error && error.diagnostics && error.diagnostics.chromeLastError) || error.message || '');
         return /receiving end does not exist/i.test(message);
+    }
+
+    function isMessageChannelClosedError(error) {
+        const message = String((error && error.diagnostics && error.diagnostics.chromeLastError) || error.message || '');
+        return /message channel closed|asynchronous response|extension context invalidated/i.test(message);
     }
 
     function wait(ms) {
@@ -183,6 +201,22 @@
             throw createPhaseError(errorCode, phase, {
                 reason: 'tab_load_timeout',
                 timeoutMs: tabReadyTimeoutMs
+            });
+        }
+
+        async function waitForImaginePostReady(tabId, errorCode, phase, options = {}) {
+            const startedAt = now();
+            const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : tabReadyTimeoutMs;
+
+            while (now() - startedAt <= timeoutMs) {
+                const tab = await tabsGet(tabId, errorCode, phase);
+                if (tab && tab.status === 'complete' && isGrokImaginePostUrl(tab.url)) return tab;
+                await wait(tabReadyPollMs);
+            }
+
+            throw createPhaseError(errorCode, phase, {
+                reason: 'post_navigation_timeout',
+                timeoutMs
             });
         }
 
@@ -351,6 +385,54 @@
             }, response && response.diagnostics ? response.diagnostics : {});
         }
 
+        function storageLocalGet(keys) {
+            return new Promise((resolve) => {
+                if (!chromeApi.storage || !chromeApi.storage.local || !chromeApi.storage.local.get) {
+                    resolve({});
+                    return;
+                }
+
+                try {
+                    const result = chromeApi.storage.local.get(keys, (stored) => {
+                        resolve(stored || {});
+                    });
+                    if (result && typeof result.then === 'function') {
+                        result.then((stored) => resolve(stored || {}), () => resolve({}));
+                    }
+                } catch {
+                    resolve({});
+                }
+            });
+        }
+
+        function storageLocalSet(values) {
+            return new Promise((resolve) => {
+                if (!chromeApi.storage || !chromeApi.storage.local || !chromeApi.storage.local.set) {
+                    resolve(false);
+                    return;
+                }
+
+                try {
+                    const result = chromeApi.storage.local.set(values, () => resolve(true));
+                    if (result && typeof result.then === 'function') {
+                        result.then(() => resolve(true), () => resolve(false));
+                    }
+                } catch {
+                    resolve(false);
+                }
+            });
+        }
+
+        async function appendRecreateLedgerEntry(entry) {
+            try {
+                const stored = await storageLocalGet(['gptRecreateRunLedger']);
+                const ledger = Array.isArray(stored.gptRecreateRunLedger) ? stored.gptRecreateRunLedger : [];
+                await storageLocalSet({ gptRecreateRunLedger: [entry, ...ledger].slice(0, 100) });
+            } catch {
+                // Ledger writes are diagnostic only and must not fail generation.
+            }
+        }
+
         function ensureActive(run) {
             if (!activeRun || activeRun.runId !== run.runId || activeRun.aborted) {
                 throw createError('workflow_aborted');
@@ -375,6 +457,34 @@
             return imagineTab.id;
         }
 
+        async function validateOpenedImaginePost(run, referenceKind, generatedPrompt) {
+            await waitForImaginePostReady(run.imagineTabId, 'imagine_tab_unavailable', 'imagine');
+            await injectRecreateContentScripts(run.imagineTabId, 'imagine_tab_unavailable', 'imagine');
+            return await tabsSendMessage(run.imagineTabId, {
+                action: 'GPT_RECREATE_IMAGINE_POST_VALIDATION_STEP',
+                runId: run.runId,
+                generatedPrompt,
+                targetMode: referenceKind,
+                referenceKind,
+                mediaKind: referenceKind
+            }, 'imagine_tab_unavailable', 'imagine', {
+                timeoutMs: messageTimeoutMs
+            });
+        }
+
+        async function recoverFromOpenedImaginePost(run, referenceKind, generatedPrompt, generatedMediaLabel) {
+            await waitForImaginePostReady(run.imagineTabId, 'imagine_tab_unavailable', 'imagine', {
+                timeoutMs: messageTimeoutMs
+            });
+            await sendStatus(run, 'imagine', `Validating opened Grok post ${generatedMediaLabel}...`, 'info');
+            ensureActive(run);
+            return await validateOpenedImaginePost(run, referenceKind, generatedPrompt);
+        }
+
+        function ignoreFailedPostRecovery(promise) {
+            return promise.catch(() => new Promise(() => {}));
+        }
+
         async function start(request = {}, context = {}) {
             if (activeRun) {
                 return buildFailure(activeRun, 'workflow', 'workflow_active');
@@ -390,8 +500,27 @@
             };
             activeRun = run;
 
+            let ledgerBase = null;
+
             try {
                 const reference = workflowUtils.normalizeRecreateReference(request.reference);
+                const referenceKind = reference.kind === 'video' ? 'video' : 'image';
+                const generatedMediaLabel = referenceKind === 'video' ? 'video' : 'image';
+                ledgerBase = {
+                    runId: run.runId,
+                    createdAt: new Date(now()).toISOString(),
+                    referenceKind,
+                    promptVersion: referenceKind === 'video' ? 'video-recreate-v1' : 'image-recreate-v1',
+                    source: reference.source,
+                    referenceSource: reference.source,
+                    name: reference.name,
+                    referenceName: reference.name,
+                    mimeType: reference.mimeType,
+                    referenceMimeType: reference.mimeType,
+                    byteLength: reference.byteLength || 0,
+                    sourceByteLength: reference.byteLength || 0,
+                    sourceUrl: reference.url || ''
+                };
 
                 await sendStatus(run, 'chat', 'Opening Grok chat tab...', 'info');
                 ensureActive(run);
@@ -407,42 +536,91 @@
                     action: 'GPT_RECREATE_CHAT_STEP',
                     runId: run.runId,
                     reference,
+                    referenceKind,
                     bestPracticesEnabled: !!request.bestPracticesEnabled
                 }, 'chat_tab_unavailable', 'chat');
                 ensureActive(run);
 
                 if (!chatResponse || !chatResponse.ok) {
                     const failed = buildResponseFailure(run, 'chat', 'chat_answer_timeout', chatResponse);
+                    await appendRecreateLedgerEntry({
+                        ...ledgerBase,
+                        status: 'failed',
+                        phase: failed.phase,
+                        error: failed.error
+                    });
                     await sendStatus(run, failed.phase, failed.error, 'error');
                     clearActiveRun(run);
                     return failed;
+                }
+
+                if (chatResponse.referenceSummary) {
+                    ledgerBase = {
+                        ...ledgerBase,
+                        ...chatResponse.referenceSummary,
+                        referenceKind
+                    };
                 }
 
                 const generatedPrompt =
                     typeof chatResponse.generatedPrompt === 'string' ? chatResponse.generatedPrompt.trim() : '';
                 if (!generatedPrompt) {
                     const failed = buildFailure(run, 'chat', 'chat_prompt_marker_missing');
+                    await appendRecreateLedgerEntry({
+                        ...ledgerBase,
+                        status: 'failed',
+                        phase: failed.phase,
+                        error: failed.error
+                    });
                     await sendStatus(run, failed.phase, failed.error, 'error');
                     clearActiveRun(run);
                     return failed;
                 }
 
-                await sendStatus(run, 'imagine', 'Submitting prompt and waiting for generated images...', 'info');
+                await sendStatus(run, 'imagine', `Submitting prompt and waiting for generated ${generatedMediaLabel}...`, 'info');
                 ensureActive(run);
 
                 run.imagineTabId = await getImagineTabId(run);
                 ensureActive(run);
 
-                const imagineResponse = await tabsSendMessage(run.imagineTabId, {
+                let imagineResponse;
+                const imagineMessage = {
                     action: 'GPT_RECREATE_IMAGINE_STEP',
                     runId: run.runId,
                     generatedPrompt,
+                    targetMode: referenceKind,
+                    referenceKind,
                     autoSubmit: true
-                }, 'imagine_tab_unavailable', 'imagine');
+                };
+                const imagineSubmitPromise = tabsSendMessage(
+                    run.imagineTabId,
+                    imagineMessage,
+                    'imagine_tab_unavailable',
+                    'imagine'
+                );
+                const openedPostRecoveryPromise = ignoreFailedPostRecovery(
+                    recoverFromOpenedImaginePost(run, referenceKind, generatedPrompt, generatedMediaLabel)
+                );
+
+                try {
+                    imagineResponse = await Promise.race([imagineSubmitPromise, openedPostRecoveryPromise]);
+                } catch (error) {
+                    if (!isMessageChannelClosedError(error)) throw error;
+                    await sendStatus(run, 'imagine', `Validating opened Grok post ${generatedMediaLabel}...`, 'info');
+                    ensureActive(run);
+                    imagineResponse = await validateOpenedImaginePost(run, referenceKind, generatedPrompt);
+                }
                 ensureActive(run);
 
                 if (!imagineResponse || !imagineResponse.ok) {
                     const failed = buildResponseFailure(run, 'imagine', 'imagine_submit_failed', imagineResponse);
+                    await appendRecreateLedgerEntry({
+                        ...ledgerBase,
+                        status: 'failed',
+                        phase: failed.phase,
+                        error: failed.error,
+                        generatedPrompt
+                    });
                     await sendStatus(run, failed.phase, failed.error, 'error');
                     clearActiveRun(run);
                     return failed;
@@ -450,6 +628,13 @@
 
                 if (imagineResponse.submitted !== true) {
                     const failed = buildFailure(run, 'imagine', 'imagine_submit_failed', imagineResponse.diagnostics || {});
+                    await appendRecreateLedgerEntry({
+                        ...ledgerBase,
+                        status: 'failed',
+                        phase: failed.phase,
+                        error: failed.error,
+                        generatedPrompt
+                    });
                     await sendStatus(run, failed.phase, failed.error, 'error');
                     clearActiveRun(run);
                     return failed;
@@ -457,17 +642,44 @@
 
                 if (imagineResponse.resultReady !== true) {
                     const failed = buildFailure(run, 'imagine', 'imagine_result_unverified', imagineResponse.diagnostics || {});
+                    await appendRecreateLedgerEntry({
+                        ...ledgerBase,
+                        status: 'failed',
+                        phase: failed.phase,
+                        error: failed.error,
+                        generatedPrompt
+                    });
                     await sendStatus(run, failed.phase, failed.error, 'error');
                     clearActiveRun(run);
                     return failed;
                 }
 
-                await sendStatus(run, 'done', 'Generated image ready.', 'success');
+                const outputUrl =
+                    imagineResponse.result && (
+                        imagineResponse.result.openedUrl ||
+                        imagineResponse.result.url ||
+                        imagineResponse.result.postUrl ||
+                        ''
+                    );
+                await appendRecreateLedgerEntry({
+                    ...ledgerBase,
+                    status: 'success',
+                    phase: 'done',
+                    generatedPrompt,
+                    outputUrl,
+                    outputMediaHash: imagineResponse.result && imagineResponse.result.outputMediaHash || null,
+                    resultByteLength: imagineResponse.result && Number.isFinite(imagineResponse.result.byteLength)
+                        ? imagineResponse.result.byteLength
+                        : null,
+                    subjectiveNotes: ''
+                });
+                await sendStatus(run, 'done', `Generated ${generatedMediaLabel} ready.`, 'success');
                 clearActiveRun(run);
 
                 return {
                     ok: true,
                     runId: run.runId,
+                    referenceKind,
                     generatedPrompt,
                     submitted: true,
                     resultReady: true,
@@ -478,6 +690,15 @@
                     sourceTabUrl: run.sourceTabUrl,
                     chatTabId: run.chatTabId,
                     imagineTabId: run.imagineTabId
+                });
+                await appendRecreateLedgerEntry({
+                    ...(ledgerBase || {
+                        runId: run.runId,
+                        createdAt: new Date(now()).toISOString()
+                    }),
+                    status: 'failed',
+                    phase: result.phase,
+                    error: result.error
                 });
                 await sendStatus(run, result.phase, result.error, 'error');
                 clearActiveRun(run);

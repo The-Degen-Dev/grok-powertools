@@ -9,7 +9,7 @@
         root.GrokRecreateWorkflowUtils = utils;
     }
 })(typeof self !== 'undefined' ? self : typeof globalThis !== 'undefined' ? globalThis : this, function () {
-    const ALLOWED_RECREATE_MIME_TYPES = [
+    const ALLOWED_RECREATE_IMAGE_MIME_TYPES = [
         'image/jpeg',
         'image/png',
         'image/gif',
@@ -17,9 +17,27 @@
         'image/bmp',
         'image/tiff'
     ];
-    const ALLOWED_RECREATE_SOURCES = ['local', 'paste', 'drop', 'current-grok-image'];
+    const ALLOWED_RECREATE_VIDEO_MIME_TYPES = [
+        'video/mp4',
+        'video/quicktime',
+        'video/webm'
+    ];
+    const ALLOWED_RECREATE_MIME_TYPES = [
+        ...ALLOWED_RECREATE_IMAGE_MIME_TYPES,
+        ...ALLOWED_RECREATE_VIDEO_MIME_TYPES
+    ];
+    const ALLOWED_RECREATE_SOURCES = [
+        'local',
+        'paste',
+        'drop',
+        'current-grok-image',
+        'grok-post-url',
+        'grok-video-url'
+    ];
     const FINAL_PROMPT_MARKER = 'FINAL_IMAGINE_PROMPT:';
+    const FINAL_VIDEO_PROMPT_MARKER = 'FINAL_IMAGINE_VIDEO_PROMPT:';
     const MAX_REFERENCE_BYTES = 8 * 1024 * 1024;
+    const MAX_VIDEO_REFERENCE_BYTES = 32 * 1024 * 1024;
     const SENSITIVE_EXACT_DIAGNOSTIC_KEYS = new Set([
         'dataurl',
         'reference'
@@ -113,12 +131,35 @@
         return estimatedByteLength;
     }
 
+    function getReferenceKindFromMimeType(mimeType) {
+        const normalizedMimeType = String(mimeType || '').toLowerCase();
+        if (ALLOWED_RECREATE_VIDEO_MIME_TYPES.includes(normalizedMimeType)) return 'video';
+        if (normalizedMimeType === 'image/gif') return 'video';
+        if (ALLOWED_RECREATE_IMAGE_MIME_TYPES.includes(normalizedMimeType)) return 'image';
+        return '';
+    }
+
+    function getDecodedBase64ByteLengthForLimit(base64, maxBytes) {
+        const clean = String(base64 || '').replace(/\s+/g, '');
+        if (!isStrictBase64(clean)) {
+            throw fail('reference_invalid');
+        }
+
+        const estimatedByteLength = getEstimatedDecodedBase64ByteLength(clean);
+        if (estimatedByteLength <= 0 || estimatedByteLength > maxBytes) {
+            throw fail('reference_invalid');
+        }
+
+        validateBase64Decode(clean);
+        return estimatedByteLength;
+    }
+
     function parseRecreateDataUrl(dataUrl) {
         const match = String(dataUrl || '').match(/^data:([^;,]+);base64,([a-zA-Z0-9+/=\s]+)$/);
         if (!match) throw fail('reference_invalid');
 
         const mimeType = match[1].toLowerCase();
-        if (!ALLOWED_RECREATE_MIME_TYPES.includes(mimeType)) throw fail('reference_invalid');
+        if (!ALLOWED_RECREATE_IMAGE_MIME_TYPES.includes(mimeType)) throw fail('reference_invalid');
 
         const base64 = match[2].replace(/\s+/g, '');
         const byteLength = getDecodedBase64ByteLength(base64);
@@ -127,25 +168,74 @@
         return { mimeType, base64, byteLength };
     }
 
+    function parseRecreateMediaDataUrl(dataUrl) {
+        const match = String(dataUrl || '').match(/^data:([^;,]+);base64,([a-zA-Z0-9+/=\s]+)$/);
+        if (!match) throw fail('reference_invalid');
+
+        const mimeType = match[1].toLowerCase();
+        const kind = getReferenceKindFromMimeType(mimeType);
+        if (!kind) throw fail('reference_invalid');
+
+        const base64 = match[2].replace(/\s+/g, '');
+        const maxBytes = kind === 'video' ? MAX_VIDEO_REFERENCE_BYTES : MAX_REFERENCE_BYTES;
+        const byteLength = getDecodedBase64ByteLengthForLimit(base64, maxBytes);
+
+        return { kind, mimeType, base64, byteLength };
+    }
+
     function normalizeRecreateReference(input) {
         if (!input || typeof input !== 'object') throw fail('reference_missing');
 
-        const parsed = parseRecreateDataUrl(input.dataUrl);
-        const mimeType = String(input.mimeType || parsed.mimeType).toLowerCase();
-        if (mimeType !== parsed.mimeType || !ALLOWED_RECREATE_MIME_TYPES.includes(mimeType)) {
+        const rawMimeType = String(input.mimeType || '').toLowerCase();
+        const url = String(input.url || '').trim();
+        const requestedKind = input.kind === 'video' || input.kind === 'image' ? input.kind : '';
+        const parsed = input.dataUrl ? parseRecreateMediaDataUrl(input.dataUrl) : null;
+        const kind = requestedKind || (parsed ? parsed.kind : getReferenceKindFromMimeType(rawMimeType));
+        if (!kind) throw fail('reference_invalid');
+
+        if (!parsed && !url) throw fail('reference_invalid');
+
+        if (parsed && requestedKind && requestedKind !== parsed.kind) throw fail('reference_invalid');
+
+        if (kind === 'image' && parsed && !ALLOWED_RECREATE_IMAGE_MIME_TYPES.includes(parsed.mimeType)) {
             throw fail('reference_invalid');
         }
 
-        const source = ALLOWED_RECREATE_SOURCES.includes(input.source) ? input.source : 'local';
-        const name = String(input.name || 'reference-image').trim().slice(0, 120) || 'reference-image';
+        if (kind === 'video' && parsed && !ALLOWED_RECREATE_MIME_TYPES.includes(parsed.mimeType)) {
+            throw fail('reference_invalid');
+        }
 
-        return {
+        const mimeType = String(input.mimeType || (parsed ? parsed.mimeType : rawMimeType)).toLowerCase();
+        if (parsed && mimeType !== parsed.mimeType) {
+            throw fail('reference_invalid');
+        }
+        if (!parsed && kind === 'video' && mimeType && !ALLOWED_RECREATE_MIME_TYPES.includes(mimeType)) {
+            throw fail('reference_invalid');
+        }
+        if (!parsed && kind === 'image') throw fail('reference_invalid');
+
+        const source = ALLOWED_RECREATE_SOURCES.includes(input.source) ? input.source : 'local';
+        const defaultName = kind === 'video' ? 'reference-video' : 'reference-image';
+        const name = String(input.name || defaultName).trim().slice(0, 120) || defaultName;
+
+        const normalized = {
             name,
             mimeType,
-            dataUrl: String(input.dataUrl),
             source,
-            byteLength: parsed.byteLength
+            byteLength: parsed ? parsed.byteLength : Number(input.byteLength || 0)
         };
+
+        if (input.dataUrl) normalized.dataUrl = String(input.dataUrl);
+        if (url) normalized.url = url;
+        if (kind === 'video') normalized.kind = 'video';
+        if (input.metadata && typeof input.metadata === 'object') {
+            normalized.metadata = { ...input.metadata };
+        }
+        if (input.frames && typeof input.frames === 'object') {
+            normalized.frames = { ...input.frames };
+        }
+
+        return normalized;
     }
 
     function extractFinalImaginePrompt(answerText) {
@@ -195,6 +285,47 @@
         ].join('\n');
     }
 
+    function buildVideoRecreateChatInstruction(options = {}) {
+        const bestPracticesLine = options.bestPracticesEnabled
+            ? 'If best-practices mode is enabled, use Grok search to find current Grok Imagine video prompt best practices and apply them.'
+            : 'Use only your visual and motion analysis of the attached reference material and the prompt-writing instructions below.';
+        const metadata = options.metadata && typeof options.metadata === 'object' ? options.metadata : {};
+        const metadataLines = [];
+
+        if (Number.isFinite(metadata.durationSec)) metadataLines.push(`Reference duration: ${metadata.durationSec}s.`);
+        if (Number.isFinite(metadata.width) && Number.isFinite(metadata.height)) {
+            metadataLines.push(`Reference size: ${metadata.width}x${metadata.height}.`);
+        }
+        if (metadata.sourcePrompt) metadataLines.push(`Known source prompt context: ${metadata.sourcePrompt}.`);
+
+        return [
+            'You are creating one ready-to-paste Grok Imagine Video prompt from the attached video/GIF reference material.',
+            '',
+            'Important context: Grok Imagine Video is not Runway, Midjourney, Stable Diffusion, or a generic video model. Write for Grok Imagine Video specifically: concrete visible action, temporal order, subject continuity, camera movement, and final frame. Avoid prompt-engineering keyword soup and avoid claiming exact duplication.',
+            '',
+            'Analyze the opening frame, motion beats, subject actions, camera angle, camera movement, pacing, lighting, color, setting, style, and ending frame. Preserve the important motion structure and visual continuity while avoiding references to this instruction.',
+            '',
+            metadataLines.length ? metadataLines.join('\n') : 'No extra source metadata is available.',
+            '',
+            bestPracticesLine,
+            '',
+            'Return exactly one final prompt for Grok Imagine Video. Do not include alternatives, commentary, markdown tables, or explanations.',
+            '',
+            FINAL_VIDEO_PROMPT_MARKER,
+            '<one ready-to-paste Grok Imagine Video prompt>'
+        ].join('\n');
+    }
+
+    function extractFinalImagineVideoPrompt(answerText) {
+        const text = String(answerText || '');
+        const markerIndex = text.indexOf(FINAL_VIDEO_PROMPT_MARKER);
+        if (markerIndex < 0) throw fail('chat_prompt_marker_missing');
+
+        return extractFinalImaginePrompt(
+            `${FINAL_PROMPT_MARKER}${text.slice(markerIndex + FINAL_VIDEO_PROMPT_MARKER.length)}`
+        );
+    }
+
     function isTrustedGrokMediaUrl(value) {
         try {
             const parsed = new URL(String(value || ''));
@@ -211,9 +342,48 @@
         }
     }
 
+    function isTrustedGrokVideoUrl(value) {
+        try {
+            const parsed = new URL(String(value || ''));
+            return (
+                parsed.protocol === 'https:' &&
+                (
+                    (
+                        parsed.hostname === 'imagine-public.x.ai' &&
+                        /\/share-videos\//i.test(parsed.pathname)
+                    ) ||
+                    (
+                        parsed.hostname === 'assets.grok.com' &&
+                        /\.(mp4|webm|mov)$/i.test(parsed.pathname)
+                    )
+                )
+            );
+        } catch {
+            return false;
+        }
+    }
+
     function isSupportedCurrentImageSrc(src) {
         const value = String(src || '');
         return value.startsWith('data:image/') || value.startsWith('blob:') || isTrustedGrokMediaUrl(value);
+    }
+
+    function isTrustedGrokPostUrl(value) {
+        try {
+            const parsed = new URL(String(value || ''));
+            return (
+                parsed.protocol === 'https:' &&
+                parsed.hostname === 'grok.com' &&
+                /^\/imagine\/post\/[a-f0-9-]+$/i.test(parsed.pathname)
+            );
+        } catch {
+            return false;
+        }
+    }
+
+    function isSupportedCurrentVideoSrc(src) {
+        const value = String(src || '');
+        return value.startsWith('data:video/') || value.startsWith('blob:') || isTrustedGrokVideoUrl(value);
     }
 
     function isLikelyGeneratedImageCandidate(candidate) {
@@ -271,7 +441,13 @@
     }
 
     function shouldScrubValue(value) {
-        return typeof value === 'string' && value.trimStart().startsWith('data:image/');
+        return (
+            typeof value === 'string' &&
+            (
+                value.trimStart().startsWith('data:image/') ||
+                value.trimStart().startsWith('data:video/')
+            )
+        );
     }
 
     function scrubDiagnosticValue(value) {
@@ -324,17 +500,28 @@
 
     return {
         ALLOWED_RECREATE_MIME_TYPES,
+        ALLOWED_RECREATE_IMAGE_MIME_TYPES,
+        ALLOWED_RECREATE_VIDEO_MIME_TYPES,
         FINAL_PROMPT_MARKER,
+        FINAL_VIDEO_PROMPT_MARKER,
         MAX_REFERENCE_BYTES,
+        MAX_VIDEO_REFERENCE_BYTES,
         buildRecreateChatInstruction,
         buildRecreateFailure,
+        buildVideoRecreateChatInstruction,
         chooseBestGeneratedImageCandidate,
         createRecreateRunId,
+        extractFinalImagineVideoPrompt,
         extractFinalImaginePrompt,
+        getReferenceKindFromMimeType,
         isLikelyGeneratedImageCandidate,
         isSupportedCurrentImageSrc,
+        isSupportedCurrentVideoSrc,
+        isTrustedGrokPostUrl,
         isTrustedGrokMediaUrl,
+        isTrustedGrokVideoUrl,
         normalizeRecreateReference,
-        parseRecreateDataUrl
+        parseRecreateDataUrl,
+        parseRecreateMediaDataUrl
     };
 });
