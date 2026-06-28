@@ -178,8 +178,8 @@
     },
     {
       "path": "logs/cloud-typecheck.txt",
-      "bytes": 57,
-      "updatedAt": "2026-06-28T04:03:44.666Z"
+      "bytes": 56,
+      "updatedAt": "2026-06-28T04:09:56.503Z"
     },
     {
       "path": "logs/d1-broad-token-select-only-approval.json",
@@ -210,6 +210,11 @@
       "path": "logs/d1-vault_overlays.json",
       "bytes": 642,
       "updatedAt": "2026-06-28T03:48:05.118Z"
+    },
+    {
+      "path": "logs/live-grok-window-check-2026-06-28.json",
+      "bytes": 3620,
+      "updatedAt": "2026-06-28T04:13:26.296Z"
     },
     {
       "path": "logs/local-checks-summary.json",
@@ -293,8 +298,8 @@
     },
     {
       "path": "logs/root-lint.txt",
-      "bytes": 64,
-      "updatedAt": "2026-06-28T04:03:44.481Z"
+      "bytes": 63,
+      "updatedAt": "2026-06-28T04:09:56.503Z"
     },
     {
       "path": "logs/root-test-e2e.txt",
@@ -317,19 +322,24 @@
       "updatedAt": "2026-06-28T02:52:34.316Z"
     },
     {
+      "path": "logs/secret-scan-summary.json",
+      "bytes": 945,
+      "updatedAt": "2026-06-28T04:09:28.233Z"
+    },
+    {
       "path": "logs/validate-artifacts.json",
       "bytes": 102,
-      "updatedAt": "2026-06-28T04:08:39.599Z"
+      "updatedAt": "2026-06-28T04:14:10.183Z"
     },
     {
       "path": "logs/web-build.txt",
-      "bytes": 1365,
-      "updatedAt": "2026-06-28T04:03:51.364Z"
+      "bytes": 1358,
+      "updatedAt": "2026-06-28T04:09:56.503Z"
     },
     {
       "path": "logs/web-lint.txt",
-      "bytes": 28,
-      "updatedAt": "2026-06-28T04:03:44.575Z"
+      "bytes": 27,
+      "updatedAt": "2026-06-28T04:09:56.503Z"
     },
     {
       "path": "logs/web-media-first-chunk-beyond-first-page.json",
@@ -484,7 +494,7 @@
     {
       "path": "report.md",
       "bytes": 5024,
-      "updatedAt": "2026-06-28T04:08:39.484Z"
+      "updatedAt": "2026-06-28T04:14:04.516Z"
     },
     {
       "path": "screenshots/.gitkeep",

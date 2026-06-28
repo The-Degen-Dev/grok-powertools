@@ -1,0 +1,211 @@
+{
+  "generatedAt": "2026-06-28T04:11:58.105Z",
+  "method": "peekaboo list windows --app Chrome --json, sanitized window titles",
+  "rawTitlesStored": false,
+  "grokWindowVisible": false,
+  "visibleTitleCategories": [
+    "blank",
+    "non_grok_browser",
+    "chrome"
+  ],
+  "windows": [
+    {
+      "windowId": 2163,
+      "titleCategory": "blank",
+      "isMainWindow": true,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          0,
+          617
+        ],
+        [
+          500,
+          500
+        ]
+      ]
+    },
+    {
+      "windowId": 2107,
+      "titleCategory": "blank",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "windowId": 2106,
+      "titleCategory": "blank",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "windowId": 2104,
+      "titleCategory": "blank",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          99,
+          59
+        ],
+        [
+          1100,
+          88
+        ]
+      ]
+    },
+    {
+      "windowId": 2103,
+      "titleCategory": "non_grok_browser",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          0,
+          34
+        ],
+        [
+          1568,
+          1080
+        ]
+      ]
+    },
+    {
+      "windowId": 2102,
+      "titleCategory": "blank",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          1728,
+          33
+        ]
+      ]
+    },
+    {
+      "windowId": 2101,
+      "titleCategory": "blank",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          1728,
+          33
+        ]
+      ]
+    },
+    {
+      "windowId": 2100,
+      "titleCategory": "blank",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          1728,
+          33
+        ]
+      ]
+    },
+    {
+      "windowId": 2099,
+      "titleCategory": "blank",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          1728,
+          33
+        ]
+      ]
+    },
+    {
+      "windowId": 2098,
+      "titleCategory": "chrome",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          352,
+          98
+        ],
+        [
+          1024,
+          822
+        ]
+      ]
+    },
+    {
+      "windowId": 2105,
+      "titleCategory": "blank",
+      "isMainWindow": false,
+      "isOnScreen": true,
+      "isOffScreen": false,
+      "isMinimized": false,
+      "bounds": [
+        [
+          99,
+          59
+        ],
+        [
+          1100,
+          418
+        ]
+      ]
+    }
+  ]
+}
