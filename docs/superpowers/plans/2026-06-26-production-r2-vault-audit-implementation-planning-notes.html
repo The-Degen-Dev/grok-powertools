@@ -87,6 +87,7 @@
     <li>D1 export is planned through <code>wrangler d1 execute --remote --json --command</code> under Node 24 because current command help confirms that surface.</li>
     <li>The final report has three verdicts: production R2 internal correctness, current Grok Saved completeness, and local system health. A visual Grok sample cannot prove full current Saved completeness.</li>
     <li>Local parent-folder inventory is filtered to likely Grok/R2 media candidates. The parent contains unrelated repositories and dependency folders, so scanning every media-like file would create noisy false gaps.</li>
+    <li>After a read-only live Grok probe on 2026-06-28, the planning identity rule is: capture <code>grokPostId</code> from <code>/imagine/post/{uuid}</code> as the preferred Grok Saved item identifier when present. Media URL UUIDs remain variant and storage evidence because the same page can expose multiple media UUIDs for thumbnails, variants, user paths, and active media.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -95,6 +96,7 @@
     <li>The plan does not add or modify product route code during audit execution. If existing routes are insufficient, the audit records a blocker instead of adding a new production data path.</li>
     <li>The plan allows dry-run Next scan and plan routes only after code inspection confirms no production writes. It still excludes approve, run, gap-fill run, and reconcile index routes because the audit does not need approval or execution semantics.</li>
     <li>The plan does not attempt to prove every current Grok Saved item unless a stable export, API, or other authoritative enumeration appears during execution. It keeps Grok visual inspection as sample evidence by default.</li>
+    <li>The live identifier probe opened one visible Saved media tile and returned the tab to <code>/imagine/saved</code>. It did not run generation, selection, sync, backup, repair, download, delete, share, or post actions.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -104,6 +106,7 @@
     <li>Alternative considered: download a full local copy of production R2. Rejected because the user approved hashing, not creating a second media corpus. The plan streams or downloads only to hash and discards bytes.</li>
     <li>Alternative considered: scan every file under the parent media root. Rejected because the parent root contains unrelated app source trees and dependencies. The plan inventories <code>GrokVault</code> fully and parent media candidates selectively.</li>
     <li>Alternative considered: inspect the live Grok tab first. Rejected because the spec makes raw R2 and local inventory the first proof layer, and live Grok should not be driven until raw inventories are complete or blocked.</li>
+    <li>Alternative considered: treat the current internal <code>assetId</code> or the last UUID in a media URL as the logical Saved identity. Rejected for the canonical model because the live page can expose multiple media UUIDs around one Grok post. The canonical model should keep <code>grokPostId</code>, media UUIDs, R2 keys, and hashes as separate evidence fields.</li>
   </ul>
 
   <h2>Open Questions</h2>

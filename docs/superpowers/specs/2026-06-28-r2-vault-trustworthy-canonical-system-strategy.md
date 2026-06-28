@@ -66,15 +66,25 @@ The user's expected product contract is:
 
 Canonical identity is a logical Grok Saved asset record.
 
+Live Grok Saved probe on 2026-06-28 resolved the first identity question:
+
+- Opening a visible Saved media tile in the user's existing Chrome/Grok session navigated from `https://grok.com/imagine/saved` to `https://grok.com/imagine/post/{uuid}`.
+- The `{uuid}` from that route should be captured as `grokPostId` and treated as the primary Grok item identifier when present.
+- A sanitized active-tab DOM probe found the same route UUID in the active media URL for the opened item, while nearby thumbnails and page chrome also contained other media UUIDs.
+- Therefore media URL UUIDs are useful variant/storage evidence, but they are not always equivalent to the logical Grok Saved item identity.
+- The exact observed post UUID, prompt text, media URLs, cookies, and signed query strings were not stored in this durable note.
+
 Rejected as primary identity:
 
 - R2 object key. R2 keys are storage locations, not product identity.
 - SHA-256 hash. Hashes prove byte equality, not Saved-item identity.
 - Existing D1/Worker asset ID. Current app index evidence is incomplete and must not become root truth until reconciled.
+- Raw media URL UUIDs by themselves. A page can expose multiple media UUIDs for thumbnails, variants, user paths, or active media.
 
 Accepted roles:
 
 - Grok Saved durable evidence decides whether a logical asset should exist.
+- `grokPostId` from `/imagine/post/{uuid}` is the preferred Grok-side item identity when available.
 - R2 keys are storage locations for media or metadata bytes.
 - SHA-256 is duplicate and byte-proof evidence.
 - D1/Worker rows are current app-index evidence.
@@ -149,6 +159,8 @@ Phase 1: Durable Grok Saved inventory
 
 - Build a read-only Saved enumerator for the existing Chrome session or another user-approved export/API path.
 - Capture a stable snapshot without generating, deleting, syncing, backing up, or repairing.
+- Open each Saved media item or otherwise read its detail route to capture `grokPostId` from `/imagine/post/{uuid}` when available.
+- Capture media URL UUIDs separately as variant/storage evidence, not as the primary logical item identity unless no `grokPostId` can be recovered.
 - Redact private prompt text unless explicitly needed and approved.
 - Produce a parseable Saved inventory artifact.
 
@@ -185,20 +197,18 @@ Phase 6: Physical cleanup, optional and later
 
 These are the next grilling decisions:
 
-1. What evidence from Grok Saved is stable enough to define a logical asset identity?
-2. Should prompt text be hashed, redacted, or stored encrypted for canonical matching?
-3. How should image/video pairs and generated variants be represented: one asset with variants, or separate assets linked by generation context?
-4. What is the minimum confidence threshold for automatic `alternate_duplicate` classification?
-5. Where should the canonical index live first: D1, R2 JSON snapshot, both, or local-only draft?
-6. What does "clean" mean for the next audit: zero unresolved canonical objects, zero duplicate product assets, or zero physical duplicate bytes?
+1. Should prompt text be hashed, redacted, or stored encrypted for canonical matching?
+2. How should image/video pairs and generated variants be represented: one asset with variants, or separate assets linked by generation context?
+3. What is the minimum confidence threshold for automatic `alternate_duplicate` classification?
+4. Where should the canonical index live first: D1, R2 JSON snapshot, both, or local-only draft?
+5. What does "clean" mean for the next audit: zero unresolved canonical objects, zero duplicate product assets, or zero physical duplicate bytes?
 
 ## Current Recommended Next Question
 
-What evidence from Grok Saved is stable enough to define a logical asset identity?
+Should prompt text be hashed, redacted, or stored encrypted for canonical matching?
 
 Recommended answer to evaluate next:
 
-- Use the strongest stable Grok item identifier if one is exposed.
-- If no stable item ID is exposed, use a compound identity made from Saved item URL/details, visible media references, generation/project context, and R2/content-hash corroboration.
-- Do not use prompt text alone, R2 key alone, D1 ID alone, or SHA-256 alone.
-
+- Store a salted prompt hash for matching and diagnostics.
+- Store redacted prompt excerpts only when they are needed for human review.
+- Do not store full raw prompt text in the canonical index unless the user explicitly approves a separate encrypted prompt vault.
