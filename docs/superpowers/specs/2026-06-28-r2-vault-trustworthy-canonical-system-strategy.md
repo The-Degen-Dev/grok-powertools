@@ -108,7 +108,7 @@ Decision:
 - Store full image prompts, full video prompts, and all available Grok metadata in Vault records.
 - Store them as fields attached to the logical `grokPostId` record and/or existing prompt sidecar objects.
 - Keep R2 as the durable raw metadata store.
-- Keep D1 primarily as an index and lookup layer unless product needs force a small number of prompt fields into D1.
+- Keep D1 as the required app-facing index and lookup layer after the canonical schema is proven. D1 should not replace R2 as the durable raw metadata store.
 - Do not introduce a separate encrypted prompt vault, separate service, separate account, or complex access model for this owner-only phase.
 
 Risk handling without extra architecture:
@@ -232,20 +232,35 @@ Phase 3: Read-only reconciliation
 - Produce a classification proposal for every R2 media object and every Saved item.
 - Produce separate lists for missing-from-R2, R2-only/unlinked, duplicate groups, metadata gaps, and human-review items.
 
-Phase 4: Logical product cleanup
+Phase 4: First approved canonical snapshot
 
-- Teach app views to read from the canonical asset model or an equivalent generated index.
+- After the read-only reconciliation is reviewed, write an append-only R2 JSON canonical snapshot only with explicit write approval.
+- Include schema version, source snapshot IDs, source counts, classification counts, content hashes, generated time, and rollback notes.
+- Treat this R2 JSON snapshot as the durable source-of-truth and recovery record for the canonical model.
+- Do not treat the R2 JSON snapshot as the final app query layer.
+
+Phase 5: D1 canonical index projection
+
+- Add D1 tables or rows as a derived projection from the approved R2 JSON canonical snapshot.
+- Keep D1 focused on query fields, lookup keys, source pointers, hashes, status, counts, and selected display fields.
+- Keep bulky raw metadata and full prompt archives in R2 unless a specific UI read requires a small D1 copy.
+- Validate D1 against the R2 snapshot before product views use it: row counts, canonical IDs, classification counts, and manifest hash or version must match.
+
+Phase 6: Logical product cleanup
+
+- Teach app views to read from the D1 canonical index projection, with R2 JSON snapshots available for audit, recovery, and diagnostics.
 - Product views should show one logical asset per canonical Saved identity.
 - Duplicate/alternate/date-folder objects should be visible in diagnostics, not normal gallery views.
+- Keep a reconciliation check that can compare app-facing D1 rows back to the R2 canonical snapshot and raw R2 inventory.
 
-Phase 5: Approved repair plan
+Phase 7: Approved repair plan
 
-- Only after the read-only classification is reviewed, design exact write steps.
+- Only after the read-only classification and staged index writes are reviewed, design exact repair steps.
 - Prefer append-only index/ledger updates first.
 - Avoid object rewrites or deletes.
 - Use exact counts, plan hashes, rollback notes, and explicit user approval.
 
-Phase 6: Physical cleanup, optional and later
+Phase 8: Physical cleanup, optional and later
 
 - Consider deletes or lifecycle moves only after repeated clean audits and explicit approval.
 
@@ -262,7 +277,10 @@ Where should the canonical index live first?
 
 Recommended answer to evaluate next:
 
-- During read-only reconciliation, generate a local-only canonical index artifact.
-- The first approved persistent write should be an append-only R2 JSON snapshot under the existing Vault metadata namespace.
-- Add D1 rows only after the schema and UI reads are stable enough to need indexed querying.
+- Stage 1: During read-only reconciliation, generate a local-only canonical index artifact.
+- Stage 2: The first approved persistent write should be an append-only R2 JSON snapshot under the existing Vault metadata namespace.
+- Stage 3: Add D1 rows as a derived app-facing index from the approved R2 snapshot once the schema is stable enough to query.
+- Stage 4: Move product views to the D1 canonical index, with R2 JSON snapshots retained for audit, recovery, and diagnostics.
+- Stage 5: Keep periodic reconciliation that checks D1 back against the R2 snapshot and raw R2 inventory.
+- The canonical-index plan is not complete at the R2 JSON snapshot. D1 projection and validation are part of the staged target system.
 - Keep physical R2 media objects unchanged in the first write phase.

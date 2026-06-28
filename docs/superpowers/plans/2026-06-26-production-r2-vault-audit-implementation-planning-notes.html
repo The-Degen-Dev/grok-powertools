@@ -121,7 +121,7 @@
     <li>No planning question blocks execution. Execution must still stop if read-only R2/D1 auth cannot be proven, if raw R2 listing is unexpectedly huge or points outside the prefix, or if browser automation cannot prove it controls the visible Grok tab.</li>
     <li>If production R2 byte hashing is large enough to trigger rate, cost, or local disk risk, the execution worker should stop and ask whether to continue, sample, or split into a separate hashing run.</li>
     <li>Before implementing a full Grok Saved enumerator, remove or gate logs that print prompt snippets or source URL snippets. The current backup flow has short prompt/source logging, which is acceptable for debugging but not for a raw metadata capture run.</li>
-    <li>The next planning decision is where the canonical index should live first. Current recommendation: local-only artifact during read-only reconciliation, append-only R2 JSON snapshot after write approval, then D1 rows only when indexed UI reads need them.</li>
+    <li>The canonical-index staging plan must not stop at the R2 JSON snapshot. Current recommendation: local-only artifact during read-only reconciliation, append-only R2 JSON snapshot after write approval, D1 projection as the app-facing query layer once the schema is stable, product views reading D1, and recurring reconciliation from D1 back to the R2 snapshot and raw R2 inventory.</li>
   </ul>
 </body>
 </html>
