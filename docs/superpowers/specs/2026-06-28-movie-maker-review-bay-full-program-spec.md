@@ -254,7 +254,12 @@ Export requirements:
 - Export blockers disable export and link back to the affected clips.
 - Export warnings do not block, but must be visible.
 - MP4 export must not be implemented by relabeling canvas-only WebM output.
+- The export engine choice must be proven before export work starts.
+- FFmpeg.wasm is the conservative Phase 1 default, but WebCodecs plus Mediabunny may replace it only after a short spike proves MP4 plus audio, browser support, memory behavior, and testability with this repo's fixture media.
+- Remotion may inform future deterministic rendering architecture, but it must not become a hidden server or licensing dependency for local-only Phase 1 work without a separate decision record.
 - FFmpeg core/runtime versions must be verified during implementation.
+- If FFmpeg.wasm multithreaded core is used, cross-origin isolation and SharedArrayBuffer requirements must be explicitly handled before it is selected.
+- If WebCodecs is used, the plan must cover browser support, MP4 muxing, frame and audio sample cleanup, and fallback behavior.
 - Completed MP4 exports with expected audio must be verified by stream inspection in tests.
 - Export runs are stored locally with timestamp, format, status, warnings, duration where available, output size where available, and audio proof result.
 
@@ -275,6 +280,20 @@ Warnings:
 - Resolution mismatch.
 - Non-cut transitions requiring fallback behavior.
 - Browser/runtime export limitation.
+
+## Preview, Media, And Timebase Model
+
+Preview and export must share a deterministic project model even if they use different render engines.
+
+Required media rules:
+
+- Timeline math must use integer frame ticks, rational time values, or an equivalent stable timebase instead of accumulating floating-point seconds as the source of truth.
+- Preview should prefer frame callbacks such as `requestVideoFrameCallback` where available, while keeping a tested fallback for browsers that lack it.
+- Preview must avoid seeking the active video every animation frame.
+- Last-good-frame behavior should hide transient decode stalls without hiding missing-media errors.
+- Media element, object URL, AudioContext, FFmpeg virtual file, VideoFrame, and AudioData lifecycles must have explicit cleanup paths.
+- Audio preview and export must derive from the same clip trim, gain, mute, and solo state.
+- Browser media feature detection belongs in media hooks or export adapters, not scattered through UI components.
 
 ## Director Model
 
@@ -383,6 +402,7 @@ Keep pure logic outside React:
 
 - Review reducer.
 - Timeline calculations.
+- Timebase and frame mapping.
 - Export-safe predicate.
 - Director proposal validation and application.
 - Draft grouping.
@@ -393,7 +413,8 @@ Keep effects at edges:
 - IndexedDB storage helpers.
 - Next API routes.
 - Media loading hooks.
-- FFmpeg export orchestration.
+- Export engine orchestration.
+- Browser media capability detection.
 - Provider route calls.
 
 Keep browser secrets out of browser code:
@@ -480,7 +501,8 @@ Includes:
 - Trim, reorder, delete, volume, mute, solo.
 - Audio-aware preview.
 - Export pre-flight.
-- MP4 with audio through FFmpeg.
+- MP4 with audio through the selected proven export engine.
+- Export-engine spike and decision record, covering FFmpeg.wasm versus WebCodecs plus Mediabunny for MP4 plus audio.
 - WebM fallback.
 - Export history.
 - Rule-based Director.
@@ -618,6 +640,8 @@ Every implementation plan derived from this spec must include:
 - Playwright E2E over fake Vault worker.
 - Real local browser pass where the workflow depends on UI feel.
 - MP4 audio proof with `ffprobe`.
+- Browser media support matrix for any selected export engine.
+- Cleanup proof for object URLs, FFmpeg virtual files, media elements, AudioContext, and WebCodecs frames or samples when used.
 - Boundary checks for no env/R2/D1/extension/processed/live Grok changes.
 - Secret scan over diffs before commit.
 
@@ -642,6 +666,10 @@ Known failure modes to design against:
 - Storing signed URLs in movie records.
 - Using canvas capture and labeling the output MP4.
 - Shipping export without proving audio stream presence.
+- Assuming WebCodecs includes MP4 muxing by itself.
+- Choosing FFmpeg.wasm without testing memory, cancellation, long-run behavior, and cross-origin isolation requirements.
+- Leaking object URLs, media elements, AudioContext nodes, FFmpeg virtual files, VideoFrame objects, or AudioData objects.
+- Letting floating-point timeline drift create preview/export mismatches.
 - Treating weak prompt metadata as reliable grouping.
 - Using cloud sync to patch incomplete local state.
 - Breaking existing local movies during IndexedDB migration.
