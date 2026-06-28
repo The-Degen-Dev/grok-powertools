@@ -74,6 +74,14 @@ Live Grok Saved probe on 2026-06-28 resolved the first identity question:
 - Therefore media URL UUIDs are useful variant/storage evidence, but they are not always equivalent to the logical Grok Saved item identity.
 - The exact observed post UUID, prompt text, media URLs, cookies, and signed query strings were not stored in this durable note.
 
+Follow-up variant probe on 2026-06-28:
+
+- A sampled `/imagine/post/{uuid}` page exposed two in-post thumbnail controls.
+- Switching to the second thumbnail changed the displayed media while the browser stayed on the same `/imagine/post/{uuid}` route.
+- Sanitized DOM evidence showed one post UUID and multiple media UUIDs on the same page.
+- This supports modeling those in-post media choices as variants under the `grokPostId` record.
+- This is sample evidence, not a universal rule. The enumerator must detect per post whether Grok exposes one media item, multiple in-post thumbnails, video frames, upscales, extensions, or separate post routes.
+
 Rejected as primary identity:
 
 - R2 object key. R2 keys are storage locations, not product identity.
@@ -239,5 +247,6 @@ How should image/video pairs and generated variants be represented?
 Recommended answer to evaluate next:
 
 - Treat `grokPostId` as the logical record.
-- Represent image/video outputs, thumbnails, upscales, extensions, and re-downloads as variants under that record when Grok presents them as one post.
+- Represent image/video outputs, thumbnails, upscales, extensions, and re-downloads as variants under that record when Grok presents them inside one `/imagine/post/{uuid}` route.
 - Split into separate logical records only when Grok exposes separate `/imagine/post/{uuid}` identities.
+- Do not assume all Saved grid neighbors belong to the same post. The enumerator must open/read each item and classify variants from the detail route evidence.

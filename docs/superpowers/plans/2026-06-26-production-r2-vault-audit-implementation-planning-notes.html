@@ -88,6 +88,7 @@
     <li>The final report has three verdicts: production R2 internal correctness, current Grok Saved completeness, and local system health. A visual Grok sample cannot prove full current Saved completeness.</li>
     <li>Local parent-folder inventory is filtered to likely Grok/R2 media candidates. The parent contains unrelated repositories and dependency folders, so scanning every media-like file would create noisy false gaps.</li>
     <li>After a read-only live Grok probe on 2026-06-28, the planning identity rule is: capture <code>grokPostId</code> from <code>/imagine/post/{uuid}</code> as the preferred Grok Saved item identifier when present. Media URL UUIDs remain variant and storage evidence because the same page can expose multiple media UUIDs for thumbnails, variants, user paths, and active media.</li>
+    <li>A follow-up variant probe sampled one <code>/imagine/post/{uuid}</code> with two in-post thumbnail controls. Switching thumbnails changed the displayed media while the route stayed on the same post UUID, so variants under one <code>grokPostId</code> are real behavior for at least that case.</li>
     <li>Prompt handling is revised after user clarification: full image prompts, full video prompts, and all available Grok metadata should be stored in the existing Vault data plane. Audit and planning artifacts should stay redacted or hash-only by default, but the Vault itself should preserve the raw prompt text.</li>
   </ul>
 
@@ -109,6 +110,7 @@
     <li>Alternative considered: scan every file under the parent media root. Rejected because the parent root contains unrelated app source trees and dependencies. The plan inventories <code>GrokVault</code> fully and parent media candidates selectively.</li>
     <li>Alternative considered: inspect the live Grok tab first. Rejected because the spec makes raw R2 and local inventory the first proof layer, and live Grok should not be driven until raw inventories are complete or blocked.</li>
     <li>Alternative considered: treat the current internal <code>assetId</code> or the last UUID in a media URL as the logical Saved identity. Rejected for the canonical model because the live page can expose multiple media UUIDs around one Grok post. The canonical model should keep <code>grokPostId</code>, media UUIDs, R2 keys, and hashes as separate evidence fields.</li>
+    <li>Alternative considered: assume adjacent Saved grid tiles with similar visuals are variants of one generation. Rejected because the verified behavior is route-local, not grid-neighbor-based. The enumerator must classify variants from the opened detail route, not from visual proximity in the Saved grid.</li>
     <li>Alternative considered: store only prompt hashes/redacted excerpts in the canonical index. Rejected because the product requirement is to archive full prompts and metadata. The safer compromise is not a separate vault, but a rule that raw prompt fields stay in Vault/R2 and do not get copied into committed reports, plans, chat summaries, or broad audit exports.</li>
   </ul>
 
