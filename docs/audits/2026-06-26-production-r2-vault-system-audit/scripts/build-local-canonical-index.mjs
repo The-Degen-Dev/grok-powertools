@@ -64,6 +64,14 @@ async function optionalJsonl(relPath) {
   }
 }
 
+async function optionalJson(relPath) {
+  try {
+    return await readJson(relPath);
+  } catch {
+    return null;
+  }
+}
+
 async function writeJson(relPath, value) {
   const filePath = auditPath(relPath);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -204,6 +212,52 @@ function identityLinks(left, right) {
   return links;
 }
 
+function grokSavedStatusFrom({ rows, summary }) {
+  const allRowsHavePostId = summary?.identity?.status === 'all_rows_have_grok_post_id';
+  const identityLimited = rows.length > 0 && !allRowsHavePostId;
+  if (!rows.length && !summary) {
+    return {
+      status: 'blocked',
+      rowCount: 0,
+      completedGridTraversal: false,
+      identityStatus: 'not_captured',
+      blocker: 'Current Grok Saved enumeration has not been captured from the visible authenticated tab.'
+    };
+  }
+
+  const completedGridTraversal = Boolean(summary?.traversal?.completedGridTraversal);
+  const identityStatus = summary?.identity?.status || 'unknown';
+  if (completedGridTraversal && allRowsHavePostId && rows.length > 0) {
+    return {
+      status: 'verified',
+      rowCount: rows.length,
+      completedGridTraversal,
+      identityStatus,
+      identityLimited: false
+    };
+  }
+  if (completedGridTraversal) {
+    return {
+      status: 'grid_captured_identity_limited',
+      rowCount: rows.length,
+      completedGridTraversal,
+      identityStatus,
+      identityLimited,
+      limitation: 'Saved grid traversal reached the end, but logical grokPostId identity is incomplete. Detail-page capture or another identity source is still required before claiming Grok Saved logical completeness.'
+    };
+  }
+  return {
+    status: 'partial',
+    rowCount: rows.length,
+    completedGridTraversal,
+    identityStatus,
+    identityLimited,
+    limitation: identityLimited
+      ? 'Saved grid traversal did not reach a verified end state, and captured grid rows do not have complete logical grokPostId identity.'
+      : 'Saved grid traversal did not reach a verified end state.'
+  };
+}
+
 function makeEvidence({ object, hashRow, d1ByKey, workerByKey, promptSidecarsByMediaKey }) {
   const d1 = d1ByKey.get(object.key) || null;
   const worker = workerByKey.get(object.key) || null;
@@ -289,6 +343,7 @@ async function buildCanonicalIndex() {
   const metadataRefs = await readJson('inventory/metadata-references.json');
   const localSummary = await readJson('inventory/local-media-summary.json');
   const grokSavedRows = await optionalJsonl('private/grok-saved-current-inventory.jsonl');
+  const grokSavedSummary = await optionalJson('inventory/grok-saved-current-summary.json');
 
   const mediaObjects = r2Objects.filter((object) => object.isMedia);
   const hashByKey = new Map(r2Hashes.map((row) => [row.objectKey, row]));
@@ -385,13 +440,10 @@ async function buildCanonicalIndex() {
   const metadataLinkedMedia = indexRows.filter((row) => row.evidence.promptSidecarKeys.length > 0).length;
   const hashOnlyDuplicateObjects = indexRows.filter((row) => row.reason === 'same_sha256_without_accepted_identity_link').length;
   const acceptedLinkedDuplicateObjects = indexRows.filter((row) => row.identityLinksToRetained.length > 0).length;
-  const grokSavedInventoryStatus = grokSavedRows.length
-    ? { status: 'present', rowCount: grokSavedRows.length }
-    : {
-        status: 'blocked',
-        rowCount: 0,
-        blocker: 'Chrome DevTools/browser control is not connected, so current Grok Saved enumeration cannot be proven from the visible authenticated tab.'
-      };
+  const grokSavedInventoryStatus = grokSavedStatusFrom({
+    rows: grokSavedRows,
+    summary: grokSavedSummary
+  });
 
   const summary = {
     generatedAt,
@@ -411,7 +463,8 @@ async function buildCanonicalIndex() {
       workerRows: 'inventory/worker-vault-assets.jsonl',
       metadataReferences: 'inventory/metadata-references.json',
       localSummary: 'inventory/local-media-summary.json',
-      grokSavedInventory: grokSavedRows.length ? 'private/grok-saved-current-inventory.jsonl' : null
+      grokSavedInventory: grokSavedRows.length ? 'private/grok-saved-current-inventory.jsonl' : null,
+      grokSavedSummary: grokSavedSummary ? 'inventory/grok-saved-current-summary.json' : null
     },
     sourceCounts: {
       r2Objects: r2Objects.length,
@@ -443,10 +496,12 @@ async function buildCanonicalIndex() {
       metadataUnlinkedMedia: mediaObjects.length - metadataLinkedMedia,
       needsHumanReview: statusCounts.needs_human_review || 0,
       orphanCandidates: statusCounts.orphan_candidate || 0,
-      grokSavedInventoryBlocked: grokSavedRows.length ? 0 : 1
+      grokSavedInventoryBlocked: grokSavedInventoryStatus.status === 'blocked' ? 1 : 0,
+      grokSavedInventoryPartial: grokSavedInventoryStatus.status === 'partial' ? 1 : 0,
+      grokSavedIdentityLimited: grokSavedInventoryStatus.identityLimited ? 1 : 0
     },
     confidenceLimits: [
-      'Current Grok Saved completeness is not proven until DevTools/browser control can enumerate the visible authenticated Saved tab.',
+      'Current Grok Saved logical completeness is not proven until every Saved item has an authoritative logical identity, preferably grokPostId from /imagine/post/{uuid}.',
       'D1 asset_id is preserved as evidence but is not treated as primary Grok identity.',
       'Same SHA-256 without an accepted identity-link signal remains needs_human_review.',
       'This is a local-only canonical index proposal and does not authorize production writes, object moves, deletes, or repair actions.'
@@ -486,35 +541,41 @@ async function buildCanonicalIndex() {
     status: grokSavedInventoryStatus.status,
     visibleWindowPreviouslyVerified: true,
     visibleUrlPath: 'grok.com/imagine/saved',
-    devtoolsConnected: false,
+    activeTabBrowserControl: grokSavedRows.length ? 'verified' : 'not_captured',
     blockedRequirement: 'current Grok Saved inventory from the existing authenticated Chrome tab',
-    nextAction: 'Enable Chrome remote debugging for this profile and accept the DevTools permission prompt.'
+    nextAction: grokSavedInventoryStatus.status === 'blocked'
+      ? 'Capture the current Grok Saved inventory from the visible authenticated tab.'
+      : 'Capture detail-page grokPostId evidence for rows without logical identity, without production writes or Grok actions.'
   });
   await writeText('report-canonical.md', renderMarkdownReport(summary));
 
   await updateManifest((manifest) => {
     manifest.status = 'in_progress';
     manifest.subsystems ||= {};
-    manifest.subsystems.canonicalIndex = grokSavedRows.length ? 'verified' : 'partial';
-    manifest.subsystems.grokSavedInventory = grokSavedRows.length ? 'verified' : 'blocked';
+    manifest.subsystems.canonicalIndex = grokSavedInventoryStatus.status === 'verified' ? 'verified' : 'partial';
+    manifest.subsystems.grokSavedInventory = grokSavedInventoryStatus.status;
     manifest.blockers = (manifest.blockers || []).filter((blocker) => blocker.mode !== 'grokSavedInventory');
-    if (!grokSavedRows.length) {
+    if (grokSavedInventoryStatus.status !== 'verified') {
       manifest.blockers.push({
         mode: 'grokSavedInventory',
         recordedAt: generatedAt,
-        reason: 'Chrome DevTools/browser control is not connected, so current Grok Saved enumeration cannot be proven from the visible authenticated tab.',
-        nextAction: 'Enable Chrome remote debugging for this profile and accept the DevTools permission prompt.'
+        reason: grokSavedInventoryStatus.limitation || grokSavedInventoryStatus.blocker || 'Current Grok Saved logical completeness is not proven.',
+        nextAction: grokSavedInventoryStatus.status === 'blocked'
+          ? 'Capture the current Grok Saved inventory from the visible authenticated tab.'
+          : 'Use a safer full Saved export/API path or explicitly approve controlled detail-page navigation to capture grokPostId identity without production writes.'
       });
     }
     manifest.finalVerdicts ||= {};
-    manifest.finalVerdicts.currentGrokSavedCompleteness = grokSavedRows.length ? 'inventory_captured' : 'blocked';
+    manifest.finalVerdicts.currentGrokSavedCompleteness = grokSavedInventoryStatus.status === 'verified'
+      ? 'inventory_captured'
+      : grokSavedInventoryStatus.status;
     manifest.finalVerdicts.productionR2InternalCorrectness = manifest.finalVerdicts.productionR2InternalCorrectness || 'dirty';
   });
 
   console.log(`local canonical index rows: ${indexRows.length}`);
   console.log(`redacted canonical report: ${path.relative(process.cwd(), auditPath('report-canonical.md'))}`);
-  if (!grokSavedRows.length) {
-    console.log('grok saved inventory: blocked until DevTools/browser control is connected');
+  if (grokSavedInventoryStatus.status !== 'verified') {
+    console.log(`grok saved inventory: ${grokSavedInventoryStatus.status}`);
   }
 }
 
@@ -530,7 +591,7 @@ This report is redacted. It contains counts and hashes only, not raw prompts, co
 - Production writes: ${summary.productionWrites ? 'yes' : 'no'}
 - Raw local canonical index: \`${summary.privateArtifacts.localCanonicalIndexJsonl}\` (gitignored)
 - Grok Saved inventory: ${summary.grokSavedInventoryStatus.status}
-- Canonical index status: ${summary.grokSavedInventoryStatus.status === 'present' ? 'complete for captured sources' : 'partial because current Grok Saved enumeration is blocked'}
+- Canonical index status: ${summary.grokSavedInventoryStatus.status === 'verified' ? 'complete for captured sources' : 'partial because current Grok Saved logical identity is not fully proven'}
 
 ## Source Counts
 

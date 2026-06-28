@@ -1,0 +1,17 @@
+{
+  "generatedAt": "2026-06-28T21:41:47.774Z",
+  "productionWrites": false,
+  "method": "active_chrome_front_tab_javascript",
+  "route": "/imagine/saved",
+  "completedGridTraversal": false,
+  "stoppedReason": "chrome_memory_guard",
+  "uniqueCandidateCount": 821,
+  "viewportCount": 63,
+  "identityStatus": "grid_has_no_grok_post_ids",
+  "chromeMemory": {
+    "initialTotalRssMb": 25974.2,
+    "maxObservedTotalRssMb": 28701.1,
+    "maxObservedDeltaMb": 2726.9
+  },
+  "rawArtifactsGitIgnored": true
+}

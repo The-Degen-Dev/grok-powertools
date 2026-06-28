@@ -48,6 +48,10 @@
     <li>Subagent reconciliation review also found that metadata-reference and local/R2 deltas should not be described as full completeness failures. The report now treats metadata as reference coverage and local/R2 as SHA-256 overlap against the scanned macOS corpus.</li>
     <li>The stricter canonical-index goal adds a second-stage local canonicalization pass. Raw exact-key rows are written to ignored <code>private/local-canonical-index.jsonl</code>; committed artifacts contain counts, status totals, and object-key hashes only.</li>
     <li>The local canonicalizer applies the accepted duplicate rule: same SHA-256 plus an accepted identity-link signal can classify an alternate or mapped duplicate; same SHA-256 alone stays <code>needs_human_review</code>.</li>
+    <li>Live Grok Saved browser control is now constrained to the active Chrome front-window tab only. The safe path is narrow active-tab JavaScript against the visible <code>https://grok.com/imagine/saved</code> page; do not use all-tab discovery, full-window accessibility snapshots, or DevTools page lists for this dataset.</li>
+    <li>The Grok Saved page uses an internal main gallery scroller rather than window scroll. The verified scroller is the large content container at the right of the sidebar, with <code>clientHeight=1070</code> and <code>scrollHeight=7029</code> in the current session.</li>
+    <li>The Saved capture script writes raw visible card data only to ignored <code>private/grok-saved-current-inventory.jsonl</code> and writes committed evidence only as counts and hashes in <code>inventory/grok-saved-current-summary.json</code> and <code>logs/grok-saved-active-tab-capture.json</code>.</li>
+    <li>The Saved capture script now merges with an existing private inventory by candidate signature. This prevents a later memory-guarded early stop from shrinking a better previous partial inventory.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -61,18 +65,48 @@
     <li>The final live-Grok inspection did not attempt a full Saved scrape or generation. It records visible route, extension status, cloud settings, and popup status only.</li>
     <li>The canonicalization pass uses a separate script, <code>scripts/build-local-canonical-index.mjs</code>, instead of adding a mode to the original validated audit runner. This keeps the original read-only inventory runner stable while adding a narrower post-audit stage for the stricter goal.</li>
     <li>The canonicalization pass reuses the existing same-day R2/D1/Worker/local/metadata artifacts instead of rehashing all production media again. Full current-state proof still requires either a fresh approved R2 hash rerun or accepting the existing hash snapshot as the read-only source artifact for this pass.</li>
+    <li>The bundled Chrome controller connected, but <code>browser.tabs.selected()</code> did not expose the focused user tab. I did not call <code>browser.user.openTabs()</code> because that would be whole-profile tab discovery on a Chrome profile with many tabs. Active-tab Chrome scripting was used instead.</li>
+    <li>The current Saved browser artifact is a partial grid inventory, not an authoritative logical Saved inventory. Bounded traversal captured <code>821</code> unique grid candidates, but the run stopped on the memory guard and the grid did not expose <code>/imagine/post/{uuid}</code> identifiers.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
   <ul>
     <li>The secret scan has expected false positives in policy prose, redaction code, and root test names that mention cookies without containing cookie values. Manual review found no raw keys, bearer tokens, signed URLs, cookies, passwords, or private prompt dumps in current audit artifacts.</li>
     <li>The local canonical index is useful for classification and gap analysis before Grok Saved enumeration is available, but it is still partial. D1 asset IDs, R2 keys, hashes, source URL hashes, and prompt sidecar links are evidence fields; they do not replace authoritative <code>grokPostId</code> identity.</li>
+    <li>The safe Grok Saved strategy is bounded viewport stepping: capture one visible gallery slice, scroll the main gallery container by less than one viewport, wait briefly, capture the next slice, and stop on memory or route guardrails. A one-step probe moved the main scroller from <code>0</code> to <code>802</code>, loaded only a small next slice, then restored the position to <code>0</code>.</li>
+    <li>The Saved grid appears lazy-loaded or virtualized. Longer scroll passes expanded the scroll range and sometimes shifted scroll position backward after new batches loaded. Continuing blindly would increase Chrome pressure without proving completion, so the report keeps Grok Saved status <code>partial</code>.</li>
+    <li>A narrow resource-path probe found only media asset paths and <code>/api/log_metric</code>; it did not reveal a Saved-feed API path suitable for a safer full enumeration.</li>
   </ul>
 
   <h2>Open Questions</h2>
   <ul>
-    <li>Authoritative current Grok Saved inventory remains blocked for this stricter goal. Peekaboo proved the visible Chrome window is on <code>grok.com/imagine/saved</code>, but Chrome DevTools/browser control is not connected, and <code>agent-browser</code>/<code>plwr</code> are not installed. Do not claim current Grok Saved completeness until the existing authenticated tab can be enumerated with DOM or network-level control.</li>
+    <li>Authoritative current Grok Saved inventory is no longer blocked on browser control, but it is still incomplete. Current evidence is a partial grid scrape with <code>821</code> unique candidates, <code>1027</code> unique media URL hashes, and <code>694</code> unique media UUID hashes. Do not claim current Grok Saved completeness until traversal reaches a verified end state and logical identity is captured.</li>
+    <li>The Saved grid did not expose <code>grokPostId</code> values. Detail-page capture or another identity source is required before using Grok Saved as authoritative logical identity. Opening detail pages may require explicit approval because the objective prohibits route mutation during browser work.</li>
     <li>Current local canonical index artifacts: raw ignored <code>private/local-canonical-index.jsonl</code>, redacted <code>reconciliations/local-canonical-index-summary.json</code>, redacted <code>reconciliations/canonical-gap-report.json</code>, and redacted <code>report-canonical.md</code>.</li>
+  </ul>
+
+  <h2>Commands Run</h2>
+  <ul>
+    <li><code>node --check docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/capture-grok-saved-active-tab.mjs</code></li>
+    <li><code>node --check docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/build-local-canonical-index.mjs</code></li>
+    <li><code>GROK_CAPTURE_MAX_VIEWPORTS=2 ... node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/capture-grok-saved-active-tab.mjs</code> for the first probe.</li>
+    <li><code>GROK_CAPTURE_MAX_VIEWPORTS=20</code>, <code>40</code>, <code>120</code>, <code>170</code>, <code>80</code>, and <code>110</code> bounded capture passes were run with memory guards. The final merged private inventory contains <code>821</code> rows.</li>
+    <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/build-local-canonical-index.mjs</code> rebuilt the local canonical index and redacted reports after the partial browser capture.</li>
+    <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/audit-production-r2-vault.mjs validate-artifacts</code> passed.</li>
+    <li><code>npm run test:unit</code> passed: <code>18</code> suites, <code>298</code> tests.</li>
+    <li><code>npm run lint</code> passed.</li>
+    <li><code>git diff --check</code> passed.</li>
+    <li>A targeted leak scan for exact Grok asset URLs, exact post routes, signed URL markers, bearer strings, cookie strings, and API-key markers in committed-safe changed artifacts returned no matches.</li>
+  </ul>
+
+  <h2>Artifacts Produced</h2>
+  <ul>
+    <li><code>scripts/capture-grok-saved-active-tab.mjs</code>: active-tab-only Saved grid capture script.</li>
+    <li><code>private/grok-saved-current-inventory.jsonl</code>: ignored raw partial Saved grid inventory with exact media URLs and visible card fields.</li>
+    <li><code>private/grok-saved-current-summary.json</code>: ignored raw capture summary.</li>
+    <li><code>inventory/grok-saved-current-summary.json</code>: committed-safe redacted/hash-only capture summary.</li>
+    <li><code>logs/grok-saved-active-tab-capture.json</code>: committed-safe capture status summary.</li>
+    <li><code>reconciliations/local-canonical-index-summary.json</code>, <code>reconciliations/canonical-gap-report.json</code>, and <code>report-canonical.md</code>: regenerated with Grok Saved status <code>partial</code>.</li>
   </ul>
 </body>
 </html>

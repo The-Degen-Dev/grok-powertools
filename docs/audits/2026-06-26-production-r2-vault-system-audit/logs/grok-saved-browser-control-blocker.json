@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-06-28T20:53:15.129Z",
-  "status": "blocked",
+  "generatedAt": "2026-06-28T21:45:25.541Z",
+  "status": "partial",
   "visibleWindowPreviouslyVerified": true,
   "visibleUrlPath": "grok.com/imagine/saved",
-  "devtoolsConnected": false,
+  "activeTabBrowserControl": "verified",
   "blockedRequirement": "current Grok Saved inventory from the existing authenticated Chrome tab",
-  "nextAction": "Enable Chrome remote debugging for this profile and accept the DevTools permission prompt."
+  "nextAction": "Capture detail-page grokPostId evidence for rows without logical identity, without production writes or Grok actions."
 }

@@ -35,14 +35,14 @@
     "liveGrok": "verified",
     "reconciliation": "dirty",
     "canonicalIndex": "partial",
-    "grokSavedInventory": "blocked"
+    "grokSavedInventory": "partial"
   },
   "blockers": [
     {
       "mode": "grokSavedInventory",
-      "recordedAt": "2026-06-28T20:53:15.129Z",
-      "reason": "Chrome DevTools/browser control is not connected, so current Grok Saved enumeration cannot be proven from the visible authenticated tab.",
-      "nextAction": "Enable Chrome remote debugging for this profile and accept the DevTools permission prompt."
+      "recordedAt": "2026-06-28T21:45:25.541Z",
+      "reason": "Saved grid traversal did not reach a verified end state, and captured grid rows do not have complete logical grokPostId identity.",
+      "nextAction": "Use a safer full Saved export/API path or explicitly approve controlled detail-page navigation to capture grokPostId identity without production writes."
     }
   ],
   "evidenceIndex": [
@@ -58,8 +58,8 @@
     },
     {
       "path": "implementation-notes.html",
-      "bytes": 9224,
-      "updatedAt": "2026-06-28T20:52:03.894Z"
+      "bytes": 14486,
+      "updatedAt": "2026-06-28T21:44:46.004Z"
     },
     {
       "path": "inventory/.gitkeep",
@@ -85,6 +85,11 @@
       "path": "inventory/d1-vault-overlays.jsonl",
       "bytes": 0,
       "updatedAt": "2026-06-28T03:48:05.119Z"
+    },
+    {
+      "path": "inventory/grok-saved-current-summary.json",
+      "bytes": 23816,
+      "updatedAt": "2026-06-28T21:41:47.791Z"
     },
     {
       "path": "inventory/local-media-summary.json",
@@ -212,9 +217,14 @@
       "updatedAt": "2026-06-28T03:48:05.118Z"
     },
     {
+      "path": "logs/grok-saved-active-tab-capture.json",
+      "bytes": 500,
+      "updatedAt": "2026-06-28T21:41:47.800Z"
+    },
+    {
       "path": "logs/grok-saved-browser-control-blocker.json",
-      "bytes": 399,
-      "updatedAt": "2026-06-28T20:53:15.214Z"
+      "bytes": 437,
+      "updatedAt": "2026-06-28T21:45:25.627Z"
     },
     {
       "path": "logs/live-grok-extension-summary-2026-06-28.json",
@@ -354,7 +364,7 @@
     {
       "path": "logs/validate-artifacts.json",
       "bytes": 102,
-      "updatedAt": "2026-06-28T20:53:24.953Z"
+      "updatedAt": "2026-06-28T21:45:37.912Z"
     },
     {
       "path": "logs/web-build.txt",
@@ -468,8 +478,8 @@
     },
     {
       "path": "reconciliations/canonical-gap-report.json",
-      "bytes": 3559,
-      "updatedAt": "2026-06-28T20:53:15.213Z"
+      "bytes": 3784,
+      "updatedAt": "2026-06-28T21:45:25.626Z"
     },
     {
       "path": "reconciliations/duplicate-groups.json",
@@ -478,8 +488,8 @@
     },
     {
       "path": "reconciliations/local-canonical-index-summary.json",
-      "bytes": 10259,
-      "updatedAt": "2026-06-28T20:53:15.212Z"
+      "bytes": 10593,
+      "updatedAt": "2026-06-28T21:45:25.625Z"
     },
     {
       "path": "reconciliations/malformed-keys.json",
@@ -528,8 +538,8 @@
     },
     {
       "path": "report-canonical.md",
-      "bytes": 1665,
-      "updatedAt": "2026-06-28T20:53:15.214Z"
+      "bytes": 1779,
+      "updatedAt": "2026-06-28T21:45:25.627Z"
     },
     {
       "path": "report.md",
@@ -573,13 +583,18 @@
     },
     {
       "path": "scripts/build-local-canonical-index.mjs",
-      "bytes": 23360,
-      "updatedAt": "2026-06-28T20:51:16.139Z"
+      "bytes": 25896,
+      "updatedAt": "2026-06-28T21:45:16.658Z"
+    },
+    {
+      "path": "scripts/capture-grok-saved-active-tab.mjs",
+      "bytes": 25257,
+      "updatedAt": "2026-06-28T21:37:55.919Z"
     }
   ],
   "finalVerdicts": {
     "productionR2InternalCorrectness": "dirty",
-    "currentGrokSavedCompleteness": "blocked",
+    "currentGrokSavedCompleteness": "partial",
     "localSystemHealth": "clean"
   },
   "repoSnapshots": [
@@ -607,5 +622,18 @@
       "No authoritative full Grok Saved export or API found",
       "Raw accessibility text, prompt history, account email, API key value, and activity object keys were not stored"
     ]
+  },
+  "browserCapture": {
+    "grokSavedActiveTab": {
+      "generatedAt": "2026-06-28T21:41:47.774Z",
+      "method": "active_chrome_front_tab_javascript",
+      "route": "/imagine/saved",
+      "completedGridTraversal": false,
+      "stoppedReason": "chrome_memory_guard",
+      "uniqueCandidateCount": 821,
+      "identityStatus": "grid_has_no_grok_post_ids",
+      "committedSummary": "inventory/grok-saved-current-summary.json",
+      "rawInventory": "private/grok-saved-current-inventory.jsonl"
+    }
   }
 }

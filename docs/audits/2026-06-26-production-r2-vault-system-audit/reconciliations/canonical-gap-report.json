@@ -1,11 +1,14 @@
 {
-  "generatedAt": "2026-06-28T20:53:15.129Z",
+  "generatedAt": "2026-06-28T21:45:25.541Z",
   "reportType": "redacted_canonical_gap_report",
   "productionWrites": false,
   "grokSavedInventoryStatus": {
-    "status": "blocked",
-    "rowCount": 0,
-    "blocker": "Chrome DevTools/browser control is not connected, so current Grok Saved enumeration cannot be proven from the visible authenticated tab."
+    "status": "partial",
+    "rowCount": 821,
+    "completedGridTraversal": false,
+    "identityStatus": "grid_has_no_grok_post_ids",
+    "identityLimited": true,
+    "limitation": "Saved grid traversal did not reach a verified end state, and captured grid rows do not have complete logical grokPostId identity."
   },
   "counts": {
     "r2Objects": 18083,
@@ -15,7 +18,7 @@
     "workerRows": 4647,
     "metadataReferences": 2100,
     "localFiles": 8532,
-    "grokSavedRows": 0
+    "grokSavedRows": 821
   },
   "statusCounts": {
     "orphan_candidate": 1679,
@@ -31,7 +34,9 @@
     "metadataUnlinkedMedia": 13891,
     "needsHumanReview": 5687,
     "orphanCandidates": 1679,
-    "grokSavedInventoryBlocked": 1
+    "grokSavedInventoryBlocked": 0,
+    "grokSavedInventoryPartial": 1,
+    "grokSavedIdentityLimited": 1
   },
   "duplicateClassification": {
     "sameHashGroupCount": 5116,
@@ -119,7 +124,7 @@
     ]
   },
   "residualRisks": [
-    "Current Grok Saved completeness is not proven until DevTools/browser control can enumerate the visible authenticated Saved tab.",
+    "Current Grok Saved logical completeness is not proven until every Saved item has an authoritative logical identity, preferably grokPostId from /imagine/post/{uuid}.",
     "D1 asset_id is preserved as evidence but is not treated as primary Grok identity.",
     "Same SHA-256 without an accepted identity-link signal remains needs_human_review.",
     "This is a local-only canonical index proposal and does not authorize production writes, object moves, deletes, or repair actions."
