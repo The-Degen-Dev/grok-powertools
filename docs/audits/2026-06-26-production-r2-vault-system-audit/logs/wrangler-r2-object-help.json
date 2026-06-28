@@ -12,8 +12,8 @@
     "object",
     "--help"
   ],
-  "startedAt": "2026-06-27T20:47:12.726Z",
-  "finishedAt": "2026-06-27T20:47:18.922Z",
+  "startedAt": "2026-06-28T02:52:25.413Z",
+  "finishedAt": "2026-06-28T02:52:29.920Z",
   "exitCode": 0,
   "stdout": "wrangler r2 object\n\nManage R2 objects\n\nCOMMANDS\n  wrangler r2 object get <objectPath>     Fetch an object from an R2 bucket\n  wrangler r2 object put <objectPath>     Create an object in an R2 bucket\n  wrangler r2 object delete <objectPath>  Delete an object in an R2 bucket\n\nGLOBAL FLAGS\n  -c, --config          Path to Wrangler configuration file  [string]\n      --cwd             Run as if Wrangler was started in the specified directory instead of the current working directory  [string]\n  -e, --env             Environment to use for operations, and for selecting .env and .dev.vars files  [string]\n      --env-file        Path to an .env file to load - can be specified multiple times - values from earlier files are overridden by values in later files  [array]\n  -h, --help            Show help  [boolean]\n      --install-skills  Install Cloudflare skills for detected AI coding agents before running the command  [boolean] [default: false]\n  -v, --version         Show version number  [boolean]\n",
   "stderr": ""

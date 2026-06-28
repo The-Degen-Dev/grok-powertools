@@ -7,8 +7,8 @@
     "cloud/src",
     "web/src/app/api/vault"
   ],
-  "startedAt": "2026-06-27T20:47:25.327Z",
-  "finishedAt": "2026-06-27T20:47:25.336Z",
+  "startedAt": "2026-06-28T02:52:34.293Z",
+  "finishedAt": "2026-06-28T02:52:34.303Z",
   "exitCode": 0,
   "stdout": "cloud/src/index.ts:432:            'POST /v1/presign',\ncloud/src/index.ts:433:            'POST /v1/objects/verify',\ncloud/src/index.ts:434:            'HEAD /v1/objects/verify?objectKey=...',\ncloud/src/index.ts:435:            'POST /v1/metadata/snapshot',\ncloud/src/index.ts:672:            if (request.method === 'POST' && url.pathname === '/v1/sync/push') {\ncloud/src/index.ts:700:        if (request.method === 'POST' && url.pathname === '/v1/presign') {\ncloud/src/index.ts:753:        if (request.method === 'POST' && url.pathname === '/v1/metadata/snapshot') {\n",
   "stderr": ""

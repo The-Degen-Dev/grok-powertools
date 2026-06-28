@@ -1,0 +1,97 @@
+{
+  "generatedAt": "2026-06-28T03:47:52.435Z",
+  "database": "grok-powertools-db",
+  "databaseId": "ad89e4bb-0b68-4c72-93d9-b90e6eb45aa6",
+  "rows": [
+    {
+      "name": "idx_r2_dedupe_user_content_type",
+      "type": "index",
+      "sql": "CREATE UNIQUE INDEX idx_r2_dedupe_user_content_type ON r2_dedupe_index (user_id, content_sha256, media_type) WHERE content_sha256 IS NOT NULL"
+    },
+    {
+      "name": "sqlite_autoindex_collections_1",
+      "type": "index",
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_metadata_snapshot_index_1",
+      "type": "index",
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_metadata_snapshot_index_2",
+      "type": "index",
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_movies_1",
+      "type": "index",
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_r2_dedupe_index_1",
+      "type": "index",
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_r2_dedupe_index_2",
+      "type": "index",
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_settings_1",
+      "type": "index",
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_users_1",
+      "type": "index",
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_vault_overlays_1",
+      "type": "index",
+      "sql": null
+    },
+    {
+      "name": "_cf_KV",
+      "type": "table",
+      "sql": "CREATE TABLE _cf_KV (\n        key TEXT PRIMARY KEY,\n        value BLOB\n      ) WITHOUT ROWID"
+    },
+    {
+      "name": "collections",
+      "type": "table",
+      "sql": "CREATE TABLE collections (\n  id TEXT PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  data TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  deleted_at TEXT\n)"
+    },
+    {
+      "name": "metadata_snapshot_index",
+      "type": "table",
+      "sql": "CREATE TABLE metadata_snapshot_index (user_id TEXT NOT NULL, kind TEXT NOT NULL, content_hash TEXT NOT NULL, object_key TEXT NOT NULL, first_written_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, PRIMARY KEY (user_id, kind, content_hash), UNIQUE (object_key))"
+    },
+    {
+      "name": "movies",
+      "type": "table",
+      "sql": "CREATE TABLE movies (\n  id TEXT PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  data TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  deleted_at TEXT\n)"
+    },
+    {
+      "name": "r2_dedupe_index",
+      "type": "table",
+      "sql": "CREATE TABLE r2_dedupe_index (user_id TEXT NOT NULL, asset_id TEXT NOT NULL, canonical_object_key TEXT NOT NULL, source_url_hashes TEXT NOT NULL DEFAULT '[]', content_sha256 TEXT, media_type TEXT, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, upload_status TEXT NOT NULL, duplicate_object_keys TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (user_id, asset_id), UNIQUE (canonical_object_key))"
+    },
+    {
+      "name": "settings",
+      "type": "table",
+      "sql": "CREATE TABLE settings (\n  user_id TEXT PRIMARY KEY,\n  data TEXT NOT NULL,\n  updated_at TEXT NOT NULL\n)"
+    },
+    {
+      "name": "users",
+      "type": "table",
+      "sql": "CREATE TABLE users (\n  id TEXT PRIMARY KEY,\n  email TEXT,\n  name TEXT,\n  image TEXT,\n  created_at TEXT DEFAULT (datetime('now'))\n)"
+    },
+    {
+      "name": "vault_overlays",
+      "type": "table",
+      "sql": "CREATE TABLE vault_overlays (user_id TEXT NOT NULL, asset_id TEXT NOT NULL, data TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT, PRIMARY KEY (user_id, asset_id))"
+    }
+  ]
+}

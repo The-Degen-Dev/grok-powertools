@@ -1,0 +1,53 @@
+{
+  "generatedAt": "2026-06-28T04:01:56.795Z",
+  "results": [
+    {
+      "name": "web-vault-desktop",
+      "url": "http://localhost:3001/vault",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "startedAt": "2026-06-28T04:01:47.924Z",
+      "finishedAt": "2026-06-28T04:01:51.944Z",
+      "status": 200,
+      "title": "Grok Power Tools",
+      "bodyTextSha256": "aea9c4844c10408812b18185cbe7139cc47241f49aa454aa84422a0e142abcfa",
+      "bodyTextBytes": 442,
+      "errors": [],
+      "screenshot": "screenshots/web-vault-desktop.png"
+    },
+    {
+      "name": "web-vault-mobile",
+      "url": "http://localhost:3001/vault",
+      "viewport": {
+        "width": 390,
+        "height": 900
+      },
+      "startedAt": "2026-06-28T04:01:51.986Z",
+      "finishedAt": "2026-06-28T04:01:53.311Z",
+      "status": 200,
+      "title": "Grok Power Tools",
+      "bodyTextSha256": "aea9c4844c10408812b18185cbe7139cc47241f49aa454aa84422a0e142abcfa",
+      "bodyTextBytes": 442,
+      "errors": [],
+      "screenshot": "screenshots/web-vault-mobile.png"
+    },
+    {
+      "name": "web-ops-desktop",
+      "url": "http://localhost:3001/ops",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "startedAt": "2026-06-28T04:01:53.352Z",
+      "finishedAt": "2026-06-28T04:01:56.779Z",
+      "status": 200,
+      "title": "Grok Power Tools",
+      "bodyTextSha256": "698444f601e0abcb483edf7aa6d6af9229d7c9b8f7e30cced23b7091e2d8c857",
+      "bodyTextBytes": 1056,
+      "errors": [],
+      "screenshot": "screenshots/web-ops-desktop.png"
+    }
+  ]
+}

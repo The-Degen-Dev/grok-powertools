@@ -1,0 +1,8 @@
+{
+  "generatedAt": "2026-06-28T03:25:36.910Z",
+  "mediaObjects": 15981,
+  "existingHashRows": 0,
+  "remainingHashRows": 15981,
+  "hashConcurrency": 4,
+  "hashBatchSize": 50
+}

@@ -4,8 +4,8 @@
   "args": [
     "--version"
   ],
-  "startedAt": "2026-06-27T20:46:57.564Z",
-  "finishedAt": "2026-06-27T20:46:57.584Z",
+  "startedAt": "2026-06-28T02:52:10.898Z",
+  "finishedAt": "2026-06-28T02:52:10.914Z",
   "exitCode": 0,
   "stdout": "v23.11.0\n",
   "stderr": ""

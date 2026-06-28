@@ -8,17 +8,18 @@
     "workerName": "grok-r2-backup-worker"
   },
   "envPresence": {
-    "CLOUDFLARE_ACCOUNT_ID": false,
-    "AUDIT_R2_BUCKET": false,
-    "AUDIT_R2_PREFIX": false,
-    "R2_ACCESS_KEY_ID": false,
-    "R2_SECRET_ACCESS_KEY": false,
-    "WORKER_URL": false,
-    "WORKER_API_KEY": false,
-    "CLIENT_API_KEY": false
+    "CLOUDFLARE_ACCOUNT_ID": true,
+    "AUDIT_R2_BUCKET": true,
+    "AUDIT_R2_PREFIX": true,
+    "R2_ACCESS_KEY_ID": true,
+    "R2_SECRET_ACCESS_KEY": true,
+    "WORKER_URL": true,
+    "WORKER_API_KEY": true,
+    "CLIENT_API_KEY": false,
+    "AUDIT_APPROVE_BROAD_WRANGLER_SELECT_ONLY": true
   },
   "envMatches": {
-    "CLOUDFLARE_ACCOUNT_ID": false,
+    "CLOUDFLARE_ACCOUNT_ID": true,
     "AUDIT_R2_BUCKET": true,
     "AUDIT_R2_PREFIX": true
   },
@@ -45,17 +46,17 @@
     "wranglerVersion": true,
     "wranglerR2Help": true,
     "wranglerD1Help": true,
-    "routeSafety": true
+    "routeSafety": true,
+    "nextRouteSafety": true
   },
   "authenticatedProof": {
     "r2": {
-      "ok": false,
-      "reason": "missing required R2 env",
-      "missing": [
-        "CLOUDFLARE_ACCOUNT_ID",
-        "R2_ACCESS_KEY_ID",
-        "R2_SECRET_ACCESS_KEY"
-      ]
+      "ok": true,
+      "method": "S3 HeadBucket plus ListObjectsV2 MaxKeys=1",
+      "bucket": "grok-gallery-001",
+      "prefix": "grok-powertools/v1",
+      "firstPageKeyCount": 1,
+      "isTruncated": true
     },
     "d1": {
       "ok": true,
@@ -63,6 +64,7 @@
       "database": "grok-powertools-db",
       "databaseId": "ad89e4bb-0b68-4c72-93d9-b90e6eb45aa6",
       "rowCount": 18
-    }
+    },
+    "broadWranglerTokenForSelectOnlyD1": "[redacted sha256:b28c94b2195c8ed2 length:15]"
   }
 }

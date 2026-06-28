@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-06-28T03:58:19.283Z",
+  "route": "GET /api/vault/repair/proof",
+  "sampleIndex": 1000,
+  "status": 200,
+  "proof": {
+    "ok": true,
+    "exists": true,
+    "objectKey": "grok-powertools/v1/users/Shared_Account/media/by-asset/media_e375494d-b15e-4f60-bac4-044534aaee4a.mp4",
+    "sizeBytes": 2661257,
+    "etag": "9eae8034291ff1b314872368d3cb7230",
+    "sha256": "a04a07adf2d1f5e1797e1457cc2e620c9bfb26538c052a8d1b82a1bb3d5853c7",
+    "contentType": "video/mp4"
+  }
+}

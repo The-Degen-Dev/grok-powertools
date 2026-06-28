@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-06-28T03:58:19.068Z",
+  "route": "POST /api/vault/repair/scan",
+  "status": 200,
+  "dryRunSourceProof": "route source loads preview and classifies issues only; no approve/run/gap-fill/reconcile route invoked",
+  "summary": {
+    "totalIssues": 0,
+    "writableIssues": 0,
+    "blockedIssues": 0,
+    "readOnlyIssues": 0
+  },
+  "issueTypeCounts": {},
+  "writeClassCounts": {},
+  "blockedIssues": 0
+}

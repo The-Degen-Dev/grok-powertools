@@ -1,62 +1,45 @@
 {
-  "generatedAt": "2026-06-27T20:55:39.267Z",
-  "status": "verified",
+  "generatedAt": "2026-06-28T04:04:15.635Z",
   "checks": [
     {
       "name": "rootUnit",
-      "command": "mise exec node@24 -- npm run test:unit",
-      "log": "logs/root-test-unit.txt",
-      "exitCode": 0,
       "status": "passed",
-      "bytes": 25765
+      "log": "logs/root-test-unit.txt"
     },
     {
       "name": "rootE2E",
-      "command": "mise exec node@24 -- npm run test:e2e",
-      "log": "logs/root-test-e2e.txt",
-      "exitCode": 0,
       "status": "passed",
-      "bytes": 4267
+      "log": "logs/root-test-e2e.txt"
     },
     {
       "name": "rootLint",
-      "command": "mise exec node@24 -- npm run lint",
-      "log": "logs/root-lint.txt",
-      "exitCode": 0,
       "status": "passed",
-      "bytes": 64
+      "log": "logs/root-lint.txt"
     },
     {
       "name": "webBuild",
-      "command": "mise exec node@24 -- npm --prefix web run build",
-      "log": "logs/web-build.txt",
-      "exitCode": 0,
       "status": "passed",
-      "bytes": 1396
+      "log": "logs/web-build.txt"
     },
     {
       "name": "webLint",
-      "command": "mise exec node@24 -- npm --prefix web run lint",
-      "log": "logs/web-lint.txt",
-      "exitCode": 0,
       "status": "passed",
-      "bytes": 28
+      "log": "logs/web-lint.txt"
     },
     {
       "name": "cloudTypecheck",
-      "command": "mise exec node@24 -- npm --prefix cloud run typecheck",
-      "log": "logs/cloud-typecheck.txt",
-      "exitCode": 0,
       "status": "passed",
-      "bytes": 57
+      "log": "logs/cloud-typecheck.txt"
     },
     {
       "name": "cloudAcceptance",
-      "command": "mise exec node@24 -- npm --prefix cloud run test:acceptance",
-      "log": "logs/cloud-test-acceptance.txt",
-      "exitCode": 0,
       "status": "passed",
-      "bytes": 2183
+      "log": "logs/cloud-test-acceptance.txt"
+    },
+    {
+      "name": "webUiSmoke",
+      "status": "passed",
+      "log": "logs/web-ui-smoke.json"
     }
   ]
 }

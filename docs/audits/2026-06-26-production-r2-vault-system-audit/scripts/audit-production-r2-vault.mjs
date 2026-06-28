@@ -38,8 +38,27 @@ const EXPECTED = {
   workerName: 'grok-r2-backup-worker'
 };
 
-const SECRET_KEY_RE = /(key|token|secret|cookie|authorization|signature|credential|password|uploadUrl|signedUrl|promptText)/i;
-const PRIVATE_TEXT_KEY_RE = /^(text|prompt|promptText|negativePrompt|privatePrompt|rawPrompt)$/i;
+const SECRET_KEY_RE = /(apikey|api-key|api_key|accesskey|access-key|access_key|secret|token|cookie|authorization|signature|credential|password|uploadurl|upload-url|upload_url|signedurl|signed-url|signed_url|prompttext|prompt-text|prompt_text)/i;
+const STORAGE_IDENTIFIER_KEYS = new Set([
+  'key',
+  'objectkey',
+  'object_key',
+  'canonicalobjectkey',
+  'canonical_object_key',
+  'versionkey',
+  'version_key',
+  'conflictkey',
+  'conflict_key'
+]);
+const PRIVATE_TEXT_KEYS = new Set([
+  'text',
+  'prompt',
+  'prompttext',
+  'negativeprompt',
+  'privateprompt',
+  'rawprompt',
+  'originalprompt'
+]);
 const MEDIA_EXT_RE = /\.(avif|gif|heic|jpeg|jpg|m4v|mov|mp4|png|webm|webp)$/i;
 const IMAGE_EXT_RE = /\.(avif|gif|heic|jpeg|jpg|png|webp)$/i;
 const VIDEO_EXT_RE = /\.(m4v|mov|mp4|webm)$/i;
@@ -201,9 +220,20 @@ function redactedValue(value) {
   return `[redacted sha256:${hashString(text).slice(0, 16)} length:${text.length}]`;
 }
 
+function isPrivateTextKey(key) {
+  const normalized = String(key || '').toLowerCase().replace(/[-_\s]/g, '');
+  return PRIVATE_TEXT_KEYS.has(normalized);
+}
+
+function isStorageIdentifierKey(key) {
+  const normalized = String(key || '').toLowerCase().replace(/[-_\s]/g, '');
+  return STORAGE_IDENTIFIER_KEYS.has(normalized);
+}
+
 function redact(value, keyPath = []) {
   const key = String(keyPath.at(-1) || '');
-  if (SECRET_KEY_RE.test(key) || PRIVATE_TEXT_KEY_RE.test(key)) {
+  const normalizedKey = key.toLowerCase().replace(/[-_\s]/g, '');
+  if (!isStorageIdentifierKey(key) && (SECRET_KEY_RE.test(normalizedKey) || isPrivateTextKey(key))) {
     if (typeof value === 'boolean' || typeof value === 'number' || value === null) return value;
     return redactedValue(value);
   }
@@ -312,6 +342,10 @@ function envPresence(names) {
 function configuredValue(name, fallback) {
   const value = process.env[name];
   return value && value.trim() ? value.trim() : fallback;
+}
+
+function broadWranglerSelectOnlyApproved() {
+  return /^(1|true|yes)$/i.test(String(process.env.AUDIT_APPROVE_BROAD_WRANGLER_SELECT_ONLY || '').trim());
 }
 
 async function scaffold() {
@@ -440,7 +474,8 @@ async function preflight() {
       'R2_SECRET_ACCESS_KEY',
       'WORKER_URL',
       'WORKER_API_KEY',
-      'CLIENT_API_KEY'
+      'CLIENT_API_KEY',
+      'AUDIT_APPROVE_BROAD_WRANGLER_SELECT_ONLY'
     ]),
     envMatches: {
       CLOUDFLARE_ACCOUNT_ID:
@@ -478,7 +513,12 @@ async function preflight() {
     },
     authenticatedProof: {
       r2: r2Proof,
-      d1: d1Proof
+      d1: d1Proof,
+      broadWranglerTokenForSelectOnlyD1: {
+        approved: broadWranglerSelectOnlyApproved(),
+        scope: 'Remote D1 SELECT-only reads',
+        writesAllowed: false
+      }
     }
   };
   await writeJson(path.join(auditRoot, 'inventory', 'preflight-identity.json'), identity);
@@ -527,12 +567,23 @@ async function preflight() {
       neededUserDecision: 'Provide read-only production R2 credentials or approve a different read-only bucket/prefix proof.'
     });
   }
-  if (wranglerWhoami.scopeSummary.writeOrAdminScopes.length > 0) {
+  if (wranglerWhoami.scopeSummary.writeOrAdminScopes.length > 0 && !broadWranglerSelectOnlyApproved()) {
     blockers.push({
       reason: 'Cloudflare Wrangler auth token appears broader than read-only',
       command: 'wrangler whoami',
       evidence: 'whoami output includes write or admin scopes',
       neededUserDecision: 'Provide a read-only Cloudflare token for D1 proof, or explicitly approve using the current broad token for SELECT-only D1 audit reads.'
+    });
+  }
+  if (wranglerWhoami.scopeSummary.writeOrAdminScopes.length > 0 && broadWranglerSelectOnlyApproved()) {
+    await writeJson(path.join(auditRoot, 'logs', 'd1-broad-token-select-only-approval.json'), {
+      generatedAt: nowIso(),
+      approvalEnv: 'AUDIT_APPROVE_BROAD_WRANGLER_SELECT_ONLY',
+      approved: true,
+      scope: 'Remote D1 SELECT-only audit reads against grok-powertools-db',
+      writesAllowed: false,
+      writeOrAdminScopeCount: wranglerWhoami.scopeSummary.writeOrAdminScopes.length,
+      note: 'Approval is for using the currently authenticated broad Wrangler token only for SELECT statements. Production writes remain forbidden.'
     });
   }
   if (!d1Proof.ok) {
@@ -762,6 +813,22 @@ async function bodyToHash(body) {
   return { sha256: hash.digest('hex'), bytesRead: bytes };
 }
 
+async function mapLimit(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  async function worker() {
+    for (;;) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
 async function r2Inventory() {
   if (!(await requirePreflightVerified('rawR2'))) {
     process.exitCode = 1;
@@ -798,13 +865,15 @@ async function r2Inventory() {
   }
   const { S3Client, ListObjectsV2Command, HeadObjectCommand, GetObjectCommand } = s3;
   const client = new S3Client(s3ClientConfig());
-  const objects = [];
+  const listedObjects = [];
   const pages = [];
   let continuationToken;
-  let totalBytes = 0;
   let page = 0;
   const maxObjects = Number(process.env.AUDIT_MAX_R2_OBJECTS || 100000);
   const maxHashBytes = Number(process.env.AUDIT_MAX_R2_HASH_BYTES || 100 * 1024 * 1024 * 1024);
+  const headConcurrency = Math.max(1, Number(process.env.AUDIT_R2_HEAD_CONCURRENCY || 16));
+  const hashConcurrency = Math.max(1, Number(process.env.AUDIT_R2_HASH_CONCURRENCY || 4));
+  const hashBatchSize = Math.max(1, Number(process.env.AUDIT_R2_HASH_BATCH_SIZE || 50));
 
   for (;;) {
     page += 1;
@@ -825,30 +894,19 @@ async function r2Inventory() {
     for (const item of response.Contents || []) {
       const key = item.Key;
       if (!key) continue;
-      const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key })).catch((error) => ({ __headError: error }));
-      const headError = head.__headError;
-      const contentType = headError ? undefined : head.ContentType;
-      const size = Number(item.Size ?? (headError ? 0 : head.ContentLength) ?? 0);
-      totalBytes += Number.isFinite(size) ? size : 0;
-      const classification = classifyObjectKey(key, contentType);
-      objects.push({
+      listedObjects.push({
         key,
-        size,
-        etag: item.ETag || (headError ? undefined : head.ETag),
-        uploadedAt: item.LastModified ? item.LastModified.toISOString() : undefined,
-        contentType,
-        customMetadata: headError ? undefined : head.Metadata || {},
-        headStatus: headError ? 'failed' : 'ok',
-        headError: headError ? headError.message : undefined,
-        ...classification
+        listedSize: Number(item.Size ?? 0),
+        listedEtag: item.ETag,
+        listedLastModified: item.LastModified ? item.LastModified.toISOString() : undefined
       });
-      if (objects.length > maxObjects) {
-        await writeJsonl(path.join(auditRoot, 'inventory', 'r2-objects.jsonl'), objects);
+      if (listedObjects.length > maxObjects) {
+        await writeJsonl(path.join(auditRoot, 'inventory', 'r2-objects-listing-checkpoint.jsonl'), listedObjects);
         await writeJson(path.join(auditRoot, 'inventory', 'r2-pages.json'), { method: 'S3 ListObjectsV2', pages });
         await addBlocker('rawR2', {
           reason: 'R2 listing exceeded configured object safety limit',
           maxObjects,
-          observedObjects: objects.length,
+          observedObjects: listedObjects.length,
           neededUserDecision: 'Approve continuing with a higher AUDIT_MAX_R2_OBJECTS limit or split the run.'
         });
         process.exitCode = 1;
@@ -859,6 +917,39 @@ async function r2Inventory() {
     if (!response.IsTruncated || !continuationToken) break;
   }
 
+  await writeJsonl(path.join(auditRoot, 'inventory', 'r2-objects-listing-checkpoint.jsonl'), listedObjects);
+  await writeJson(path.join(auditRoot, 'inventory', 'r2-listing-checkpoint.json'), {
+    generatedAt: nowIso(),
+    method: 'S3 ListObjectsV2 before HeadObject enrichment',
+    bucket,
+    prefix,
+    objectCount: listedObjects.length,
+    pageCount: pages.length,
+    finalTruncatedState: pages.at(-1)?.isTruncated || false,
+    headConcurrency,
+    hashConcurrency,
+    hashBatchSize
+  });
+
+  const objects = await mapLimit(listedObjects, headConcurrency, async (listed) => {
+    const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: listed.key })).catch((error) => ({ __headError: error }));
+    const headError = head.__headError;
+    const contentType = headError ? undefined : head.ContentType;
+    const size = Number(listed.listedSize ?? (headError ? 0 : head.ContentLength) ?? 0);
+    const classification = classifyObjectKey(listed.key, contentType);
+    return {
+      key: listed.key,
+      size,
+      etag: listed.listedEtag || (headError ? undefined : head.ETag),
+      uploadedAt: listed.listedLastModified,
+      contentType,
+      customMetadata: headError ? undefined : head.Metadata || {},
+      headStatus: headError ? 'failed' : 'ok',
+      headError: headError ? headError.message : undefined,
+      ...classification
+    };
+  });
+
   await writeJsonl(path.join(auditRoot, 'inventory', 'r2-objects.jsonl'), objects);
   await writeJson(path.join(auditRoot, 'inventory', 'r2-pages.json'), {
     method: 'S3 ListObjectsV2',
@@ -867,6 +958,8 @@ async function r2Inventory() {
     pageSize: 1000,
     pageCount: pages.length,
     finalTruncatedState: pages.at(-1)?.isTruncated || false,
+    headMethod: 'S3 HeadObject for every listed object',
+    headConcurrency,
     pages
   });
   if (objects.length === 0) {
@@ -896,44 +989,63 @@ async function r2Inventory() {
   }
 
   const hashPath = path.join(auditRoot, 'inventory', 'r2-media-hashes.jsonl');
-  await fs.writeFile(assertAuditPath(hashPath), '');
-  const hashRows = [];
-  for (const object of mediaObjects) {
-    const startedAt = nowIso();
-    try {
-      const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: object.key }));
-      const hashed = await bodyToHash(response.Body);
-      const row = {
-        objectKey: object.key,
-        bytesRead: hashed.bytesRead,
-        sha256: hashed.sha256,
-        status: 'ok',
-        method: 'S3 GetObject streamed to SHA-256 digest',
-        startedAt,
-        finishedAt: nowIso()
-      };
-      hashRows.push(row);
-      await appendJsonl(hashPath, row);
-    } catch (error) {
-      const row = {
-        objectKey: object.key,
-        bytesRead: 0,
-        sha256: null,
-        status: 'failed',
-        error: error.message,
-        method: 'S3 GetObject streamed to SHA-256 digest',
-        startedAt,
-        finishedAt: nowIso()
-      };
-      hashRows.push(row);
+  const existingHashRows = await optionalJsonl(hashPath);
+  if (!existingHashRows.length) await fs.writeFile(assertAuditPath(hashPath), '');
+  const hashRowsByKey = new Map();
+  for (const row of existingHashRows) {
+    if (row?.objectKey) hashRowsByKey.set(row.objectKey, row);
+  }
+  await writeJson(path.join(auditRoot, 'logs', 'r2-hash-resume-state.json'), {
+    generatedAt: nowIso(),
+    mediaObjects: mediaObjects.length,
+    existingHashRows: existingHashRows.length,
+    remainingHashRows: mediaObjects.filter((object) => !hashRowsByKey.has(object.key)).length,
+    hashConcurrency,
+    hashBatchSize
+  });
+  const remainingMediaObjects = mediaObjects.filter((object) => !hashRowsByKey.has(object.key));
+  for (let index = 0; index < remainingMediaObjects.length; index += hashBatchSize) {
+    const batch = remainingMediaObjects.slice(index, index + hashBatchSize);
+    const batchRows = await mapLimit(batch, hashConcurrency, async (object) => hashR2MediaObject(client, GetObjectCommand, bucket, object));
+    for (const row of batchRows) {
+      hashRowsByKey.set(row.objectKey, row);
       await appendJsonl(hashPath, row);
     }
   }
+  const hashRows = [...hashRowsByKey.values()];
   await recordEvidence(hashPath);
   await writeJson(path.join(auditRoot, 'inventory', 'r2-objects-summary.json'), r2Summary(objects, hashRows));
   await markSubsystem('rawR2', 'verified');
   await markSubsystem('r2ByteHashes', hashRows.some((row) => row.status !== 'ok') ? 'dirty' : 'verified');
   console.log(`r2 inventory complete: ${objects.length} objects, ${mediaObjects.length} media objects`);
+}
+
+async function hashR2MediaObject(client, GetObjectCommand, bucket, object) {
+  const startedAt = nowIso();
+  try {
+    const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: object.key }));
+    const hashed = await bodyToHash(response.Body);
+    return {
+      objectKey: object.key,
+      bytesRead: hashed.bytesRead,
+      sha256: hashed.sha256,
+      status: 'ok',
+      method: 'S3 GetObject streamed to SHA-256 digest',
+      startedAt,
+      finishedAt: nowIso()
+    };
+  } catch (error) {
+    return {
+      objectKey: object.key,
+      bytesRead: 0,
+      sha256: null,
+      status: 'failed',
+      error: error.message,
+      method: 'S3 GetObject streamed to SHA-256 digest',
+      startedAt,
+      finishedAt: nowIso()
+    };
+  }
 }
 
 function r2Summary(objects, hashRows) {
@@ -977,6 +1089,7 @@ function extractD1Rows(parsed) {
 }
 
 async function d1Execute(name, sql) {
+  assertSelectOnlySql(name, sql);
   const result = await runCommand(`d1-${name}`, 'mise', [
     'exec',
     'node@24',
@@ -991,13 +1104,66 @@ async function d1Execute(name, sql) {
     '--json',
     '--command',
     sql
-  ], { cwd: path.join(repoRoot, 'cloud') });
-  if (!result.ok) throw new Error(result.stderr || `${name} failed`);
+  ], { cwd: path.join(repoRoot, 'cloud'), persist: false });
+  let parsed = null;
+  let parseError = null;
   try {
-    return JSON.parse(result.stdout);
+    parsed = JSON.parse(result.stdout);
   } catch (error) {
-    throw new Error(`D1 ${name} returned non-JSON output: ${error.message}`);
+    parseError = error;
   }
+  await writeJson(path.join(auditRoot, 'logs', `d1-${name}.json`), {
+    name: result.name,
+    command: result.command,
+    args: result.args,
+    startedAt: result.startedAt,
+    finishedAt: result.finishedAt,
+    exitCode: result.exitCode,
+    ok: result.ok,
+    sqlShape: selectSqlShape(sql),
+    stdoutBytes: Buffer.byteLength(result.stdout || ''),
+    stdoutSha256: result.stdout ? hashString(result.stdout) : null,
+    parsedRowCount: parsed ? extractD1Rows(parsed).length : null,
+    rowsWritten: extractD1Meta(parsed, 'rows_written'),
+    changedDb: extractD1Meta(parsed, 'changed_db'),
+    stderr: result.stderr,
+    parseError: parseError?.message
+  });
+  if (!result.ok) throw new Error(result.stderr || `${name} failed`);
+  if (parseError) throw new Error(`D1 ${name} returned non-JSON output: ${parseError.message}`);
+  return parsed;
+}
+
+function assertSelectOnlySql(name, sql) {
+  const trimmed = String(sql || '').trim();
+  const singleStatement = trimmed.replace(/;\s*$/, '');
+  if (!/^select\b/i.test(singleStatement)) {
+    throw new Error(`Refusing non-SELECT D1 SQL for ${name}`);
+  }
+  if (/[;]/.test(singleStatement)) {
+    throw new Error(`Refusing multi-statement D1 SQL for ${name}`);
+  }
+  if (/\b(insert|update|delete|upsert|replace|drop|alter|create|pragma|attach|detach|vacuum|reindex)\b/i.test(singleStatement)) {
+    throw new Error(`Refusing mutation-capable D1 SQL for ${name}`);
+  }
+}
+
+function selectSqlShape(sql) {
+  return String(sql || '')
+    .replace(/\s+/g, ' ')
+    .replace(/\bSELECT\s+\*/i, 'SELECT *')
+    .trim()
+    .slice(0, 240);
+}
+
+function extractD1Meta(parsed, field) {
+  if (!parsed) return null;
+  const entries = Array.isArray(parsed) ? parsed : [parsed];
+  for (const entry of entries) {
+    const meta = entry?.meta || entry?.result?.meta || entry?.result?.[0]?.meta;
+    if (meta && Object.prototype.hasOwnProperty.call(meta, field)) return meta[field];
+  }
+  return null;
 }
 
 async function d1Inventory() {
@@ -1707,10 +1873,26 @@ async function generateReport() {
   const localChecksJson = await optionalJson(path.join(auditRoot, 'logs', 'local-checks-summary.json'));
   const duplicateJson = await optionalJson(path.join(auditRoot, 'reconciliations', 'duplicate-groups.json'));
   const unresolvedJson = await optionalJson(path.join(auditRoot, 'reconciliations', 'unresolved-items.json'));
+  const unresolvedSummaryJson = await optionalJson(path.join(auditRoot, 'reconciliations', 'unresolved-summary.json'));
+  const webWorkerDeltaJson = await optionalJson(path.join(auditRoot, 'reconciliations', 'web-worker-delta.json'));
   const statuses = manifest.subsystems || {};
-  const productionReady = ['rawR2', 'r2ByteHashes', 'd1', 'metadata', 'localFiles', 'workerRoutes', 'reconciliation']
+  const productionSubsystems = ['rawR2', 'r2ByteHashes', 'd1', 'metadata', 'localFiles', 'workerRoutes', 'webRoutes', 'reconciliation'];
+  const productionBlockerModes = new Set(['preflight', ...productionSubsystems]);
+  const productionBlockers = (manifest.blockers || []).filter((blocker) => productionBlockerModes.has(blocker.mode));
+  const productionReady = productionSubsystems
     .every((name) => statuses[name] === 'verified');
-  const productionStatus = productionReady ? 'clean' : manifest.blockers?.length ? 'blocked' : 'inconclusive';
+  const productionStatus = productionBlockers.length
+    ? 'blocked'
+    : productionReady
+      ? 'clean'
+      : statuses.reconciliation === 'dirty'
+        ? 'dirty'
+        : 'inconclusive';
+  const grokSavedStatus = statuses.liveGrok === 'verified'
+    ? 'sample_verified'
+    : (manifest.blockers || []).some((blocker) => blocker.mode === 'liveGrok')
+      ? 'blocked'
+      : 'inconclusive';
   const localStatus = ['localFiles', 'localSystem'].every((name) => statuses[name] === 'verified')
     ? 'clean'
     : statuses.localSystem === 'failed'
@@ -1726,8 +1908,8 @@ Report generated: ${nowIso()}
 
 | Verdict | Status | Evidence |
 | ------- | ------ | -------- |
-| Production R2 internal correctness | ${productionStatus} | Raw R2: ${statuses.rawR2}; hashes: ${statuses.r2ByteHashes}; D1: ${statuses.d1}; metadata: ${statuses.metadata}; local: ${statuses.localFiles}; Worker: ${statuses.workerRoutes}; reconciliation: ${statuses.reconciliation}. |
-| Current Grok Saved completeness | ${statuses.liveGrok === 'verified' ? 'sample_verified' : 'inconclusive'} | Full Saved completeness requires an authoritative current Saved enumeration; visual samples alone do not prove it. |
+| Production R2 internal correctness | ${productionStatus} | Raw R2: ${statuses.rawR2}; hashes: ${statuses.r2ByteHashes}; D1: ${statuses.d1}; metadata: ${statuses.metadata}; local: ${statuses.localFiles}; Worker: ${statuses.workerRoutes}; web: ${statuses.webRoutes}; reconciliation: ${statuses.reconciliation}. |
+| Current Grok Saved completeness | ${grokSavedStatus} | Full Saved completeness requires an authoritative current Saved enumeration; visual samples alone do not prove it. |
 | Local system health | ${localStatus} | Local checks: ${statuses.localSystem}; local files: ${statuses.localFiles}. |
 
 ## Identity Proof
@@ -1747,18 +1929,26 @@ Report generated: ${nowIso()}
 - R2 hash attempts: ${r2SummaryJson?.hashCoverage?.attempted ?? 'not_run'}
 - R2 hash failures: ${r2SummaryJson?.hashCoverage?.failed ?? 'not_run'}
 - Local media/files inventoried: ${localSummaryJson?.counts?.total ?? 'not_run'}
+- D1/Worker indexed assets: ${webWorkerDeltaJson?.workerAssetCount ?? 'not_run'}
+- Web route assets: ${webWorkerDeltaJson?.webAssetCount ?? 'not_run'}
 
 ## Duplicate Findings
 
 See \`reconciliations/duplicate-groups.json\`. Same-hash groups: ${duplicateJson?.sameContentHash?.length ?? 'not_run'}.
+See \`reconciliations/unresolved-summary.json\` for duplicate and legacy/canonical classification. Duplicate hash object groups: ${unresolvedSummaryJson?.duplicateContentHash?.groupCount ?? 'not_run'}.
+Duplicate byte hashes are real byte-identical groups, not automatic corruption or deletion candidates. They require classification because many involve legacy date-folder repeats, and some canonical-only groups remain unresolved.
 
 ## Missing Media
 
 See \`reconciliations/r2-local-delta.json\`, \`reconciliations/r2-d1-delta.json\`, and \`reconciliations/worker-raw-delta.json\`.
+R2 media missing from D1 by class: ${JSON.stringify(unresolvedSummaryJson?.d1Coverage?.missingByPathClass || {})}.
+R2 media missing from Worker by class: ${JSON.stringify(unresolvedSummaryJson?.workerCoverage?.missingByPathClass || {})}.
+Interpretation: exact-key D1/Worker gaps include legacy date-folder media that the current D1/Worker inventory does not index by design, plus canonical \`media/by-asset\` objects that remain unresolved raw-R2-only evidence until another artifact proves they are intentionally out of scope.
 
-## Missing Metadata
+## Metadata Reference Coverage
 
 See \`reconciliations/r2-metadata-delta.json\`.
+\`metadataReferencesMissingMedia\` means metadata references pointing at missing media. \`r2MediaWithoutMetadataReference\` is not proof that required metadata is missing; the metadata reference artifact is mostly prompt sidecar references and is not an authoritative coverage map for every R2 object.
 
 ## Malformed Keys
 
@@ -1767,10 +1957,13 @@ See \`reconciliations/malformed-keys.json\`.
 ## Local-Only And R2-Only Findings
 
 See \`reconciliations/r2-local-delta.json\`.
+Interpretation: local/R2 deltas are SHA-256 overlap findings between production R2 and the scanned local macOS corpus only. They do not prove that R2 lost local files or that the local machine is expected to contain every R2 asset.
 
 ## Worker And Product Route Mismatches
 
 See \`reconciliations/worker-raw-delta.json\`.
+See \`reconciliations/web-worker-delta.json\`. Web/Worker asset ID mismatches: ${(webWorkerDeltaJson?.workerAssetsMissingFromWebByAssetId?.length ?? 'not_run')} worker-only and ${(webWorkerDeltaJson?.webAssetsMissingFromWorkerByAssetId?.length ?? 'not_run')} web-only.
+Interpretation: web route parity proves the product route matches Worker/D1 inventory. It does not prove the web Vault covers every raw R2 object because the Worker inventory prefers D1-indexed rows.
 
 ## Route Safety Evidence
 
@@ -1800,16 +1993,17 @@ ${unresolvedJson?.items?.length ? `See \`reconciliations/unresolved-items.json\`
 
 ## Prioritized Next Actions
 
-- P0 data correctness: Resolve blockers and review unresolved reconciliation groups before any repair plan.
-- P1 backup pipeline reliability: Only after this read-only audit, design a separate repair/backfill plan for confirmed gaps.
+- P0 live validation: Bring the existing Grok Saved tab/window to the foreground for read-only live Grok and extension inspection.
+- P1 data correctness: Review unresolved canonical raw-R2-only objects, duplicate hash groups, and local/R2 overlap findings before any repair plan.
+- P2 backup pipeline reliability: Only after this read-only audit, design a separate repair/backfill plan for confirmed gaps.
 - P2 product visibility and operator UX: Improve preview/reporting only after raw R2 and D1 truth are reconciled.
 `;
   await writeText(path.join(auditRoot, 'report.md'), report);
   await updateManifest((updated) => {
     updated.finalVerdicts.productionR2InternalCorrectness = productionStatus;
-    updated.finalVerdicts.currentGrokSavedCompleteness = statuses.liveGrok === 'verified' ? 'sample_verified' : 'inconclusive';
+    updated.finalVerdicts.currentGrokSavedCompleteness = grokSavedStatus;
     updated.finalVerdicts.localSystemHealth = localStatus;
-    updated.status = productionStatus === 'blocked' ? 'blocked' : 'in_progress';
+    updated.status = (manifest.blockers || []).length ? 'blocked' : 'in_progress';
   });
   console.log('report generated');
 }
@@ -1827,14 +2021,25 @@ async function validateArtifacts() {
     'reconciliations/r2-metadata-delta.json',
     'reconciliations/r2-local-delta.json',
     'reconciliations/worker-raw-delta.json',
+    'reconciliations/web-worker-delta.json',
     'reconciliations/duplicate-groups.json',
     'reconciliations/malformed-keys.json',
     'reconciliations/unresolved-items.json',
+    'reconciliations/unresolved-summary.json',
+    'logs/web-vault-identity.json',
+    'logs/web-vault-inventory-pages.json',
+    'logs/web-vault-preview.json',
+    'logs/web-repair-scan.json',
+    'logs/web-route-smoke-summary.json',
+    'logs/web-ui-smoke.json',
     'reconciliations/sample-set.json'
   ];
   const requiredJsonl = [
     'inventory/r2-objects.jsonl',
-    'inventory/r2-media-hashes.jsonl'
+    'inventory/r2-media-hashes.jsonl',
+    'inventory/web-vault-assets.jsonl',
+    'inventory/worker-vault-assets.jsonl',
+    'inventory/d1-r2-dedupe-index.jsonl'
   ];
   const missing = [];
   const parseFailures = [];

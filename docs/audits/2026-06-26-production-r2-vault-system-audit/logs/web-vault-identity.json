@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-06-28T03:58:14.500Z",
+  "route": "GET /api/vault/identity",
+  "status": 200,
+  "identity": {
+    "ok": true,
+    "service": "grok-r2-backup",
+    "workerHost": "grok-r2-backup-worker.greymakerxyz-grok.workers.dev",
+    "keyPrefix": "grok-powertools/v1",
+    "r2": {
+      "bucketName": "grok-gallery-001",
+      "bindingPresent": true
+    },
+    "d1": {
+      "bindingPresent": true
+    },
+    "apiKeyFingerprint": "fp_540f6271723d"
+  }
+}

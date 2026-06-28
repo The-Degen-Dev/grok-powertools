@@ -1,0 +1,83 @@
+{
+  "generatedAt": "2026-06-28T03:53:35.216Z",
+  "workerUrlHost": "grok-r2-backup-worker.greymakerxyz-grok.workers.dev",
+  "pageCount": 5,
+  "truncatedAtPageLimit": false,
+  "pages": [
+    {
+      "page": 1,
+      "itemCount": 1000,
+      "nextCursorPresent": true,
+      "counts": {
+        "assets": 1000,
+        "images": 642,
+        "videos": 358,
+        "verified": 1000,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      },
+      "timestamp": "2026-06-28T03:53:34.649Z"
+    },
+    {
+      "page": 2,
+      "itemCount": 1000,
+      "nextCursorPresent": true,
+      "counts": {
+        "assets": 1000,
+        "images": 665,
+        "videos": 335,
+        "verified": 1000,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      },
+      "timestamp": "2026-06-28T03:53:34.743Z"
+    },
+    {
+      "page": 3,
+      "itemCount": 1000,
+      "nextCursorPresent": true,
+      "counts": {
+        "assets": 1000,
+        "images": 555,
+        "videos": 445,
+        "verified": 1000,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      },
+      "timestamp": "2026-06-28T03:53:35.012Z"
+    },
+    {
+      "page": 4,
+      "itemCount": 1000,
+      "nextCursorPresent": true,
+      "counts": {
+        "assets": 1000,
+        "images": 610,
+        "videos": 390,
+        "verified": 1000,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      },
+      "timestamp": "2026-06-28T03:53:35.100Z"
+    },
+    {
+      "page": 5,
+      "itemCount": 647,
+      "nextCursorPresent": false,
+      "counts": {
+        "assets": 647,
+        "images": 382,
+        "videos": 265,
+        "verified": 647,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      },
+      "timestamp": "2026-06-28T03:53:35.168Z"
+    }
+  ]
+}

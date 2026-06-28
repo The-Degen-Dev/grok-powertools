@@ -1,0 +1,30 @@
+{
+  "name": "d1-metadata_snapshot_index",
+  "command": "mise",
+  "args": [
+    "exec",
+    "node@24",
+    "--",
+    "npx",
+    "--yes",
+    "wrangler@latest",
+    "d1",
+    "execute",
+    "grok-powertools-db",
+    "--remote",
+    "--json",
+    "--command",
+    "SELECT * FROM metadata_snapshot_index"
+  ],
+  "startedAt": "2026-06-28T03:47:56.788Z",
+  "finishedAt": "2026-06-28T03:48:00.941Z",
+  "exitCode": 0,
+  "ok": true,
+  "sqlShape": "SELECT * FROM metadata_snapshot_index",
+  "stdoutBytes": 2191,
+  "stdoutSha256": "61c160c24281ff2302fd941d10568509bf149cd42a48a0df7757584b94a6653c",
+  "parsedRowCount": 4,
+  "rowsWritten": 0,
+  "changedDb": false,
+  "stderr": ""
+}

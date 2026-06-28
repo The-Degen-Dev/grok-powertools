@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "service": "grok-r2-backup",
+  "keyPrefix": "grok-powertools/v1",
+  "r2": {
+    "bucketName": "grok-gallery-001",
+    "bindingPresent": true
+  },
+  "d1": {
+    "bindingPresent": true
+  },
+  "apiKeyFingerprint": "[redacted sha256:3baf2f0460880948 length:15]"
+}

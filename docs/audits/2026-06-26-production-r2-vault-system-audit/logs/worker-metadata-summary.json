@@ -1,0 +1,30 @@
+{
+  "generatedAt": "2026-06-28T03:53:35.562Z",
+  "metadataSummaries": [
+    {
+      "kind": "savedPrompts",
+      "ok": true,
+      "count": 0
+    },
+    {
+      "kind": "promptHistory",
+      "ok": true,
+      "count": 0
+    },
+    {
+      "kind": "processedIds",
+      "ok": true,
+      "count": 0
+    },
+    {
+      "kind": "backfillManifest",
+      "ok": true,
+      "count": 0
+    },
+    {
+      "kind": "savedList",
+      "ok": true,
+      "count": 0
+    }
+  ]
+}

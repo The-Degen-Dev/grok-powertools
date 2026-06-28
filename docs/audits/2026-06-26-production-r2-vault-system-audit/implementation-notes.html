@@ -36,11 +36,25 @@
     <li>The user approved moving from spec and implementation planning into Codex Goal execution before this audit run. The runner still treats production identity proof as a hard gate before raw inventory.</li>
     <li>Subagent review tightened preflight by requiring authenticated R2 bucket/prefix proof and D1 schema proof before raw R2 inventory.</li>
     <li>The raw <code>wrangler whoami</code> output is not persisted. The audit records only the expected account ID and a structured summary of scope classes so the broad-credential blocker is evidenced without storing account email or token text.</li>
+    <li>The user explicitly approved the currently authenticated broad Wrangler token for remote D1 <code>SELECT</code>-only audit reads. The runner now requires <code>AUDIT_APPROVE_BROAD_WRANGLER_SELECT_ONLY=1</code> and records that approval in <code>logs/d1-broad-token-select-only-approval.json</code>; production writes remain forbidden.</li>
+    <li>Subagent safety review found that raw Wrangler D1 stdout could be persisted before row-level redaction. The runner now disables raw D1 command persistence, stores only stdout hash/byte count/row count/metadata, and enforces single-statement <code>SELECT</code> SQL before Wrangler is invoked.</li>
+    <li>Subagent safety review also broadened prompt/private-text key redaction to cover kebab-case and snake_case metadata keys such as <code>prompt-text</code>, <code>prompt_text</code>, <code>negative-prompt</code>, and <code>raw-prompt</code>.</li>
+    <li>The R2 runner now writes a listing checkpoint before object-head enrichment and uses bounded concurrency for <code>HeadObject</code>. This preserves full coverage while avoiding the earlier serial-head bottleneck that produced no artifact for several minutes.</li>
+    <li>The R2 hash runner now resumes from existing <code>r2-media-hashes.jsonl</code> rows and hashes remaining media in small batches with bounded concurrent streams. This preserves full byte-hash coverage while allowing an interrupted hash run to continue without discarding completed hash rows.</li>
+    <li>Redaction was corrected to preserve storage identifier fields such as <code>key</code>, <code>objectKey</code>, and <code>canonical_object_key</code>. The earlier broad <code>key</code> redaction made R2/D1 reconciliation evidence unusable. Secret-like fields such as API keys, access keys, tokens, cookies, signatures, signed URLs, and prompt text remain redacted.</li>
+    <li>Live Grok inspection uses the existing visible Chrome window only. Peekaboo showed the visible Chrome window was Gmail, not <code>grok.com/imagine/saved</code>, so the audit recorded a live-Grok blocker instead of broad-scanning tabs or navigating unrelated Chrome windows.</li>
+    <li>Subagent reconciliation review found that D1/Worker exact-key gaps should be split by path semantics: legacy date-folder objects are not indexed by the current D1/Worker path, while canonical <code>media/by-asset</code> objects absent from D1/Worker remain unresolved raw-R2-only evidence. The report now describes those separately and avoids calling all deltas missing media.</li>
+    <li>Subagent reconciliation review also found that metadata-reference and local/R2 deltas should not be described as full completeness failures. The report now treats metadata as reference coverage and local/R2 as SHA-256 overlap against the scanned macOS corpus.</li>
   </ul>
 
   <h2>Deviations</h2>
   <ul>
     <li>The audit generated a blocked current-state report before completing downstream inventory phases. This does not relax final success criteria; it preserves the exact hard-gate state for handoff.</li>
+    <li>The R2 phase was interrupted before artifact writeout because the user requested a safe pause before restarting the Mac. Resume from <code>r2</code>; do not treat the interrupted run as evidence.</li>
+    <li>A later R2 attempt was also interrupted before required artifact writeout so the runner could be adjusted to write a checkpoint and use bounded <code>HeadObject</code> concurrency. Do not treat that interrupted run as evidence.</li>
+    <li>The first successful listing/hash attempt wrote partial hash rows, then was interrupted so the runner could become resume-safe and use bounded hash concurrency. The existing rows are retained and the next <code>r2</code> run must finish the remaining hash rows before the hash subsystem can be considered verified.</li>
+    <li>The redacted-key R2 artifacts from the interrupted runs were deleted after the storage-key redaction bug was found. The next R2 run must regenerate raw R2 evidence from scratch.</li>
+    <li>The report generator was tightened after subagent review to avoid unsafe claims: no clean production verdict, no required-metadata-loss claim from prompt-sidecar reference absence, no local corpus completeness claim, and no deletion recommendation for duplicate hash groups.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -50,8 +64,7 @@
 
   <h2>Open Questions</h2>
   <ul>
-    <li>Provide read-only R2 environment variables for <code>CLOUDFLARE_ACCOUNT_ID</code>, <code>R2_ACCESS_KEY_ID</code>, and <code>R2_SECRET_ACCESS_KEY</code>, or approve an alternate read-only R2 proof method.</li>
-    <li>Provide a read-only Cloudflare token for D1 proof, or explicitly approve using the currently authenticated broad Wrangler token for SELECT-only D1 reads.</li>
+    <li>Bring the existing <code>grok.com/imagine/saved</code> tab/window with Grok Vault open to the foreground, then resume the Goal for read-only live Grok and extension inspection. The audit must not use broad Chrome tab discovery or navigate over unrelated tabs unless the user explicitly approves a different narrow method.</li>
   </ul>
 </body>
 </html>

@@ -1,0 +1,30 @@
+{
+  "name": "d1-r2_dedupe_index",
+  "command": "mise",
+  "args": [
+    "exec",
+    "node@24",
+    "--",
+    "npx",
+    "--yes",
+    "wrangler@latest",
+    "d1",
+    "execute",
+    "grok-powertools-db",
+    "--remote",
+    "--json",
+    "--command",
+    "SELECT * FROM r2_dedupe_index"
+  ],
+  "startedAt": "2026-06-28T03:47:52.436Z",
+  "finishedAt": "2026-06-28T03:47:56.751Z",
+  "exitCode": 0,
+  "ok": true,
+  "sqlShape": "SELECT * FROM r2_dedupe_index",
+  "stdoutBytes": 2868798,
+  "stdoutSha256": "2471641996b94936a3570495eec473b1be8d126678c87f25ded0a3aa4dcdafea",
+  "parsedRowCount": 4648,
+  "rowsWritten": 0,
+  "changedDb": false,
+  "stderr": ""
+}

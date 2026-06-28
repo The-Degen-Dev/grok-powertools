@@ -1,0 +1,576 @@
+{
+  "generatedAt": "2026-06-28T04:01:18.842Z",
+  "r2Media": {
+    "count": 15981,
+    "byPathClass": {
+      "legacy-date-media": 9893,
+      "canonical-media": 6088
+    },
+    "byUser": {
+      "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 10290,
+      "Shared_Account": 5691
+    }
+  },
+  "d1Coverage": {
+    "covered": 4647,
+    "missing": 11334,
+    "missingByPathClass": {
+      "legacy-date-media": 9893,
+      "canonical-media": 1441
+    },
+    "coveredByPathClass": {
+      "canonical-media": 4647
+    }
+  },
+  "workerCoverage": {
+    "covered": 4647,
+    "missing": 11334,
+    "missingByPathClass": {
+      "legacy-date-media": 9893,
+      "canonical-media": 1441
+    },
+    "coveredByPathClass": {
+      "canonical-media": 4647
+    }
+  },
+  "metadataReferenceCoverage": {
+    "referenced": 2090,
+    "missing": 13891,
+    "missingByPathClass": {
+      "legacy-date-media": 8017,
+      "canonical-media": 5874
+    }
+  },
+  "duplicateContentHash": {
+    "groupCount": 5116,
+    "objectCountInDuplicateGroups": 12073,
+    "groupsByPathClassComposition": {
+      "legacy-date-media:5": 104,
+      "legacy-date-media:6": 27,
+      "legacy-date-media:2": 1975,
+      "legacy-date-media:7": 17,
+      "legacy-date-media:4": 242,
+      "legacy-date-media:3": 556,
+      "legacy-date-media:8": 5,
+      "canonical-media:2|legacy-date-media:1": 1,
+      "canonical-media:1|legacy-date-media:2": 111,
+      "canonical-media:1|legacy-date-media:1": 564,
+      "canonical-media:2": 1366,
+      "canonical-media:3": 146,
+      "canonical-media:6": 2
+    },
+    "largestGroups": [
+      {
+        "sha256": "afb9becfa5f0426ff85fd262fb23eea091d2d28c3e8bd43197ca9f8f5a308215",
+        "count": 8,
+        "totalBytes": 59023880,
+        "byPathClass": {
+          "legacy-date-media": 8
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 8
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/11b31b0e-d54f-4527-a169-095051ede912.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/1bfeacc2-7c13-4ab7-8099-69c2cde7c00d.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/923e5081-707a-429e-9baf-68f752365e59.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/c13eb700-6da4-4d95-8520-300b7f514b43.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/8475f5c7-6ad0-482a-803a-47037f13fba3.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/8475f5c7-6ad0-482a-803a-47037f13fba3.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/8475f5c7-6ad0-482a-803a-47037f13fba3.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/8475f5c7-6ad0-482a-803a-47037f13fba3.mp4"
+        ]
+      },
+      {
+        "sha256": "339290a03c0593e41563261bfc2fba52cb3bc28387dfc0cee139e25c62074e3b",
+        "count": 8,
+        "totalBytes": 28637176,
+        "byPathClass": {
+          "legacy-date-media": 8
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 8
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/18098a3c-8a55-48d1-9920-3a103171994e.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/7486d692-e97d-4f1d-bad8-08f914df0a75.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/9cda0067-c8cc-42e7-b4c7-6dbe813ceda4.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/ab1d1828-5044-4549-b873-719f3fdd4ec5.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/2623e004-b8c0-41e1-94db-6978add9aaf4.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/2623e004-b8c0-41e1-94db-6978add9aaf4.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/2623e004-b8c0-41e1-94db-6978add9aaf4.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/2623e004-b8c0-41e1-94db-6978add9aaf4.mp4"
+        ]
+      },
+      {
+        "sha256": "7a24eda656313e2cf8753a58ca88a3fce819958a75d63862d76518a92282e82e",
+        "count": 8,
+        "totalBytes": 55034440,
+        "byPathClass": {
+          "legacy-date-media": 8
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 8
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/1ec83b66-81fa-4d6b-96bb-ffc4a76c2346.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/20c8b64b-1b3b-42a2-985b-2809bcbee56d.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/b50ee291-8795-423d-9ad8-0bbbd4ff1021.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/e30de630-159c-4d59-9e62-a146e44e5247.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/4f31a016-e61a-43b5-9fe2-e1a9c297b953.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/4f31a016-e61a-43b5-9fe2-e1a9c297b953.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/4f31a016-e61a-43b5-9fe2-e1a9c297b953.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/4f31a016-e61a-43b5-9fe2-e1a9c297b953.mp4"
+        ]
+      },
+      {
+        "sha256": "3302ce4ca895f9911872c8ddbedbcbc758078519054204e84f34b4ecf2e57c83",
+        "count": 8,
+        "totalBytes": 53150992,
+        "byPathClass": {
+          "legacy-date-media": 8
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 8
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/22b0f8ca-ae79-4594-83b4-39318aa8ceec.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/7d4e4c60-0531-42e6-94fe-e0c0c1ba4ab8.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/ad0c4f22-61fe-4607-b8ec-ce28f0c5799d.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/e4cf11fb-b149-4835-b73e-82b512dfc5f2.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/b2b6d3a5-af14-49be-b00f-23e8392fdef1.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/b2b6d3a5-af14-49be-b00f-23e8392fdef1.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/b2b6d3a5-af14-49be-b00f-23e8392fdef1.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/b2b6d3a5-af14-49be-b00f-23e8392fdef1.mp4"
+        ]
+      },
+      {
+        "sha256": "c7123409af34a09f8615efd4103ce340d2b5b98392b1dcadac9537fb92437bb2",
+        "count": 8,
+        "totalBytes": 63568224,
+        "byPathClass": {
+          "legacy-date-media": 8
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 8
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/4d1501bd-e855-49e4-9561-cfd26939ddf2.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/6e188dd9-b4db-466f-aae1-e3c112e01d15.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/d1351ad5-8676-4c3a-8f92-87bff7fc9e10.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/f0a61c7c-d299-4b7e-8cf1-787ceba40c8f.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/2fce27df-1ec6-49c4-bcfe-bdac9daf52d4.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/2fce27df-1ec6-49c4-bcfe-bdac9daf52d4.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/2fce27df-1ec6-49c4-bcfe-bdac9daf52d4.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/2fce27df-1ec6-49c4-bcfe-bdac9daf52d4.mp4"
+        ]
+      },
+      {
+        "sha256": "cd53156c3bf033bd052d9f529bcae2df2bd02f3a6e13a2e40412647e07eca7f4",
+        "count": 7,
+        "totalBytes": 48125343,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-31_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-04_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-05_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4"
+        ]
+      },
+      {
+        "sha256": "0b54c6d95783780098b2537d9848a42853b65a7b341efab70bcb3d574be4da41",
+        "count": 7,
+        "totalBytes": 39143356,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/0d19f082-a478-4f1c-9079-c6714c4ac129.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/912f6627-d4d1-42c2-9b1d-f31f5b6c4383.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/d4c9c3b5-8afa-402e-8355-51d71c4092d0.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/544ee6de-6843-491f-8658-9685c699687e.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/544ee6de-6843-491f-8658-9685c699687e.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/544ee6de-6843-491f-8658-9685c699687e.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/544ee6de-6843-491f-8658-9685c699687e.mp4"
+        ]
+      },
+      {
+        "sha256": "a1440839be9bbf6f7f90b74cd5a89bbd871873b2ef889563140747aced69b8ff",
+        "count": 7,
+        "totalBytes": 25293702,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/0ebc1d92-b4f4-4ba6-8249-cd376fab74f3.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/5afd691a-b971-4c0d-8043-324154aa03cc.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/ca558183-b518-4316-9cc7-354184f0a10e.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/6c638e73-bfd3-431f-a9ae-7c9d2c2ac4bc.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/6c638e73-bfd3-431f-a9ae-7c9d2c2ac4bc.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/6c638e73-bfd3-431f-a9ae-7c9d2c2ac4bc.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/6c638e73-bfd3-431f-a9ae-7c9d2c2ac4bc.mp4"
+        ]
+      },
+      {
+        "sha256": "9757f46bc9c803763717a78207557bc8653dfe37261d00623926d4ca55cfaf47",
+        "count": 7,
+        "totalBytes": 40595240,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/148a5ea9-c070-4e3a-bae0-af0d7f4dd851.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/710e25f5-8cc2-44cc-81e3-204373b5ec13.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/dc22f831-bc03-4379-97d6-50d06e78de5e.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/488ad304-ddbb-41f3-9a31-6a85adcabf2d.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/488ad304-ddbb-41f3-9a31-6a85adcabf2d.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/488ad304-ddbb-41f3-9a31-6a85adcabf2d.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/488ad304-ddbb-41f3-9a31-6a85adcabf2d.mp4"
+        ]
+      },
+      {
+        "sha256": "98b7937a0028e7f31d9bad0f6a2b538d3801b9a04886da2051bf0f08091529eb",
+        "count": 7,
+        "totalBytes": 31288985,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/1d0d8485-28e4-4d63-8ca2-fd14c6f705ee.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/8442dec7-57e3-44b0-97db-81c43e8d4eaf.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/d0f498bc-1bdf-428b-a483-fcbe1297e93f.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/13a270dd-7597-4e7c-bf6c-cd2e939159f0.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/13a270dd-7597-4e7c-bf6c-cd2e939159f0.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/13a270dd-7597-4e7c-bf6c-cd2e939159f0.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/13a270dd-7597-4e7c-bf6c-cd2e939159f0.mp4"
+        ]
+      },
+      {
+        "sha256": "67056288527768689eef45ab93c7ce07962d486ba9c5db54b460ad72b331abe8",
+        "count": 7,
+        "totalBytes": 41313874,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/25cb7bef-b5a7-4cdc-a6ed-44fe06de78e3.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/a2d9d514-ddfa-4392-8735-b6829fec9561.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/ad7270f6-e725-44d3-be03-a420c2df737d.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/20f93807-6b7a-4696-b2bc-e2126c9d4b36.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/20f93807-6b7a-4696-b2bc-e2126c9d4b36.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/20f93807-6b7a-4696-b2bc-e2126c9d4b36.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/20f93807-6b7a-4696-b2bc-e2126c9d4b36.mp4"
+        ]
+      },
+      {
+        "sha256": "f38494e61d46c3ec33456aa527247b4c95071c9e85a456a631d3158bc94cc10a",
+        "count": 7,
+        "totalBytes": 32644640,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/282dd6f9-6b72-454f-b251-f9595b0d8b02.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/6c1d3c1f-eb19-4b03-8704-e22311bed11b.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/c1257cf0-06c2-41cc-9ece-e3688bad8b89.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/2f2c5f5a-b0bf-43a7-b20e-a3f54b25a4ac.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/2f2c5f5a-b0bf-43a7-b20e-a3f54b25a4ac.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/2f2c5f5a-b0bf-43a7-b20e-a3f54b25a4ac.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/2f2c5f5a-b0bf-43a7-b20e-a3f54b25a4ac.mp4"
+        ]
+      },
+      {
+        "sha256": "3beef6ed3cfd149b6ee16663668dcc3d693793b146903ff0a5a104bff0c4d848",
+        "count": 7,
+        "totalBytes": 37083263,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/3242fa17-1cd0-43bb-9b82-080972c99d98.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/f5f4b11b-2f9c-40d9-b32b-d296dafbb2fe.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/fba5c683-9112-4460-bc1f-b78ab62b41eb.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/6d8e2161-d05f-4410-aa3c-353596d9e13a.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/6d8e2161-d05f-4410-aa3c-353596d9e13a.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/6d8e2161-d05f-4410-aa3c-353596d9e13a.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/6d8e2161-d05f-4410-aa3c-353596d9e13a.mp4"
+        ]
+      },
+      {
+        "sha256": "a48cd5c0a84560fb786db7bf4f93be8fd89d93ce6b045a7a42fecfd28b0c13a6",
+        "count": 7,
+        "totalBytes": 24593653,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/4a81907f-b404-4327-b682-0eeff1693ed1.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/651c841b-a1c0-42eb-a8d8-1d2e29b42b37.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/97586744-d278-456e-8402-727b2b3f90bd.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/480a9e5d-77a8-4977-8875-c1a7f6993bc8.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/480a9e5d-77a8-4977-8875-c1a7f6993bc8.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/480a9e5d-77a8-4977-8875-c1a7f6993bc8.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/480a9e5d-77a8-4977-8875-c1a7f6993bc8.mp4"
+        ]
+      },
+      {
+        "sha256": "f4b3f3bae85831ad2b1d30db8c27e560fe033bd41058c990cf2ca7ec46ccb905",
+        "count": 7,
+        "totalBytes": 30761451,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/6673b00a-0859-4f65-b4f5-9f6d3bb64c30.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/8f6db165-2b86-4b16-b3a5-89bdb1085e55.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/f13ccb7a-95c3-436d-9e0a-ea9eef01688a.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/ba50f42e-9860-47b7-b8f2-aea2f685c15b.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/ba50f42e-9860-47b7-b8f2-aea2f685c15b.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/ba50f42e-9860-47b7-b8f2-aea2f685c15b.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/ba50f42e-9860-47b7-b8f2-aea2f685c15b.mp4"
+        ]
+      },
+      {
+        "sha256": "d417044825d61ea1283bfc592254f4f6da354fd9b21e1d5e519f1db3f65ba9c2",
+        "count": 7,
+        "totalBytes": 26405190,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/6e91051a-b106-4531-a985-55d8474889f7.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/7840a09a-3dbc-4558-9f13-31c404a7fc9e.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/8d8bf5b1-28b6-453c-9583-0dbc79d4a05f.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/b2bde09d-79d3-4f06-be2c-c0dee387c630.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/b2bde09d-79d3-4f06-be2c-c0dee387c630.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/b2bde09d-79d3-4f06-be2c-c0dee387c630.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/b2bde09d-79d3-4f06-be2c-c0dee387c630.mp4"
+        ]
+      },
+      {
+        "sha256": "056060525f947937c1b530e4557cbe730d5c3e8fcc22fe1c38c87c0b3f5a0bb7",
+        "count": 7,
+        "totalBytes": 34790259,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/7be0ac28-87e5-4cec-8b64-be6b592c4932.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/8bd08cd6-ba74-4323-b033-20217b1f7ec9.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/f8d14c6d-1bf5-44cc-b0d2-1466330bceeb.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/004c99e3-af2b-49b5-bc95-6e63bdfd4a27.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/004c99e3-af2b-49b5-bc95-6e63bdfd4a27.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/004c99e3-af2b-49b5-bc95-6e63bdfd4a27.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/004c99e3-af2b-49b5-bc95-6e63bdfd4a27.mp4"
+        ]
+      },
+      {
+        "sha256": "c4c6f196f7db1b7c2e085d1621006adee574d035a351e9afdc6d6f0e642250ae",
+        "count": 7,
+        "totalBytes": 32037726,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/832c1109-4926-4a71-ab49-2cab2979c05d.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/972f8c22-f20d-488d-a10e-f63ec42fe073.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/cfa93490-8d8f-4d3a-ae07-4edc3b3aa29e.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/383af77c-3914-41e8-929e-b65c8edbafbc.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/383af77c-3914-41e8-929e-b65c8edbafbc.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/383af77c-3914-41e8-929e-b65c8edbafbc.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/383af77c-3914-41e8-929e-b65c8edbafbc.mp4"
+        ]
+      },
+      {
+        "sha256": "fe9a6d5a09d94d0d88a4e01cd285bc2099acf27795ddbc80a73b24c4666e1fb4",
+        "count": 7,
+        "totalBytes": 25738776,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/8de38063-65a8-41a0-979f-5e43580487d7.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/abb03e43-2d87-424e-8c59-183e8c941c28.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/d3a798f5-b3a4-44f5-a3cf-8e0ae91705a8.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/a501c8b2-86fc-45d1-a0a5-df329befea91.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/a501c8b2-86fc-45d1-a0a5-df329befea91.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/a501c8b2-86fc-45d1-a0a5-df329befea91.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/a501c8b2-86fc-45d1-a0a5-df329befea91.mp4"
+        ]
+      },
+      {
+        "sha256": "5b0360bc4dda988585b51859d132d28b62853227360e7d657fdded6b5485f5fa",
+        "count": 7,
+        "totalBytes": 30592758,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/96ef39f0-b970-4da2-8903-b5db4aa0a63f.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/a951e323-5676-4043-adde-194f0b9f2efd.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/cf7604df-28eb-4a51-9edd-b2cc1429561f.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/b6a3317c-9191-4ae9-9ead-b221edbd07eb.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/b6a3317c-9191-4ae9-9ead-b221edbd07eb.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/b6a3317c-9191-4ae9-9ead-b221edbd07eb.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/b6a3317c-9191-4ae9-9ead-b221edbd07eb.mp4"
+        ]
+      },
+      {
+        "sha256": "4c291f95cc6a91a748111fd816c6d4a6f53b9485982efd800ffeeccde335f7f0",
+        "count": 7,
+        "totalBytes": 29635795,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/a8fac6bb-82d1-4136-8956-60100374b7c7.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/b87142c7-d870-4bbf-b2b0-0ca1b46d822c.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/e413ef16-4a6e-49a4-8530-bb6983cefea6.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/0f1b7af2-9210-4a8f-85c1-b9d8db6b4eb2.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/0f1b7af2-9210-4a8f-85c1-b9d8db6b4eb2.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/0f1b7af2-9210-4a8f-85c1-b9d8db6b4eb2.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/0f1b7af2-9210-4a8f-85c1-b9d8db6b4eb2.mp4"
+        ]
+      },
+      {
+        "sha256": "acfc72503f2276a21911cd95f26b4add82b95280d05c3b753c617bb70f942b56",
+        "count": 7,
+        "totalBytes": 33005672,
+        "byPathClass": {
+          "legacy-date-media": 7
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 7
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/c4d63491-7f30-4438-a89e-ad02fdda0013.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/d6e43977-303d-4e1e-88c5-924e9bbe8cba.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/d81d2d49-8995-4714-966e-9dc72b478a9e.png",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-07_Auto/57037c6a-afd3-4660-8191-4084490e94d6.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/57037c6a-afd3-4660-8191-4084490e94d6.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-20_Auto/57037c6a-afd3-4660-8191-4084490e94d6.mp4",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-23_Auto/57037c6a-afd3-4660-8191-4084490e94d6.mp4"
+        ]
+      },
+      {
+        "sha256": "edb846dd4ab0c8d2b67e8549d02668e9e58c7037ada9028ecdbe4da34d39bb76",
+        "count": 6,
+        "totalBytes": 3583668,
+        "byPathClass": {
+          "legacy-date-media": 6
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 6
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-31_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-04_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-05_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg"
+        ]
+      },
+      {
+        "sha256": "5f5fb991e7fabda89d5735104dc4f0647dbca6341f859fb591d6d21cb58f28d4",
+        "count": 6,
+        "totalBytes": 3774528,
+        "byPathClass": {
+          "legacy-date-media": 6
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 6
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-31_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-04_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-05_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg"
+        ]
+      },
+      {
+        "sha256": "cea88ae3a7db6d9ae91684d55888470bf88547c341ba1e1430a381ebb10a2409",
+        "count": 6,
+        "totalBytes": 3591636,
+        "byPathClass": {
+          "legacy-date-media": 6
+        },
+        "byUser": {
+          "73e01e47-8b4d-4560-8d6e-d72f00b02b82": 6
+        },
+        "sampleKeys": [
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-31_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-04_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-05_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-06_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg",
+          "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-04-08_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg"
+        ]
+      }
+    ]
+  },
+  "localDuplicateHashGroups": {
+    "groupCount": 387
+  },
+  "localVsR2Notes": {
+    "localTotal": 8532,
+    "localImage": 6893,
+    "localVideo": 1638,
+    "localNonMedia": 1
+  }
+}

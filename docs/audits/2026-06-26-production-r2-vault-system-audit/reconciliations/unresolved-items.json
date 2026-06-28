@@ -1,0 +1,150 @@
+{
+  "generatedAt": "2026-06-28T04:00:48.334Z",
+  "items": [
+    {
+      "source": "r2-d1-delta.json",
+      "path": "r2MediaWithoutD1",
+      "count": 11334,
+      "sample": [
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-20_Auto/c196e1e7-ee4d-4f6e-a6b8-c325ff12a800.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/012773ad-d52c-4193-94be-b7ca24068ce4.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/0c4cb7cd-be13-4b9b-9adb-79d3e66dd7bb.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/10fc8306-e893-4642-97b1-4ae862377056.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/174a5e8c-e1f1-419a-951d-c330bf2fa5c9.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/191506c7-e838-49f6-a2a0-4e601393d192.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4"
+      ]
+    },
+    {
+      "source": "r2-metadata-delta.json",
+      "path": "r2MediaWithoutMetadataReference",
+      "count": 13891,
+      "sample": [
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-20_Auto/c196e1e7-ee4d-4f6e-a6b8-c325ff12a800.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/012773ad-d52c-4193-94be-b7ca24068ce4.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/0c4cb7cd-be13-4b9b-9adb-79d3e66dd7bb.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/10fc8306-e893-4642-97b1-4ae862377056.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/174a5e8c-e1f1-419a-951d-c330bf2fa5c9.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/191506c7-e838-49f6-a2a0-4e601393d192.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4"
+      ]
+    },
+    {
+      "source": "r2-local-delta.json",
+      "path": "r2MediaMissingLocallyByHash",
+      "count": 13032,
+      "sample": [
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-20_Auto/c196e1e7-ee4d-4f6e-a6b8-c325ff12a800.jpg",
+          "sha256": "345623692875ebd2839b320bd66e3f6126639db6a86c247f970ad3fb4032a774"
+        },
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/012773ad-d52c-4193-94be-b7ca24068ce4.jpg",
+          "sha256": "8596e49dd8f2e9c69a3006a50812b150c463f46c81789c7f14f8627318f1a542"
+        },
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg",
+          "sha256": "edb846dd4ab0c8d2b67e8549d02668e9e58c7037ada9028ecdbe4da34d39bb76"
+        },
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/0c4cb7cd-be13-4b9b-9adb-79d3e66dd7bb.jpg",
+          "sha256": "8fe004db4551246093b67170292081b8fd3d863a52fd19e3b44858de611dd285"
+        },
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/10fc8306-e893-4642-97b1-4ae862377056.jpg",
+          "sha256": "d3679ec091648d3a8b20f0702d900c2e8d776ce8830646649cf5a9177a89eac1"
+        },
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg",
+          "sha256": "5f5fb991e7fabda89d5735104dc4f0647dbca6341f859fb591d6d21cb58f28d4"
+        },
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg",
+          "sha256": "cea88ae3a7db6d9ae91684d55888470bf88547c341ba1e1430a381ebb10a2409"
+        },
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/174a5e8c-e1f1-419a-951d-c330bf2fa5c9.jpg",
+          "sha256": "169e774d8fd92d351de7be4ca512469dbc9bcf2c67c0a99a04d3480d7e337ba6"
+        },
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/191506c7-e838-49f6-a2a0-4e601393d192.jpg",
+          "sha256": "eb7665618a5f4fc693729cf3e67ee32bea03d2cac4e739c2ffacb314a1076ce1"
+        },
+        {
+          "objectKey": "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/1bcd3504-00d1-4cb2-916f-1f928e6e02c4.jpg",
+          "sha256": "f026e950274bce5c1343dfe5e4a83332a11b3c8b53f20010c4fd3b2eb49684fc"
+        }
+      ]
+    },
+    {
+      "source": "r2-local-delta.json",
+      "path": "localMediaMissingInR2ByHash",
+      "count": 6758,
+      "sample": [
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/057430db-9ecf-49e7-a222-6e03d15afcd7_hd.mp4",
+          "sha256": "c3c37f6e75abd7379cceefcdc89b414fcb09fc6da510c88841ac0e57196ce251"
+        },
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/062b3ceb-ea90-4351-8856-c29395c27115.png",
+          "sha256": "790ac64310ed003e748f198b063b32ea1d6ef8dd6a8bf28290f5fb8de6ff8e68"
+        },
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/0bd7e9f0-ba12-4d26-ad1c-64435133bc3f.png",
+          "sha256": "0069beef9323bab0ef68c5079616904b8c4cc4ab6385e121dee3d3ff392cbe96"
+        },
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/0cef185c-1368-44db-b905-6b5ba4b7b459.png",
+          "sha256": "deb976472bab0b1ba465dee42d1edfd95872573cd1552e60ad3bbbeefcdd71b9"
+        },
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/2bff5a65-2d2e-43f6-ab36-ba77c1d14dc1.png",
+          "sha256": "abdbc0669553c776db7b9454e36148cda96840b8c76ba3d81785a0d76d600974"
+        },
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/3ba23932-c617-4a70-b647-9ea4bb340008.png",
+          "sha256": "ec8f40f2ca4c2be8828bd43388bf8dc3356785425a5eb49412f4cea9f40ade5c"
+        },
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/3d98c0e5-c993-4dda-9d09-28cf3723cf45.png",
+          "sha256": "8c870787aa4939292bc94667934201ed75ae5ad906ee6c9a8a22c34fff862f60"
+        },
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/3e714925-4fe7-48e9-ad10-a4f9e717ff88.png",
+          "sha256": "989c61d19b4a6a1baeebe070080b9bdeec90034179028d393a8c2868cbd18b05"
+        },
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/485665bb-3927-4149-a810-bdf2a6ec97fc.png",
+          "sha256": "039391b881f02b2418506c556bbd1e7b2c885b3a1f9b09dfd5b96451d4e348cc"
+        },
+        {
+          "path": "/Users/philipbankier/Content/Grok IMagine/greymaker/GrokVault/2025-12-19_Auto/4ca786aa-cf3e-4bc7-8cd8-205b791fedbf.png",
+          "sha256": "64ee7ef544f124fd9f79c52c933d87a41c8f21267154de2816d5a65679395929"
+        }
+      ]
+    },
+    {
+      "source": "worker-raw-delta.json",
+      "path": "r2MediaMissingFromWorker",
+      "count": 11334,
+      "sample": [
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-20_Auto/c196e1e7-ee4d-4f6e-a6b8-c325ff12a800.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/012773ad-d52c-4193-94be-b7ca24068ce4.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/04ac550d-8947-40c6-90e2-70828ffaa526.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/0c4cb7cd-be13-4b9b-9adb-79d3e66dd7bb.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/10fc8306-e893-4642-97b1-4ae862377056.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/14066eeb-d719-40e9-a345-d8fb97b84b96.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/144de7c2-cd5d-4a0d-a230-7c38bd1f4c93.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/174a5e8c-e1f1-419a-951d-c330bf2fa5c9.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/191506c7-e838-49f6-a2a0-4e601393d192.jpg",
+        "grok-powertools/v1/users/73e01e47-8b4d-4560-8d6e-d72f00b02b82/media/2026-03-30_Auto/1ac259a8-90de-4b5c-ac92-c33a1ea05eda.mp4"
+      ]
+    }
+  ]
+}

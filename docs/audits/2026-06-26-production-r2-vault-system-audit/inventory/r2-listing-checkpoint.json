@@ -1,0 +1,12 @@
+{
+  "generatedAt": "2026-06-28T03:24:41.318Z",
+  "method": "S3 ListObjectsV2 before HeadObject enrichment",
+  "bucket": "grok-gallery-001",
+  "prefix": "grok-powertools/v1",
+  "objectCount": 18083,
+  "pageCount": 19,
+  "finalTruncatedState": false,
+  "headConcurrency": 16,
+  "hashConcurrency": 4,
+  "hashBatchSize": 50
+}

@@ -1,0 +1,24 @@
+{
+  "generatedAt": "2026-06-28T03:47:17.030Z",
+  "rawObjectCount": 18083,
+  "mediaObjectCount": 15981,
+  "metadataObjectCount": 10,
+  "totalBytes": 44814744381,
+  "byClass": {
+    "legacy-date-media": 9894,
+    "prompt-sidecar": 2090,
+    "canonical-media": 6088,
+    "metadata": 10,
+    "system": 1
+  },
+  "byMediaType": {
+    "image": 9600,
+    "video": 6381,
+    "non-media": 2102
+  },
+  "hashCoverage": {
+    "attempted": 15981,
+    "ok": 15981,
+    "failed": 0
+  }
+}

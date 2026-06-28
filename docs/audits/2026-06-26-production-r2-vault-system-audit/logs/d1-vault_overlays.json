@@ -1,0 +1,30 @@
+{
+  "name": "d1-vault_overlays",
+  "command": "mise",
+  "args": [
+    "exec",
+    "node@24",
+    "--",
+    "npx",
+    "--yes",
+    "wrangler@latest",
+    "d1",
+    "execute",
+    "grok-powertools-db",
+    "--remote",
+    "--json",
+    "--command",
+    "SELECT * FROM vault_overlays"
+  ],
+  "startedAt": "2026-06-28T03:48:00.944Z",
+  "finishedAt": "2026-06-28T03:48:05.117Z",
+  "exitCode": 0,
+  "ok": true,
+  "sqlShape": "SELECT * FROM vault_overlays",
+  "stdoutBytes": 461,
+  "stdoutSha256": "acb652a394c10c28915664a6d37f8df6fff3410380ff434c9641198670733bb3",
+  "parsedRowCount": 0,
+  "rowsWritten": 0,
+  "changedDb": false,
+  "stderr": ""
+}

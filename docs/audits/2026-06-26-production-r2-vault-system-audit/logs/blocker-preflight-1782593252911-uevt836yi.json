@@ -1,8 +1,0 @@
-{
-  "mode": "preflight",
-  "recordedAt": "2026-06-27T20:47:32.911Z",
-  "reason": "Authenticated R2 bucket/prefix proof failed",
-  "commandOrApiPath": "S3 HeadBucket and ListObjectsV2 MaxKeys=1",
-  "error": "missing required R2 env",
-  "neededUserDecision": "Provide read-only production R2 credentials or approve a different read-only bucket/prefix proof."
-}

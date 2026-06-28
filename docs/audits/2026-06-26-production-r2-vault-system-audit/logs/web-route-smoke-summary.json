@@ -1,0 +1,16 @@
+{
+  "startedAt": "2026-06-28T03:58:13.426Z",
+  "finishedAt": "2026-06-28T03:58:19.657Z",
+  "base": "http://localhost:3001",
+  "routes": [
+    "GET /api/vault/identity",
+    "GET /api/vault/inventory",
+    "GET /api/vault/gaps",
+    "GET /api/vault/preview",
+    "POST /api/vault/repair/scan",
+    "GET /api/vault/repair/proof",
+    "GET /api/vault/media/[assetId] first chunk only"
+  ],
+  "assetCount": 4647,
+  "pageCount": 5
+}

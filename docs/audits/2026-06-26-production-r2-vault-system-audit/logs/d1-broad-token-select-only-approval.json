@@ -1,0 +1,9 @@
+{
+  "generatedAt": "2026-06-28T02:52:40.396Z",
+  "approvalEnv": "AUDIT_APPROVE_BROAD_WRANGLER_SELECT_ONLY",
+  "approved": true,
+  "scope": "Remote D1 SELECT-only audit reads against grok-powertools-db",
+  "writesAllowed": false,
+  "writeOrAdminScopeCount": 21,
+  "note": "Approval is for using the currently authenticated broad Wrangler token only for SELECT statements. Production writes remain forbidden."
+}

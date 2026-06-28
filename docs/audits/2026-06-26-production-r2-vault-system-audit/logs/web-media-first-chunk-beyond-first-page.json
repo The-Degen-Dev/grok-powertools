@@ -1,0 +1,13 @@
+{
+  "generatedAt": "2026-06-28T03:58:19.656Z",
+  "route": "GET /api/vault/media/[assetId]",
+  "sampleIndex": 1000,
+  "assetId": "media_e375494d-b15e-4f60-bac4-044534aaee4a",
+  "objectKey": "grok-powertools/v1/users/Shared_Account/media/by-asset/media_e375494d-b15e-4f60-bac4-044534aaee4a.mp4",
+  "status": 200,
+  "contentType": "video/mp4",
+  "firstChunkBytes": 1892,
+  "firstChunkSha256": "afc730cea414307e953f1be43fe2308a5d6c6c0a7c1f74ef7f64424939a7c6a1",
+  "readError": null,
+  "bodyStored": false
+}

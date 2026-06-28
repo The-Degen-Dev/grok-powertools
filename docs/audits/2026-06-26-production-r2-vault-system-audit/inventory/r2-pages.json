@@ -1,0 +1,164 @@
+{
+  "method": "S3 ListObjectsV2",
+  "bucket": "grok-gallery-001",
+  "prefix": "grok-powertools/v1",
+  "pageSize": 1000,
+  "pageCount": 19,
+  "finalTruncatedState": false,
+  "headMethod": "S3 HeadObject for every listed object",
+  "headConcurrency": 16,
+  "pages": [
+    {
+      "page": 1,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": false,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:34.447Z"
+    },
+    {
+      "page": 2,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:34.847Z"
+    },
+    {
+      "page": 3,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:35.369Z"
+    },
+    {
+      "page": 4,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:35.765Z"
+    },
+    {
+      "page": 5,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:36.186Z"
+    },
+    {
+      "page": 6,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:36.608Z"
+    },
+    {
+      "page": 7,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:37.029Z"
+    },
+    {
+      "page": 8,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:37.378Z"
+    },
+    {
+      "page": 9,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:37.726Z"
+    },
+    {
+      "page": 10,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:38.052Z"
+    },
+    {
+      "page": 11,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:38.538Z"
+    },
+    {
+      "page": 12,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:38.932Z"
+    },
+    {
+      "page": 13,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:39.306Z"
+    },
+    {
+      "page": 14,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:39.644Z"
+    },
+    {
+      "page": 15,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:40.056Z"
+    },
+    {
+      "page": 16,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:40.390Z"
+    },
+    {
+      "page": 17,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:40.813Z"
+    },
+    {
+      "page": 18,
+      "keyCount": 1000,
+      "isTruncated": true,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": true,
+      "timestamp": "2026-06-28T03:24:41.190Z"
+    },
+    {
+      "page": 19,
+      "keyCount": 83,
+      "isTruncated": false,
+      "continuationTokenPresent": true,
+      "nextContinuationTokenPresent": false,
+      "timestamp": "2026-06-28T03:24:41.257Z"
+    }
+  ]
+}

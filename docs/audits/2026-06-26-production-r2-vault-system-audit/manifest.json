@@ -6,8 +6,8 @@
   "repo": {
     "path": "/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools",
     "branch": "codex/production-r2-vault-audit",
-    "commit": "ab345858d3453f93ba21caff31b7fa61a6a64ff5",
-    "gitStatusShort": "",
+    "commit": "3e358b6b0a12be972e5a1625709987c412bf7f68",
+    "gitStatusShort": " M docs/audits/2026-06-26-production-r2-vault-system-audit/implementation-notes.html\n M docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/preflight-d1-schema.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/inventory/preflight-identity.json\n D docs/audits/2026-06-26-production-r2-vault-system-audit/logs/blocker-preflight-1782593252910-uevt7p2sj.json\n D docs/audits/2026-06-26-production-r2-vault-system-audit/logs/blocker-preflight-1782593252911-uevt836yi.json\n D docs/audits/2026-06-26-production-r2-vault-system-audit/logs/blocker-preflight-1782593252912-uevt8uvgc.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/d1-preflight-schema-smoke.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/next-route-safety-source.txt\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/preflight-git-branch.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/preflight-git-diff-check.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/preflight-git-head.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/preflight-git-status.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/preflight-git.txt\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/preflight-node-version.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/preflight-node24-version.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/preflight-npm-version.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/preflight-runtime.txt\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/route-safety-source.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/wrangler-d1-execute-help.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/wrangler-d1-execute-help.txt\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/wrangler-r2-object-help.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/wrangler-r2-object-help.txt\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/wrangler-version.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/wrangler-version.txt\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/wrangler-whoami.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/wrangler-whoami.txt\n M docs/audits/2026-06-26-production-r2-vault-system-audit/manifest.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/audit-production-r2-vault.mjs\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/logs/d1-broad-token-select-only-approval.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/logs/next-route-safety-source.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/logs/pause-checkpoint-2026-06-27T23-36-33Z.json\n",
     "snapshotNote": "repo.commit records the latest clean evidence checkpoint before the current cleanup artifacts are committed; final Git HEAD may advance by the commit containing this manifest."
   },
   "productionTarget": {
@@ -23,294 +23,503 @@
     "parent": "/Users/philipbankier/Content/Grok IMagine/greymaker"
   },
   "subsystems": {
-    "preflight": "blocked",
-    "rawR2": "not_run",
-    "r2ByteHashes": "not_run",
-    "d1": "not_run",
-    "metadata": "not_run",
+    "preflight": "verified",
+    "rawR2": "verified",
+    "r2ByteHashes": "verified",
+    "d1": "verified",
+    "metadata": "verified",
     "localFiles": "verified",
-    "workerRoutes": "not_run",
-    "webRoutes": "not_run",
+    "workerRoutes": "verified",
+    "webRoutes": "verified",
     "localSystem": "verified",
-    "liveGrok": "not_run",
-    "reconciliation": "not_run"
+    "liveGrok": "blocked",
+    "reconciliation": "dirty"
   },
   "blockers": [
     {
-      "mode": "preflight",
-      "recordedAt": "2026-06-27T20:47:32.910Z",
-      "reason": "CLOUDFLARE_ACCOUNT_ID missing or does not match production account from cloud/wrangler.toml",
-      "expected": "ba5339fd86e87c226bdc306347636042",
-      "actualPresent": false,
-      "neededUserDecision": "Provide read-only production Cloudflare/R2 environment for this shell or approve an alternate account-proof method."
-    },
-    {
-      "mode": "preflight",
-      "recordedAt": "2026-06-27T20:47:32.911Z",
-      "reason": "Authenticated R2 bucket/prefix proof failed",
-      "commandOrApiPath": "S3 HeadBucket and ListObjectsV2 MaxKeys=1",
-      "error": "missing required R2 env",
-      "neededUserDecision": "Provide read-only production R2 credentials or approve a different read-only bucket/prefix proof."
-    },
-    {
-      "mode": "preflight",
-      "recordedAt": "2026-06-27T20:47:32.912Z",
-      "reason": "Cloudflare Wrangler auth token appears broader than read-only",
-      "command": "wrangler whoami",
-      "evidence": "whoami output includes write or admin scopes",
-      "neededUserDecision": "Provide a read-only Cloudflare token for D1 proof, or explicitly approve using the current broad token for SELECT-only D1 audit reads."
+      "mode": "liveGrok",
+      "recordedAt": "2026-06-28T04:05:45.218Z",
+      "reason": "Visible Chrome window is not the Grok Saved tab, and project instructions forbid broad Chrome tab discovery or taking over unrelated tabs for live Grok validation.",
+      "commandOrApiPath": "Peekaboo Chrome window list, narrow existing-window inspection only",
+      "evidence": "Chrome window list showed Gmail and generic Chrome windows, not a visible grok.com/imagine/saved page.",
+      "neededUserDecision": "Bring the existing Grok Saved tab/window to the foreground and resume, or explicitly approve a different narrow browser inspection method."
     }
   ],
   "evidenceIndex": [
     {
       "path": "browser-samples/.gitkeep",
       "bytes": 1,
-      "updatedAt": "2026-06-27T20:28:16.050Z"
+      "updatedAt": "2026-06-27T23:20:40.028Z"
+    },
+    {
+      "path": "browser-samples/live-grok-samples.md",
+      "bytes": 587,
+      "updatedAt": "2026-06-28T04:05:45.220Z"
     },
     {
       "path": "implementation-notes.html",
-      "bytes": 2871,
-      "updatedAt": "2026-06-27T20:57:00.106Z"
+      "bytes": 6893,
+      "updatedAt": "2026-06-28T04:08:26.492Z"
     },
     {
       "path": "inventory/.gitkeep",
       "bytes": 1,
-      "updatedAt": "2026-06-27T20:28:16.049Z"
+      "updatedAt": "2026-06-27T23:20:40.029Z"
+    },
+    {
+      "path": "inventory/d1-metadata-snapshot-index.jsonl",
+      "bytes": 1570,
+      "updatedAt": "2026-06-28T03:48:00.944Z"
+    },
+    {
+      "path": "inventory/d1-r2-dedupe-index.jsonl",
+      "bytes": 2463952,
+      "updatedAt": "2026-06-28T03:47:56.788Z"
+    },
+    {
+      "path": "inventory/d1-schema.json",
+      "bytes": 3442,
+      "updatedAt": "2026-06-28T03:47:52.436Z"
+    },
+    {
+      "path": "inventory/d1-vault-overlays.jsonl",
+      "bytes": 0,
+      "updatedAt": "2026-06-28T03:48:05.119Z"
     },
     {
       "path": "inventory/local-media-summary.json",
-      "bytes": 195073,
-      "updatedAt": "2026-06-27T20:53:29.853Z"
+      "bytes": 202801,
+      "updatedAt": "2026-06-28T04:00:34.167Z"
     },
     {
       "path": "inventory/local-parent-media-files.csv",
       "bytes": 3359462,
-      "updatedAt": "2026-06-27T20:53:29.841Z"
+      "updatedAt": "2026-06-28T04:00:34.156Z"
     },
     {
       "path": "inventory/local-vault-files.csv",
       "bytes": 793280,
-      "updatedAt": "2026-06-27T20:53:29.825Z"
+      "updatedAt": "2026-06-28T04:00:34.139Z"
+    },
+    {
+      "path": "inventory/metadata-objects.json",
+      "bytes": 1167385,
+      "updatedAt": "2026-06-28T03:53:10.227Z"
+    },
+    {
+      "path": "inventory/metadata-references.json",
+      "bytes": 1152803,
+      "updatedAt": "2026-06-28T03:53:10.254Z"
     },
     {
       "path": "inventory/preflight-d1-schema.json",
       "bytes": 3587,
-      "updatedAt": "2026-06-27T20:47:32.909Z"
+      "updatedAt": "2026-06-28T02:52:40.395Z"
     },
     {
       "path": "inventory/preflight-identity.json",
-      "bytes": 2127,
-      "updatedAt": "2026-06-27T20:47:32.910Z"
+      "bytes": 2320,
+      "updatedAt": "2026-06-28T02:52:40.396Z"
+    },
+    {
+      "path": "inventory/r2-listing-checkpoint.json",
+      "bytes": 322,
+      "updatedAt": "2026-06-28T03:24:41.319Z"
+    },
+    {
+      "path": "inventory/r2-media-hashes.jsonl",
+      "bytes": 5948948,
+      "updatedAt": "2026-06-28T03:47:17.024Z"
+    },
+    {
+      "path": "inventory/r2-objects-listing-checkpoint.jsonl",
+      "bytes": 4505251,
+      "updatedAt": "2026-06-28T03:24:41.309Z"
+    },
+    {
+      "path": "inventory/r2-objects-summary.json",
+      "bytes": 472,
+      "updatedAt": "2026-06-28T03:47:17.034Z"
+    },
+    {
+      "path": "inventory/r2-objects.jsonl",
+      "bytes": 9927269,
+      "updatedAt": "2026-06-28T03:25:36.903Z"
+    },
+    {
+      "path": "inventory/r2-pages.json",
+      "bytes": 4291,
+      "updatedAt": "2026-06-28T03:25:36.907Z"
+    },
+    {
+      "path": "inventory/web-vault-assets.jsonl",
+      "bytes": 1566339,
+      "updatedAt": "2026-06-28T03:58:15.626Z"
+    },
+    {
+      "path": "inventory/worker-vault-assets.jsonl",
+      "bytes": 2500386,
+      "updatedAt": "2026-06-28T03:53:35.215Z"
+    },
+    {
+      "path": "inventory/worker-vault-pages.json",
+      "bytes": 1798,
+      "updatedAt": "2026-06-28T03:53:35.217Z"
     },
     {
       "path": "logs/.gitkeep",
       "bytes": 1,
-      "updatedAt": "2026-06-27T20:28:16.049Z"
-    },
-    {
-      "path": "logs/blocker-preflight-1782593252910-uevt7p2sj.json",
-      "bytes": 396,
-      "updatedAt": "2026-06-27T20:47:32.911Z"
-    },
-    {
-      "path": "logs/blocker-preflight-1782593252911-uevt836yi.json",
-      "bytes": 359,
-      "updatedAt": "2026-06-27T20:47:32.911Z"
-    },
-    {
-      "path": "logs/blocker-preflight-1782593252912-uevt8uvgc.json",
-      "bytes": 403,
-      "updatedAt": "2026-06-27T20:47:32.913Z"
+      "updatedAt": "2026-06-27T23:20:40.060Z"
     },
     {
       "path": "logs/cloud-test-acceptance.txt",
-      "bytes": 2183,
-      "updatedAt": "2026-06-27T20:55:17.720Z"
+      "bytes": 2173,
+      "updatedAt": "2026-06-28T04:04:00.373Z"
     },
     {
       "path": "logs/cloud-typecheck.txt",
-      "bytes": 56,
-      "updatedAt": "2026-06-27T20:57:46.007Z"
+      "bytes": 57,
+      "updatedAt": "2026-06-28T04:03:44.666Z"
+    },
+    {
+      "path": "logs/d1-broad-token-select-only-approval.json",
+      "bytes": 410,
+      "updatedAt": "2026-06-28T02:52:40.397Z"
+    },
+    {
+      "path": "logs/d1-metadata_snapshot_index.json",
+      "bytes": 670,
+      "updatedAt": "2026-06-28T03:48:00.942Z"
     },
     {
       "path": "logs/d1-preflight-schema-smoke.json",
-      "bytes": 4807,
-      "updatedAt": "2026-06-27T20:47:32.909Z"
+      "bytes": 782,
+      "updatedAt": "2026-06-28T02:52:40.394Z"
+    },
+    {
+      "path": "logs/d1-r2_dedupe_index.json",
+      "bytes": 652,
+      "updatedAt": "2026-06-28T03:47:56.756Z"
+    },
+    {
+      "path": "logs/d1-schema.json",
+      "bytes": 766,
+      "updatedAt": "2026-06-28T03:47:52.428Z"
+    },
+    {
+      "path": "logs/d1-vault_overlays.json",
+      "bytes": 642,
+      "updatedAt": "2026-06-28T03:48:05.118Z"
     },
     {
       "path": "logs/local-checks-summary.json",
-      "bytes": 1569,
-      "updatedAt": "2026-06-27T20:55:39.268Z"
+      "bytes": 901,
+      "updatedAt": "2026-06-28T04:04:15.637Z"
+    },
+    {
+      "path": "logs/next-route-safety-source.json",
+      "bytes": 11422,
+      "updatedAt": "2026-06-28T02:52:34.312Z"
     },
     {
       "path": "logs/next-route-safety-source.txt",
       "bytes": 10768,
-      "updatedAt": "2026-06-27T21:05:22.551Z"
+      "updatedAt": "2026-06-28T02:52:34.316Z"
+    },
+    {
+      "path": "logs/pause-checkpoint-2026-06-27T23-36-33Z.json",
+      "bytes": 1314,
+      "updatedAt": "2026-06-27T23:36:49.227Z"
     },
     {
       "path": "logs/preflight-git-branch.json",
       "bytes": 278,
-      "updatedAt": "2026-06-27T20:46:57.528Z"
+      "updatedAt": "2026-06-28T02:52:10.856Z"
     },
     {
       "path": "logs/preflight-git-diff-check.json",
       "bytes": 240,
-      "updatedAt": "2026-06-27T20:46:57.564Z"
+      "updatedAt": "2026-06-28T02:52:10.898Z"
     },
     {
       "path": "logs/preflight-git-head.json",
       "bytes": 278,
-      "updatedAt": "2026-06-27T20:46:57.544Z"
+      "updatedAt": "2026-06-28T02:52:10.871Z"
     },
     {
       "path": "logs/preflight-git-status.json",
-      "bytes": 539,
-      "updatedAt": "2026-06-27T20:46:57.506Z"
+      "bytes": 3146,
+      "updatedAt": "2026-06-28T02:52:10.826Z"
     },
     {
       "path": "logs/preflight-git.txt",
-      "bytes": 629,
-      "updatedAt": "2026-06-27T20:47:25.338Z"
+      "bytes": 3209,
+      "updatedAt": "2026-06-28T02:52:34.313Z"
     },
     {
       "path": "logs/preflight-node-version.json",
       "bytes": 239,
-      "updatedAt": "2026-06-27T20:46:57.585Z"
+      "updatedAt": "2026-06-28T02:52:10.915Z"
     },
     {
       "path": "logs/preflight-node24-version.json",
       "bytes": 290,
-      "updatedAt": "2026-06-27T20:46:57.731Z"
+      "updatedAt": "2026-06-28T02:52:11.069Z"
     },
     {
       "path": "logs/preflight-npm-version.json",
       "bytes": 235,
-      "updatedAt": "2026-06-27T20:46:57.703Z"
+      "updatedAt": "2026-06-28T02:52:11.040Z"
     },
     {
       "path": "logs/preflight-runtime.txt",
       "bytes": 223,
-      "updatedAt": "2026-06-27T20:47:25.338Z"
+      "updatedAt": "2026-06-28T02:52:34.314Z"
     },
     {
       "path": "logs/production-wrangler-config.txt",
       "bytes": 450,
-      "updatedAt": "2026-06-27T20:47:25.337Z"
+      "updatedAt": "2026-06-28T02:52:34.313Z"
+    },
+    {
+      "path": "logs/r2-hash-resume-state.json",
+      "bytes": 175,
+      "updatedAt": "2026-06-28T03:25:36.916Z"
     },
     {
       "path": "logs/repo-snapshot-after-local-evidence.json",
       "bytes": 386,
-      "updatedAt": "2026-06-27T21:06:36.536Z"
+      "updatedAt": "2026-06-27T23:20:40.066Z"
     },
     {
       "path": "logs/root-lint.txt",
-      "bytes": 63,
-      "updatedAt": "2026-06-27T20:57:46.007Z"
+      "bytes": 64,
+      "updatedAt": "2026-06-28T04:03:44.481Z"
     },
     {
       "path": "logs/root-test-e2e.txt",
       "bytes": 4267,
-      "updatedAt": "2026-06-27T20:54:31.347Z"
+      "updatedAt": "2026-06-28T04:03:47.691Z"
     },
     {
       "path": "logs/root-test-unit.txt",
-      "bytes": 25765,
-      "updatedAt": "2026-06-27T20:54:22.526Z"
+      "bytes": 25815,
+      "updatedAt": "2026-06-28T04:03:48.456Z"
     },
     {
       "path": "logs/route-safety-source.json",
       "bytes": 1020,
-      "updatedAt": "2026-06-27T20:47:25.337Z"
+      "updatedAt": "2026-06-28T02:52:34.304Z"
     },
     {
       "path": "logs/route-safety-source.txt",
       "bytes": 568,
-      "updatedAt": "2026-06-27T20:47:25.340Z"
+      "updatedAt": "2026-06-28T02:52:34.316Z"
     },
     {
       "path": "logs/validate-artifacts.json",
-      "bytes": 4833,
-      "updatedAt": "2026-06-27T21:06:52.983Z"
+      "bytes": 102,
+      "updatedAt": "2026-06-28T04:08:39.599Z"
     },
     {
       "path": "logs/web-build.txt",
-      "bytes": 1389,
-      "updatedAt": "2026-06-27T20:57:46.008Z"
+      "bytes": 1365,
+      "updatedAt": "2026-06-28T04:03:51.364Z"
     },
     {
       "path": "logs/web-lint.txt",
-      "bytes": 27,
-      "updatedAt": "2026-06-27T20:57:46.008Z"
+      "bytes": 28,
+      "updatedAt": "2026-06-28T04:03:44.575Z"
+    },
+    {
+      "path": "logs/web-media-first-chunk-beyond-first-page.json",
+      "bytes": 503,
+      "updatedAt": "2026-06-28T03:58:19.657Z"
+    },
+    {
+      "path": "logs/web-repair-proof-beyond-first-page.json",
+      "bytes": 493,
+      "updatedAt": "2026-06-28T03:58:19.284Z"
+    },
+    {
+      "path": "logs/web-repair-scan.json",
+      "bytes": 424,
+      "updatedAt": "2026-06-28T03:58:19.069Z"
+    },
+    {
+      "path": "logs/web-route-smoke-summary.json",
+      "bytes": 428,
+      "updatedAt": "2026-06-28T03:58:19.658Z"
+    },
+    {
+      "path": "logs/web-ui-smoke.json",
+      "bytes": 1600,
+      "updatedAt": "2026-06-28T04:01:56.795Z"
+    },
+    {
+      "path": "logs/web-vault-gaps.json",
+      "bytes": 188,
+      "updatedAt": "2026-06-28T03:58:16.238Z"
+    },
+    {
+      "path": "logs/web-vault-identity.json",
+      "bytes": 464,
+      "updatedAt": "2026-06-28T03:58:14.501Z"
+    },
+    {
+      "path": "logs/web-vault-inventory-pages.json",
+      "bytes": 1655,
+      "updatedAt": "2026-06-28T03:58:15.627Z"
+    },
+    {
+      "path": "logs/web-vault-preview.json",
+      "bytes": 854,
+      "updatedAt": "2026-06-28T03:58:17.897Z"
+    },
+    {
+      "path": "logs/worker-metadata-summary.json",
+      "bytes": 469,
+      "updatedAt": "2026-06-28T03:53:35.562Z"
+    },
+    {
+      "path": "logs/worker-vault-identity.json",
+      "bytes": 278,
+      "updatedAt": "2026-06-28T03:53:34.310Z"
     },
     {
       "path": "logs/wrangler-d1-execute-help.json",
       "bytes": 2043,
-      "updatedAt": "2026-06-27T20:47:25.326Z"
+      "updatedAt": "2026-06-28T02:52:34.293Z"
     },
     {
       "path": "logs/wrangler-d1-execute-help.txt",
       "bytes": 1848,
-      "updatedAt": "2026-06-27T20:47:25.340Z"
+      "updatedAt": "2026-06-28T02:52:34.315Z"
     },
     {
       "path": "logs/wrangler-r2-object-help.json",
       "bytes": 1354,
-      "updatedAt": "2026-06-27T20:47:18.923Z"
+      "updatedAt": "2026-06-28T02:52:29.921Z"
     },
     {
       "path": "logs/wrangler-r2-object-help.txt",
       "bytes": 1172,
-      "updatedAt": "2026-06-27T20:47:25.339Z"
+      "updatedAt": "2026-06-28T02:52:34.315Z"
     },
     {
       "path": "logs/wrangler-version.json",
       "bytes": 316,
-      "updatedAt": "2026-06-27T20:47:12.725Z"
+      "updatedAt": "2026-06-28T02:52:25.413Z"
     },
     {
       "path": "logs/wrangler-version.txt",
       "bytes": 171,
-      "updatedAt": "2026-06-27T20:47:25.339Z"
+      "updatedAt": "2026-06-28T02:52:34.314Z"
     },
     {
       "path": "logs/wrangler-whoami.json",
-      "bytes": 1862,
-      "updatedAt": "2026-06-27T20:47:06.582Z"
+      "bytes": 2079,
+      "updatedAt": "2026-06-28T02:52:21.002Z"
     },
     {
       "path": "logs/wrangler-whoami.txt",
-      "bytes": 910,
-      "updatedAt": "2026-06-27T20:47:25.339Z"
+      "bytes": 1122,
+      "updatedAt": "2026-06-28T02:52:34.314Z"
     },
     {
       "path": "reconciliations/.gitkeep",
       "bytes": 1,
-      "updatedAt": "2026-06-27T20:28:16.049Z"
+      "updatedAt": "2026-06-27T23:20:40.076Z"
+    },
+    {
+      "path": "reconciliations/duplicate-groups.json",
+      "bytes": 3176884,
+      "updatedAt": "2026-06-28T04:00:48.323Z"
+    },
+    {
+      "path": "reconciliations/malformed-keys.json",
+      "bytes": 123,
+      "updatedAt": "2026-06-28T04:00:48.324Z"
+    },
+    {
+      "path": "reconciliations/r2-d1-delta.json",
+      "bytes": 1462151,
+      "updatedAt": "2026-06-28T04:00:46.662Z"
+    },
+    {
+      "path": "reconciliations/r2-local-delta.json",
+      "bytes": 4974185,
+      "updatedAt": "2026-06-28T04:00:48.296Z"
+    },
+    {
+      "path": "reconciliations/r2-metadata-delta.json",
+      "bytes": 1702936,
+      "updatedAt": "2026-06-28T04:00:46.705Z"
+    },
+    {
+      "path": "reconciliations/sample-set.json",
+      "bytes": 1134,
+      "updatedAt": "2026-06-28T04:00:48.346Z"
+    },
+    {
+      "path": "reconciliations/unresolved-items.json",
+      "bytes": 9929,
+      "updatedAt": "2026-06-28T04:00:48.334Z"
+    },
+    {
+      "path": "reconciliations/unresolved-summary.json",
+      "bytes": 34684,
+      "updatedAt": "2026-06-28T04:01:18.847Z"
+    },
+    {
+      "path": "reconciliations/web-worker-delta.json",
+      "bytes": 277,
+      "updatedAt": "2026-06-28T03:58:49.593Z"
+    },
+    {
+      "path": "reconciliations/worker-raw-delta.json",
+      "bytes": 1462144,
+      "updatedAt": "2026-06-28T04:00:48.305Z"
     },
     {
       "path": "report.md",
-      "bytes": 3091,
-      "updatedAt": "2026-06-27T21:06:03.930Z"
+      "bytes": 5024,
+      "updatedAt": "2026-06-28T04:08:39.484Z"
     },
     {
       "path": "screenshots/.gitkeep",
       "bytes": 1,
-      "updatedAt": "2026-06-27T20:28:16.050Z"
+      "updatedAt": "2026-06-27T23:20:40.076Z"
+    },
+    {
+      "path": "screenshots/web-ops-desktop.png",
+      "bytes": 134280,
+      "updatedAt": "2026-06-28T04:01:56.777Z"
+    },
+    {
+      "path": "screenshots/web-vault-desktop.png",
+      "bytes": 60555,
+      "updatedAt": "2026-06-28T04:01:51.941Z"
+    },
+    {
+      "path": "screenshots/web-vault-mobile.png",
+      "bytes": 62274,
+      "updatedAt": "2026-06-28T04:01:53.310Z"
     },
     {
       "path": "scripts/.gitkeep",
       "bytes": 1,
-      "updatedAt": "2026-06-27T20:28:16.050Z"
+      "updatedAt": "2026-06-27T23:20:40.076Z"
     },
     {
       "path": "scripts/audit-production-r2-vault.mjs",
-      "bytes": 71900,
-      "updatedAt": "2026-06-27T21:05:46.949Z"
+      "bytes": 81667,
+      "updatedAt": "2026-06-28T04:08:12.426Z"
     }
   ],
   "finalVerdicts": {
-    "productionR2InternalCorrectness": "blocked",
-    "currentGrokSavedCompleteness": "inconclusive",
+    "productionR2InternalCorrectness": "dirty",
+    "currentGrokSavedCompleteness": "blocked",
     "localSystemHealth": "clean"
   },
   "repoSnapshots": [

@@ -1,0 +1,9 @@
+{
+  "generatedAt": "2026-06-28T03:58:16.237Z",
+  "route": "GET /api/vault/gaps",
+  "status": 200,
+  "gapCount": 0,
+  "codeCounts": {},
+  "requiresLiveGrok": 0,
+  "requiresCloudWrite": 0
+}

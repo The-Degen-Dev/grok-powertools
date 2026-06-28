@@ -1,0 +1,84 @@
+{
+  "generatedAt": "2026-06-28T03:58:15.626Z",
+  "route": "GET /api/vault/inventory",
+  "pageCount": 5,
+  "assetCount": 4647,
+  "truncatedAtPageLimit": false,
+  "pages": [
+    {
+      "page": 1,
+      "status": 200,
+      "itemCount": 1000,
+      "nextCursorPresent": true,
+      "counts": {
+        "assets": 1000,
+        "images": 642,
+        "videos": 358,
+        "verified": 1000,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      }
+    },
+    {
+      "page": 2,
+      "status": 200,
+      "itemCount": 1000,
+      "nextCursorPresent": true,
+      "counts": {
+        "assets": 1000,
+        "images": 665,
+        "videos": 335,
+        "verified": 1000,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      }
+    },
+    {
+      "page": 3,
+      "status": 200,
+      "itemCount": 1000,
+      "nextCursorPresent": true,
+      "counts": {
+        "assets": 1000,
+        "images": 555,
+        "videos": 445,
+        "verified": 1000,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      }
+    },
+    {
+      "page": 4,
+      "status": 200,
+      "itemCount": 1000,
+      "nextCursorPresent": true,
+      "counts": {
+        "assets": 1000,
+        "images": 610,
+        "videos": 390,
+        "verified": 1000,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      }
+    },
+    {
+      "page": 5,
+      "status": 200,
+      "itemCount": 647,
+      "nextCursorPresent": false,
+      "counts": {
+        "assets": 647,
+        "images": 382,
+        "videos": 265,
+        "verified": 647,
+        "blocked": 0,
+        "failed": 0,
+        "unproven": 0
+      }
+    }
+  ]
+}
