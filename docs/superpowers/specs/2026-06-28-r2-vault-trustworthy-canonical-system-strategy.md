@@ -1,0 +1,204 @@
+# R2 Vault Trustworthy Canonical System Strategy
+
+Date: 2026-06-28
+
+Repo: `/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools`
+
+Status: living strategy record for post-audit repair planning. This is not approval to mutate production.
+
+## Source Evidence
+
+Primary evidence folder:
+
+- `docs/audits/2026-06-26-production-r2-vault-system-audit/`
+
+Final audit checkpoint:
+
+- Branch: `codex/production-r2-vault-audit`
+- Commit: `15c307d docs: complete production r2 vault audit`
+
+Audit verdicts:
+
+- Production R2 internal correctness: `dirty`
+- Current Grok Saved completeness: `sample_verified`
+- Local system health: `clean`
+
+Key counts from the audit:
+
+- Raw R2 objects: `18083`
+- Raw R2 media objects: `15981`
+- R2 media hash attempts: `15981`
+- R2 media hash failures: `0`
+- D1/Worker indexed assets: `4647`
+- Web route assets: `4647`
+- Date-folder R2 media objects: `9893`
+- Canonical `media/by-asset` R2 objects: `6088`
+- Canonical R2 objects missing from D1/Worker exact-key coverage: `1441`
+- Same-hash duplicate groups: `5116`
+- Unresolved groups: `5`
+
+## Vocabulary Decision
+
+Do not call the date-folder objects "legacy imports" in future plans.
+
+Use this wording instead:
+
+- `date-folder R2 objects not indexed by D1/Worker`
+
+Meaning:
+
+- These are R2 media objects stored under older date-shaped paths such as `media/2026-04-06_Auto/...`.
+- They are not automatically unimportant.
+- They are not safe to ignore.
+- They are not safe to delete.
+- Each must be mapped to a Grok Saved identity, classified as duplicate evidence, or held for review.
+
+## Product Contract
+
+The user's expected product contract is:
+
+- Every real media item should correspond to `grok.com/imagine/saved`.
+- Every real metadata item should be available through the backup/Vault system.
+- The system should not expose duplicate logical assets as separate clean records.
+- The system should not hide missing or unresolved records behind normalized preview counts.
+
+## Identity Decision
+
+Canonical identity is a logical Grok Saved asset record.
+
+Rejected as primary identity:
+
+- R2 object key. R2 keys are storage locations, not product identity.
+- SHA-256 hash. Hashes prove byte equality, not Saved-item identity.
+- Existing D1/Worker asset ID. Current app index evidence is incomplete and must not become root truth until reconciled.
+
+Accepted roles:
+
+- Grok Saved durable evidence decides whether a logical asset should exist.
+- R2 keys are storage locations for media or metadata bytes.
+- SHA-256 is duplicate and byte-proof evidence.
+- D1/Worker rows are current app-index evidence.
+- Local files are corroborating evidence, not the system of record.
+
+## Existence Authority Decision
+
+Current Grok Saved enumeration is the authority for "should this logical asset exist?"
+
+Important qualifier:
+
+- Visual spot-checks are not enough.
+- The next phase needs a durable, repeatable Grok Saved inventory snapshot.
+- The snapshot must capture every Saved item reachable in the current Grok Saved surface, stable item evidence when available, visible media references, project/history context when available, and any metadata Grok exposes.
+
+If R2 has more objects than Grok Saved appears to expose, do not delete or discard them. Classify the discrepancy and preserve the bytes until stronger evidence exists.
+
+## Cleanup Strategy Decision
+
+Make the system logically clean before making R2 physically clean.
+
+First repair phase:
+
+- Preserve every existing R2 object.
+- Build a canonical index that hides duplicate storage noise from product views.
+- Classify objects rather than deleting them.
+- Add ignore/archive/tombstone-style classifications only as metadata, not destructive operations.
+- Do not physically delete, move, rewrite, or canonicalize R2 objects.
+
+Physical cleanup can be considered only after:
+
+- At least two clean audit runs.
+- A rollback/export path exists.
+- Every target object has durable classification evidence.
+- The user explicitly approves a separate destructive cleanup plan.
+
+## Required Classifications
+
+Every R2 media object should eventually have one of these statuses:
+
+- `canonical`: preferred storage object for a logical Grok Saved asset.
+- `alternate_duplicate`: byte-identical or provably equivalent storage object attached to a canonical asset.
+- `date_folder_mapped`: date-folder object mapped to a logical Saved asset, often as an alternate or historical storage location.
+- `metadata_only_or_sidecar`: metadata or prompt-sidecar evidence, not a standalone media asset.
+- `orphan_candidate`: object not yet linked to Grok Saved or another accepted source.
+- `invalid_or_system`: upload-test, tool/system artifact, malformed object, or non-user media.
+- `needs_human_review`: insufficient evidence for automated classification.
+
+These classifications are not delete permissions.
+
+## Trust Invariants
+
+Future build plans must preserve these invariants:
+
+- No production R2 or D1 writes without a separate approved repair plan.
+- No deletes in the first repair phase.
+- No broad "repair everything" action.
+- No treating `/api/vault/preview` or Worker normalized inventory as full raw R2 proof.
+- No treating D1 absence as proof that an R2 object is invalid.
+- No treating duplicate SHA-256 as automatic deletion approval.
+- No claiming full Grok Saved completeness without authoritative Saved enumeration.
+- No storing raw private prompt bodies, cookies, bearer tokens, signed URLs, or API keys in durable artifacts.
+
+## Recommended Phase Plan
+
+Phase 0: Freeze the decision record
+
+- Keep this file as the source of truth for the current strategy.
+- Keep the completed audit folder immutable except for clearly marked follow-up notes.
+
+Phase 1: Durable Grok Saved inventory
+
+- Build a read-only Saved enumerator for the existing Chrome session or another user-approved export/API path.
+- Capture a stable snapshot without generating, deleting, syncing, backing up, or repairing.
+- Redact private prompt text unless explicitly needed and approved.
+- Produce a parseable Saved inventory artifact.
+
+Phase 2: Canonical asset model
+
+- Define the schema for a logical Saved asset record.
+- Include identity evidence, media variants, metadata references, R2 storage locations, hashes, D1/Worker links, local corroboration, status, and confidence.
+- Treat schema as the contract before writing product code.
+
+Phase 3: Read-only reconciliation
+
+- Join Grok Saved snapshot, raw R2 inventory, R2 hashes, D1/Worker rows, metadata, and local hashes.
+- Produce a classification proposal for every R2 media object and every Saved item.
+- Produce separate lists for missing-from-R2, R2-only/unlinked, duplicate groups, metadata gaps, and human-review items.
+
+Phase 4: Logical product cleanup
+
+- Teach app views to read from the canonical asset model or an equivalent generated index.
+- Product views should show one logical asset per canonical Saved identity.
+- Duplicate/alternate/date-folder objects should be visible in diagnostics, not normal gallery views.
+
+Phase 5: Approved repair plan
+
+- Only after the read-only classification is reviewed, design exact write steps.
+- Prefer append-only index/ledger updates first.
+- Avoid object rewrites or deletes.
+- Use exact counts, plan hashes, rollback notes, and explicit user approval.
+
+Phase 6: Physical cleanup, optional and later
+
+- Consider deletes or lifecycle moves only after repeated clean audits and explicit approval.
+
+## Open Questions
+
+These are the next grilling decisions:
+
+1. What evidence from Grok Saved is stable enough to define a logical asset identity?
+2. Should prompt text be hashed, redacted, or stored encrypted for canonical matching?
+3. How should image/video pairs and generated variants be represented: one asset with variants, or separate assets linked by generation context?
+4. What is the minimum confidence threshold for automatic `alternate_duplicate` classification?
+5. Where should the canonical index live first: D1, R2 JSON snapshot, both, or local-only draft?
+6. What does "clean" mean for the next audit: zero unresolved canonical objects, zero duplicate product assets, or zero physical duplicate bytes?
+
+## Current Recommended Next Question
+
+What evidence from Grok Saved is stable enough to define a logical asset identity?
+
+Recommended answer to evaluate next:
+
+- Use the strongest stable Grok item identifier if one is exposed.
+- If no stable item ID is exposed, use a compound identity made from Saved item URL/details, visible media references, generation/project context, and R2/content-hash corroboration.
+- Do not use prompt text alone, R2 key alone, D1 ID alone, or SHA-256 alone.
+
