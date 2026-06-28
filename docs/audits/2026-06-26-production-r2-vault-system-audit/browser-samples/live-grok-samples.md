@@ -1,9 +1,20 @@
 # Live Grok Read-Only Inspection
 
-Status: blocked.
+Status: sample verified.
 
-The audit reached the live browser gate, but the visible Chrome window was not a Grok Saved page. Peekaboo permissions were available, and Chrome windows were listed narrowly by sanitized title category and bounds rather than full tab discovery. The visible Chrome windows were categorized as non-Grok browser or generic Chrome windows, so the audit did not interact with Chrome, did not navigate tabs, did not scrape Grok, and did not run Grok generation.
+The user confirmed the only open Chrome window was `grok.com/imagine/saved`. A narrow sanitized Chrome window check then found a visible Grok candidate window without broad tab discovery. Computer Use verified the selected Chrome tab URL as `grok.com/imagine/saved`.
 
-Resume check: `logs/live-grok-window-check-2026-06-28-resume.json` repeated the same result after restart: no visible `grok.com/imagine/saved` or Grok Vault window was present.
+Visible Grok state: Grok Imagine Saved history/gallery was loaded, with saved-history grid, filters, and composer visible. This is a spot-check only; no authoritative full Saved export/API was found, so current Grok Saved completeness is not proven.
 
-Needed user action: bring the existing `grok.com/imagine/saved` tab/window with the Grok Vault open to the foreground, then resume the Goal.
+Extension state: Grok Power Tools was injected on the page and showed `Ready` with provider `Grok Imagine`. The toolbar popup showed Grok Vault `Ready`, backup mode `Cloud only (R2)`, Worker URL `https://grok-r2-backup-worker.greymakerxyz-grok.workers.dev`, key prefix `grok-powertools/v1`, a masked secure API key field, download folder `GrokVault`, global auto-retry disabled, and max retries `3`.
+
+Settings observed: default max retries `3`, default video goal `200`, advanced developer mode off, prompt history limit `50`.
+
+Forbidden actions: no generation, recreate, batch, sync, test upload, retry, backfill, canary, full backup, reset, repair, or clear-status button was clicked.
+
+Artifacts:
+
+- `logs/live-grok-window-check-2026-06-28-user-confirmed.json`
+- `logs/live-grok-visible-window-summary-2026-06-28.json`
+- `logs/live-grok-extension-summary-2026-06-28.json`
+- `screenshots/live-grok-visible-window-2026-06-28.png`

@@ -43,6 +43,7 @@
     <li>The R2 hash runner now resumes from existing <code>r2-media-hashes.jsonl</code> rows and hashes remaining media in small batches with bounded concurrent streams. This preserves full byte-hash coverage while allowing an interrupted hash run to continue without discarding completed hash rows.</li>
     <li>Redaction was corrected to preserve storage identifier fields such as <code>key</code>, <code>objectKey</code>, and <code>canonical_object_key</code>. The earlier broad <code>key</code> redaction made R2/D1 reconciliation evidence unusable. Secret-like fields such as API keys, access keys, tokens, cookies, signatures, signed URLs, and prompt text remain redacted.</li>
     <li>Live Grok inspection uses the existing visible Chrome window only. Peekaboo showed no visible <code>grok.com/imagine/saved</code> or Grok Vault window, so the audit recorded a live-Grok blocker instead of broad-scanning tabs or navigating unrelated Chrome windows.</li>
+    <li>After the user confirmed the only open Chrome window was <code>grok.com/imagine/saved</code>, Computer Use verified the selected Chrome tab, visible Grok Saved route, page-injected Grok Power Tools overlay, and Grok Vault toolbar popup. The live-Grok subsystem is now verified as a read-only spot-check.</li>
     <li>Subagent reconciliation review found that D1/Worker exact-key gaps should be split by path semantics: legacy date-folder objects are not indexed by the current D1/Worker path, while canonical <code>media/by-asset</code> objects absent from D1/Worker remain unresolved raw-R2-only evidence. The report now describes those separately and avoids calling all deltas missing media.</li>
     <li>Subagent reconciliation review also found that metadata-reference and local/R2 deltas should not be described as full completeness failures. The report now treats metadata as reference coverage and local/R2 as SHA-256 overlap against the scanned macOS corpus.</li>
   </ul>
@@ -55,6 +56,7 @@
     <li>The first successful listing/hash attempt wrote partial hash rows, then was interrupted so the runner could become resume-safe and use bounded hash concurrency. The existing rows are retained and the next <code>r2</code> run must finish the remaining hash rows before the hash subsystem can be considered verified.</li>
     <li>The redacted-key R2 artifacts from the interrupted runs were deleted after the storage-key redaction bug was found. The next R2 run must regenerate raw R2 evidence from scratch.</li>
     <li>The report generator was tightened after subagent review to avoid unsafe claims: no clean production verdict, no required-metadata-loss claim from prompt-sidecar reference absence, no local corpus completeness claim, and no deletion recommendation for duplicate hash groups.</li>
+    <li>The final live-Grok inspection did not attempt a full Saved scrape or generation. It records visible route, extension status, cloud settings, and popup status only.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -64,7 +66,7 @@
 
   <h2>Open Questions</h2>
   <ul>
-    <li>The live-Grok targeting blocker repeated after restart in <code>logs/live-grok-window-check-2026-06-28-resume.json</code>. Bring the existing <code>grok.com/imagine/saved</code> tab/window with Grok Vault open to the foreground, then resume the Goal for read-only live Grok and extension inspection. The audit must not use broad Chrome tab discovery or navigate over unrelated tabs unless the user explicitly approves a different narrow method.</li>
+    <li>No open live-Grok blocker remains. Current Grok Saved completeness is still only <code>sample_verified</code>, not clean, because no authoritative full Saved enumeration/export/API was found.</li>
   </ul>
 </body>
 </html>

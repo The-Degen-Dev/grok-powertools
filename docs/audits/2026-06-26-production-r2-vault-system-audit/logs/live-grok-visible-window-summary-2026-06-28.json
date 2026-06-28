@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-06-28T18:14:35.902Z",
+  "source": "/tmp/live-grok-see-2026-06-28.json",
+  "rawJsonStoredInAudit": false,
+  "topLevelKeys": [
+    "data",
+    "success",
+    "debug_logs"
+  ],
+  "rawByteLength": 28378,
+  "approximateElementMentions": 72,
+  "containsGrok": true,
+  "containsImagine": true,
+  "containsSaved": true,
+  "containsVault": true,
+  "containsExtensionLikeText": true,
+  "screenshotPath": "screenshots/live-grok-visible-window-2026-06-28.png"
+}

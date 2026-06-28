@@ -1898,6 +1898,17 @@ async function generateReport() {
     : statuses.localSystem === 'failed'
       ? 'dirty'
       : 'inconclusive';
+  const auditComplete = !(manifest.blockers || []).length &&
+    ['preflight', 'rawR2', 'r2ByteHashes', 'd1', 'metadata', 'localFiles', 'workerRoutes', 'webRoutes', 'localSystem', 'liveGrok']
+      .every((name) => statuses[name] === 'verified') &&
+    ['verified', 'dirty'].includes(statuses.reconciliation);
+  const nextActions = [
+    statuses.liveGrok === 'verified'
+      ? '- P0 data correctness: Review unresolved canonical raw-R2-only objects, duplicate hash groups, and local/R2 overlap findings before any repair plan.'
+      : '- P0 live validation: Bring the existing Grok Saved tab/window to the foreground for read-only live Grok and extension inspection.',
+    '- P2 backup pipeline reliability: Only after this read-only audit, design a separate repair/backfill plan for confirmed gaps.',
+    '- P2 product visibility and operator UX: Improve preview/reporting only after raw R2 and D1 truth are reconciled.'
+  ].join('\n');
   const report = `# Production R2 Vault System Audit
 
 Plan date: 2026-06-26
@@ -1993,17 +2004,14 @@ ${unresolvedJson?.items?.length ? `See \`reconciliations/unresolved-items.json\`
 
 ## Prioritized Next Actions
 
-- P0 live validation: Bring the existing Grok Saved tab/window to the foreground for read-only live Grok and extension inspection.
-- P1 data correctness: Review unresolved canonical raw-R2-only objects, duplicate hash groups, and local/R2 overlap findings before any repair plan.
-- P2 backup pipeline reliability: Only after this read-only audit, design a separate repair/backfill plan for confirmed gaps.
-- P2 product visibility and operator UX: Improve preview/reporting only after raw R2 and D1 truth are reconciled.
+${nextActions}
 `;
   await writeText(path.join(auditRoot, 'report.md'), report);
   await updateManifest((updated) => {
     updated.finalVerdicts.productionR2InternalCorrectness = productionStatus;
     updated.finalVerdicts.currentGrokSavedCompleteness = grokSavedStatus;
     updated.finalVerdicts.localSystemHealth = localStatus;
-    updated.status = (manifest.blockers || []).length ? 'blocked' : 'in_progress';
+    updated.status = (manifest.blockers || []).length ? 'blocked' : auditComplete ? 'complete' : 'in_progress';
   });
   console.log('report generated');
 }

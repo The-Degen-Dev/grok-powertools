@@ -1,0 +1,85 @@
+{
+  "generatedAt": "2026-06-28T18:45:47Z",
+  "method": "Computer Use visible Google Chrome state plus read-only extension overlay and popup inspection",
+  "rawAccessibilityTreeStoredInAudit": false,
+  "rawPromptTextStoredInAudit": false,
+  "rawAccountEmailStoredInAudit": false,
+  "rawApiKeyStoredInAudit": false,
+  "rawActivityObjectKeysStoredInAudit": false,
+  "chromeTarget": {
+    "app": "Google Chrome",
+    "windowTitleCategory": "grok_saved",
+    "url": "grok.com/imagine/saved",
+    "selectedTabCategory": "Imagine Saved - Grok",
+    "userConfirmedOnlyOpenChromeWindowIsGrokSaved": true
+  },
+  "visibleGrokState": {
+    "route": "grok.com/imagine/saved",
+    "surface": "Grok Imagine Saved history/gallery",
+    "hasSavedHistoryGrid": true,
+    "hasComposer": true,
+    "fullSavedEnumerationFound": false,
+    "fullSavedCompletenessProof": "not_proven"
+  },
+  "extensionOverlay": {
+    "name": "Grok Power Tools",
+    "injectedOnPage": true,
+    "status": "Ready",
+    "provider": "Grok Imagine",
+    "recreateControlsVisible": true,
+    "autoRetryPanelVisible": true,
+    "retriesUsed": "0/0",
+    "videosGenerated": "0/0",
+    "videoGoalValueVisible": 200,
+    "galleryLimitValueVisible": 200,
+    "writeActionButtonsVisibleButNotClicked": [
+      "Start Recreate",
+      "Start Video Goal",
+      "Quick Batch",
+      "Prompted Batch",
+      "Start Template Batch",
+      "Start Quality Repeat",
+      "Download Gallery"
+    ]
+  },
+  "extensionSettings": {
+    "defaultsTabObserved": true,
+    "defaultMaxRetries": 3,
+    "defaultVideoGoal": 200,
+    "advancedTabObserved": true,
+    "developerMode": false,
+    "promptHistoryLimit": 50,
+    "writeActionButtonsVisibleButNotClicked": [
+      "Export JSON",
+      "Import JSON",
+      "Reset"
+    ]
+  },
+  "extensionPopup": {
+    "name": "Grok Vault",
+    "version": "v0.2.0",
+    "status": "Ready",
+    "downloadFolder": "GrokVault",
+    "globalAutoRetryEnabled": false,
+    "maxRetries": 3,
+    "backupMode": "Cloud only (R2)",
+    "workerUrl": "https://grok-r2-backup-worker.greymakerxyz-grok.workers.dev",
+    "apiKeyField": "secure_masked",
+    "keyPrefix": "grok-powertools/v1",
+    "activityLogSummary": "Recent activity included cloud metadata sync, scan/stop entries, and cloud upload complete entries. Raw object keys were intentionally not copied into this artifact.",
+    "writeActionButtonsVisibleButNotClicked": [
+      "Start Sync",
+      "Test Upload Pipeline",
+      "Retry Unsynced",
+      "Run Backfill",
+      "Clear Cloud Status",
+      "Reset Processed IDs",
+      "One Media R2 Canary",
+      "Full Media Backup"
+    ]
+  },
+  "forbiddenActionsClicked": [],
+  "screenshotArtifacts": [
+    "screenshots/live-grok-visible-window-2026-06-28.png"
+  ]
+}
