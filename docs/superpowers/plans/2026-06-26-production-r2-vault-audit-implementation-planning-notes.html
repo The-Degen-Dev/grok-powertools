@@ -90,6 +90,7 @@
     <li>After a read-only live Grok probe on 2026-06-28, the planning identity rule is: capture <code>grokPostId</code> from <code>/imagine/post/{uuid}</code> as the preferred Grok Saved item identifier when present. Media URL UUIDs remain variant and storage evidence because the same page can expose multiple media UUIDs for thumbnails, variants, user paths, and active media.</li>
     <li>A follow-up variant probe sampled one <code>/imagine/post/{uuid}</code> with two in-post thumbnail controls. Switching thumbnails changed the displayed media while the route stayed on the same post UUID, so variants under one <code>grokPostId</code> are real behavior for at least that case.</li>
     <li>Prompt handling is revised after user clarification: full image prompts, full video prompts, and all available Grok metadata should be stored in the existing Vault data plane. Audit and planning artifacts should stay redacted or hash-only by default, but the Vault itself should preserve the raw prompt text.</li>
+    <li>Automatic <code>alternate_duplicate</code> classification now requires exact SHA-256 equality plus at least one identity-link signal, such as the same <code>grokPostId</code>, media UUID, canonical source URL hash, or prompt sidecar link. Same-hash-only groups stay reviewable until source relationship is known.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -112,6 +113,7 @@
     <li>Alternative considered: treat the current internal <code>assetId</code> or the last UUID in a media URL as the logical Saved identity. Rejected for the canonical model because the live page can expose multiple media UUIDs around one Grok post. The canonical model should keep <code>grokPostId</code>, media UUIDs, R2 keys, and hashes as separate evidence fields.</li>
     <li>Alternative considered: assume adjacent Saved grid tiles with similar visuals are variants of one generation. Rejected because the verified behavior is route-local, not grid-neighbor-based. The enumerator must classify variants from the opened detail route, not from visual proximity in the Saved grid.</li>
     <li>Alternative considered: store only prompt hashes/redacted excerpts in the canonical index. Rejected because the product requirement is to archive full prompts and metadata. The safer compromise is not a separate vault, but a rule that raw prompt fields stay in Vault/R2 and do not get copied into committed reports, plans, chat summaries, or broad audit exports.</li>
+    <li>Alternative considered: auto-hide all same-SHA media as duplicates. Rejected because byte equality alone does not prove both objects belong to the same logical Saved asset. The accepted rule needs byte equality plus an identity-link signal.</li>
   </ul>
 
   <h2>Open Questions</h2>
@@ -119,6 +121,7 @@
     <li>No planning question blocks execution. Execution must still stop if read-only R2/D1 auth cannot be proven, if raw R2 listing is unexpectedly huge or points outside the prefix, or if browser automation cannot prove it controls the visible Grok tab.</li>
     <li>If production R2 byte hashing is large enough to trigger rate, cost, or local disk risk, the execution worker should stop and ask whether to continue, sample, or split into a separate hashing run.</li>
     <li>Before implementing a full Grok Saved enumerator, remove or gate logs that print prompt snippets or source URL snippets. The current backup flow has short prompt/source logging, which is acceptable for debugging but not for a raw metadata capture run.</li>
+    <li>The next planning decision is where the canonical index should live first. Current recommendation: local-only artifact during read-only reconciliation, append-only R2 JSON snapshot after write approval, then D1 rows only when indexed UI reads need them.</li>
   </ul>
 </body>
 </html>

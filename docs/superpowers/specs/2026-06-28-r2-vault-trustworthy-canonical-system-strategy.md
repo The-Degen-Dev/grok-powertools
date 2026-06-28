@@ -170,6 +170,24 @@ Every R2 media object should eventually have one of these statuses:
 
 These classifications are not delete permissions.
 
+## Duplicate Classification Decision
+
+Automatic `alternate_duplicate` classification requires both:
+
+1. Exact byte equality: same SHA-256 for the media bytes.
+2. At least one identity-link signal:
+   - same `grokPostId`
+   - same media UUID
+   - same canonical source URL hash
+   - same prompt sidecar link
+
+Implications:
+
+- Same SHA-256 alone proves duplicate bytes, but does not prove the objects belong to the same logical Saved asset.
+- Same identity signal without byte equality is not an alternate duplicate. Classify it as a variant, conflict, or `needs_human_review` depending on the evidence.
+- Hash-only duplicate groups stay visible to diagnostics and reconciliation until another identity signal links them.
+- Product views may hide `alternate_duplicate` objects once both checks pass, but phase one still does not delete, move, rewrite, or canonicalize physical R2 objects.
+
 ## Trust Invariants
 
 Future build plans must preserve these invariants:
@@ -235,18 +253,16 @@ Phase 6: Physical cleanup, optional and later
 
 These are the next grilling decisions:
 
-1. How should image/video pairs and generated variants be represented: one asset with variants, or separate assets linked by generation context?
-2. What is the minimum confidence threshold for automatic `alternate_duplicate` classification?
-3. Where should the canonical index live first: D1, R2 JSON snapshot, both, or local-only draft?
-4. What does "clean" mean for the next audit: zero unresolved canonical objects, zero duplicate product assets, or zero physical duplicate bytes?
+1. Where should the canonical index live first: D1, R2 JSON snapshot, both, or local-only draft?
+2. What does "clean" mean for the next audit: zero unresolved canonical objects, zero duplicate product assets, or zero physical duplicate bytes?
 
 ## Current Recommended Next Question
 
-How should image/video pairs and generated variants be represented?
+Where should the canonical index live first?
 
 Recommended answer to evaluate next:
 
-- Treat `grokPostId` as the logical record.
-- Represent image/video outputs, thumbnails, upscales, extensions, and re-downloads as variants under that record when Grok presents them inside one `/imagine/post/{uuid}` route.
-- Split into separate logical records only when Grok exposes separate `/imagine/post/{uuid}` identities.
-- Do not assume all Saved grid neighbors belong to the same post. The enumerator must open/read each item and classify variants from the detail route evidence.
+- During read-only reconciliation, generate a local-only canonical index artifact.
+- The first approved persistent write should be an append-only R2 JSON snapshot under the existing Vault metadata namespace.
+- Add D1 rows only after the schema and UI reads are stable enough to need indexed querying.
+- Keep physical R2 media objects unchanged in the first write phase.
