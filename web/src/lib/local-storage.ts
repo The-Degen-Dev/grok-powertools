@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from "./types";
 import { upgradeVaultStores } from "./vault-storage";
 
 const DB_NAME = "grok-power-tools";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -43,6 +43,53 @@ export function getDB(): Promise<IDBPDatabase> {
         } else {
           const movieStore = transaction.objectStore("movies");
           ensureIndex(movieStore, "by-updated", "updatedAt");
+        }
+        if (!db.objectStoreNames.contains("movie_review_projects")) {
+          const store = db.createObjectStore("movie_review_projects", { keyPath: "id" });
+          store.createIndex("by-movie", "movieId");
+          store.createIndex("by-updated", "updatedAt");
+        } else {
+          const store = transaction.objectStore("movie_review_projects");
+          ensureIndex(store, "by-movie", "movieId");
+          ensureIndex(store, "by-updated", "updatedAt");
+        }
+        if (!db.objectStoreNames.contains("movie_versions")) {
+          const store = db.createObjectStore("movie_versions", { keyPath: "id" });
+          store.createIndex("by-movie", "movieId");
+          store.createIndex("by-project", "projectId");
+          store.createIndex("by-updated", "updatedAt");
+        } else {
+          const store = transaction.objectStore("movie_versions");
+          ensureIndex(store, "by-movie", "movieId");
+          ensureIndex(store, "by-project", "projectId");
+          ensureIndex(store, "by-updated", "updatedAt");
+        }
+        if (!db.objectStoreNames.contains("movie_director_proposals")) {
+          const store = db.createObjectStore("movie_director_proposals", { keyPath: "id" });
+          store.createIndex("by-project", "projectId");
+          store.createIndex("by-updated", "updatedAt");
+        } else {
+          const store = transaction.objectStore("movie_director_proposals");
+          ensureIndex(store, "by-project", "projectId");
+          ensureIndex(store, "by-updated", "updatedAt");
+        }
+        if (!db.objectStoreNames.contains("movie_export_runs")) {
+          const store = db.createObjectStore("movie_export_runs", { keyPath: "id" });
+          store.createIndex("by-project", "projectId");
+          store.createIndex("by-updated", "updatedAt");
+        } else {
+          const store = transaction.objectStore("movie_export_runs");
+          ensureIndex(store, "by-project", "projectId");
+          ensureIndex(store, "by-updated", "updatedAt");
+        }
+        if (!db.objectStoreNames.contains("movie_review_notes")) {
+          const store = db.createObjectStore("movie_review_notes", { keyPath: "id" });
+          store.createIndex("by-project", "projectId");
+          store.createIndex("by-updated", "updatedAt");
+        } else {
+          const store = transaction.objectStore("movie_review_notes");
+          ensureIndex(store, "by-project", "projectId");
+          ensureIndex(store, "by-updated", "updatedAt");
         }
         if (!db.objectStoreNames.contains("prompts")) {
           const promptStore = db.createObjectStore("prompts", { keyPath: "id" });

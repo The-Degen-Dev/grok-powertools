@@ -972,6 +972,69 @@
                             <code>26195</code>.
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added Zod schemas as the Review Bay persistence contract, derived
+                            TypeScript types from those schemas, and added five additive
+                            IndexedDB stores under database version <code>6</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Deviations</td>
+                        <td>
+                            Added <code>fake-indexeddb</code> as a web dev dependency because the
+                            current repo had no Node IndexedDB unit-test setup. Kept
+                            <code>zod</code> in runtime dependencies because app code imports schemas
+                            outside tests. Review Bay hydration derives same-origin Vault media URLs
+                            from <code>sourceAssetId</code> and does not copy legacy
+                            <code>objectKey</code> query strings into Review Bay state.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Used direct <code>fake-indexeddb/auto</code> import in the storage test
+                            rather than introducing a global Vitest config before more tests need it.
+                            This keeps the setup scoped to the first IndexedDB unit test.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Open questions</td>
+                        <td>
+                            None. The Node <code>v23.11.0</code> install path emits engine warnings
+                            for Vitest and eslint internals that declare even-major Node ranges, but
+                            the focused tests and lint passed in this environment.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first run:
+                            <pre><code>FAIL  src/lib/movie-review-storage.test.ts
+Error: Cannot find module './movie-review-storage'</code></pre>
+                            Passing storage run:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-review-storage
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)</code></pre>
+                            Existing draft builder run:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run vault-movie-drafts
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>
