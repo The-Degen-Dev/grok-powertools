@@ -1305,6 +1305,50 @@ Error: element(s) not found</code></pre>
 ✓ Generating static pages using 11 workers (29/29)</code></pre>
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 6: Review Hardening Follow-Up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Fixed the review findings before Task 7: project updates now use a
+                            current-state ref plus functional updater support, pending saves flush on
+                            unmount, keyboard reject applies only to a visible selected candidate,
+                            mode buttons expose <code>aria-pressed</code>, and the Review Bay layout
+                            stacks at narrow widths.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Hardening Follow-Up</td>
+                        <td>Deviations</td>
+                        <td>
+                            The original Task 6 note under-recorded scope: the shell already included
+                            basic trim, volume, mute, and a rule-based Director proposal button.
+                            Those are still minimal controls, but they are real state-writing
+                            surfaces, not only placeholders.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Hardening Follow-Up</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Reject-by-key now requires a selected candidate. This removes the hidden
+                            mutation where pressing <code>X</code> after keeping a clip rejected the
+                            next active candidate while the inspector showed the committed clip.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Hardening Follow-Up</td>
+                        <td>Validation</td>
+                        <td>
+                            Passing focused E2E with persistence check:
+                            <pre><code>Running 2 tests using 1 worker
+  ✓  1 [chromium] › tests/e2e-web/movie-review-bay.spec.js:4:1 › Review Bay first viewport exposes operator regions (2.7s)
+  ✓  2 [chromium] › tests/e2e-web/movie-review-bay.spec.js:14:1 › Keyboard keep and reject move candidates into the right lanes (2.0s)
+
+  2 passed (8.1s)</code></pre>
+                            Lint, full unit suite, and build passed after the hook and keyboard
+                            fixes.
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>

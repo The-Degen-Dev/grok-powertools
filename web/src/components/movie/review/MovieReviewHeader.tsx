@@ -42,6 +42,7 @@ export default function MovieReviewHeader({
               key={mode}
               type="button"
               aria-label={`Switch to ${mode} mode`}
+              aria-pressed={project.mode === mode}
               onClick={() => onProjectChange(applyReviewCommand(project, { type: "set-mode", mode }))}
               className={`rounded px-2 py-1 text-xs capitalize ${
                 project.mode === mode ? "bg-orange-600 text-white" : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"

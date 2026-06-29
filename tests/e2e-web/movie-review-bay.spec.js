@@ -17,6 +17,13 @@ test("Keyboard keep and reject move candidates into the right lanes", async ({ p
   await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-video-1", exact: true })).toBeVisible();
   await page.keyboard.press("KeyK");
   await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-1").first()).toBeVisible();
+  await page.getByRole("button", { name: /Back to movies/i }).click();
+  await expect(page).toHaveURL(/\/movie$/);
+  await page.goto(`/movie?id=${movieId}`);
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-1").first()).toBeVisible();
+  await page.keyboard.press("KeyX");
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByText("asset-video-2").first()).toBeVisible();
+  await page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-video-2", exact: true }).click();
   await page.keyboard.press("KeyX");
   await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByText("asset-video-2")).toHaveCount(0);
 });
