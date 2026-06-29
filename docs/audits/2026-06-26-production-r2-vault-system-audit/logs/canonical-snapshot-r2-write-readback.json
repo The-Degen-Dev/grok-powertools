@@ -1,0 +1,98 @@
+{
+  "generatedAt": "2026-06-29T03:09:58.385Z",
+  "status": "write_readback_verified",
+  "productionWrites": {
+    "r2AppendOnlySnapshotObjectsWritten": 1,
+    "d1Writes": 0,
+    "workerStateWrites": 0,
+    "grokActions": 0,
+    "objectMoves": 0,
+    "objectDeletes": 0,
+    "repairRouteCalls": 0,
+    "syncRouteCalls": 0,
+    "physicalCleanupActions": 0
+  },
+  "approval": {
+    "approvedBucket": "grok-gallery-001",
+    "approvedObjectKey": "grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json",
+    "approvedPayloadSha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+    "approvedStableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+    "approvedSourceBaselineCommit": "edaaf8134bb545969d6e8036952695a3d8102ca7",
+    "rollbackReadbackPlan": "write exact ignored dry-run payload once, read back through R2 S3, verify byte SHA-256 and stable content hash, keep append-only object as rollback/recovery source, no D1/Worker/Grok/move/delete/repair/sync/physical cleanup"
+  },
+  "repo": {
+    "branch": "codex/production-r2-vault-audit",
+    "commitBeforeWrite": "b756d9730acff9e11f9a0a1b5f6f475303880953"
+  },
+  "localPayload": {
+    "path": "private/canonical-snapshot-dry-run.json",
+    "gitIgnored": true,
+    "bytes": 112614234,
+    "sha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+    "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+    "schemaVersion": "r2-vault-canonical-snapshot/v1",
+    "snapshotKind": "local_dry_run",
+    "sourceBaselineCommit": "edaaf8134bb545969d6e8036952695a3d8102ca7",
+    "logicalAssetCount": 8080,
+    "storageObjectCount": 15981,
+    "promptRecordCount": 13914,
+    "gapRecordCount": 7696
+  },
+  "r2": {
+    "accountId": "ba5339fd86e87c226bdc306347636042",
+    "bucket": "grok-gallery-001",
+    "prefix": "grok-powertools/v1",
+    "objectKey": "grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json",
+    "headBucket": "ok",
+    "prefixHasObjects": true,
+    "beforeWriteHead": {
+      "exists": false,
+      "errorName": "NotFound",
+      "httpStatusCode": 404
+    },
+    "put": {
+      "startedAt": "2026-06-29T03:09:31.624Z",
+      "completedAt": "2026-06-29T03:09:53.841Z",
+      "etag": "\"025f78814c8ff5a0dfda355a44d589b5\"",
+      "versionId": "7e60eea57de482e21340e47aaabd0990",
+      "requestId": null,
+      "httpStatusCode": 200,
+      "conditional": "IfNoneMatch:*"
+    },
+    "afterWriteHead": {
+      "exists": true,
+      "contentLength": 112614234,
+      "etag": "\"025f78814c8ff5a0dfda355a44d589b5\"",
+      "contentType": "application/json; charset=utf-8",
+      "metadata": {
+        "dry-run-commit": "e45690b45cad5a09b197d8e308c284c253d3e22d",
+        "payload-sha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+        "schema-version": "r2-vault-canonical-snapshot-v1",
+        "source-baseline-commit": "edaaf8134bb545969d6e8036952695a3d8102ca7",
+        "stable-content-hash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+        "write-kind": "append-only-canonical-snapshot"
+      },
+      "lastModified": "2026-06-29T03:09:53.000Z"
+    },
+    "readback": {
+      "completedAt": "2026-06-29T03:09:58.385Z",
+      "bytes": 112614234,
+      "sha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+      "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+      "contentLength": 112614234,
+      "contentType": "application/json; charset=utf-8",
+      "etag": "\"025f78814c8ff5a0dfda355a44d589b5\"",
+      "requestId": null,
+      "httpStatusCode": 200
+    }
+  },
+  "verification": {
+    "byteSha256MatchesApproved": true,
+    "stableContentHashMatchesApproved": true,
+    "readbackByteLengthMatchesLocal": true,
+    "targetWasAbsentBeforeWrite": true,
+    "targetExistsAfterWrite": true,
+    "ok": true
+  },
+  "nextPhase": "D1 canonical projection from the approved R2 snapshot after separate approval"
+}

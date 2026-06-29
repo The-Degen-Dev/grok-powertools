@@ -85,6 +85,11 @@
         <td class="done">Done</td>
         <td>The plan now explicitly carries the work through append-only R2 snapshot, D1 projection, product-view validation, recurring reconciliation, review queue burn-down, physical cleanup dry run, and separately approved physical cleanup.</td>
       </tr>
+      <tr>
+        <td>Append-only R2 snapshot reflected</td>
+        <td class="done">Done</td>
+        <td>The first append-only R2 JSON canonical snapshot write/readback is documented as complete; the next planning slice is D1 canonical projection from the approved R2 object.</td>
+      </tr>
     </tbody>
   </table>
 
@@ -103,7 +108,7 @@
     <li>Automatic <code>alternate_duplicate</code> classification now requires exact SHA-256 equality plus at least one identity-link signal, such as the same <code>grokPostId</code>, media UUID, canonical source URL hash, or prompt sidecar link. Same-hash-only groups stay reviewable until source relationship is known.</li>
     <li>Physical duplicate cleanup is part of the target plan, not an optional side project. It comes after logical clean state, approved R2 canonical snapshot, D1 projection, app-view validation, and repeated clean audits.</li>
     <li>The completed read-only evidence baseline is commit <code>edaaf8134bb545969d6e8036952695a3d8102ca7</code>. Future planning should use <code>report-canonical.md</code>, <code>reconciliations/local-canonical-index-summary.json</code>, and <code>reconciliations/canonical-gap-report.json</code> as the current baseline rather than older blocked, sample-verified, or grid-partial reports.</li>
-    <li>The local-only canonical snapshot dry run is complete. The next implementation slice is the first append-only R2 JSON snapshot write and readback verification, but only after explicit approval names the target bucket/key, private payload SHA-256, stable content hash, source baseline commit, and rollback/readback plan.</li>
+    <li>The local-only canonical snapshot dry run and first append-only R2 JSON snapshot write/readback are complete. The next implementation slice is D1 canonical projection from the approved R2 object.</li>
     <li>The append-only R2 JSON snapshot is not the end state. It is the durable recovery/source record that D1 projection and product reads must derive from in later phases.</li>
   </ul>
 
@@ -134,8 +139,8 @@
 
   <h2>Open Questions</h2>
   <ul>
-    <li>No planning question blocks preparing the first append-only R2 JSON snapshot write from the validated dry run. The write itself still requires explicit approval with target bucket/key, payload SHA-256, stable content hash, source baseline commit, and rollback/readback verification plan.</li>
-    <li>The next slice must not be treated as finishing the system. The staged target remains: append-only R2 JSON snapshot after write approval, D1 projection as the app-facing query layer, product views reading D1, recurring reconciliation from D1 back to the R2 snapshot and raw R2 inventory, review queue burn-down, then physical duplicate cleanup dry run and separately approved cleanup.</li>
+    <li>No planning question blocks preparing the D1 canonical projection from the approved R2 JSON snapshot, but D1 writes and product-read changes still require separate approval.</li>
+    <li>The next slice must not be treated as finishing the system. The staged target remains: D1 projection as the app-facing query layer, product views reading D1, recurring reconciliation from D1 back to the R2 snapshot and raw R2 inventory, review queue burn-down, then physical duplicate cleanup dry run and separately approved cleanup.</li>
     <li>The clean-state decision is staged: logical clean first, index clean second, storage clean third. Full system clean requires physical duplicate cleanup to succeed or any remaining candidate groups to be explicitly deferred with reasons.</li>
   </ul>
 </body>

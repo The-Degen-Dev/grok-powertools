@@ -14,17 +14,18 @@ The read-only audit evidence baseline is complete at commit `edaaf8134bb545969d6
 
 The local-only canonical snapshot dry run is now complete and validated. Current dry-run artifacts are `reconciliations/canonical-snapshot-schema.json`, `reconciliations/canonical-snapshot-dry-run-summary.json`, `logs/canonical-snapshot-dry-run-validation.json`, `report-canonical-snapshot-dry-run.md`, and the ignored private payload `private/canonical-snapshot-dry-run.json`.
 
-Do not re-run this historical checklist as the next phase by default. The next execution slice is the first append-only R2 JSON canonical snapshot only after explicit write approval naming the target bucket/key, payload SHA-256, stable content hash, source baseline commit, and rollback/readback verification plan. D1 writes, Worker writes, Grok actions, repair/sync routes, object moves, deletes, and physical duplicate cleanup remain forbidden until separately approved.
+The first append-only R2 JSON canonical snapshot write is now complete and readback verified. Current write artifacts are `logs/canonical-snapshot-r2-write-readback.json` and `report-canonical-snapshot-r2-write.md`. The approved R2 object is `grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json` in bucket `grok-gallery-001`; readback SHA-256 and stable content hash match the approved values.
+
+Do not re-run this historical checklist as the next phase by default. The next execution slice is D1 canonical index projection from the approved R2 JSON snapshot. D1 writes, Worker writes, product read changes, Grok actions, repair/sync routes, object moves, deletes, and physical duplicate cleanup remain forbidden until separately approved.
 
 Forward staged plan:
 
-1. Append-only R2 JSON canonical snapshot write and readback verification after explicit approval.
-2. D1 canonical index projection derived from the approved R2 JSON snapshot.
-3. Product views read the D1 projection while diagnostics retain access to R2 snapshot and raw R2 evidence.
-4. Recurring reconciliation compares D1, the approved R2 snapshot, raw R2 inventory, and Grok evidence.
-5. Review queue burn-down resolves or explicitly defers response gaps, `needs_human_review`, `orphan_candidate`, and hash-only duplicate groups.
-6. Physical duplicate cleanup dry run creates an exact manifest from the approved canonical index and validated D1 projection.
-7. Physical duplicate cleanup executes only after separate approval of the exact dry-run manifest, then the audit reruns to verify storage, index, and product state.
+1. D1 canonical index projection derived from the approved R2 JSON snapshot.
+2. Product views read the D1 projection while diagnostics retain access to R2 snapshot and raw R2 evidence.
+3. Recurring reconciliation compares D1, the approved R2 snapshot, raw R2 inventory, and Grok evidence.
+4. Review queue burn-down resolves or explicitly defers response gaps, `needs_human_review`, `orphan_candidate`, and hash-only duplicate groups.
+5. Physical duplicate cleanup dry run creates an exact manifest from the approved canonical index and validated D1 projection.
+6. Physical duplicate cleanup executes only after separate approval of the exact dry-run manifest, then the audit reruns to verify storage, index, and product state.
 
 ---
 

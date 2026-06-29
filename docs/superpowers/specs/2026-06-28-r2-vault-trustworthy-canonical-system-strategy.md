@@ -27,6 +27,17 @@ Canonical snapshot dry-run checkpoint:
 - Dry-run counts: `8080` logical assets, `15981` storage objects, `13914` prompt records, `7696` gap records
 - Production writes during dry run: none
 
+Approved append-only R2 snapshot checkpoint:
+
+- Status: write/readback verified
+- R2 bucket: `grok-gallery-001`
+- R2 object key: `grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json`
+- Bytes: `112614234`
+- ETag: `"025f78814c8ff5a0dfda355a44d589b5"`
+- Readback SHA-256: `21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6`
+- Readback stable content hash: `4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1`
+- Production writes in this checkpoint: one append-only R2 snapshot object only. No D1 writes, Worker writes, Grok actions, object moves/deletes, repair/sync routes, or physical cleanup.
+
 Audit verdicts:
 
 - Production R2 internal correctness: `dirty`
@@ -264,6 +275,7 @@ Phase 3: Local-only canonical snapshot dry run
 
 Phase 4: First approved canonical snapshot
 
+- Current status: complete and readback verified for the object key recorded above.
 - After the local dry-run snapshot is reviewed, write an append-only R2 JSON canonical snapshot only with explicit write approval.
 - Approval must name the target bucket, exact object key, private payload SHA-256, stable content hash, source baseline commit, and rollback/readback verification plan.
 - The write phase must immediately read the object back from R2, verify byte-for-byte payload SHA-256 and stable content hash, record object metadata, and update only committed-safe reports.
@@ -274,6 +286,7 @@ Phase 4: First approved canonical snapshot
 
 Phase 5: D1 canonical index projection
 
+- Current status: next recommended phase. This phase still needs a separate approval before D1 writes or product read changes.
 - Add D1 tables or rows as a derived projection from the approved R2 JSON canonical snapshot.
 - Keep D1 focused on query fields, lookup keys, source pointers, hashes, status, counts, and selected display fields.
 - Keep bulky raw metadata and full prompt archives in R2 unless a specific UI read requires a small D1 copy.
@@ -318,8 +331,8 @@ No planning question blocks the next execution slice. The current recommendation
 
 Current next execution slice:
 
-1. Re-verify the current dry-run payload, schema, hashes, ignored/private storage, committed summaries, and no-write audit trail.
-2. Prepare the exact first append-only R2 JSON snapshot write plan from the validated dry-run artifact.
-3. If and only if explicit write approval names the required target and hashes, write the exact payload once, read it back, and verify byte-for-byte integrity.
-4. Update manifest, reports, and implementation notes with committed-safe R2 snapshot evidence.
-5. Stop before D1 projection, product route changes, Worker state changes, Grok actions, repair/sync routes, object moves, deletes, or physical duplicate cleanup. Those remain later phases in this same staged plan.
+1. Derive the D1 canonical index projection from the approved R2 JSON snapshot object.
+2. Validate D1 row counts, canonical IDs, classifications, hashes, selected display fields, and snapshot version against the approved R2 object.
+3. Keep full raw prompts and bulky metadata in R2 while D1 stores query fields, lookup keys, pointers, statuses, counts, and selected display fields.
+4. Stop before product route changes, Worker state changes, Grok actions, repair/sync routes, object moves, deletes, or physical duplicate cleanup unless a later goal explicitly approves those operations.
+5. After D1 validates, move to product-view validation, recurring reconciliation, review queue burn-down, physical cleanup dry run, and separately approved physical cleanup.

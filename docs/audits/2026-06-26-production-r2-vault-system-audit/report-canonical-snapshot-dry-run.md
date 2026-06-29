@@ -53,7 +53,7 @@ This report is redacted. It contains counts and hashes only. The exact dry-run p
 
 ## Approval Gate
 
-The next phase is an append-only R2 JSON snapshot write. It requires explicit user approval naming the target bucket/key, payload SHA-256, stable content hash, source baseline commit, and rollback/readback verification plan. D1 writes, Worker writes, Grok actions, object moves, deletes, repair routes, sync routes, and physical cleanup remain forbidden without separate approval.
+The append-only R2 JSON snapshot write required explicit user approval naming the target bucket/key, payload SHA-256, stable content hash, source baseline commit, and rollback/readback verification plan. That approval was supplied and the write/readback verification completed. D1 writes, Worker writes, Grok actions, object moves, deletes, repair routes, sync routes, and physical cleanup remain forbidden without separate approval.
 
 ## Write Gate Check
 
@@ -68,27 +68,37 @@ Checked: 2026-06-29T00:55:59Z
 - R2 bucket reachable: yes
 - R2 prefix has existing objects: yes
 - Proposed object already exists: no
-- Production writes performed: no
+- Production writes performed at gate-check time: no
 
-The write remains paused because the Goal text did not explicitly approve the exact object key above.
+## R2 Write Completion
 
-Exact approval needed:
+Completed: 2026-06-29T03:09:58.385Z
 
-```text
-I explicitly approve writing the append-only R2 canonical snapshot to bucket grok-gallery-001 at object key grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json, using private payload SHA-256 21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6 and stable content hash 4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1, from source baseline commit edaaf8134bb545969d6e8036952695a3d8102ca7. Rollback/readback plan: write the exact ignored dry-run payload once, read it back through R2 S3, verify byte SHA-256 and stable content hash, then keep the append-only object as the rollback/recovery source without D1, Worker, Grok, move, delete, repair, sync, or physical cleanup actions.
-```
+- R2 append-only snapshot objects written: 1
+- Object key: `grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json`
+- Bytes: 112614234
+- ETag: `"025f78814c8ff5a0dfda355a44d589b5"`
+- Readback SHA-256: `21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6`
+- Readback stable content hash: `4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1`
+- Readback verified: yes
+- D1 writes: 0
+- Worker state writes: 0
+- Grok actions: 0
+- Object moves/deletes: 0
+- Repair/sync/physical cleanup actions: 0
+
+See `report-canonical-snapshot-r2-write.md` and `logs/canonical-snapshot-r2-write-readback.json` for committed-safe write evidence.
 
 ## Next Staged Plan
 
 This dry run is not the final clean state. It is the approval object for the first durable canonical snapshot.
 
-1. Write the exact append-only R2 JSON snapshot only after explicit approval, then read it back and verify byte SHA-256 plus stable content hash.
-2. Build the D1 canonical index projection from the approved R2 snapshot, not directly from ad hoc local files.
-3. Point normal product views at the D1 projection while keeping duplicate, variant, orphan, and review evidence visible in diagnostics.
-4. Keep recurring reconciliation from D1 back to the R2 snapshot, raw R2 inventory, and Grok evidence.
-5. Burn down or explicitly defer the review queue: media-post gaps, conversation-response gaps, `needs_human_review`, `orphan_candidate`, and hash-only duplicate groups.
-6. Generate a physical duplicate cleanup dry-run manifest only after logical state, D1 projection, and app reads validate cleanly.
-7. Execute physical duplicate cleanup only after separate approval of the exact manifest, then rerun the audit to verify storage, index, and product state.
+1. Build the D1 canonical index projection from the approved R2 snapshot, not directly from ad hoc local files.
+2. Point normal product views at the D1 projection while keeping duplicate, variant, orphan, and review evidence visible in diagnostics.
+3. Keep recurring reconciliation from D1 back to the R2 snapshot, raw R2 inventory, and Grok evidence.
+4. Burn down or explicitly defer the review queue: media-post gaps, conversation-response gaps, `needs_human_review`, `orphan_candidate`, and hash-only duplicate groups.
+5. Generate a physical duplicate cleanup dry-run manifest only after logical state, D1 projection, and app reads validate cleanly.
+6. Execute physical duplicate cleanup only after separate approval of the exact manifest, then rerun the audit to verify storage, index, and product state.
 
 ## Validation
 
