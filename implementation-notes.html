@@ -1143,6 +1143,70 @@ Error: Cannot find module './movie-timebase'</code></pre>
 &gt; eslint</code></pre>
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added a proposal-only Director domain module with rule-based fallback,
+                            strict provider payload parsing, project clip-target validation, and a
+                            server-only OpenAI-compatible chat-completions route. The route reports
+                            configured status without exposing credentials and posts only from the
+                            server boundary.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Deviations</td>
+                        <td>
+                            Required an explicit <code>MOVIE_DIRECTOR_MODEL</code> or
+                            <code>CLIPROXYAPI_MODEL</code> instead of hardcoding the plan sketch's
+                            sample model name. Also used relative imports in the new route because
+                            this repo has no Vitest alias config for direct route imports.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Requiring an explicit model adds setup friction, but avoids stale-model
+                            assumptions. The provider path is unit-tested with a mocked
+                            OpenAI-compatible endpoint, not a live provider call, because this task
+                            is the boundary and contract layer rather than UI/provider acceptance.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Open questions</td>
+                        <td>
+                            Which local CLIProxyAPI model should be set for real Director calls
+                            remains a later setup choice. The route fails closed until that env value
+                            is explicit.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first run:
+                            <pre><code>FAIL  src/lib/movie-director.test.ts
+Error: Cannot find module './movie-director'</code></pre>
+                            Passing run:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-director route
+
+ Test Files  2 passed (2)
+      Tests  7 passed (7)</code></pre>
+                            Full unit suite:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  6 passed (6)
+      Tests  29 passed (29)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>
