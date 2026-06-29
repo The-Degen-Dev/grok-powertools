@@ -124,50 +124,56 @@ export default function MovieDirectorPanel({
       </button>
       {config.error && <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-200">{config.error}</div>}
       <div className="space-y-2">
-        {proposals.map((proposal) => (
-          <article
-            key={proposal.id}
-            aria-label={`Director proposal ${proposal.title}`}
-            className="rounded border border-neutral-800 bg-neutral-950 p-3"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-medium text-neutral-100">{proposal.title}</h3>
-                <p className="mt-1 text-xs text-neutral-500">{proposal.rationale}</p>
-              </div>
-              <span className="rounded border border-neutral-700 px-2 py-1 text-[11px] text-neutral-300">{proposal.status.replace("-", " ")}</span>
-            </div>
-            <div className="mt-3 space-y-2">
-              {proposal.changes.map((change, index) => {
-                const changeId = change.id ?? `${proposal.id}-${index}`;
-                return (
-                  <label key={changeId} className="flex gap-2 rounded bg-neutral-900 p-2 text-xs text-neutral-300">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select Director change ${index + 1}`}
-                      checked={selectedChanges[proposal.id]?.has(changeId) ?? false}
-                      onChange={(event) => toggleChange(proposal.id, changeId, event.target.checked)}
-                      className="mt-0.5 accent-orange-500"
-                    />
-                    <span>
-                      <span className="block font-medium text-neutral-200">{changeLabel(change)}</span>
-                      <span className="block text-neutral-500">{change.rationale || "No rationale provided."}</span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                void applySelectedChanges(proposal);
-              }}
-              className="mt-3 w-full rounded bg-neutral-900 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-800"
+        {proposals.map((proposal) => {
+          const selectedCount = selectedChanges[proposal.id]?.size ?? 0;
+          const canApply = proposal.status === "pending" && proposal.changes.length > 0 && selectedCount > 0;
+          return (
+            <article
+              key={proposal.id}
+              aria-label={`Director proposal ${proposal.title}`}
+              className="rounded border border-neutral-800 bg-neutral-950 p-3"
             >
-              Apply selected changes
-            </button>
-          </article>
-        ))}
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium text-neutral-100">{proposal.title}</h3>
+                  <p className="mt-1 text-xs text-neutral-500">{proposal.rationale}</p>
+                  {proposal.validationError && <p className="mt-2 text-xs text-amber-200">{proposal.validationError}</p>}
+                </div>
+                <span className="rounded border border-neutral-700 px-2 py-1 text-[11px] text-neutral-300">{proposal.status.replace("-", " ")}</span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {proposal.changes.map((change, index) => {
+                  const changeId = change.id ?? `${proposal.id}-${index}`;
+                  return (
+                    <label key={changeId} className="flex gap-2 rounded bg-neutral-900 p-2 text-xs text-neutral-300">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select Director change ${index + 1}`}
+                        checked={selectedChanges[proposal.id]?.has(changeId) ?? false}
+                        onChange={(event) => toggleChange(proposal.id, changeId, event.target.checked)}
+                        className="mt-0.5 accent-orange-500"
+                      />
+                      <span>
+                        <span className="block font-medium text-neutral-200">{changeLabel(change)}</span>
+                        <span className="block text-neutral-500">{change.rationale || "No rationale provided."}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                disabled={!canApply}
+                onClick={() => {
+                  void applySelectedChanges(proposal);
+                }}
+                className="mt-3 w-full rounded bg-neutral-900 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Apply selected changes
+              </button>
+            </article>
+          );
+        })}
         {proposals.length === 0 && <div className="rounded border border-neutral-800 p-3 text-sm text-neutral-500">No Director proposals yet.</div>}
       </div>
     </div>

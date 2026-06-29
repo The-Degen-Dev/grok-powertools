@@ -48,6 +48,29 @@ describe("movie director", () => {
     expect(proposal.changes.length).toBeGreaterThan(0);
   });
 
+  it("marks no-op Director output invalid instead of pending", () => {
+    const original = {
+      ...project(),
+      candidates: [],
+      committedClips: [{ ...clip("kept-a", 0), lifecycle: "kept" as const }],
+    };
+    const ruleProposal = createRuleBasedDirectorProposal(original);
+    expect(ruleProposal.status).toBe("invalid");
+    expect(ruleProposal.changes).toEqual([]);
+    expect(ruleProposal.validationError).toMatch(/No actionable/i);
+
+    const providerProposal = parseDirectorProviderPayload(
+      {
+        title: "No useful changes",
+        rationale: "The current cut is already assembled.",
+        changes: [],
+      },
+      original,
+    );
+    expect(providerProposal.status).toBe("invalid");
+    expect(providerProposal.validationError).toMatch(/no actionable/i);
+  });
+
   it("rejects invalid provider output", () => {
     expect(() => parseDirectorProviderPayload({ title: "", changes: [{ type: "deleteEverything" }] }, project())).toThrow();
     expect(() =>

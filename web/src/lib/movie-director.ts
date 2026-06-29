@@ -88,10 +88,14 @@ export function createRuleBasedDirectorProposal(project: MovieReviewProject): Di
     id: uuidv4(),
     movieId: project.movieId,
     projectId: project.id,
-    status: "pending",
+    status: changes.length > 0 ? "pending" : "invalid",
     title: "Start with strongest available clip",
-    rationale: "Rule-based Director uses the current candidate order and proposes a conservative first assembly.",
+    rationale:
+      changes.length > 0
+        ? "Rule-based Director uses the current candidate order and proposes a conservative first assembly."
+        : "No unresolved candidates are available for the rule-based Director.",
     changes,
+    validationError: changes.length > 0 ? undefined : "No actionable Director changes.",
     createdAt: timestamp,
     updatedAt: timestamp,
   });
@@ -104,10 +108,11 @@ export function parseDirectorProviderPayload(payload: unknown, project: MovieRev
     id: uuidv4(),
     movieId: project.movieId,
     projectId: project.id,
-    status: "pending",
+    status: parsed.changes.length > 0 ? "pending" : "invalid",
     title: parsed.title,
     rationale: parsed.rationale,
     changes: parsed.changes.map((change) => ({ ...change, id: change.id || uuidv4() })),
+    validationError: parsed.changes.length > 0 ? undefined : "Provider returned no actionable Director changes.",
     createdAt: timestamp,
     updatedAt: timestamp,
   });
