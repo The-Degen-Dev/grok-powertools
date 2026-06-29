@@ -1,0 +1,53 @@
+{
+  "schemaId": "r2-vault-canonical-snapshot/v1",
+  "schemaKind": "append_only_r2_json_canonical_snapshot",
+  "productionWritePolicy": "schema_and_local_dry_run_only_until_explicit_write_approval",
+  "requiredTopLevelFields": [
+    "schemaVersion",
+    "snapshotKind",
+    "generatedAt",
+    "productionWrites",
+    "sourceBaseline",
+    "sourceArtifacts",
+    "sourceCounts",
+    "classificationCounts",
+    "gapCounts",
+    "validationRules",
+    "logicalAssets",
+    "storageObjects",
+    "promptArchive",
+    "gapRecords",
+    "approvalGate"
+  ],
+  "recordContracts": {
+    "logicalAssets": {
+      "identity": "preferred Grok post identity when available, otherwise retained storage key identity for review",
+      "storageObjectKeys": "exact private storage keys in raw snapshot only",
+      "promptRefIds": "links to full prompt records inside this snapshot",
+      "gapFlags": "machine-readable reasons this logical asset is not yet clean"
+    },
+    "storageObjects": {
+      "objectKey": "exact private R2 object key in raw snapshot only",
+      "status": "canonical, date_folder_mapped, alternate_duplicate, needs_human_review, orphan_candidate, metadata_only_or_sidecar, or invalid_or_system",
+      "evidence": "R2, D1, Worker, Grok, metadata, hash, and local evidence used to classify the object"
+    },
+    "promptArchive": {
+      "prompt": "full prompt body allowed only in ignored local dry-run payload or approved R2 data plane",
+      "metadata": "selected stable Grok metadata fields; signed/cookie-bearing URLs are not stored verbatim",
+      "mediaEvidence": "UUID evidence and hashes rather than signed media URLs"
+    },
+    "gapRecords": {
+      "reviewRows": "needs_human_review and orphan_candidate storage objects",
+      "grokGaps": "Grok media-post and conversation response gaps carried forward explicitly"
+    }
+  },
+  "validationRules": [
+    "productionWrites must be false for local dry run",
+    "storageObjects length must equal R2 media object count",
+    "classification counts must match local-canonical-index-summary.json",
+    "gap counts must match canonical-gap-report.json",
+    "source artifact SHA-256 values must be recorded",
+    "raw payload must be written under docs/audits/**/private/",
+    "committed summaries must not include raw prompt bodies, signed URLs, cookies, bearer tokens, or exact private IDs"
+  ]
+}

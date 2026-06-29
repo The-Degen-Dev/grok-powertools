@@ -12,7 +12,19 @@
 
 The read-only audit evidence baseline is complete at commit `edaaf8134bb545969d6e8036952695a3d8102ca7`. Current baseline artifacts are in `docs/audits/2026-06-26-production-r2-vault-system-audit/`, especially `report-canonical.md`, `reconciliations/local-canonical-index-summary.json`, `reconciliations/canonical-gap-report.json`, and `manifest.json`.
 
-Do not re-run this historical checklist as the next phase by default. The next approved planning slice is local-only: freeze the current baseline, define the append-only R2 JSON canonical snapshot schema, generate and validate the exact local dry-run payload, and stop before any production R2, D1, Worker, Grok, repair, move, sync, or delete action.
+The local-only canonical snapshot dry run is now complete and validated. Current dry-run artifacts are `reconciliations/canonical-snapshot-schema.json`, `reconciliations/canonical-snapshot-dry-run-summary.json`, `logs/canonical-snapshot-dry-run-validation.json`, `report-canonical-snapshot-dry-run.md`, and the ignored private payload `private/canonical-snapshot-dry-run.json`.
+
+Do not re-run this historical checklist as the next phase by default. The next execution slice is the first append-only R2 JSON canonical snapshot only after explicit write approval naming the target bucket/key, payload SHA-256, stable content hash, source baseline commit, and rollback/readback verification plan. D1 writes, Worker writes, Grok actions, repair/sync routes, object moves, deletes, and physical duplicate cleanup remain forbidden until separately approved.
+
+Forward staged plan:
+
+1. Append-only R2 JSON canonical snapshot write and readback verification after explicit approval.
+2. D1 canonical index projection derived from the approved R2 JSON snapshot.
+3. Product views read the D1 projection while diagnostics retain access to R2 snapshot and raw R2 evidence.
+4. Recurring reconciliation compares D1, the approved R2 snapshot, raw R2 inventory, and Grok evidence.
+5. Review queue burn-down resolves or explicitly defers response gaps, `needs_human_review`, `orphan_candidate`, and hash-only duplicate groups.
+6. Physical duplicate cleanup dry run creates an exact manifest from the approved canonical index and validated D1 projection.
+7. Physical duplicate cleanup executes only after separate approval of the exact dry-run manifest, then the audit reruns to verify storage, index, and product state.
 
 ---
 

@@ -17,6 +17,16 @@ Final audit checkpoint:
 - Branch: `codex/production-r2-vault-audit`
 - Evidence baseline commit: `edaaf8134bb545969d6e8036952695a3d8102ca7 docs: add grok saved api audit evidence`
 
+Canonical snapshot dry-run checkpoint:
+
+- Schema version: `r2-vault-canonical-snapshot/v1`
+- Private exact payload: `docs/audits/2026-06-26-production-r2-vault-system-audit/private/canonical-snapshot-dry-run.json`
+- Committed summary: `docs/audits/2026-06-26-production-r2-vault-system-audit/report-canonical-snapshot-dry-run.md`
+- Private payload SHA-256: `21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6`
+- Stable content hash: `4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1`
+- Dry-run counts: `8080` logical assets, `15981` storage objects, `13914` prompt records, `7696` gap records
+- Production writes during dry run: none
+
 Audit verdicts:
 
 - Production R2 internal correctness: `dirty`
@@ -238,6 +248,7 @@ Phase 1: Gap-bearing Grok Saved inventory baseline
 
 Phase 2: Canonical snapshot schema
 
+- Current status: complete for the local dry-run payload as schema version `r2-vault-canonical-snapshot/v1`.
 - Define the schema for an append-only R2 JSON canonical snapshot before any production write.
 - Include identity evidence, media variants, full prompts, metadata references, R2 storage locations, hashes, D1/Worker links, local corroboration, status, provenance, and confidence.
 - Include source snapshot IDs, generated time, source counts, source hashes, classification counts, gap counts, rollback notes, and validation rules.
@@ -245,6 +256,7 @@ Phase 2: Canonical snapshot schema
 
 Phase 3: Local-only canonical snapshot dry run
 
+- Current status: complete and validated locally. The exact payload remains ignored/private; committed artifacts contain only counts, hashes, schema, validation, and approval gates.
 - Generate the exact append-only R2 JSON payload locally from the ignored canonical index and raw private Grok evidence.
 - Validate parseability, schema version, counts, hashes, status totals, gap totals, and source references.
 - Produce committed-safe summary artifacts and an ignored raw local snapshot payload.
@@ -253,9 +265,12 @@ Phase 3: Local-only canonical snapshot dry run
 Phase 4: First approved canonical snapshot
 
 - After the local dry-run snapshot is reviewed, write an append-only R2 JSON canonical snapshot only with explicit write approval.
+- Approval must name the target bucket, exact object key, private payload SHA-256, stable content hash, source baseline commit, and rollback/readback verification plan.
+- The write phase must immediately read the object back from R2, verify byte-for-byte payload SHA-256 and stable content hash, record object metadata, and update only committed-safe reports.
 - Include schema version, source snapshot IDs, source counts, classification counts, content hashes, generated time, and rollback notes.
 - Treat this R2 JSON snapshot as the durable source-of-truth and recovery record for the canonical model.
 - Do not treat the R2 JSON snapshot as the final app query layer.
+- Stop before D1 writes, Worker state changes, Grok actions, repair/sync routes, object moves, deletes, or physical cleanup unless a later goal explicitly approves those operations.
 
 Phase 5: D1 canonical index projection
 
@@ -303,7 +318,8 @@ No planning question blocks the next execution slice. The current recommendation
 
 Current next execution slice:
 
-1. Freeze the current baseline in docs and manifest.
-2. Define the canonical snapshot schema.
-3. Build and validate the local-only canonical snapshot dry run.
-4. Stop before production writes and present the exact dry-run payload summary for review.
+1. Re-verify the current dry-run payload, schema, hashes, ignored/private storage, committed summaries, and no-write audit trail.
+2. Prepare the exact first append-only R2 JSON snapshot write plan from the validated dry-run artifact.
+3. If and only if explicit write approval names the required target and hashes, write the exact payload once, read it back, and verify byte-for-byte integrity.
+4. Update manifest, reports, and implementation notes with committed-safe R2 snapshot evidence.
+5. Stop before D1 projection, product route changes, Worker state changes, Grok actions, repair/sync routes, object moves, deletes, or physical duplicate cleanup. Those remain later phases in this same staged plan.

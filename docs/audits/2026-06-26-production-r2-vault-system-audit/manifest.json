@@ -36,7 +36,8 @@
     "liveGrok": "verified",
     "reconciliation": "dirty",
     "canonicalIndex": "local_only_complete_with_gaps",
-    "grokSavedInventory": "api_captured_post_identity_with_post_gaps"
+    "grokSavedInventory": "api_captured_post_identity_with_post_gaps",
+    "canonicalSnapshotDryRun": "validated"
   },
   "blockers": [],
   "evidenceIndex": [
@@ -52,8 +53,8 @@
     },
     {
       "path": "implementation-notes.html",
-      "bytes": 23790,
-      "updatedAt": "2026-06-29T00:35:10.967Z"
+      "bytes": 27834,
+      "updatedAt": "2026-06-29T00:50:47.839Z"
     },
     {
       "path": "inventory/.gitkeep",
@@ -174,6 +175,11 @@
       "path": "logs/.gitkeep",
       "bytes": 1,
       "updatedAt": "2026-06-27T23:20:40.060Z"
+    },
+    {
+      "path": "logs/canonical-snapshot-dry-run-validation.json",
+      "bytes": 94,
+      "updatedAt": "2026-06-29T00:47:23.189Z"
     },
     {
       "path": "logs/cloud-test-acceptance.txt",
@@ -368,7 +374,7 @@
     {
       "path": "logs/validate-artifacts.json",
       "bytes": 102,
-      "updatedAt": "2026-06-29T00:36:08.655Z"
+      "updatedAt": "2026-06-29T00:51:04.390Z"
     },
     {
       "path": "logs/web-build.txt",
@@ -486,6 +492,16 @@
       "updatedAt": "2026-06-29T00:10:03.092Z"
     },
     {
+      "path": "reconciliations/canonical-snapshot-dry-run-summary.json",
+      "bytes": 3539,
+      "updatedAt": "2026-06-29T00:47:23.189Z"
+    },
+    {
+      "path": "reconciliations/canonical-snapshot-schema.json",
+      "bytes": 2367,
+      "updatedAt": "2026-06-29T00:47:23.188Z"
+    },
+    {
       "path": "reconciliations/duplicate-groups.json",
       "bytes": 3176884,
       "updatedAt": "2026-06-28T04:00:48.323Z"
@@ -541,6 +557,11 @@
       "updatedAt": "2026-06-28T04:00:48.305Z"
     },
     {
+      "path": "report-canonical-snapshot-dry-run.md",
+      "bytes": 2897,
+      "updatedAt": "2026-06-29T00:50:47.839Z"
+    },
+    {
       "path": "report-canonical.md",
       "bytes": 2265,
       "updatedAt": "2026-06-29T00:10:03.093Z"
@@ -582,8 +603,13 @@
     },
     {
       "path": "scripts/audit-production-r2-vault.mjs",
-      "bytes": 82573,
-      "updatedAt": "2026-06-28T22:32:09.669Z"
+      "bytes": 82745,
+      "updatedAt": "2026-06-29T00:43:12.973Z"
+    },
+    {
+      "path": "scripts/build-canonical-snapshot-dry-run.mjs",
+      "bytes": 33990,
+      "updatedAt": "2026-06-29T00:47:02.235Z"
     },
     {
       "path": "scripts/build-local-canonical-index.mjs",
@@ -733,5 +759,20 @@
       "existing artifacts fail validation or disagree on baseline counts",
       "local dry-run payload cannot be made repeatable"
     ]
+  },
+  "currentCanonicalSnapshotDryRun": {
+    "generatedAt": "2026-06-29T00:47:23.175Z",
+    "schemaVersion": "r2-vault-canonical-snapshot/v1",
+    "privatePayload": "private/canonical-snapshot-dry-run.json",
+    "payloadSha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+    "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+    "validation": {
+      "ok": true,
+      "errorCount": 0,
+      "warningCount": 0
+    },
+    "productionWrites": false,
+    "nextAllowedPhase": "append_only_r2_json_snapshot_write",
+    "requiresExplicitUserApproval": true
   }
 }

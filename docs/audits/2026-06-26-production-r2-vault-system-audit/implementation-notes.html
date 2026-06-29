@@ -59,6 +59,10 @@
     <li>The full async-worker media-post pass attempted all <code>12,446</code> captured Grok asset IDs. After two retry passes over failures, <code>12,232</code> media-post rows returned <code>200</code>, <code>213</code> returned stable <code>404</code>, and <code>1</code> returned a persistent <code>500</code>. These are recorded as media-post response gaps, not inferred physical media loss.</li>
     <li>The current evidence baseline is commit <code>edaaf8134bb545969d6e8036952695a3d8102ca7</code>. It supersedes older <code>sample_verified</code>, blocked, or grid-partial Grok Saved statuses with <code>api_captured_post_identity_with_post_gaps</code>.</li>
     <li>The next execution slice should not write production data. It should freeze this baseline, define the append-only R2 JSON canonical snapshot schema, generate the exact snapshot payload locally, validate it, and stop before production R2, D1, Worker, Grok, repair, move, or delete actions.</li>
+    <li>The canonical snapshot dry-run schema is versioned as <code>r2-vault-canonical-snapshot/v1</code>. The raw dry-run payload includes exact private R2 keys, exact private Grok IDs, and full prompt bodies only in ignored <code>private/canonical-snapshot-dry-run.json</code>; committed artifacts contain counts, hashes, schema contracts, validation results, and approval gates only.</li>
+    <li>The dry-run payload generator hashes a normalized manifest view that excludes dry-run bookkeeping. This keeps the stable content hash repeatable across reruns even though the manifest records the latest dry-run metadata and the raw payload timestamp changes.</li>
+    <li>The next implementation slice has moved from local dry-run generation to first append-only R2 JSON snapshot write and readback verification. That slice still requires explicit write approval and must stop before D1 writes, Worker writes, Grok actions, repair/sync routes, object moves, deletes, or physical duplicate cleanup.</li>
+    <li>The full staged plan remains: append-only R2 snapshot, D1 canonical projection, product views reading D1, recurring reconciliation against R2/raw evidence, review queue burn-down, physical duplicate cleanup dry run, separately approved physical cleanup, and a post-cleanup audit.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -91,6 +95,7 @@
     <li>The completed response pass attempted all <code>7,985</code> source conversations. It captured <code>6,522</code> successful response payloads and recorded <code>1,463</code> <code>404</code> response gaps.</li>
     <li>The async media-post worker trades slightly more bookkeeping for a safer browser profile: results are drained in bounded chunks to ignored JSONL checkpoints, while fetches run asynchronously with limited concurrency so Chrome's UI thread is not held by thousands of blocking requests.</li>
     <li>One media-post endpoint kept returning <code>500</code> after retry. I stopped retrying after the second low-concurrency retry pass because the remaining count was isolated and the canonical report can carry it as a residual response gap without risking unnecessary API churn.</li>
+    <li>The dry-run snapshot stores selected stable Grok metadata and UUID evidence instead of signed or cookie-bearing media URLs. Full prompt text is included in the ignored private payload because the future approved R2 data plane is expected to preserve it; committed summaries only publish prompt counts and hashes.</li>
   </ul>
 
   <h2>Open Questions</h2>
@@ -100,6 +105,9 @@
     <li>Current local canonical index artifacts: raw ignored <code>private/local-canonical-index.jsonl</code>, redacted <code>reconciliations/local-canonical-index-summary.json</code>, redacted <code>reconciliations/canonical-gap-report.json</code>, and redacted <code>report-canonical.md</code>.</li>
     <li>The active-tab API inventory captured <code>12,446</code> Grok assets across <code>208</code> asset pages and attempted all <code>7,985</code> source conversations. It found <code>6,606</code> prompt candidates. Media-post identity is now captured from <code>/rest/media/post/get</code> for successful rows, but detail-route equivalence was not opened per item.</li>
     <li>The media-post API now provides post identity for successful rows without route mutation. Detail-route equivalence was not opened per item, and <code>214</code> media-post response gaps remain after retry.</li>
+    <li>The first append-only R2 JSON snapshot write is not approved yet. Approval must name the target R2 bucket/key, private payload SHA-256, stable content hash, source baseline commit, and rollback/readback verification plan. D1 writes, Worker writes, Grok actions, repair/sync routes, object moves, deletes, and physical duplicate cleanup still require separate approval.</li>
+    <li>The first snapshot write goal should verify the local payload before writing, write the exact payload once if approved, read it back, compare byte SHA-256 and stable content hash, update committed-safe artifacts, and stop before D1 projection.</li>
+    <li>After that write is verified, the next goal should derive a D1 canonical projection from the approved R2 snapshot. D1 should hold query fields, lookup keys, source pointers, status, counts, and selected display fields, while full raw prompts and bulky metadata remain in R2.</li>
   </ul>
 
   <h2>Commands Run</h2>
@@ -127,6 +135,11 @@
     <li><code>npm run lint</code>, <code>npm run test:unit</code>, and <code>npm run test:e2e</code> passed after the hardening change.</li>
     <li><code>git diff --check</code> passed after generated artifact updates. <code>git check-ignore</code> confirmed the raw private Grok asset, conversation, and media-post JSONL artifacts remain ignored.</li>
     <li>A targeted scan of committed-safe changed files for bearer tokens, cookies, signed URL markers, exact Grok post routes, and exact Grok media host URLs found no secret or raw media URL leakage beyond existing policy prose.</li>
+    <li><code>node --check docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/build-canonical-snapshot-dry-run.mjs</code> passed.</li>
+    <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/build-canonical-snapshot-dry-run.mjs</code> generated and validated the local-only canonical snapshot dry-run payload.</li>
+    <li>The dry-run builder was run twice consecutively after the normalized-manifest fix. Both runs produced stable content hash <code>4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1</code>.</li>
+    <li><code>git diff --check</code>, <code>node --check</code> for the dry-run builder and artifact validator, and <code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/audit-production-r2-vault.mjs validate-artifacts</code> passed after updating the forward staged plan docs.</li>
+    <li><code>npm run lint</code>, <code>npm run test:unit</code>, and <code>npm run test:e2e</code> passed after the final docs and audit-script changes.</li>
   </ul>
 
   <h2>Artifacts Produced</h2>
@@ -145,6 +158,12 @@
     <li><code>inventory/grok-assets-current-summary.json</code>: committed-safe redacted/hash-only asset and prompt-response summary.</li>
     <li><code>logs/grok-assets-active-tab-capture.json</code>: committed-safe API capture status summary.</li>
     <li><code>reconciliations/local-canonical-index-summary.json</code>, <code>reconciliations/canonical-gap-report.json</code>, and <code>report-canonical.md</code>: regenerated with Grok Saved status <code>api_captured_post_identity_with_post_gaps</code>.</li>
+    <li><code>scripts/build-canonical-snapshot-dry-run.mjs</code>: local-only dry-run builder for the append-only R2 JSON canonical snapshot payload.</li>
+    <li><code>private/canonical-snapshot-dry-run.json</code>: ignored exact dry-run payload with private object keys, private Grok IDs, and full prompt bodies.</li>
+    <li><code>reconciliations/canonical-snapshot-schema.json</code>: committed-safe schema contract for <code>r2-vault-canonical-snapshot/v1</code>.</li>
+    <li><code>reconciliations/canonical-snapshot-dry-run-summary.json</code>: committed-safe dry-run counts, hashes, validation summary, and approval gate.</li>
+    <li><code>logs/canonical-snapshot-dry-run-validation.json</code>: committed-safe validation result for the dry-run payload.</li>
+    <li><code>report-canonical-snapshot-dry-run.md</code>: committed-safe human summary and approval gate for the first append-only R2 JSON write phase.</li>
   </ul>
 </body>
 </html>
