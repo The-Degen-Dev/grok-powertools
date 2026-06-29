@@ -76,13 +76,26 @@ describe("movie review storage", () => {
           transition: { type: "cut", duration: 0 },
           position: 0,
         },
+        {
+          id: "clip-b",
+          type: "image",
+          imageUrl: "/api/vault/media/asset-image-1?objectKey=grok-powertools%2Fv1%2Fmedia%2Fb.png",
+          sourceAssetId: "asset-image-1",
+          transition: { type: "cut", duration: 0 },
+          position: 1,
+          stillDuration: 4,
+        },
       ],
     });
 
     const project = await createReviewProjectFromMovie(movie.id);
-    expect(project.candidates).toHaveLength(1);
+    expect(project.candidates).toHaveLength(2);
     expect(project.candidates[0].sourceAssetId).toBe("asset-video-1");
     expect(project.candidates[0].mediaRef).toEqual({ type: "vault", assetId: "asset-video-1" });
+    expect(project.candidates[0].videoUrl).toBe("/api/vault/media/asset-video-1");
+    expect(project.candidates[1].sourceAssetId).toBe("asset-image-1");
+    expect(project.candidates[1].mediaRef).toEqual({ type: "vault", assetId: "asset-image-1" });
+    expect(project.candidates[1].imageUrl).toBe("/api/vault/media/asset-image-1");
     expect(JSON.stringify(project)).not.toContain("objectKey=");
   });
 

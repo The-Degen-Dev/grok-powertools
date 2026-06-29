@@ -30,6 +30,11 @@ function mediaUrlFromClip(clip: MovieClip): string | undefined {
   return clip.videoUrl;
 }
 
+function imageUrlFromClip(clip: MovieClip): string | undefined {
+  if (clip.type === "image" && clip.sourceAssetId) return `/api/vault/media/${encodeURIComponent(clip.sourceAssetId)}`;
+  return clip.imageUrl;
+}
+
 export function reviewClipFromMovieClip(clip: MovieClip, position: number, timestamp = now()): ReviewClip {
   return {
     id: clip.id || uuidv4(),
@@ -38,7 +43,7 @@ export function reviewClipFromMovieClip(clip: MovieClip, position: number, times
     mediaType: clip.type,
     mediaRef: mediaRefFromClip(clip),
     videoUrl: mediaUrlFromClip(clip),
-    imageUrl: clip.imageUrl,
+    imageUrl: imageUrlFromClip(clip),
     titleText: clip.titleText,
     position,
     lifecycle: "proposed",

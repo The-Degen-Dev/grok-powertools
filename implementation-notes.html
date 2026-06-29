@@ -1035,6 +1035,76 @@ Error: Cannot find module './movie-review-storage'</code></pre>
 &gt; eslint</code></pre>
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage Review Follow-Up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Normalized Vault-backed image clip URLs to the same canonical
+                            <code>/api/vault/media/:assetId</code> form as video clips. This keeps
+                            Review Bay durable state aligned around <code>mediaRef</code> and avoids
+                            persisting stale <code>objectKey</code> query strings.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage Review Follow-Up</td>
+                        <td>Validation</td>
+                        <td>
+                            Expanded the storage hydration test to include a Vault-backed image clip
+                            and reran <code>npm --prefix web run test:unit -- movie-review-storage</code>.
+                            It passed 1 file and 3 tests.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added a <code>30000</code>-tick integer movie timebase, a pure timeline
+                            model for trim and export preflight, and a pure reducer for Review Bay
+                            selection, keep/reject, trim, reorder, delete, mute, and solo state.
+                            Added a shared effective-gain predicate so preview and export can use
+                            the same solo semantics.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Deviations</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Kept this layer UI-free and storage-free so later components can reuse
+                            the same reducer and timeline predicates without duplicating business
+                            rules in React.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first run:
+                            <pre><code>FAIL  src/lib/movie-review-reducer.test.ts
+Error: Cannot find module './movie-review-reducer'
+
+FAIL  src/lib/movie-timeline-model.test.ts
+Error: Cannot find module './movie-timebase'</code></pre>
+                            Passing run:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-timeline-model movie-review-reducer
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>
