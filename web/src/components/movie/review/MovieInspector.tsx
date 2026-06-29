@@ -50,7 +50,6 @@ export default function MovieInspector({
                         type: "set-trim",
                         clipId: clip.id,
                         trimStartSeconds: Number(event.target.value),
-                        trimEndSeconds: trimOut,
                       }),
                     )
                   }

@@ -1,27 +1,50 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listMovieVersions } from "@/lib/movie-review-storage";
+import { applyReviewCommand } from "@/lib/movie-review-reducer";
+import { listMovieVersionsForProject, saveMovieVersion } from "@/lib/movie-review-storage";
 import type { MovieReviewProject, MovieVersion } from "@/lib/movie-review-types";
+import type { MovieReviewProjectUpdate } from "./useMovieReviewProject";
+
+function autosaveId(): string {
+  return `autosave-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 export default function MovieDraftQueue({
   project,
   onProjectChange,
 }: {
   project: MovieReviewProject;
-  onProjectChange: (project: MovieReviewProject) => void;
+  onProjectChange: (project: MovieReviewProjectUpdate) => void;
 }) {
   const [versions, setVersions] = useState<MovieVersion[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    listMovieVersions(project.movieId).then((rows) => {
+    listMovieVersionsForProject(project.id).then((rows) => {
       if (!cancelled) setVersions(rows);
     });
     return () => {
       cancelled = true;
     };
-  }, [project.movieId, project.updatedAt]);
+  }, [project.id, project.updatedAt]);
+
+  async function applyVersion(version: MovieVersion) {
+    if (project.committedClips.length > 0) {
+      const timestamp = new Date().toISOString();
+      await saveMovieVersion({
+        id: autosaveId(),
+        movieId: project.movieId,
+        projectId: project.id,
+        name: `Autosave before ${version.name}`,
+        description: "Automatic safety snapshot before applying a saved version.",
+        clips: project.committedClips,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    }
+    onProjectChange((current) => applyReviewCommand(current, { type: "apply-version", clips: version.clips }));
+  }
 
   return (
     <div className="rounded border border-neutral-800 p-3">
@@ -32,7 +55,9 @@ export default function MovieDraftQueue({
           <button
             key={version.id}
             type="button"
-            onClick={() => onProjectChange({ ...project, committedClips: version.clips, updatedAt: new Date().toISOString() })}
+            onClick={() => {
+              void applyVersion(version);
+            }}
             className="block w-full rounded border border-neutral-800 px-2 py-1 text-left text-xs text-neutral-300 hover:bg-neutral-900"
           >
             {version.name}

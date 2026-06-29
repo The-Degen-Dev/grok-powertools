@@ -28,7 +28,7 @@ export function useMovieKeyboard(project: MovieReviewProject | null, setProject:
       }
       if (event.code === "KeyX" || event.code === "Backspace") {
         event.preventDefault();
-        setProject(rejectSelectedCandidate);
+        setProject((current) => (current.mode === "focus" ? applyReviewCommand(current, { type: "reject-current" }) : rejectSelectedCandidate(current)));
       }
       if (event.code === "Digit1") {
         event.preventDefault();

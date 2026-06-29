@@ -5,13 +5,14 @@ import { createRuleBasedDirectorProposal } from "@/lib/movie-director";
 import { saveDirectorProposal } from "@/lib/movie-review-storage";
 import type { MovieReviewProject } from "@/lib/movie-review-types";
 import MovieDraftQueue from "./MovieDraftQueue";
+import type { MovieReviewProjectUpdate } from "./useMovieReviewProject";
 
 export default function MovieLeftRail({
   project,
   onProjectChange,
 }: {
   project: MovieReviewProject;
-  onProjectChange: (project: MovieReviewProject) => void;
+  onProjectChange: (project: MovieReviewProjectUpdate) => void;
 }) {
   return (
     <aside role="region" aria-label="Drafts and Director" className="min-h-0 overflow-y-auto border-r border-neutral-800 p-3">

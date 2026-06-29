@@ -7,7 +7,8 @@ export type ReviewCommand =
   | { type: "reject-current" }
   | { type: "move-committed"; clipId: string; direction: -1 | 1 }
   | { type: "delete-committed"; clipId: string }
-  | { type: "set-trim"; clipId: string; trimStartSeconds: number; trimEndSeconds: number }
+  | { type: "set-trim"; clipId: string; trimStartSeconds?: number; trimEndSeconds?: number }
+  | { type: "apply-version"; clips: ReviewClip[] }
   | { type: "set-audio"; clipId: string; volume: number; muted: boolean; solo: boolean };
 
 function timestampProject(project: MovieReviewProject): MovieReviewProject {
@@ -41,8 +42,12 @@ function clampVolume(volume: number): number {
   return Math.max(0, Math.min(2, volume));
 }
 
-function validTrim(trimStartSeconds: number, trimEndSeconds: number): boolean {
-  return Number.isFinite(trimStartSeconds) && Number.isFinite(trimEndSeconds) && trimStartSeconds >= 0 && trimEndSeconds > trimStartSeconds;
+function validTrim(trimStartSeconds: number, trimEndSeconds: number | undefined): boolean {
+  return (
+    Number.isFinite(trimStartSeconds) &&
+    trimStartSeconds >= 0 &&
+    (trimEndSeconds === undefined || (Number.isFinite(trimEndSeconds) && trimEndSeconds > trimStartSeconds))
+  );
 }
 
 function candidateSelection(candidates: ReviewClip[], activeIndex: number): SelectedTarget | undefined {
@@ -84,7 +89,7 @@ export function applyReviewCommand(project: MovieReviewProject, command: ReviewC
         ...project,
         candidates: withPositions(candidates),
         activeIndex,
-        selectedTarget: selectedCurrent ? candidateSelection(candidates, activeIndex) : project.selectedTarget,
+        selectedTarget: selectedCurrent || project.mode === "focus" ? candidateSelection(candidates, activeIndex) : project.selectedTarget,
       });
     }
     case "move-committed": {
@@ -107,12 +112,24 @@ export function applyReviewCommand(project: MovieReviewProject, command: ReviewC
       });
     }
     case "set-trim": {
-      if (!validTrim(command.trimStartSeconds, command.trimEndSeconds)) return project;
+      const existing = project.committedClips.find((clip) => clip.id === command.clipId);
+      if (!existing) return project;
+      const trimStartSeconds = command.trimStartSeconds ?? existing.trimStartSeconds;
+      const trimEndSeconds = command.trimEndSeconds ?? existing.trimEndSeconds;
+      if (!validTrim(trimStartSeconds, trimEndSeconds)) return project;
       return timestampProject(
         updateCommittedClip(project, command.clipId, (clip) =>
-          flagClip({ ...clip, trimStartSeconds: command.trimStartSeconds, trimEndSeconds: command.trimEndSeconds }, "trimmed", true),
+          flagClip({ ...clip, trimStartSeconds, trimEndSeconds }, "trimmed", trimStartSeconds > 0 || trimEndSeconds !== undefined),
         ),
       );
+    }
+    case "apply-version": {
+      const committedClips = withPositions(command.clips.map((clip) => ({ ...clip, lifecycle: "kept" as const })));
+      return timestampProject({
+        ...project,
+        committedClips,
+        selectedTarget: committedSelection(committedClips, 0),
+      });
     }
     case "set-audio":
       return timestampProject(

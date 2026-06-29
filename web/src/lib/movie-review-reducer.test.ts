@@ -68,6 +68,18 @@ describe("movie review reducer", () => {
     expect(trimmed.committedClips[0].flags).toContain("trimmed");
   });
 
+  it("updates trim start without inventing an unknown trim end", () => {
+    const kept = applyReviewCommand(project(), { type: "keep-current" });
+    const unknownDuration = {
+      ...kept,
+      committedClips: kept.committedClips.map((item) => ({ ...item, durationSeconds: undefined, trimEndSeconds: undefined })),
+    };
+    const trimmed = applyReviewCommand(unknownDuration, { type: "set-trim", clipId: "a", trimStartSeconds: 0.2 });
+    expect(trimmed.committedClips[0]).toMatchObject({ trimStartSeconds: 0.2 });
+    expect(trimmed.committedClips[0].trimEndSeconds).toBeUndefined();
+    expect(trimmed.committedClips[0].flags).toContain("trimmed");
+  });
+
   it("ignores invalid trims and clamps audio volume to schema-safe values", () => {
     const kept = applyReviewCommand(project(), { type: "keep-current" });
     const invalidTrim = applyReviewCommand(kept, { type: "set-trim", clipId: "a", trimStartSeconds: 2, trimEndSeconds: 1 });
@@ -89,5 +101,27 @@ describe("movie review reducer", () => {
     const deleted = applyReviewCommand({ ...kept, selectedTarget: { type: "clip", clipId: "a" } }, { type: "delete-committed", clipId: "a" });
     expect(deleted.committedClips).toEqual([]);
     expect(deleted.selectedTarget).toBeUndefined();
+  });
+
+  it("rejects the active focus candidate even when the selected target is a committed clip", () => {
+    const kept = applyReviewCommand({ ...project(), mode: "focus" }, { type: "keep-current" });
+    const rejected = applyReviewCommand(kept, { type: "reject-current" });
+    expect(rejected.candidates).toEqual([]);
+    expect(rejected.committedClips.map((item) => item.id)).toEqual(["a"]);
+    expect(rejected.selectedTarget).toBeUndefined();
+  });
+
+  it("applies a saved version with normalized positions and valid selection", () => {
+    const current = {
+      ...applyReviewCommand(project(), { type: "keep-current" }),
+      selectedTarget: { type: "clip" as const, clipId: "missing" },
+    };
+    const versionClips = [clip("z", 4), clip("y", 2)];
+    const applied = applyReviewCommand(current, { type: "apply-version", clips: versionClips });
+    expect(applied.committedClips.map((item) => [item.id, item.position])).toEqual([
+      ["z", 0],
+      ["y", 1],
+    ]);
+    expect(applied.selectedTarget).toEqual({ type: "clip", clipId: "z" });
   });
 });

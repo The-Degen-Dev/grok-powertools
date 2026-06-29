@@ -114,6 +114,12 @@ export async function listMovieVersions(movieId: string): Promise<MovieVersion[]
   return rows.map((row) => movieVersionSchema.parse(row)).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
+export async function listMovieVersionsForProject(projectId: string): Promise<MovieVersion[]> {
+  const db = await getDB();
+  const rows = (await db.getAllFromIndex("movie_versions", "by-project", projectId)) as MovieVersion[];
+  return rows.map((row) => movieVersionSchema.parse(row)).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
 export async function saveDirectorProposal(proposal: DirectorProposal): Promise<DirectorProposal> {
   const db = await getDB();
   const parsed = directorProposalSchema.parse(proposal);

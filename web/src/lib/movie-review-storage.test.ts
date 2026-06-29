@@ -7,6 +7,7 @@ import {
   getReviewProject,
   listExportRuns,
   listMovieVersions,
+  listMovieVersionsForProject,
   saveDirectorProposal,
   saveExportRun,
   saveMovieVersion,
@@ -153,5 +154,33 @@ describe("movie review storage", () => {
     });
     expect(await listMovieVersions(movie.id)).toEqual([version]);
     expect(await listExportRuns(project.id)).toEqual([run]);
+  });
+
+  it("lists versions for only the active review project", async () => {
+    const movie = await createMovie("Project scoped versions");
+    const project = await createReviewProjectFromMovie(movie.id);
+    const timestamp = "2026-06-28T00:00:00.000Z";
+    const currentVersion: MovieVersion = {
+      id: "version-current",
+      movieId: movie.id,
+      projectId: project.id,
+      name: "Current",
+      description: "Belongs to active project",
+      clips: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const staleVersion: MovieVersion = {
+      ...currentVersion,
+      id: "version-stale",
+      projectId: "project-stale",
+      name: "Stale",
+      description: "Belongs to another project",
+    };
+    await saveMovieVersion(staleVersion);
+    await saveMovieVersion(currentVersion);
+
+    expect((await listMovieVersions(movie.id)).map((version) => version.id).sort()).toEqual(["version-current", "version-stale"]);
+    expect(await listMovieVersionsForProject(project.id)).toEqual([currentVersion]);
   });
 });

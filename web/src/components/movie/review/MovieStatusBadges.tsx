@@ -28,7 +28,12 @@ export function MovieFlagBadges({ flags }: { flags: ClipFlag[] }) {
                   ? AlertTriangle
                   : Check;
         return (
-          <span key={flag} aria-label={flag.replaceAll("-", " ")} className="inline-flex items-center rounded border border-neutral-700 px-1 py-0.5 text-neutral-300">
+          <span
+            key={flag}
+            role="img"
+            aria-label={flag.replaceAll("-", " ")}
+            className="inline-flex items-center rounded border border-neutral-700 px-1 py-0.5 text-neutral-300"
+          >
             <Icon className="h-3 w-3" />
           </span>
         );
