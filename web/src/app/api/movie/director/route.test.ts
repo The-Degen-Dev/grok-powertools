@@ -72,6 +72,41 @@ describe("movie director route", () => {
     expect(body).toEqual({ error: "MOVIE_DIRECTOR_NOT_CONFIGURED" });
   });
 
+  it("returns a typed 400 when JSON is not a project object", async () => {
+    process.env.MOVIE_DIRECTOR_BASE_URL = "http://127.0.0.1:8317/v1";
+    process.env.MOVIE_DIRECTOR_API_KEY = "test-secret";
+    process.env.MOVIE_DIRECTOR_MODEL = "test-model";
+
+    const response = await POST(new Request("http://localhost/api/movie/director", { method: "POST", body: "null" }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: "MOVIE_DIRECTOR_INVALID_PROJECT" });
+  });
+
+  it("normalizes provider network failures", async () => {
+    process.env.MOVIE_DIRECTOR_BASE_URL = "http://127.0.0.1:8317/v1";
+    process.env.MOVIE_DIRECTOR_API_KEY = "test-secret";
+    process.env.MOVIE_DIRECTOR_MODEL = "test-model";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("socket closed");
+      }),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/movie/director", {
+        method: "POST",
+        body: JSON.stringify({ project: project() }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body).toEqual({ error: "MOVIE_DIRECTOR_PROVIDER_FAILED" });
+  });
+
   it("calls an OpenAI-compatible chat completions endpoint without returning secrets", async () => {
     process.env.MOVIE_DIRECTOR_BASE_URL = "http://127.0.0.1:8317/v1";
     process.env.MOVIE_DIRECTOR_API_KEY = "test-secret";

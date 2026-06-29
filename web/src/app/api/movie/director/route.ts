@@ -27,29 +27,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "MOVIE_DIRECTOR_INVALID_JSON" }, { status: 400 });
   }
 
-  const project = movieReviewProjectSchema.safeParse((body as { project?: unknown }).project);
+  const projectBody = typeof body === "object" && body !== null ? (body as { project?: unknown }).project : undefined;
+  const project = movieReviewProjectSchema.safeParse(projectBody);
   if (!project.success) {
     return NextResponse.json({ error: "MOVIE_DIRECTOR_INVALID_PROJECT" }, { status: 400 });
   }
-  const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Return strict JSON with title, rationale, and changes. Valid change types are keep, reject, reorder, and trim. Do not claim edits were applied.",
-        },
-        { role: "user", content: JSON.stringify({ project: project.data }) },
-      ],
-      response_format: { type: "json_object" },
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Return strict JSON with title, rationale, and changes. Valid change types are keep, reject, reorder, and trim. Do not claim edits were applied.",
+          },
+          { role: "user", content: JSON.stringify({ project: project.data }) },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+  } catch {
+    return NextResponse.json({ error: "MOVIE_DIRECTOR_PROVIDER_FAILED" }, { status: 502 });
+  }
   if (!response.ok) {
     return NextResponse.json({ error: "MOVIE_DIRECTOR_PROVIDER_FAILED" }, { status: 502 });
   }

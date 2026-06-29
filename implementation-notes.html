@@ -1207,6 +1207,38 @@ Error: Cannot find module './movie-director'</code></pre>
 &gt; eslint</code></pre>
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 5: Review Hardening Follow-Up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added committed-clip reorder application, made Director target validation
+                            action-aware, and normalized non-object JSON bodies plus provider network
+                            failures into typed route errors.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Review Hardening Follow-Up</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first tests reproduced accepted-but-ignored reorder,
+                            wrong-lane targets, JSON <code>null</code>, and rejected provider fetch
+                            failures. After fixes:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-director route
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)</code></pre>
+                            Full unit suite:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  6 passed (6)
+      Tests  33 passed (33)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>

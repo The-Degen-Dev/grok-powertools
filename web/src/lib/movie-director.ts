@@ -38,24 +38,42 @@ export const providerDirectorPayloadSchema = z.object({
   ),
 });
 
-function projectClipIds(project: MovieReviewProject): Set<string> {
-  return new Set([...project.candidates, ...project.committedClips].map((clip) => clip.id));
-}
-
 function assertChangeTargetsProject(proposal: DirectorProposal, project: MovieReviewProject) {
-  const clipIds = projectClipIds(project);
+  const candidateIds = new Set(project.candidates.map((clip) => clip.id));
+  const committedIds = new Set(project.committedClips.map((clip) => clip.id));
+  const clipIds = new Set([...candidateIds, ...committedIds]);
   for (const change of proposal.changes) {
-    if ((change.type === "keep" || change.type === "reject") && !clipIds.has(change.clipId)) {
-      throw new Error(`DIRECTOR_UNKNOWN_CLIP:${change.clipId}`);
+    if (change.type === "keep" || change.type === "reject") {
+      if (!clipIds.has(change.clipId)) throw new Error(`DIRECTOR_UNKNOWN_CLIP:${change.clipId}`);
+      if (!candidateIds.has(change.clipId)) throw new Error(`DIRECTOR_INVALID_CANDIDATE_TARGET:${change.clipId}`);
     }
     if (change.type === "trim") {
       if (!clipIds.has(change.clipId)) throw new Error(`DIRECTOR_UNKNOWN_CLIP:${change.clipId}`);
+      if (!committedIds.has(change.clipId)) throw new Error(`DIRECTOR_INVALID_COMMITTED_TARGET:${change.clipId}`);
       if (change.trimEndSeconds <= change.trimStartSeconds) throw new Error("DIRECTOR_INVALID_TRIM");
     }
-    if (change.type === "reorder" && change.clipIds.some((clipId) => !clipIds.has(clipId))) {
-      throw new Error("DIRECTOR_UNKNOWN_REORDER_CLIP");
+    if (change.type === "reorder") {
+      if (change.clipIds.some((clipId) => !clipIds.has(clipId))) throw new Error("DIRECTOR_UNKNOWN_REORDER_CLIP");
+      if (change.clipIds.some((clipId) => !committedIds.has(clipId))) throw new Error("DIRECTOR_INVALID_REORDER_TARGET");
     }
   }
+}
+
+function reorderCommittedClips(project: MovieReviewProject, clipIds: string[]): MovieReviewProject {
+  const committed = new Map(project.committedClips.map((clip) => [clip.id, clip]));
+  const seen = new Set<string>();
+  const ordered = clipIds.flatMap((clipId) => {
+    const clip = committed.get(clipId);
+    if (!clip) return [];
+    seen.add(clipId);
+    return [clip];
+  });
+  const remaining = project.committedClips.filter((clip) => !seen.has(clip.id));
+  return {
+    ...project,
+    committedClips: [...ordered, ...remaining].map((clip, position) => ({ ...clip, position })),
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export function createRuleBasedDirectorProposal(project: MovieReviewProject): DirectorProposal {
@@ -117,6 +135,9 @@ export function applyDirectorChanges(project: MovieReviewProject, proposal: Dire
         trimStartSeconds: change.trimStartSeconds,
         trimEndSeconds: change.trimEndSeconds,
       });
+    }
+    if (change.type === "reorder") {
+      next = reorderCommittedClips(next, change.clipIds);
     }
   }
   return next;

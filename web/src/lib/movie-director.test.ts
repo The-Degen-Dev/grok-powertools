@@ -62,6 +62,33 @@ describe("movie director", () => {
     ).toThrow("DIRECTOR_UNKNOWN_CLIP:missing");
   });
 
+  it("rejects action targets from the wrong lane", () => {
+    const original = {
+      ...project(),
+      committedClips: [{ ...clip("committed-a", 0), lifecycle: "kept" as const }],
+    };
+    expect(() =>
+      parseDirectorProviderPayload(
+        {
+          title: "Wrong keep",
+          rationale: "Committed clips cannot be kept again.",
+          changes: [{ id: "keep-committed", type: "keep", clipId: "committed-a", rationale: "Wrong lane." }],
+        },
+        original,
+      ),
+    ).toThrow("DIRECTOR_INVALID_CANDIDATE_TARGET:committed-a");
+    expect(() =>
+      parseDirectorProviderPayload(
+        {
+          title: "Wrong trim",
+          rationale: "Candidate clips cannot be trimmed before they are kept.",
+          changes: [{ id: "trim-candidate", type: "trim", clipId: "a", trimStartSeconds: 0.2, trimEndSeconds: 1, rationale: "Wrong lane." }],
+        },
+        original,
+      ),
+    ).toThrow("DIRECTOR_INVALID_COMMITTED_TARGET:a");
+  });
+
   it("applies only selected changes", () => {
     const original = project();
     const proposal = createRuleBasedDirectorProposal(original);
@@ -84,5 +111,28 @@ describe("movie director", () => {
     const staleProject = { ...original, candidates: [clip("a", 0)] };
     const next = applyDirectorChanges(staleProject, proposal, ["keep-b"]);
     expect(next).toEqual(staleProject);
+  });
+
+  it("applies selected reorder changes", () => {
+    const original = {
+      ...project(),
+      candidates: [],
+      committedClips: [
+        { ...clip("a", 0), lifecycle: "kept" as const },
+        { ...clip("b", 1), lifecycle: "kept" as const },
+      ],
+    };
+    const proposal = parseDirectorProviderPayload(
+      {
+        title: "Reverse order",
+        rationale: "Use the stronger ending first.",
+        changes: [{ id: "reorder-a", type: "reorder", clipIds: ["b", "a"], rationale: "Swap the two clips." }],
+      },
+      original,
+    );
+    const next = applyDirectorChanges(original, proposal, ["reorder-a"]);
+    expect(next.committedClips.map((item) => item.id)).toEqual(["b", "a"]);
+    expect(next.committedClips.map((item) => item.position)).toEqual([0, 1]);
+    expect(original.committedClips.map((item) => item.id)).toEqual(["a", "b"]);
   });
 });
