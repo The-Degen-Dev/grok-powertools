@@ -117,6 +117,25 @@ export default function MovieInspector({
                 {clip.muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
                 {clip.muted ? "Unmute clip" : "Mute clip"}
               </button>
+              <button
+                type="button"
+                aria-label={clip.solo ? "Unsolo clip" : "Solo clip"}
+                onClick={() =>
+                  onProjectChange(
+                    applyReviewCommand(project, {
+                      type: "set-audio",
+                      clipId: clip.id,
+                      volume: clip.volume,
+                      muted: clip.muted,
+                      solo: !clip.solo,
+                    }),
+                  )
+                }
+                className="flex w-full items-center justify-center gap-2 rounded bg-neutral-900 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-800"
+              >
+                <Volume2 className="h-4 w-4" />
+                {clip.solo ? "Unsolo clip" : "Solo clip"}
+              </button>
             </>
           ) : (
             <div className="text-sm text-neutral-500">Candidate awaiting keep or reject.</div>

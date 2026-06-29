@@ -1788,8 +1788,92 @@ Export blocked button not found; export UI missing.</code></pre>
 &gt; web@0.1.0 build
 &gt; next build
 
-✓ Compiled successfully
+                            ✓ Compiled successfully
 ✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Restored the Review Bay add-clip path so the existing Movie Maker source
+                            picker still works after the Review Bay replacement. Added clips are
+                            persisted into the legacy <code>Movie</code> record and then promoted as
+                            Review Bay candidates, preserving <code>sourceAssetId</code> for Vault
+                            media traceability. Added visible <code>Solo</code> and
+                            <code>Unsolo</code> inspector controls because the goal required user
+                            facing mute and solo control, not reducer-only state. Changed the WebM
+                            fallback export to conservative VP8/Vorbis arguments after browser
+                            validation exposed that the prior VP9/Opus fallback could fail.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Deviations</td>
+                        <td>
+                            Manual validation used an isolated Playwright browser with the local fake
+                            Vault worker because connecting to the user's existing Chrome through
+                            Peekaboo/DevTools timed out during tab discovery. This kept validation
+                            real against the app UI while avoiding any changes to Chrome state,
+                            R2, D1, Worker routes, extension storage, processed IDs, env files, or
+                            live Grok.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The compatibility add-clip path reuses the existing source picker and
+                            routes new clips through candidate review first instead of reviving the
+                            old full editor interaction model. The WebM fallback now prioritizes
+                            reliable browser export over newer codec preference.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Open questions</td>
+                        <td>None for Phase 0 and Phase 1.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Validation</td>
+                        <td>
+                            Final automated gates:
+                            <pre><code>npm --prefix web run test:unit
+Test Files  7 passed (7)
+Tests       40 passed (40)
+
+npx playwright test -c playwright.web.config.js
+58 passed
+
+npm --prefix web run lint
+passed
+
+npm --prefix web run build
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)
+
+npm run test:unit
+Test Suites: 23 passed, 23 total
+Tests:       321 passed, 321 total
+
+npm run lint
+passed</code></pre>
+                            Manual validation covered New Movie, Review Bay Add Clip/source picker,
+                            candidate review, focus mode, Director partial apply, trim, volume,
+                            mute, solo, Assemble mode, ribbon, waveform, source audio, MP4 export
+                            with <code>aac</code> audio proof, WebM fallback download, and phone-width
+                            Review Bay rendering. Artifacts:
+                            <pre><code>test-results/manual-review-bay/manual-review-bay-export.mp4
+test-results/manual-review-bay/manual-review-bay-export.webm
+test-results/manual-review-bay/01-review-candidates.png
+test-results/manual-review-bay/02-assemble-audio-controls.png
+test-results/manual-review-bay/03-export-history.png
+test-results/manual-review-bay/04-mobile-review-bay.png</code></pre>
+                            Boundary checks found no changes to env files, cloud code, extension
+                            runtime files, popup files, or cloud sync helpers, and no secret-like
+                            patterns in the diff. The temporary fake Worker and app validation
+                            servers were stopped.
                         </td>
                     </tr>
                 </tbody>

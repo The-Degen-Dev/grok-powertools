@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, LayoutGrid, ListVideo, type LucideIcon } from "lucide-react";
+import { ArrowLeft, LayoutGrid, ListVideo, Plus, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { applyReviewCommand } from "@/lib/movie-review-reducer";
 import type { MovieReviewProject } from "@/lib/movie-review-types";
@@ -16,13 +16,15 @@ const modes: Array<{ mode: MovieReviewProject["mode"]; Icon: LucideIcon }> = [
 export default function MovieReviewHeader({
   project,
   onProjectChange,
+  onAddClipClick,
 }: {
   project: MovieReviewProject;
   onProjectChange: (project: MovieReviewProject) => void;
+  onAddClipClick: () => void;
 }) {
   const router = useRouter();
   return (
-    <header aria-label="Movie Review Header" className="flex items-center gap-3 border-b border-neutral-800 px-4 py-3">
+    <header aria-label="Movie Review Header" className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-3">
       <button
         type="button"
         aria-label="Back to movies"
@@ -36,6 +38,15 @@ export default function MovieReviewHeader({
         <p className="text-xs text-neutral-500">Movie Review Bay</p>
       </div>
       <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="Add Clip"
+          onClick={onAddClipClick}
+          className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+        >
+          <Plus className="mr-1 inline h-3 w-3" />
+          <span className="hidden sm:inline">Add Clip</span>
+        </button>
         <MovieStatusBadges project={project} />
         <MovieExportGate project={project} />
         <div className="flex rounded border border-neutral-800 bg-neutral-900 p-1">

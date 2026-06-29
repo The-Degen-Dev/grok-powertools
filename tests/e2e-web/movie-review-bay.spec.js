@@ -125,6 +125,7 @@ test("Inspector updates trim and audio state for selected committed clip", async
   await page.getByLabel(/Trim out/i).fill("1.4");
   await page.getByLabel(/Clip volume/i).fill("0.5");
   await page.getByRole("button", { name: /Mute clip/i }).click();
+  await page.getByRole("button", { name: /Solo clip/i }).click();
   await expect(page.getByRole("region", { name: /Clip Strip/i }).getByRole("img", { name: /trimmed/i })).toBeVisible();
   await expect(page.getByRole("region", { name: /Clip Strip/i }).getByRole("img", { name: /muted in mix/i })).toBeVisible();
   await page.waitForTimeout(400);
@@ -134,10 +135,12 @@ test("Inspector updates trim and audio state for selected committed clip", async
     trimEndSeconds: 1.4,
     volume: 0.5,
     muted: true,
+    solo: true,
   });
   await page.reload();
   await expect(page.getByLabel(/Trim in/i)).toHaveValue("0.4");
   await expect(page.getByRole("region", { name: /Inspector/i }).getByRole("button", { name: /Unmute clip/i })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Inspector/i }).getByRole("button", { name: /Unsolo clip/i })).toBeVisible();
 });
 
 test("Focus mode supports Enter to keep and Escape to return to Review", async ({ page }) => {

@@ -339,24 +339,12 @@ test("Movie Maker can persist mixed image and video clips from Vault", async ({ 
   await page.getByRole("button", { name: /Watch All/i }).click();
   await page.getByRole("button", { name: /Save as Movie/i }).click();
   await expect(page).toHaveURL(/\/movie\?id=/);
-  await expect(page.getByText(/2 clips/i)).toBeVisible();
-  await expect(assetText(page, "asset-image-1")).toBeVisible();
-  const range = page.locator('input[type="range"]');
-  await range.evaluate((input) => {
-    input.value = "1";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  await expect
-    .poll(async () =>
-      page.locator("canvas").evaluate((canvas) => {
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return 0;
-        const [r, g, b] = ctx.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data;
-        return r + g + b;
-      }),
-    )
-    .toBeGreaterThan(0);
+  await expect(page.getByText(/2 candidates/i)).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-image-1", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Keep asset-image-1/i }).click();
+  await page.getByRole("button", { name: /Keep asset-video-1/i }).click();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-image-1")).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-1")).toBeVisible();
 });
 
 test("Movie Maker source picker preserves Vault source assets", async ({ page }) => {
@@ -374,7 +362,9 @@ test("Movie Maker source picker preserves Vault source assets", async ({ page })
   await page.getByText(/glass library/i).click();
   await page.getByText(/cinematic neon canyon/i).click();
   await page.getByRole("button", { name: /Add 2 clips/i }).click();
-  await expect(page.getByText(/2 clips/i)).toBeVisible();
+  await expect(page.getByText(/2 candidates/i)).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-image-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-video-1", exact: true })).toBeVisible();
   const pickerMovieState = await page.evaluate(async () => {
     await new Promise((resolve) => setTimeout(resolve, 650));
     const db = await new Promise((resolve, reject) => {

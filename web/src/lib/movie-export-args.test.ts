@@ -21,4 +21,20 @@ describe("movie export args", () => {
       "output.mp4",
     ]);
   });
+
+  it("builds WebM fallback concat args with conservative browser codecs", () => {
+    expect(buildFfmpegConcatArgs({ inputs: ["clip-0.mp4", "clip-1.mp4"], output: "output.webm", format: "webm" })).toEqual([
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      "inputs.txt",
+      "-c:v",
+      "libvpx",
+      "-c:a",
+      "libvorbis",
+      "output.webm",
+    ]);
+  });
 });

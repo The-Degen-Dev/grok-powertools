@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { seedReviewMovie } = require("./support/movie-fixtures");
@@ -28,8 +29,10 @@ test("Movie export creates MP4 with an audio stream and keeps WebM fallback", as
   await page.keyboard.press("KeyK");
   await page.getByRole("button", { name: /^Export movie$/i }).click();
   await page.getByRole("button", { name: /Load export engine/i }).click();
-  await page.getByRole("button", { name: /Export MP4/i }).click();
-  const download = await page.waitForEvent("download", { timeout: 180000 });
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 180000 }),
+    page.getByRole("button", { name: /Export MP4/i }).click(),
+  ]);
   const outputPath = path.join(testInfo.outputDir, "review-bay-export.mp4");
   await download.saveAs(outputPath);
   const codec = execFileSync(
@@ -38,5 +41,11 @@ test("Movie export creates MP4 with an audio stream and keeps WebM fallback", as
     { encoding: "utf8" },
   ).trim();
   expect(codec).toBe("aac");
-  await expect(page.getByRole("button", { name: /Export WebM/i })).toBeVisible();
+  const [webmDownload] = await Promise.all([
+    page.waitForEvent("download", { timeout: 180000 }),
+    page.getByRole("button", { name: /Export WebM/i }).click(),
+  ]);
+  const webmPath = path.join(testInfo.outputDir, "review-bay-export.webm");
+  await webmDownload.saveAs(webmPath);
+  expect(fs.statSync(webmPath).size).toBeGreaterThan(0);
 });
