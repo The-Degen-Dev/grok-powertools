@@ -810,6 +810,64 @@
                 <li class="pass">Extension overlay reported <code>Generated video ready.</code> after reload and rerun with the post-navigation recovery patch.</li>
                 <li class="pending">Draft PR opened with green CI; merge is pending final notes commit.</li>
             </ul>
+
+            <h2>Movie Maker Review Bay Goal Run</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Task</th>
+                        <th>Category</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Execute Phase 0 and Phase 1 only from
+                            <code>docs/superpowers/plans/2026-06-28-movie-maker-review-bay-phase0-phase1.md</code>.
+                            Later phases remain gated by a separate plan after this Review Bay is
+                            verified in local use.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Deviations</td>
+                        <td>
+                            The existing notes file already contained prior Goal evidence, so this
+                            run appends a new section instead of replacing the file with a fresh
+                            minimal template.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Preserve historical implementation context while keeping all current
+                            Movie Review Bay decisions and validation evidence under this dedicated
+                            section.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Validation</td>
+                        <td>
+                            <code>pwd</code> returned
+                            <code>/Users/philipbankier/.codex/worktrees/vault-movie-drafts-exec/chrome-extension-powertools</code>.
+                            <code>git status --short --branch</code> returned
+                            <code>## codex/vault-movie-drafts-exec</code>.
+                            <code>git merge-base --is-ancestor origin/main HEAD</code> passed with
+                            <span class="pass">origin/main is included</span>.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </main>
     </body>
 </html>
