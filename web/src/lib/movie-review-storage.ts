@@ -108,6 +108,20 @@ export async function saveMovieVersion(version: MovieVersion): Promise<MovieVers
   return parsed;
 }
 
+export async function createMovieVersionFromProject(project: MovieReviewProject, name: string, description: string): Promise<MovieVersion> {
+  const timestamp = now();
+  return saveMovieVersion({
+    id: uuidv4(),
+    movieId: project.movieId,
+    projectId: project.id,
+    name,
+    description,
+    clips: project.committedClips,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+}
+
 export async function listMovieVersions(movieId: string): Promise<MovieVersion[]> {
   const db = await getDB();
   const rows = (await db.getAllFromIndex("movie_versions", "by-movie", movieId)) as MovieVersion[];

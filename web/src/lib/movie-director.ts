@@ -79,9 +79,11 @@ function reorderCommittedClips(project: MovieReviewProject, clipIds: string[]): 
 export function createRuleBasedDirectorProposal(project: MovieReviewProject): DirectorProposal {
   const timestamp = new Date().toISOString();
   const first = project.candidates[0];
-  const changes = first
-    ? [{ id: uuidv4(), type: "keep" as const, clipId: first.id, rationale: "Keep the first available candidate to start the cut." }]
-    : [];
+  const second = project.candidates[1];
+  const changes = [
+    ...(first ? [{ id: uuidv4(), type: "keep" as const, clipId: first.id, rationale: "Keep the first available candidate to start the cut." }] : []),
+    ...(second ? [{ id: uuidv4(), type: "reject" as const, clipId: second.id, rationale: "Hold the second candidate until the first cut has a baseline." }] : []),
+  ];
   return directorProposalSchema.parse({
     id: uuidv4(),
     movieId: project.movieId,

@@ -1577,6 +1577,76 @@ Failures: Clip preview region missing in Assemble mode and stability spec.</code
 ✓ Generating static pages using 11 workers (29/29)</code></pre>
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Replaced the one-off Director Proposal button with Drafts and Director
+                            tabs in the left rail. The Director panel stores proposal records in
+                            IndexedDB, checks provider configuration through the server route before
+                            enabling provider calls, applies only selected changes through
+                            <code>applyDirectorChanges</code>, snapshots the current cut before
+                            mutation, persists the updated project, and then marks proposals
+                            <code>partially-applied</code> or <code>applied</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Deviations</td>
+                        <td>
+                            The rule-based Director now proposes a conservative second change when a
+                            second candidate exists, so partial application is meaningful in the UI.
+                            Provider execution is present but remains disabled unless the server
+                            reports configured credentials and model.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Proposal cards are intentionally compact in the rail. Deeper proposal
+                            diffing stays out of this phase, but selected-change application is real
+                            and state-backed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first E2E:
+                            <pre><code>Locator: getByRole('tab', { name: /Director/i })
+Error: waiting for missing Director tab</code></pre>
+                            Passing Director unit/storage and E2E:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-director movie-review-storage
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+
+Running 2 tests using 1 worker
+  ✓ Director creates reviewable proposals without mutating the current cut
+  ✓ Director partial accept applies selected changes only
+
+  2 passed (8.3s)</code></pre>
+                            Regression, lint, and build:
+                            <pre><code>Running 7 tests using 1 worker
+  7 passed (14.1s)
+
+&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>

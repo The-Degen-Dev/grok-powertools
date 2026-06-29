@@ -1,9 +1,8 @@
 "use client";
 
-import { Wand2 } from "lucide-react";
-import { createRuleBasedDirectorProposal } from "@/lib/movie-director";
-import { saveDirectorProposal } from "@/lib/movie-review-storage";
+import { useState } from "react";
 import type { MovieReviewProject } from "@/lib/movie-review-types";
+import MovieDirectorPanel from "./MovieDirectorPanel";
 import MovieDraftQueue from "./MovieDraftQueue";
 import type { MovieReviewProjectUpdate } from "./useMovieReviewProject";
 
@@ -14,21 +13,35 @@ export default function MovieLeftRail({
   project: MovieReviewProject;
   onProjectChange: (project: MovieReviewProjectUpdate) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<"drafts" | "director">("drafts");
   return (
     <aside role="region" aria-label="Drafts and Director" className="min-h-0 overflow-y-auto border-r border-neutral-800 p-3">
       <div className="space-y-3">
-        <button
-          type="button"
-          onClick={() => {
-            const proposal = createRuleBasedDirectorProposal(project);
-            saveDirectorProposal(proposal).catch(() => {});
-          }}
-          className="flex w-full items-center justify-center gap-2 rounded bg-neutral-900 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-800"
-        >
-          <Wand2 className="h-4 w-4 text-orange-400" />
-          Director Proposal
-        </button>
-        <MovieDraftQueue project={project} onProjectChange={onProjectChange} />
+        <div role="tablist" aria-label="Movie side rail" className="grid grid-cols-2 rounded border border-neutral-800 bg-neutral-900 p-1">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "drafts"}
+            onClick={() => setActiveTab("drafts")}
+            className={`rounded px-2 py-1 text-xs ${activeTab === "drafts" ? "bg-orange-600 text-white" : "text-neutral-400 hover:bg-neutral-800"}`}
+          >
+            Drafts
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "director"}
+            onClick={() => setActiveTab("director")}
+            className={`rounded px-2 py-1 text-xs ${activeTab === "director" ? "bg-orange-600 text-white" : "text-neutral-400 hover:bg-neutral-800"}`}
+          >
+            Director
+          </button>
+        </div>
+        {activeTab === "drafts" ? (
+          <MovieDraftQueue project={project} onProjectChange={onProjectChange} />
+        ) : (
+          <MovieDirectorPanel project={project} onProjectChange={onProjectChange} />
+        )}
       </div>
     </aside>
   );

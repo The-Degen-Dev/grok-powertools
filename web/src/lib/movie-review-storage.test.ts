@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createMovie, getDB } from "./local-storage";
 import {
   createReviewProjectFromMovie,
+  createMovieVersionFromProject,
   getReviewProject,
   listExportRuns,
   listMovieVersions,
@@ -182,5 +183,41 @@ describe("movie review storage", () => {
 
     expect((await listMovieVersions(movie.id)).map((version) => version.id).sort()).toEqual(["version-current", "version-stale"]);
     expect(await listMovieVersionsForProject(project.id)).toEqual([currentVersion]);
+  });
+
+  it("creates a movie version snapshot from the current project", async () => {
+    const movie = await createMovie("Snapshot versions");
+    const project = await createReviewProjectFromMovie(movie.id);
+    const version = await createMovieVersionFromProject(
+      {
+        ...project,
+        committedClips: [
+          {
+            id: "clip-a",
+            sourceAssetId: "asset-video-1",
+            mediaType: "video",
+            mediaRef: { type: "vault", assetId: "asset-video-1" },
+            videoUrl: "/api/vault/media/asset-video-1",
+            position: 0,
+            lifecycle: "kept",
+            flags: [],
+            trimStartSeconds: 0,
+            trimEndSeconds: 2,
+            durationSeconds: 2,
+            volume: 1,
+            muted: false,
+            solo: false,
+            notes: "",
+            createdAt: "2026-06-28T00:00:00.000Z",
+            updatedAt: "2026-06-28T00:00:00.000Z",
+          },
+        ],
+      },
+      "Snapshot",
+      "Before Director changes",
+    );
+
+    expect(version).toMatchObject({ movieId: movie.id, projectId: project.id, name: "Snapshot" });
+    expect((await listMovieVersionsForProject(project.id))[0]).toMatchObject({ id: version.id, clips: [{ id: "clip-a" }] });
   });
 });
