@@ -57,6 +57,8 @@
     <li>The read-only API path captures <code>assetId</code>, <code>responseId</code>, <code>sourceConversationId</code>, media keys, prompt messages, and response metadata, but it does not expose <code>grokPostId</code> from <code>/imagine/post/{uuid}</code>. The canonical index therefore treats this as stronger current-Saved evidence than the grid scrape, but still identity-limited.</li>
     <li>Media-post identity capture now uses a page-resident async worker installed into the active Grok Saved tab. AppleScript is limited to narrow route probes, worker install/enqueue/drain/stop calls, and checkpointed result drains; bulk synchronous in-page XHR is restricted to tiny <code>sync_debug</code> probes.</li>
     <li>The full async-worker media-post pass attempted all <code>12,446</code> captured Grok asset IDs. After two retry passes over failures, <code>12,232</code> media-post rows returned <code>200</code>, <code>213</code> returned stable <code>404</code>, and <code>1</code> returned a persistent <code>500</code>. These are recorded as media-post response gaps, not inferred physical media loss.</li>
+    <li>The current evidence baseline is commit <code>edaaf8134bb545969d6e8036952695a3d8102ca7</code>. It supersedes older <code>sample_verified</code>, blocked, or grid-partial Grok Saved statuses with <code>api_captured_post_identity_with_post_gaps</code>.</li>
+    <li>The next execution slice should not write production data. It should freeze this baseline, define the append-only R2 JSON canonical snapshot schema, generate the exact snapshot payload locally, validate it, and stop before production R2, D1, Worker, Grok, repair, move, or delete actions.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -93,8 +95,8 @@
 
   <h2>Open Questions</h2>
   <ul>
-    <li>Authoritative current Grok Saved inventory is no longer blocked on browser control, but it is still incomplete. Current evidence is a partial grid scrape with <code>821</code> unique candidates, <code>1027</code> unique media URL hashes, and <code>694</code> unique media UUID hashes. Do not claim current Grok Saved completeness until traversal reaches a verified end state and logical identity is captured.</li>
-    <li>The Saved grid did not expose <code>grokPostId</code> values. Detail-page capture or another identity source is required before using Grok Saved as authoritative logical identity. Opening detail pages may require explicit approval because the objective prohibits route mutation during browser work.</li>
+    <li>No planning question blocks the next execution slice. The active-tab API and media-post worker are the current Grok Saved baseline; the older grid scrape remains partial corroborating evidence only.</li>
+    <li>Do not claim clean current Grok Saved completeness yet. The baseline still has <code>214</code> media-post response gaps, <code>1463</code> conversation-response gaps, <code>5553</code> <code>needs_human_review</code> classifications, and <code>466</code> <code>orphan_candidate</code> classifications.</li>
     <li>Current local canonical index artifacts: raw ignored <code>private/local-canonical-index.jsonl</code>, redacted <code>reconciliations/local-canonical-index-summary.json</code>, redacted <code>reconciliations/canonical-gap-report.json</code>, and redacted <code>report-canonical.md</code>.</li>
     <li>The active-tab API inventory captured <code>12,446</code> Grok assets across <code>208</code> asset pages and attempted all <code>7,985</code> source conversations. It found <code>6,606</code> prompt candidates. Media-post identity is now captured from <code>/rest/media/post/get</code> for successful rows, but detail-route equivalence was not opened per item.</li>
     <li>The media-post API now provides post identity for successful rows without route mutation. Detail-route equivalence was not opened per item, and <code>214</code> media-post response gaps remain after retry.</li>
@@ -142,7 +144,7 @@
     <li><code>private/grok-media-posts-current.jsonl</code>: ignored raw media-post identity and prompt metadata inventory from <code>/rest/media/post/get</code>.</li>
     <li><code>inventory/grok-assets-current-summary.json</code>: committed-safe redacted/hash-only asset and prompt-response summary.</li>
     <li><code>logs/grok-assets-active-tab-capture.json</code>: committed-safe API capture status summary.</li>
-    <li><code>reconciliations/local-canonical-index-summary.json</code>, <code>reconciliations/canonical-gap-report.json</code>, and <code>report-canonical.md</code>: regenerated with Grok Saved status <code>api_captured_identity_limited</code>.</li>
+    <li><code>reconciliations/local-canonical-index-summary.json</code>, <code>reconciliations/canonical-gap-report.json</code>, and <code>report-canonical.md</code>: regenerated with Grok Saved status <code>api_captured_post_identity_with_post_gaps</code>.</li>
   </ul>
 </body>
 </html>

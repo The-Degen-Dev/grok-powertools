@@ -2,13 +2,14 @@
   "auditName": "Production R2 Vault system audit",
   "auditPlanDate": "2026-06-26",
   "executionStartedAt": "2026-06-27T16:28:22-04:00",
-  "status": "in_progress",
+  "completedAt": "2026-06-29T00:11:06.100Z",
+  "status": "read_only_audit_complete_next_phase_pending",
   "repo": {
     "path": "/Users/philipbankier/Development/skunkworks/Grok-Tinker/chrome-extension-powertools",
     "branch": "codex/production-r2-vault-audit",
-    "commit": "c66b86bd6208fe903b78f3cf9165dd4cd48728a7",
-    "gitStatusShort": " M .gitignore\n M docs/audits/2026-06-26-production-r2-vault-system-audit/implementation-notes.html\n M docs/audits/2026-06-26-production-r2-vault-system-audit/logs/validate-artifacts.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/manifest.json\n M docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/audit-production-r2-vault.mjs\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/logs/grok-saved-browser-control-blocker.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/canonical-gap-report.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/reconciliations/local-canonical-index-summary.json\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/report-canonical.md\n?? docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/build-local-canonical-index.mjs\n",
-    "snapshotNote": "repo.commit records the clean checkpoint before the final live-Grok evidence commit; final Git HEAD may advance by the commit containing this manifest."
+    "commit": "edaaf8134bb545969d6e8036952695a3d8102ca7",
+    "gitStatusShort": "",
+    "snapshotNote": "repo.commit records the clean read-only evidence baseline. Later doc-sync commits may update planning without changing the baseline evidence."
   },
   "productionTarget": {
     "r2Bucket": "grok-gallery-001",
@@ -34,7 +35,7 @@
     "localSystem": "verified",
     "liveGrok": "verified",
     "reconciliation": "dirty",
-    "canonicalIndex": "partial",
+    "canonicalIndex": "local_only_complete_with_gaps",
     "grokSavedInventory": "api_captured_post_identity_with_post_gaps"
   },
   "blockers": [],
@@ -51,8 +52,8 @@
     },
     {
       "path": "implementation-notes.html",
-      "bytes": 23418,
-      "updatedAt": "2026-06-29T00:10:44.562Z"
+      "bytes": 23790,
+      "updatedAt": "2026-06-29T00:35:10.967Z"
     },
     {
       "path": "inventory/.gitkeep",
@@ -367,7 +368,7 @@
     {
       "path": "logs/validate-artifacts.json",
       "bytes": 102,
-      "updatedAt": "2026-06-29T00:11:06.100Z"
+      "updatedAt": "2026-06-29T00:36:08.655Z"
     },
     {
       "path": "logs/web-build.txt",
@@ -605,6 +606,45 @@
     "currentGrokSavedCompleteness": "api_captured_post_identity_with_post_gaps",
     "localSystemHealth": "clean"
   },
+  "currentCanonicalBaseline": {
+    "generatedAt": "2026-06-29T00:10:02.882Z",
+    "sourceArtifacts": [
+      "report-canonical.md",
+      "reconciliations/local-canonical-index-summary.json",
+      "reconciliations/canonical-gap-report.json",
+      "inventory/grok-assets-current-summary.json",
+      "logs/grok-assets-active-tab-capture.json"
+    ],
+    "counts": {
+      "r2Objects": 18083,
+      "r2MediaObjects": 15981,
+      "r2HashRows": 15981,
+      "d1Rows": 4648,
+      "workerRows": 4647,
+      "metadataReferences": 2100,
+      "grokSavedRows": 12446,
+      "grokConversationResponseRows": 7985,
+      "grokMediaPostRows": 12446
+    },
+    "grokSavedInventoryStatus": "api_captured_post_identity_with_post_gaps",
+    "grokMediaPostSuccesses": 12232,
+    "grokMediaPostResponseGaps": 214,
+    "grokConversationResponseGaps": 1463,
+    "classificationCounts": {
+      "canonical": 4419,
+      "date_folder_mapped": 5541,
+      "alternate_duplicate": 2,
+      "needs_human_review": 5553,
+      "orphan_candidate": 466
+    },
+    "duplicateClassification": {
+      "sameHashGroupCount": 5116,
+      "acceptedLinkedDuplicateObjects": 4330,
+      "hashOnlyDuplicateObjects": 2627
+    },
+    "nextPhase": "canonical_snapshot_schema_and_local_dry_run",
+    "productionWritesAuthorized": false
+  },
   "repoSnapshots": [
     {
       "generatedAt": "2026-06-27T21:06:36.533Z",
@@ -626,8 +666,8 @@
       "screenshots/live-grok-visible-window-2026-06-28.png"
     ],
     "limitations": [
-      "Visual and extension UI spot-check only",
-      "No authoritative full Grok Saved export or API found",
+      "This live UI inspection entry is a visual and extension spot-check only; inventory authority now comes from browserCapture.grokSavedActiveTabApi",
+      "No separate Grok export was found; the current baseline uses active-tab same-origin API capture with explicit response gaps",
       "Raw accessibility text, prompt history, account email, API key value, and activity object keys were not stored"
     ]
   },
@@ -667,5 +707,31 @@
       "rawMediaPosts": "private/grok-media-posts-current.jsonl",
       "identityStatus": "api_media_post_ids_captured"
     }
+  },
+  "nextRecommendedPhase": {
+    "name": "canonical_snapshot_schema_and_local_dry_run",
+    "scope": [
+      "freeze the current evidence baseline in docs",
+      "define the append-only R2 JSON canonical snapshot schema",
+      "generate the exact snapshot payload locally from ignored/private evidence",
+      "validate parseability, counts, hashes, status totals, gap totals, and source references",
+      "produce committed-safe summaries and ignored raw dry-run artifacts"
+    ],
+    "stopBefore": [
+      "production R2 writes",
+      "D1 writes",
+      "Worker state writes",
+      "Grok actions",
+      "object moves",
+      "deletes",
+      "repair or sync routes"
+    ],
+    "pauseForUser": [
+      "any production write would be needed",
+      "schema ambiguity would change classification or identity",
+      "raw prompts, cookies, signed URLs, or exact private IDs would enter committed artifacts",
+      "existing artifacts fail validation or disagree on baseline counts",
+      "local dry-run payload cannot be made repeatable"
+    ]
   }
 }

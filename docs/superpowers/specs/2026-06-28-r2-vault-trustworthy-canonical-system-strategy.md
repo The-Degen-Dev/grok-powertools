@@ -15,12 +15,12 @@ Primary evidence folder:
 Final audit checkpoint:
 
 - Branch: `codex/production-r2-vault-audit`
-- Commit: `15c307d docs: complete production r2 vault audit`
+- Evidence baseline commit: `edaaf8134bb545969d6e8036952695a3d8102ca7 docs: add grok saved api audit evidence`
 
 Audit verdicts:
 
 - Production R2 internal correctness: `dirty`
-- Current Grok Saved completeness: `sample_verified`
+- Current Grok Saved completeness: `api_captured_post_identity_with_post_gaps`
 - Local system health: `clean`
 
 Key counts from the audit:
@@ -34,8 +34,21 @@ Key counts from the audit:
 - Date-folder R2 media objects: `9893`
 - Canonical `media/by-asset` R2 objects: `6088`
 - Canonical R2 objects missing from D1/Worker exact-key coverage: `1441`
+- Grok Saved asset API rows: `12446`
+- Grok source conversations attempted: `7985`
+- Grok conversation response gaps: `1463`
+- Grok media-post rows attempted: `12446`
+- Grok media-post successes: `12232`
+- Grok media-post response gaps: `214` (`213` stable `404`, `1` persistent `500`)
+- Grok prompt candidates from conversation responses: `6606`
+- Grok media-post prompt fields present: `7308`
+- Local canonical index rows: `15981`
+- Local canonical classifications: `4419` canonical, `5541` date-folder mapped, `2` alternate duplicates, `5553` needs human review, `466` orphan candidates
 - Same-hash duplicate groups: `5116`
-- Unresolved groups: `5`
+- Accepted linked duplicate objects: `4330`
+- Hash-only duplicate objects needing review: `2627`
+- Metadata-linked media: `2090`
+- Metadata-unlinked media: `13891`
 
 ## Vocabulary Decision
 
@@ -129,11 +142,13 @@ This policy is not a security promise. It is the minimum practical hygiene for a
 
 Current Grok Saved enumeration is the authority for "should this logical asset exist?"
 
-Important qualifier:
+Current qualifier:
 
 - Visual spot-checks are not enough.
-- The next phase needs a durable, repeatable Grok Saved inventory snapshot.
-- The snapshot must capture every Saved item reachable in the current Grok Saved surface, stable item evidence when available, visible media references, project/history context when available, and any metadata Grok exposes.
+- The active-tab API capture is now the strongest current Grok Saved evidence. It attempted all `12446` asset IDs from `/rest/assets` and all `7985` source conversations, then captured media-post identity through `/rest/media/post/get` for `12232` successful rows.
+- The capture remains a gap-bearing snapshot, not a clean-state proof. The `214` media-post response gaps, `1463` conversation response gaps, `5553` `needs_human_review` classifications, and `466` `orphan_candidate` classifications must stay visible until resolved or explicitly deferred.
+- Future inventory work should reuse the active-tab API and async-worker path unless Grok changes the API surface or a better user-approved export appears. Do not go back to gallery scrolling as the primary enumeration method.
+- The raw local Grok snapshots belong in ignored `private/` artifacts unless the user explicitly approves a different storage path. Committed summaries stay redacted/hash-only.
 
 If R2 has more objects than Grok Saved appears to expose, do not delete or discard them. Classify the discrepancy and preserve the bytes until stronger evidence exists.
 
@@ -208,37 +223,36 @@ Future build plans must preserve these invariants:
 
 ## Recommended Phase Plan
 
-Phase 0: Freeze the decision record
+Phase 0: Freeze the current evidence baseline
 
-- Keep this file as the source of truth for the current strategy.
-- Keep the completed audit folder immutable except for clearly marked follow-up notes.
+- Treat `edaaf8134bb545969d6e8036952695a3d8102ca7` as the current read-only evidence baseline.
+- Update `manifest.json`, this strategy file, and implementation notes when planning interpretation changes.
+- Do not mutate production R2, D1, Worker state, product data, or Grok in this phase.
 
-Phase 1: Durable Grok Saved inventory
+Phase 1: Gap-bearing Grok Saved inventory baseline
 
-- Build a read-only Saved enumerator for the existing Chrome session or another user-approved export/API path.
-- Capture a stable snapshot without generating, deleting, syncing, backing up, or repairing.
-- Open each Saved media item or otherwise read its detail route to capture `grokPostId` from `/imagine/post/{uuid}` when available.
-- Capture media URL UUIDs separately as variant/storage evidence, not as the primary logical item identity unless no `grokPostId` can be recovered.
-- Capture full prompt text and all available metadata into the raw Vault inventory artifact.
-- Keep any raw local snapshot out of git unless the user explicitly approves committing it.
-- Produce a redacted/hash-only audit summary beside the raw Vault inventory so planning and review can happen safely.
-- Produce a parseable Saved inventory artifact.
+- Current status: mostly complete for the captured active-tab API sources, with explicit response gaps.
+- Keep the `12446` asset API rows, `7985` conversation attempts, and `12446` media-post attempts as the current baseline.
+- Do not spend the next phase trying to scroll the full gallery or open every detail route unless a specific gap requires that proof and the user approves the browser action.
+- Carry the `214` media-post gaps and `1463` conversation-response gaps into the canonical schema as first-class gap records.
 
-Phase 2: Canonical asset model
+Phase 2: Canonical snapshot schema
 
-- Define the schema for a logical Saved asset record.
+- Define the schema for an append-only R2 JSON canonical snapshot before any production write.
 - Include identity evidence, media variants, full prompts, metadata references, R2 storage locations, hashes, D1/Worker links, local corroboration, status, provenance, and confidence.
-- Treat schema as the contract before writing product code.
+- Include source snapshot IDs, generated time, source counts, source hashes, classification counts, gap counts, rollback notes, and validation rules.
+- Treat the schema as the contract before writing product code or D1 projection code.
 
-Phase 3: Read-only reconciliation
+Phase 3: Local-only canonical snapshot dry run
 
-- Join Grok Saved snapshot, raw R2 inventory, R2 hashes, D1/Worker rows, metadata, and local hashes.
-- Produce a classification proposal for every R2 media object and every Saved item.
-- Produce separate lists for missing-from-R2, R2-only/unlinked, duplicate groups, metadata gaps, and human-review items.
+- Generate the exact append-only R2 JSON payload locally from the ignored canonical index and raw private Grok evidence.
+- Validate parseability, schema version, counts, hashes, status totals, gap totals, and source references.
+- Produce committed-safe summary artifacts and an ignored raw local snapshot payload.
+- Stop before any production write. The dry-run artifact is the approval object for the first write phase.
 
 Phase 4: First approved canonical snapshot
 
-- After the read-only reconciliation is reviewed, write an append-only R2 JSON canonical snapshot only with explicit write approval.
+- After the local dry-run snapshot is reviewed, write an append-only R2 JSON canonical snapshot only with explicit write approval.
 - Include schema version, source snapshot IDs, source counts, classification counts, content hashes, generated time, and rollback notes.
 - Treat this R2 JSON snapshot as the durable source-of-truth and recovery record for the canonical model.
 - Do not treat the R2 JSON snapshot as the final app query layer.
@@ -257,14 +271,20 @@ Phase 6: Logical product cleanup
 - Duplicate/alternate/date-folder objects should be visible in diagnostics, not normal gallery views.
 - Keep a reconciliation check that can compare app-facing D1 rows back to the R2 canonical snapshot and raw R2 inventory.
 
-Phase 7: Physical duplicate cleanup dry run
+Phase 7: Review queue burn-down
+
+- Resolve or explicitly defer `needs_human_review`, `orphan_candidate`, hash-only duplicate objects, and Grok API response gaps.
+- Add narrow classification rules only when evidence supports them.
+- Keep unresolved objects visible in diagnostics. Do not hide or delete them to make counts look clean.
+
+Phase 8: Physical duplicate cleanup dry run
 
 - After logical state, D1 projection, and app reads validate cleanly, generate a physical cleanup manifest.
 - Include every proposed target key, retained canonical key, SHA-256, identity-link evidence, classification evidence, expected bytes saved, and reason.
 - Include a non-candidate report for hash-only duplicates, conflicts, unique metadata, missing retained copy, or any object still referenced by canonical views.
 - Run this phase as dry-run only until the user approves the exact manifest.
 
-Phase 8: Approved physical duplicate cleanup
+Phase 9: Approved physical duplicate cleanup
 
 - Execute only after explicit approval of the dry-run manifest.
 - Prefer the least destructive storage action that actually removes duplicate serving/storage paths, with a durable ledger before any delete or lifecycle move.
@@ -274,17 +294,16 @@ Phase 8: Approved physical duplicate cleanup
 
 ## Open Questions
 
-These are the next grilling decisions:
-
-1. What does "clean" mean for the next audit and final target: logical clean, index clean, storage clean, or all three in stages?
-
-## Current Recommended Next Question
-
-What does "clean" mean?
-
-Recommended answer to evaluate next:
+No planning question blocks the next execution slice. The current recommendation is:
 
 - Logical clean: every Grok Saved item has one canonical logical record, every R2 media object is classified, and product views show one logical asset per canonical Saved identity.
 - Index clean: the D1 projection matches the approved R2 canonical snapshot by version, counts, canonical IDs, classifications, and query-critical fields.
 - Storage clean: physical duplicate cleanup candidates have been dry-run, approved, executed or explicitly deferred, and verified by a post-cleanup R2/D1 audit.
 - The implementation should reach logical clean first, then index clean, then storage clean. Full system clean means all three are satisfied or any remaining physical duplicate groups are explicitly deferred with documented reasons.
+
+Current next execution slice:
+
+1. Freeze the current baseline in docs and manifest.
+2. Define the canonical snapshot schema.
+3. Build and validate the local-only canonical snapshot dry run.
+4. Stop before production writes and present the exact dry-run payload summary for review.

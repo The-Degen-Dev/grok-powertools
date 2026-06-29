@@ -8,6 +8,12 @@
 
 **Tech Stack:** Node.js 24 through `mise`, npm, Wrangler 4, Cloudflare R2 S3-compatible API or Cloudflare R2 read API, D1 remote read queries, Next.js Vault routes, Chrome existing Grok session, JSONL/JSON/CSV/Markdown audit artifacts.
 
+## Post-Audit Status
+
+The read-only audit evidence baseline is complete at commit `edaaf8134bb545969d6e8036952695a3d8102ca7`. Current baseline artifacts are in `docs/audits/2026-06-26-production-r2-vault-system-audit/`, especially `report-canonical.md`, `reconciliations/local-canonical-index-summary.json`, `reconciliations/canonical-gap-report.json`, and `manifest.json`.
+
+Do not re-run this historical checklist as the next phase by default. The next approved planning slice is local-only: freeze the current baseline, define the append-only R2 JSON canonical snapshot schema, generate and validate the exact local dry-run payload, and stop before any production R2, D1, Worker, Grok, repair, move, sync, or delete action.
+
 ---
 
 ## Scope Check
