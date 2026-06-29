@@ -170,3 +170,16 @@ test("Draft Queue applies only project-scoped versions with repaired selection",
   await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-2").first()).toBeVisible();
   await expect(page.getByRole("region", { name: /Inspector/i }).getByText("asset-video-2")).toBeVisible();
 });
+
+test("Assemble mode shows continuous preview, ribbon, waveform controls, and audio lane", async ({ page }) => {
+  const movieId = await seedReviewMovie(page);
+  await page.goto(`/movie?id=${movieId}`);
+  await expectReviewReady(page);
+  await page.keyboard.press("KeyK");
+  await page.keyboard.press("Digit3");
+  await expect(page.getByRole("region", { name: /Clip preview/i })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Time-proportional ribbon/i })).toBeVisible();
+  await expect(page.getByRole("slider", { name: /Trim in/i })).toBeVisible();
+  await expect(page.getByRole("slider", { name: /Trim out/i })).toBeVisible();
+  await expect(page.getByText(/Source audio/i)).toBeVisible();
+});

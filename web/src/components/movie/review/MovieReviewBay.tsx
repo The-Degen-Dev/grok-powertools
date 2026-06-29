@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import type { Movie } from "@/lib/types";
+import MovieAssembleView from "./MovieAssembleView";
 import MovieCandidatesGrid from "./MovieCandidatesGrid";
 import MovieClipStrip from "./MovieClipStrip";
 import MovieFocusLoupe from "./MovieFocusLoupe";
@@ -36,6 +37,8 @@ export default function MovieReviewBay({ movie }: { movie: Movie }) {
       <MovieLeftRail project={project} onProjectChange={setProject} />
       {project.mode === "focus" ? (
         <MovieFocusLoupe project={project} onProjectChange={setProject} />
+      ) : project.mode === "assemble" ? (
+        <MovieAssembleView project={project} onProjectChange={setProject} />
       ) : (
         <MovieCandidatesGrid project={project} onProjectChange={setProject} />
       )}
