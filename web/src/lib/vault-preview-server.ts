@@ -21,6 +21,15 @@ type VaultPreviewWithObjectKey = Omit<VaultPreview, "identity" | "gaps"> & {
   scanTruncated: boolean;
 };
 
+interface VaultPreviewLoadOptions {
+  source?: "canonical";
+}
+
+function readSource(options: VaultPreviewLoadOptions = {}): "canonical" | null {
+  if (options.source === "canonical") return "canonical";
+  return process.env.VAULT_WORKER_READ_SOURCE === "canonical" ? "canonical" : null;
+}
+
 function promptKey(prompt: VaultPrompt): string {
   return prompt.id || prompt.text;
 }
@@ -62,13 +71,14 @@ function dedupeAssets(assets: VaultAsset[]): VaultAsset[] {
   return [...byAssetId.values()];
 }
 
-async function fetchAllInventoryPages(): Promise<{ assets: VaultAsset[]; warnings: string[]; truncated: boolean }> {
+async function fetchAllInventoryPages(source: "canonical" | null): Promise<{ assets: VaultAsset[]; warnings: string[]; truncated: boolean }> {
   const assets: VaultAsset[] = [];
   const warnings: string[] = [];
   let cursor: string | null = null;
 
   for (let page = 0; page < MAX_INVENTORY_PAGES; page += 1) {
     const search = new URLSearchParams({ limit: String(INVENTORY_PAGE_LIMIT) });
+    if (source) search.set("source", source);
     if (cursor) search.set("cursor", cursor);
 
     const inventory = await workerJson<unknown>(`/v1/vault/inventory?${search.toString()}`);
@@ -114,13 +124,17 @@ function parseVaultGapsWithObjectKey(input: unknown): { value: VaultGapWithObjec
   return { value: gaps, warnings };
 }
 
-export async function loadVaultPreviewFromWorker(): Promise<VaultPreviewWithObjectKey> {
+export async function loadVaultPreviewFromWorker(options: VaultPreviewLoadOptions = {}): Promise<VaultPreviewWithObjectKey> {
+  const source = readSource(options);
+  const gapSearch = new URLSearchParams();
+  if (source) gapSearch.set("source", source);
+  const gapPath = gapSearch.size ? `/v1/vault/gaps?${gapSearch.toString()}` : "/v1/vault/gaps";
   const [identity, inventory, savedPrompts, promptHistory, gaps] = await Promise.all([
     workerJson<unknown>("/v1/vault/identity"),
-    fetchAllInventoryPages(),
+    fetchAllInventoryPages(source),
     workerJson<unknown>("/v1/vault/metadata/savedPrompts"),
     workerJson<unknown>("/v1/vault/metadata/promptHistory"),
-    workerJson<unknown>("/v1/vault/gaps"),
+    workerJson<unknown>(gapPath),
   ]);
 
   const parsedIdentity = parseVaultWorkerIdentity({

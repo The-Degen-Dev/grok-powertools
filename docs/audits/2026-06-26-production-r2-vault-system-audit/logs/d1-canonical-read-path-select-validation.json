@@ -1,0 +1,75 @@
+{
+  "generatedAt": "2026-06-29T21:43:21Z",
+  "status": "select_validation_passed",
+  "target": {
+    "database": "grok-powertools-db",
+    "databaseId": "ad89e4bb-0b68-4c72-93d9-b90e6eb45aa6"
+  },
+  "sourceSnapshot": {
+    "snapshotId": "snapshot_4100f2c3c2d3837a",
+    "schemaVersion": "d1-canonical-projection/v1",
+    "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+    "logicalAssetCount": 8080,
+    "storageObjectCount": 15981,
+    "promptRefCount": 13914,
+    "gapRecordCount": 7696
+  },
+  "queryShapeChecks": [
+    {
+      "name": "snapshot_marker",
+      "rowsReturned": 1,
+      "rowsRead": 2,
+      "rowsWritten": 0,
+      "changedDb": false
+    },
+    {
+      "name": "canonical_inventory_page",
+      "sampleLimit": 3,
+      "rowsReturned": 3,
+      "rowsRead": 3,
+      "rowsWritten": 0,
+      "changedDb": false
+    },
+    {
+      "name": "canonical_inventory_storage_subquery",
+      "sampleAssetLimit": 3,
+      "rowsReturned": 5,
+      "rowsRead": 19,
+      "rowsWritten": 0,
+      "changedDb": false
+    },
+    {
+      "name": "canonical_gap_page",
+      "sampleLimit": 3,
+      "rowsReturned": 3,
+      "rowsRead": 3,
+      "rowsWritten": 0,
+      "changedDb": false
+    },
+    {
+      "name": "canonical_media_lookup_shape",
+      "rowsReturned": 1,
+      "rowsRead": 2,
+      "rowsWritten": 0,
+      "changedDb": false
+    }
+  ],
+  "productionWrites": {
+    "d1Writes": 0,
+    "workerDeploys": 0,
+    "workerStateWrites": 0,
+    "productRouteOrReadSwitches": 0,
+    "r2Writes": 0,
+    "r2ObjectMoves": 0,
+    "r2ObjectDeletes": 0,
+    "grokActions": 0,
+    "repairRouteCalls": 0,
+    "syncRouteCalls": 0,
+    "physicalCleanupActions": 0
+  },
+  "notes": [
+    "Validation used mise exec node@24 -- npx --yes wrangler@latest, matching the successful D1 write executor path.",
+    "Committed validation log excludes raw object keys, exact Grok identifiers, prompt bodies, signed URLs, cookies, and bearer tokens."
+  ],
+  "nextAllowedPhase": "worker_deploy_and_live_route_smoke_after_separate_approval"
+}

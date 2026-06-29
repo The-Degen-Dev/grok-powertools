@@ -6,7 +6,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ asse
   const requestUrl = new URL(request.url);
   const workerSearch = new URLSearchParams({ assetId });
   const objectKey = requestUrl.searchParams.get("objectKey");
+  const source = requestUrl.searchParams.get("source");
   if (objectKey) workerSearch.set("objectKey", objectKey);
+  if (source) workerSearch.set("source", source);
   const res = await fetch(`${workerUrl}/v1/vault/media?${workerSearch.toString()}`, {
     headers: { "x-gpt-api-key": apiKey },
     cache: "no-store",

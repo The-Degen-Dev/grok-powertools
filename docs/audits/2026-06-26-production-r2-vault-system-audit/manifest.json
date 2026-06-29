@@ -40,7 +40,8 @@
     "canonicalSnapshotDryRun": "validated",
     "canonicalSnapshotR2Write": "verified",
     "d1CanonicalProjectionDryRun": "validated",
-    "d1CanonicalProjectionWrite": "verified"
+    "d1CanonicalProjectionWrite": "verified",
+    "d1CanonicalReadPathDesign": "local_validated"
   },
   "blockers": [],
   "evidenceIndex": [
@@ -56,8 +57,8 @@
     },
     {
       "path": "implementation-notes.html",
-      "bytes": 39935,
-      "updatedAt": "2026-06-29T09:39:47.952Z"
+      "bytes": 44014,
+      "updatedAt": "2026-06-29T21:47:10.979Z"
     },
     {
       "path": "inventory/.gitkeep",
@@ -218,6 +219,11 @@
       "path": "logs/d1-canonical-projection-write-readback.json",
       "bytes": 23364,
       "updatedAt": "2026-06-29T09:38:07.737Z"
+    },
+    {
+      "path": "logs/d1-canonical-read-path-select-validation.json",
+      "bytes": 2063,
+      "updatedAt": "2026-06-29T21:44:41.747Z"
     },
     {
       "path": "logs/d1-metadata_snapshot_index.json",
@@ -397,7 +403,7 @@
     {
       "path": "logs/validate-artifacts.json",
       "bytes": 102,
-      "updatedAt": "2026-06-29T09:44:52.910Z"
+      "updatedAt": "2026-06-29T21:47:35.336Z"
     },
     {
       "path": "logs/web-build.txt",
@@ -503,6 +509,11 @@
       "path": "logs/wrangler-whoami.txt",
       "bytes": 910,
       "updatedAt": "2026-06-28T20:52:56.825Z"
+    },
+    {
+      "path": "manifest.json",
+      "bytes": 35197,
+      "updatedAt": "2026-06-29T21:47:35.371Z"
     },
     {
       "path": "reconciliations/.gitkeep",
@@ -615,6 +626,11 @@
       "updatedAt": "2026-06-29T09:38:59.476Z"
     },
     {
+      "path": "report-d1-canonical-read-path-design.md",
+      "bytes": 2850,
+      "updatedAt": "2026-06-29T21:44:50.816Z"
+    },
+    {
       "path": "report.md",
       "bytes": 4741,
       "updatedAt": "2026-06-28T18:48:03.195Z"
@@ -651,8 +667,8 @@
     },
     {
       "path": "scripts/audit-production-r2-vault.mjs",
-      "bytes": 83040,
-      "updatedAt": "2026-06-29T09:39:10.096Z"
+      "bytes": 83098,
+      "updatedAt": "2026-06-29T21:45:12.835Z"
     },
     {
       "path": "scripts/build-canonical-snapshot-dry-run.mjs",
@@ -793,24 +809,25 @@
     }
   },
   "nextRecommendedPhase": {
-    "name": "product_read_path_design",
+    "name": "worker_deploy_and_live_route_smoke",
     "scope": [
-      "design Worker/product reads against the verified D1 projection",
-      "keep the existing product read path active until a separate approved switch",
-      "validate read counts, filtering, and review visibility against D1 before user-facing changes"
+      "deploy the Worker only after separate explicit approval",
+      "smoke explicit source=canonical inventory, gaps, and media reads against the verified D1 projection",
+      "keep existing product default reads unchanged until a later separately approved switch"
     ],
     "stopBefore": [
+      "default product read-path switch",
       "Grok actions",
       "R2 object moves",
       "R2 object deletes",
-      "repair or sync routes",
+      "repair or sync route calls",
       "physical duplicate cleanup"
     ],
     "pauseForUser": [
-      "product read behavior would hide review/orphan/gap rows",
-      "D1 readback no longer matches the write report",
-      "Worker route changes require a deploy",
-      "any cleanup, repair, move, delete, or Grok action is proposed"
+      "Worker deploy target or auth is uncertain",
+      "live source=canonical route counts differ from D1 readback",
+      "media route cannot fetch a canonical object that D1 says exists",
+      "any default read-path switch, cleanup, repair, move, delete, or Grok action is proposed"
     ]
   },
   "currentCanonicalSnapshotDryRun": {
@@ -1026,6 +1043,50 @@
       "report": "report-d1-canonical-projection-write.md"
     },
     "nextAllowedPhase": "product_read_path_design_after_separate_approval",
+    "requiresExplicitUserApproval": true
+  },
+  "currentD1CanonicalReadPathDesign": {
+    "generatedAt": "2026-06-29T21:43:21Z",
+    "status": "local_validated",
+    "sourceSnapshot": {
+      "snapshotId": "snapshot_4100f2c3c2d3837a",
+      "schemaVersion": "d1-canonical-projection/v1",
+      "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+      "logicalAssetCount": 8080,
+      "storageObjectCount": 15981,
+      "promptRefCount": 13914,
+      "gapRecordCount": 7696
+    },
+    "contract": {
+      "explicitSourceParameter": "source=canonical",
+      "defaultWorkerInventoryBehavior": "unchanged_legacy_r2_dedupe_index_then_r2_fallback",
+      "defaultWebPreviewBehavior": "unchanged",
+      "failClosedWhenProjectionMissing": true,
+      "reviewRequiredMapsToBlocked": true
+    },
+    "productionSelectValidation": {
+      "log": "logs/d1-canonical-read-path-select-validation.json",
+      "rowsWritten": 0,
+      "changedDb": false
+    },
+    "productionWrites": {
+      "d1Writes": 0,
+      "workerDeploys": 0,
+      "workerStateWrites": 0,
+      "productRouteOrReadSwitches": 0,
+      "r2Writes": 0,
+      "r2ObjectMoves": 0,
+      "r2ObjectDeletes": 0,
+      "grokActions": 0,
+      "repairRouteCalls": 0,
+      "syncRouteCalls": 0,
+      "physicalCleanupActions": 0
+    },
+    "committedEvidence": {
+      "report": "report-d1-canonical-read-path-design.md",
+      "selectValidation": "logs/d1-canonical-read-path-select-validation.json"
+    },
+    "nextAllowedPhase": "worker_deploy_and_live_route_smoke_after_separate_approval",
     "requiresExplicitUserApproval": true
   }
 }

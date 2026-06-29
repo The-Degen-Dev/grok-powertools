@@ -22,7 +22,7 @@ import {
     upsertVaultOverlay,
     getVaultOverlaysSince
 } from './db';
-import { buildVaultIdentity, findVaultMediaObject, listVaultInventory, readVaultMetadata } from './vault';
+import { buildVaultIdentity, findVaultMediaObject, listVaultGaps, listVaultInventory, readVaultMetadata, vaultReadSourceFromUrl } from './vault';
 
 const SERVICE_NAME = 'grok-r2-backup';
 const PRESIGN_EXPIRY_SECONDS = 3600;
@@ -709,7 +709,8 @@ export default {
             if (request.method === 'GET' && url.pathname === '/v1/vault/inventory') {
                 const cursor = url.searchParams.get('cursor');
                 const limit = Number(url.searchParams.get('limit') || '100');
-                return jsonResponse(await listVaultInventory(env, cursor, limit), 200);
+                const result = await listVaultInventory(env, cursor, limit, { source: vaultReadSourceFromUrl(url) });
+                return jsonResponse(result, 'status' in result && typeof result.status === 'number' ? result.status : 200);
             }
 
             if (request.method === 'GET' && url.pathname.startsWith('/v1/vault/metadata/')) {
@@ -719,7 +720,10 @@ export default {
             }
 
             if (request.method === 'GET' && url.pathname === '/v1/vault/gaps') {
-                return jsonResponse({ ok: true, gaps: [] }, 200);
+                const cursor = url.searchParams.get('cursor');
+                const limit = Number(url.searchParams.get('limit') || '100');
+                const result = await listVaultGaps(env, cursor, limit, { source: vaultReadSourceFromUrl(url) });
+                return jsonResponse(result, 'status' in result && typeof result.status === 'number' ? result.status : 200);
             }
 
             if (request.method === 'GET' && url.pathname === '/v1/vault/media') {
@@ -729,7 +733,7 @@ export default {
                 if (objectKey && !isValidObjectKey(objectKey, keyPrefix)) {
                     return errorResponse('Invalid object key.', 400);
                 }
-                const object = objectKey ? await env.R2_BUCKET.get(objectKey) : await findVaultMediaObject(env, assetId);
+                const object = objectKey ? await env.R2_BUCKET.get(objectKey) : await findVaultMediaObject(env, assetId, { source: vaultReadSourceFromUrl(url) });
                 if (!object?.body) return errorResponse('MEDIA_OBJECT_MISSING', 404);
                 const headers = new Headers(corsHeaders());
                 if (object.httpMetadata?.contentType) headers.set('content-type', object.httpMetadata.contentType);

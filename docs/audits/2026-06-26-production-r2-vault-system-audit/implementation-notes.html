@@ -71,6 +71,10 @@
     <li>The local projection dry run produced <code>1</code> snapshot row, <code>8080</code> asset rows, <code>15981</code> storage rows, <code>13914</code> prompt reference rows, <code>7696</code> gap rows, and <code>92363</code> lookup rows. All exact row payloads are ignored under <code>private/</code>.</li>
     <li>After explicit approval, the D1 projection write inserted the validated projection into <code>grok-powertools-db</code> and readback verified <code>1</code> snapshot row, <code>8080</code> asset rows, <code>15981</code> storage rows, <code>13914</code> prompt rows, <code>7696</code> gap rows, and <code>92363</code> lookup rows.</li>
     <li>The D1 snapshot marker row was inserted last. This preserves the approved R2 canonical snapshot as the recovery source and avoids switching any product route or Worker read path during the write phase.</li>
+    <li>The first Worker/product read-path slice adds explicit canonical read mode through <code>source=canonical</code>. Existing Worker inventory calls without that query parameter still use the legacy <code>r2_dedupe_index</code> and R2 fallback path.</li>
+    <li>The web proxy now forwards explicit <code>source=canonical</code> for Vault inventory, gaps, media, and preview. The preview server also supports <code>VAULT_WORKER_READ_SOURCE=canonical</code> for local validation. Defaults remain unchanged.</li>
+    <li>Canonical read mode requires a <code>canonical_snapshot_index</code> marker for <code>d1-canonical-projection/v1</code> and fails closed with <code>CANONICAL_PROJECTION_UNAVAILABLE</code> if the marker or tables are unavailable.</li>
+    <li>Review-required canonical assets map to Vault status <code>blocked</code> even if their raw projection verification status is <code>unproven</code>. This keeps <code>needs_human_review</code> and <code>orphan_candidate</code> rows visible in product-facing reads.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -91,6 +95,7 @@
     <li>A synchronous media-post batch of <code>100</code> made the visible Grok tab show Chrome unresponsive alerts. The implementation now forbids high-volume synchronous media-post capture; future full runs must use the async worker or stop before resuming the Goal.</li>
     <li>The D1 projection dry run uses a new dedicated script, <code>scripts/build-d1-canonical-projection-dry-run.mjs</code>, instead of adding another mode to the broad inventory runner. This keeps the production inventory runner focused on read-only evidence collection while making the projection stage repeatable from the approved snapshot.</li>
     <li>The first D1 write attempt stopped after schema creation because Wrangler returned non-JSON progress output for <code>--file</code> imports despite <code>--json</code>. I verified the projection tables existed with zero snapshot rows before resuming; the executor now treats successful file imports as success even when Wrangler emits human progress output, while still requiring JSON for SELECT readback commands.</li>
+    <li>The read-path slice intentionally does not switch the default product path to the canonical projection. It exposes the projection only through explicit opt-in reads so a later deploy or smoke test cannot silently change the Vault UI without a separate approval gate.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -111,6 +116,7 @@
     <li>The projection stores private exact object keys and Grok IDs in ignored local row artifacts because a future private D1 query projection will need them to serve media and resolve identity. Committed artifacts keep only counts, hashes, schemas, and approval gates.</li>
     <li>D1 limits SQL statements to <code>100 KB</code>, so the write path splits raw SQL into statements under <code>90 KB</code> and files under <code>3 MB</code>. One composite <code>grokPostSet</code> identity value and one matching lookup value were too large to inline; those D1 values are stored as <code>NULL</code> while their hashes and individual <code>grok_post_id</code> lookup rows preserve query identity.</li>
     <li>Nine storage rows had oversized <code>prompt_ref_ids_json</code> arrays for the same high-fanout asset. D1 stores small sentinel JSON for those fields; the individual <code>prompt_ref_id</code> lookup rows preserve the query links.</li>
+    <li>Canonical inventory and gap pagination use primary-key ordering instead of review-priority sorting. This keeps the first read path cheap and stable in production D1; review-first filters can be added later as an explicit query mode without changing the base pagination contract.</li>
   </ul>
 
   <h2>Open Questions</h2>
@@ -126,6 +132,7 @@
     <li>The D1 projection dry run is complete and validated locally. The next approval gate is a D1 projection write to <code>grok-powertools-db</code> only after explicit approval naming the target database, source R2 snapshot, payload SHA-256, stable content hash, projection schema id, expected table names and row counts, and rollback plan.</li>
     <li>Product route and read-path changes remain a later phase after D1 projection write/readback verification. Physical duplicate cleanup still comes later, after logical state and product-visible projection are proven.</li>
     <li>The D1 projection write is complete and verified. The next phase is product/Worker read-path design against this verified projection, after separate approval. No product route, Worker read path, Grok action, R2 move/delete, repair/sync route, or physical cleanup was performed in the D1 write phase.</li>
+    <li>The first local read-path design slice is complete. The next approval gate is a Worker deploy and live route smoke for explicit <code>source=canonical</code> reads only. Default product reads, repair/sync, R2 cleanup, Grok actions, and physical duplicate cleanup remain out of scope until separately approved.</li>
   </ul>
 
   <h2>Commands Run</h2>
@@ -172,6 +179,12 @@
     <li><code>node --check docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/write-d1-canonical-projection.mjs</code> passed.</li>
     <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/write-d1-canonical-projection.mjs --prepare-only</code> first exposed D1 raw SQL statement-limit issues for oversized composite identity and prompt-ref-list fields, then passed after write-only compaction was added. It generated <code>18</code> row SQL batch files under ignored <code>private/</code>.</li>
     <li><code>AUDIT_D1_PROJECTION_WRITE_APPROVED=1 node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/write-d1-canonical-projection.mjs</code> executed the approved D1 projection write. The first run stopped after schema creation because Wrangler returned non-JSON progress output for the schema file; a SELECT check showed the six projection tables existed and the snapshot had no rows. The resumed run completed and readback verified the expected counts.</li>
+    <li><code>npm run typecheck</code> in <code>cloud/</code> passed after adding explicit canonical read mode.</li>
+    <li><code>npm run test:acceptance</code> in <code>cloud/</code> passed: <code>30</code> tests. New coverage verifies explicit canonical inventory, fail-closed missing projection behavior, canonical gap reads, canonical media lookup, and no D1 mutations in those reads.</li>
+    <li><code>npm run lint</code> in <code>web/</code> passed after adding explicit canonical source forwarding for preview, gaps, and media.</li>
+    <li>A direct <code>npx wrangler</code> SELECT probe initially failed with Cloudflare code <code>7403</code> because the current shell had no <code>CLOUDFLARE_API_TOKEN</code> and used the wrong active Wrangler auth context. SELECT validation was rerun with <code>mise exec node@24 -- npx --yes wrangler@latest</code>, matching the successful D1 write executor path.</li>
+    <li>SELECT-only production D1 validation using the same query shapes verified the canonical snapshot marker, asset page query, storage-object subquery, gap page query, and media lookup. The optimized sample asset and gap page queries each read <code>3</code> rows for a <code>3</code>-row page; all validation commands reported <code>changed_db=false</code> and <code>rows_written=0</code>.</li>
+    <li>Final validation for the canonical read-path slice passed: root <code>npm run lint</code>, root <code>npm run test:unit</code> with <code>18</code> suites and <code>298</code> tests, root <code>npm run test:e2e</code> with <code>14</code> tests, web <code>npm run build</code>, web <code>npm run lint</code>, cloud <code>npm run typecheck</code>, cloud <code>npm run test:acceptance</code> with <code>30</code> tests, artifact validation, and <code>git diff --check</code>.</li>
   </ul>
 
   <h2>Artifacts Produced</h2>
@@ -209,6 +222,8 @@
     <li><code>logs/d1-canonical-projection-write-plan.json</code>: committed-safe write plan, SQL batch summary, and D1 write adaptations.</li>
     <li><code>logs/d1-canonical-projection-write-readback.json</code>: committed-safe production D1 write/readback evidence.</li>
     <li><code>report-d1-canonical-projection-write.md</code>: committed-safe human summary for the D1 projection write.</li>
+    <li><code>logs/d1-canonical-read-path-select-validation.json</code>: committed-safe SELECT-only validation summary for the canonical read-path query shapes.</li>
+    <li><code>report-d1-canonical-read-path-design.md</code>: committed-safe human summary for the explicit canonical Worker/web read-path design and SELECT-only validation.</li>
   </ul>
 </body>
 </html>

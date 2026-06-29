@@ -2056,6 +2056,7 @@ async function validateArtifacts() {
     'logs/d1-canonical-projection-dry-run-validation.json',
     'logs/d1-canonical-projection-write-plan.json',
     'logs/d1-canonical-projection-write-readback.json',
+    'logs/d1-canonical-read-path-select-validation.json',
     'reconciliations/sample-set.json'
   ];
   const requiredJsonl = [
