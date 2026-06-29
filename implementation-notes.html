@@ -1105,6 +1105,44 @@ Error: Cannot find module './movie-timebase'</code></pre>
 &gt; eslint</code></pre>
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 4: Review Hardening Follow-Up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Kept unknown video duration nonzero with the existing Movie Maker
+                            provisional <code>5</code>-second fallback until media metadata is
+                            available. Limited audio-intent export blockers to video clips, added
+                            image media presence checks, ignored invalid trim commands, clamped
+                            volume to schema bounds, and retargeted or cleared selection when
+                            rejected or deleted clips disappear.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Review Hardening Follow-Up</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The provisional duration is a warning state, not final export proof.
+                            Later preview/export work still needs real media metadata before claiming
+                            MP4 timing and audio correctness.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Review Hardening Follow-Up</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first Task 4 hardening run exposed 5 failures across provisional
+                            duration, image/audio preflight, invalid reducer inputs, and stale
+                            selection. After fixes:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-timeline-model movie-review-reducer movie-review-storage
+
+ Test Files  3 passed (3)
+      Tests  17 passed (17)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>

@@ -1,6 +1,8 @@
 import type { ReviewClip } from "./movie-review-types";
 import { secondsToTicks } from "./movie-timebase";
 
+export const DEFAULT_VIDEO_DURATION_SECONDS = 5;
+
 export interface MovieTimelineEntry {
   clipId: string;
   startTick: number;
@@ -21,7 +23,7 @@ export interface ExportPreflight {
 }
 
 export function normalizeClipTrim(clip: ReviewClip): { trimStartSeconds: number; trimEndSeconds: number } {
-  const duration = clip.durationSeconds || clip.trimEndSeconds || 0;
+  const duration = clip.durationSeconds || clip.trimEndSeconds || (clip.mediaType === "video" ? DEFAULT_VIDEO_DURATION_SECONDS : 0);
   const rawStart = clip.trimStartSeconds || 0;
   const rawEnd = clip.trimEndSeconds ?? duration;
   const sortedStart = Math.min(rawStart, rawEnd);
@@ -72,10 +74,14 @@ export function getExportPreflight(input: ExportPreflightInput): ExportPreflight
   if (input.candidates.some((clip) => clip.lifecycle !== "rejected")) blockers.push("Unresolved unsafe candidate state");
   if (input.pendingProposalCount > 0) blockers.push("Pending proposal that would change export state");
   for (const clip of input.committedClips) {
-    if (!clip.videoUrl && clip.mediaType === "video") blockers.push("Missing media");
+    if (clip.mediaType === "video" && !clip.videoUrl) blockers.push("Missing media");
+    if (clip.mediaType === "image" && !clip.imageUrl) blockers.push("Missing media");
     if (clipDurationSeconds(clip) <= 0) blockers.push("Invalid duration");
-    if (!clip.flags.includes("has-source-audio") && !clip.flags.includes("muted-in-mix")) blockers.push("Unknown audio intent");
-    if (clip.muted) warnings.push("Muted source audio");
+    if (clip.mediaType === "video" && !clip.durationSeconds && !clip.trimEndSeconds) warnings.push("Estimated video duration");
+    if (clip.mediaType === "video" && !clip.flags.includes("has-source-audio") && !clip.flags.includes("muted-in-mix")) {
+      blockers.push("Unknown audio intent");
+    }
+    if (clip.mediaType === "video" && clip.muted) warnings.push("Muted source audio");
   }
   return { blockers: [...new Set(blockers)], warnings: [...new Set(warnings)] };
 }

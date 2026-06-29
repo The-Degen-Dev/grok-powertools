@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MovieReviewProject, ReviewClip } from "./movie-review-types";
+import { movieReviewProjectSchema, type MovieReviewProject, type ReviewClip } from "./movie-review-types";
 import { applyReviewCommand } from "./movie-review-reducer";
 
 function clip(id: string, position = 0): ReviewClip {
@@ -50,9 +50,10 @@ describe("movie review reducer", () => {
   });
 
   it("rejects current candidate without adding to committed cut", () => {
-    const next = applyReviewCommand(project(), { type: "reject-current" });
+    const next = applyReviewCommand({ ...project(), selectedTarget: { type: "candidate", clipId: "a" } }, { type: "reject-current" });
     expect(next.candidates[0]).toMatchObject({ id: "b" });
     expect(next.committedClips).toEqual([]);
+    expect(next.selectedTarget).toEqual({ type: "candidate", clipId: "b" });
   });
 
   it("keeps proposal ids separate from clip ids", () => {
@@ -67,11 +68,26 @@ describe("movie review reducer", () => {
     expect(trimmed.committedClips[0].flags).toContain("trimmed");
   });
 
+  it("ignores invalid trims and clamps audio volume to schema-safe values", () => {
+    const kept = applyReviewCommand(project(), { type: "keep-current" });
+    const invalidTrim = applyReviewCommand(kept, { type: "set-trim", clipId: "a", trimStartSeconds: 2, trimEndSeconds: 1 });
+    const loud = applyReviewCommand(invalidTrim, { type: "set-audio", clipId: "a", volume: 9, muted: false, solo: false });
+    expect(loud.committedClips[0]).toMatchObject({ trimStartSeconds: 0, trimEndSeconds: 2, volume: 2 });
+    expect(() => movieReviewProjectSchema.parse(loud)).not.toThrow();
+  });
+
   it("uses solo semantics where any soloed clip silences other clips", () => {
     const keptA = applyReviewCommand(project(), { type: "keep-current" });
     const keptB = applyReviewCommand(keptA, { type: "keep-current" });
     const solo = applyReviewCommand(keptB, { type: "set-audio", clipId: "a", volume: 1, muted: false, solo: true });
     expect(solo.committedClips.find((item) => item.id === "a")?.solo).toBe(true);
     expect(solo.committedClips.find((item) => item.id === "b")?.solo).toBe(false);
+  });
+
+  it("clears selection when deleting the selected committed clip", () => {
+    const kept = applyReviewCommand(project(), { type: "keep-current" });
+    const deleted = applyReviewCommand({ ...kept, selectedTarget: { type: "clip", clipId: "a" } }, { type: "delete-committed", clipId: "a" });
+    expect(deleted.committedClips).toEqual([]);
+    expect(deleted.selectedTarget).toBeUndefined();
   });
 });

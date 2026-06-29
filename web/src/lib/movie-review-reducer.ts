@@ -36,6 +36,25 @@ function updateCommittedClip(project: MovieReviewProject, clipId: string, update
   };
 }
 
+function clampVolume(volume: number): number {
+  if (!Number.isFinite(volume)) return 1;
+  return Math.max(0, Math.min(2, volume));
+}
+
+function validTrim(trimStartSeconds: number, trimEndSeconds: number): boolean {
+  return Number.isFinite(trimStartSeconds) && Number.isFinite(trimEndSeconds) && trimStartSeconds >= 0 && trimEndSeconds > trimStartSeconds;
+}
+
+function candidateSelection(candidates: ReviewClip[], activeIndex: number): SelectedTarget | undefined {
+  const selected = candidates[activeIndex];
+  return selected ? { type: "candidate", clipId: selected.id } : undefined;
+}
+
+function committedSelection(clips: ReviewClip[], index: number): SelectedTarget | undefined {
+  const selected = clips[Math.max(0, Math.min(index, clips.length - 1))];
+  return selected ? { type: "clip", clipId: selected.id } : undefined;
+}
+
 export function applyReviewCommand(project: MovieReviewProject, command: ReviewCommand): MovieReviewProject {
   switch (command.type) {
     case "select":
@@ -58,11 +77,14 @@ export function applyReviewCommand(project: MovieReviewProject, command: ReviewC
     case "reject-current": {
       const current = activeCandidate(project);
       if (!current) return project;
+      const selectedCurrent = project.selectedTarget?.type === "candidate" && project.selectedTarget.clipId === current.id;
       const candidates = project.candidates.filter((clip) => clip.id !== current.id);
+      const activeIndex = Math.min(project.activeIndex, Math.max(0, candidates.length - 1));
       return timestampProject({
         ...project,
         candidates: withPositions(candidates),
-        activeIndex: Math.min(project.activeIndex, Math.max(0, candidates.length - 1)),
+        activeIndex,
+        selectedTarget: selectedCurrent ? candidateSelection(candidates, activeIndex) : project.selectedTarget,
       });
     }
     case "move-committed": {
@@ -74,21 +96,28 @@ export function applyReviewCommand(project: MovieReviewProject, command: ReviewC
       next.splice(targetIndex, 0, item);
       return timestampProject({ ...project, committedClips: withPositions(next) });
     }
-    case "delete-committed":
+    case "delete-committed": {
+      const deletedIndex = project.committedClips.findIndex((clip) => clip.id === command.clipId);
+      const clips = withPositions(project.committedClips.filter((clip) => clip.id !== command.clipId));
+      const selectedDeleted = project.selectedTarget?.type === "clip" && project.selectedTarget.clipId === command.clipId;
       return timestampProject({
         ...project,
-        committedClips: withPositions(project.committedClips.filter((clip) => clip.id !== command.clipId)),
+        committedClips: clips,
+        selectedTarget: selectedDeleted ? committedSelection(clips, deletedIndex) : project.selectedTarget,
       });
-    case "set-trim":
+    }
+    case "set-trim": {
+      if (!validTrim(command.trimStartSeconds, command.trimEndSeconds)) return project;
       return timestampProject(
         updateCommittedClip(project, command.clipId, (clip) =>
           flagClip({ ...clip, trimStartSeconds: command.trimStartSeconds, trimEndSeconds: command.trimEndSeconds }, "trimmed", true),
         ),
       );
+    }
     case "set-audio":
       return timestampProject(
         updateCommittedClip(project, command.clipId, (clip) =>
-          flagClip({ ...clip, volume: command.volume, muted: command.muted, solo: command.solo }, "muted-in-mix", command.muted),
+          flagClip({ ...clip, volume: clampVolume(command.volume), muted: command.muted, solo: command.solo }, "muted-in-mix", command.muted),
         ),
       );
   }

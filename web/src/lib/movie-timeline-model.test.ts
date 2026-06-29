@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewClip } from "./movie-review-types";
 import { secondsToTicks, ticksToSeconds } from "./movie-timebase";
-import { buildMovieTimeline, clipEffectiveGain, getExportPreflight, normalizeClipTrim } from "./movie-timeline-model";
+import { buildMovieTimeline, clipDurationSeconds, clipEffectiveGain, getExportPreflight, normalizeClipTrim } from "./movie-timeline-model";
 
 function clip(id: string, patch: Partial<ReviewClip> = {}): ReviewClip {
   return {
@@ -52,6 +52,15 @@ describe("movie timeline model", () => {
     });
   });
 
+  it("uses a nonzero provisional duration for videos before metadata loads", () => {
+    const pendingMetadata = clip("a", { trimEndSeconds: undefined, durationSeconds: undefined });
+    expect(clipDurationSeconds(pendingMetadata)).toBe(5);
+    expect(buildMovieTimeline([pendingMetadata])[0]).toMatchObject({
+      startTick: 0,
+      endTick: 150000,
+    });
+  });
+
   it("blocks export for unresolved candidates and unknown audio intent", () => {
     const preflight = getExportPreflight({
       committedClips: [clip("a", { flags: [] })],
@@ -60,6 +69,28 @@ describe("movie timeline model", () => {
     });
     expect(preflight.blockers).toContain("Unresolved unsafe candidate state");
     expect(preflight.blockers).toContain("Unknown audio intent");
+  });
+
+  it("checks image media without requiring source-audio intent", () => {
+    const imageClip = clip("image-a", {
+      mediaType: "image",
+      mediaRef: { type: "vault", assetId: "image-a" },
+      videoUrl: undefined,
+      imageUrl: "/api/vault/media/image-a",
+      durationSeconds: 3,
+      flags: [],
+    });
+    const missingImage = { ...imageClip, id: "image-b", imageUrl: undefined };
+    const titleClip = clip("title-a", {
+      mediaType: "title",
+      mediaRef: { type: "title" },
+      videoUrl: undefined,
+      titleText: "Title",
+      durationSeconds: 3,
+      flags: [],
+    });
+    expect(getExportPreflight({ committedClips: [imageClip, titleClip], candidates: [], pendingProposalCount: 0 }).blockers).toEqual([]);
+    expect(getExportPreflight({ committedClips: [missingImage], candidates: [], pendingProposalCount: 0 }).blockers).toContain("Missing media");
   });
 
   it("computes solo-aware effective gain for preview and export", () => {
