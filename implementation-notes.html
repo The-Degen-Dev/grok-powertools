@@ -1239,6 +1239,72 @@ Error: Cannot find module './movie-director'</code></pre>
 &gt; eslint</code></pre>
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Replaced the simple <code>/movie?id=...</code> wrapper with a local
+                            Review Bay shell backed by real IndexedDB Review project state. Added
+                            accessible operator regions for the header, Director rail, Candidates
+                            Grid, Inspector, and Clip Strip, plus keyboard keep/reject and mode
+                            commands through the reducer.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Deviations</td>
+                        <td>
+                            The E2E waits for the seeded candidate to be visible before sending
+                            keyboard input because Review project hydration is asynchronous. The
+                            rail and inspector use explicit <code>role="region"</code> because
+                            <code>aside</code> exposes as complementary by default.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Kept Task 6 visually plain and state-focused. Preview, richer surfaces,
+                            and deeper responsive polish remain in the later planned UI tasks, while
+                            this slice proves the shell and reducer wiring.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first E2E:
+                            <pre><code>Locator: getByRole('banner', { name: /Movie Review Header/i })
+Expected: visible
+Error: element(s) not found</code></pre>
+                            Passing focused E2E:
+                            <pre><code>Running 2 tests using 1 worker
+  ✓  1 [chromium] › tests/e2e-web/movie-review-bay.spec.js:4:1 › Review Bay first viewport exposes operator regions (2.5s)
+  ✓  2 [chromium] › tests/e2e-web/movie-review-bay.spec.js:14:1 › Keyboard keep and reject move candidates into the right lanes (1.2s)
+
+  2 passed (6.6s)</code></pre>
+                            Full unit suite:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  6 passed (6)
+      Tests  33 passed (33)</code></pre>
+                            Lint and build:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>
