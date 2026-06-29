@@ -96,6 +96,15 @@ describe("movie review reducer", () => {
     expect(solo.committedClips.find((item) => item.id === "b")?.solo).toBe(false);
   });
 
+  it("records explicit source-audio intent for committed clips", () => {
+    const kept = applyReviewCommand(project(), { type: "keep-current" });
+    const confirmed = applyReviewCommand(kept, { type: "set-source-audio", clipId: "a", hasSourceAudio: true });
+    expect(confirmed.committedClips[0].flags).toContain("has-source-audio");
+
+    const cleared = applyReviewCommand(confirmed, { type: "set-source-audio", clipId: "a", hasSourceAudio: false });
+    expect(cleared.committedClips[0].flags).not.toContain("has-source-audio");
+  });
+
   it("clears selection when deleting the selected committed clip", () => {
     const kept = applyReviewCommand(project(), { type: "keep-current" });
     const deleted = applyReviewCommand({ ...kept, selectedTarget: { type: "clip", clipId: "a" } }, { type: "delete-committed", clipId: "a" });

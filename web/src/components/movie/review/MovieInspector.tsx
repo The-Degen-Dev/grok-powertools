@@ -26,6 +26,7 @@ export default function MovieInspector({
   const clip = selectedClip(project);
   const committed = clip ? project.committedClips.some((item) => item.id === clip.id) : false;
   const trimOut = clip?.trimEndSeconds || clip?.durationSeconds || 5;
+  const hasSourceAudio = Boolean(clip?.flags.includes("has-source-audio"));
   return (
     <aside role="region" aria-label="Inspector" className="movie-review-inspector min-h-0 overflow-y-auto border-l border-neutral-800 p-4">
       {clip ? (
@@ -98,6 +99,25 @@ export default function MovieInspector({
                   className="mt-1 w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100"
                 />
               </label>
+              {clip.mediaType === "video" && (
+                <button
+                  type="button"
+                  aria-label={hasSourceAudio ? "Clear source audio" : "Confirm source audio"}
+                  onClick={() =>
+                    onProjectChange(
+                      applyReviewCommand(project, {
+                        type: "set-source-audio",
+                        clipId: clip.id,
+                        hasSourceAudio: !hasSourceAudio,
+                      }),
+                    )
+                  }
+                  className="flex w-full items-center justify-center gap-2 rounded bg-neutral-900 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-800"
+                >
+                  <Volume2 className="h-4 w-4" />
+                  {hasSourceAudio ? "Clear source audio" : "Confirm source audio"}
+                </button>
+              )}
               <button
                 type="button"
                 aria-label={clip.muted ? "Unmute clip" : "Mute clip"}

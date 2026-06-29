@@ -124,9 +124,11 @@ test("Inspector updates trim and audio state for selected committed clip", async
   await page.getByLabel(/Trim in/i).fill("0.4");
   await page.getByLabel(/Trim out/i).fill("1.4");
   await page.getByLabel(/Clip volume/i).fill("0.5");
+  await page.getByRole("button", { name: /Confirm source audio/i }).click();
   await page.getByRole("button", { name: /Mute clip/i }).click();
   await page.getByRole("button", { name: /Solo clip/i }).click();
   await expect(page.getByRole("region", { name: /Clip Strip/i }).getByRole("img", { name: /trimmed/i })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByRole("img", { name: /source audio/i })).toBeVisible();
   await expect(page.getByRole("region", { name: /Clip Strip/i }).getByRole("img", { name: /muted in mix/i })).toBeVisible();
   await page.waitForTimeout(400);
   const project = await readActiveReviewProject(page, movieId);
@@ -137,8 +139,10 @@ test("Inspector updates trim and audio state for selected committed clip", async
     muted: true,
     solo: true,
   });
+  expect(project.committedClips[0].flags).toContain("has-source-audio");
   await page.reload();
   await expect(page.getByLabel(/Trim in/i)).toHaveValue("0.4");
+  await expect(page.getByRole("region", { name: /Inspector/i }).getByRole("button", { name: /Clear source audio/i })).toBeVisible();
   await expect(page.getByRole("region", { name: /Inspector/i }).getByRole("button", { name: /Unmute clip/i })).toBeVisible();
   await expect(page.getByRole("region", { name: /Inspector/i }).getByRole("button", { name: /Unsolo clip/i })).toBeVisible();
 });
@@ -184,7 +188,7 @@ test("Assemble mode shows continuous preview, ribbon, waveform controls, and aud
   await expect(page.getByRole("region", { name: /Time-proportional ribbon/i })).toBeVisible();
   await expect(page.getByRole("slider", { name: /Trim in/i })).toBeVisible();
   await expect(page.getByRole("slider", { name: /Trim out/i })).toBeVisible();
-  await expect(page.getByText(/Source audio/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Source audio/i })).toBeVisible();
 });
 
 test("Review Bay remains usable at phone width", async ({ page }) => {

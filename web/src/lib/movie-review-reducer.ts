@@ -9,7 +9,8 @@ export type ReviewCommand =
   | { type: "delete-committed"; clipId: string }
   | { type: "set-trim"; clipId: string; trimStartSeconds?: number; trimEndSeconds?: number }
   | { type: "apply-version"; clips: ReviewClip[] }
-  | { type: "set-audio"; clipId: string; volume: number; muted: boolean; solo: boolean };
+  | { type: "set-audio"; clipId: string; volume: number; muted: boolean; solo: boolean }
+  | { type: "set-source-audio"; clipId: string; hasSourceAudio: boolean };
 
 function timestampProject(project: MovieReviewProject): MovieReviewProject {
   return { ...project, updatedAt: new Date().toISOString() };
@@ -136,6 +137,10 @@ export function applyReviewCommand(project: MovieReviewProject, command: ReviewC
         updateCommittedClip(project, command.clipId, (clip) =>
           flagClip({ ...clip, volume: clampVolume(command.volume), muted: command.muted, solo: command.solo }, "muted-in-mix", command.muted),
         ),
+      );
+    case "set-source-audio":
+      return timestampProject(
+        updateCommittedClip(project, command.clipId, (clip) => flagClip(clip, "has-source-audio", command.hasSourceAudio)),
       );
   }
 }
