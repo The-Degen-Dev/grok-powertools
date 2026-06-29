@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import type { Movie } from "@/lib/types";
 import MovieCandidatesGrid from "./MovieCandidatesGrid";
 import MovieClipStrip from "./MovieClipStrip";
+import MovieFocusLoupe from "./MovieFocusLoupe";
 import MovieInspector from "./MovieInspector";
 import MovieLeftRail from "./MovieLeftRail";
 import MovieReviewHeader from "./MovieReviewHeader";
@@ -33,7 +34,11 @@ export default function MovieReviewBay({ movie }: { movie: Movie }) {
         <MovieReviewHeader project={project} onProjectChange={setProject} />
       </div>
       <MovieLeftRail project={project} onProjectChange={setProject} />
-      <MovieCandidatesGrid project={project} onProjectChange={setProject} />
+      {project.mode === "focus" ? (
+        <MovieFocusLoupe project={project} onProjectChange={setProject} />
+      ) : (
+        <MovieCandidatesGrid project={project} onProjectChange={setProject} />
+      )}
       <MovieInspector project={project} onProjectChange={setProject} />
       <div className="lg:col-span-3">
         <MovieClipStrip project={project} onProjectChange={setProject} />

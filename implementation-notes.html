@@ -1349,6 +1349,77 @@ Error: element(s) not found</code></pre>
                             fixes.
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added lifecycle and flag badges to both candidates and committed clips,
+                            replaced the static draft queue with a real version list, added a Focus
+                            Loupe mode, and expanded the inspector to expose trim-in, trim-out,
+                            volume, and mute controls for selected committed clips.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Deviations</td>
+                        <td>
+                            The Task 7 E2E tests use an explicit <code>expectReviewReady</code>
+                            helper before keyboard input. Review project hydration is asynchronous,
+                            so the test waits for the visible seeded candidate instead of sending
+                            keys while the loading state may still own the page.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Draft Queue applies saved whole-cut versions instead of merging
+                            individual clips. That keeps this phase safe and reversible while later
+                            timeline work can add granular version comparison.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first focused E2E added coverage for separated candidates,
+                            inspector trim/audio edits, and Focus mode. Initial failures were a
+                            missing <code>onProjectChange</code> prop destructure and keyboard tests
+                            firing before hydrated UI readiness:
+                            <pre><code>ReferenceError path: MovieLeftRail used onProjectChange without destructuring it
+locator.fill timed out waiting for getByLabel(/Trim in/i)
+Focus Loupe region not found after Digit2 before readiness wait</code></pre>
+                            Passing focused E2E:
+                            <pre><code>Running 5 tests using 1 worker
+  ✓  1 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Review Bay first viewport exposes operator regions
+  ✓  2 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Keyboard keep and reject move candidates into the right lanes
+  ✓  3 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Review Bay keeps Candidates Grid separate from committed Clip Strip
+  ✓  4 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Inspector updates trim and audio state for selected committed clip
+  ✓  5 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Focus mode supports Enter to keep and Escape to return to Review
+
+  5 passed (10.4s)</code></pre>
+                            Targeted unit, lint, and build:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-review-reducer movie-timeline-model
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+
+&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>

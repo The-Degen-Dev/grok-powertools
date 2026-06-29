@@ -3,6 +3,7 @@
 import { Trash2 } from "lucide-react";
 import { applyReviewCommand } from "@/lib/movie-review-reducer";
 import type { MovieReviewProject, ReviewClip } from "@/lib/movie-review-types";
+import { MovieFlagBadges, MovieLifecycleBadge } from "./MovieStatusBadges";
 
 function clipLabel(clip: ReviewClip): string {
   return clip.sourceAssetId || (clip.mediaRef.type === "vault" ? clip.mediaRef.assetId : clip.titleText || clip.id);
@@ -34,6 +35,10 @@ export default function MovieClipStrip({
               >
                 <div className="text-xs text-neutral-500">#{index + 1}</div>
                 <div className="truncate text-sm font-medium text-neutral-100">{clipLabel(clip)}</div>
+                <div className="mt-1 flex gap-1">
+                  <MovieLifecycleBadge lifecycle={clip.lifecycle} />
+                  <MovieFlagBadges flags={clip.flags} />
+                </div>
               </button>
               <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
                 <span>{clip.mediaType}</span>

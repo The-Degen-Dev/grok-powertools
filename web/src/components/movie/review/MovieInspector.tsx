@@ -25,6 +25,7 @@ export default function MovieInspector({
 }) {
   const clip = selectedClip(project);
   const committed = clip ? project.committedClips.some((item) => item.id === clip.id) : false;
+  const trimOut = clip?.trimEndSeconds || clip?.durationSeconds || 5;
   return (
     <aside role="region" aria-label="Inspector" className="min-h-0 overflow-y-auto border-l border-neutral-800 p-4">
       {clip ? (
@@ -37,7 +38,7 @@ export default function MovieInspector({
           {committed ? (
             <>
               <label className="block text-xs text-neutral-400">
-                Trim start
+                Trim in
                 <input
                   type="number"
                   min="0"
@@ -49,7 +50,7 @@ export default function MovieInspector({
                         type: "set-trim",
                         clipId: clip.id,
                         trimStartSeconds: Number(event.target.value),
-                        trimEndSeconds: clip.trimEndSeconds || clip.durationSeconds || 5,
+                        trimEndSeconds: trimOut,
                       }),
                     )
                   }
@@ -57,9 +58,29 @@ export default function MovieInspector({
                 />
               </label>
               <label className="block text-xs text-neutral-400">
-                Volume
+                Trim out
                 <input
-                  type="range"
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={trimOut}
+                  onChange={(event) =>
+                    onProjectChange(
+                      applyReviewCommand(project, {
+                        type: "set-trim",
+                        clipId: clip.id,
+                        trimStartSeconds: clip.trimStartSeconds,
+                        trimEndSeconds: Number(event.target.value),
+                      }),
+                    )
+                  }
+                  className="mt-1 w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100"
+                />
+              </label>
+              <label className="block text-xs text-neutral-400">
+                Clip volume
+                <input
+                  type="number"
                   min="0"
                   max="2"
                   step="0.05"
@@ -75,11 +96,12 @@ export default function MovieInspector({
                       }),
                     )
                   }
-                  className="mt-2 w-full accent-orange-500"
+                  className="mt-1 w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-100"
                 />
               </label>
               <button
                 type="button"
+                aria-label={clip.muted ? "Unmute clip" : "Mute clip"}
                 onClick={() =>
                   onProjectChange(
                     applyReviewCommand(project, {
@@ -94,7 +116,7 @@ export default function MovieInspector({
                 className="flex w-full items-center justify-center gap-2 rounded bg-neutral-900 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-800"
               >
                 {clip.muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                {clip.muted ? "Muted" : "Audible"}
+                {clip.muted ? "Unmute clip" : "Mute clip"}
               </button>
             </>
           ) : (

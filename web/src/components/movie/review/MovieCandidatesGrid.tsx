@@ -3,6 +3,7 @@
 import { Check, MousePointer2, X } from "lucide-react";
 import { applyReviewCommand } from "@/lib/movie-review-reducer";
 import type { MovieReviewProject, ReviewClip } from "@/lib/movie-review-types";
+import { MovieFlagBadges, MovieLifecycleBadge } from "./MovieStatusBadges";
 
 function clipLabel(clip: ReviewClip): string {
   return clip.sourceAssetId || (clip.mediaRef.type === "vault" ? clip.mediaRef.assetId : clip.titleText || clip.id);
@@ -39,7 +40,13 @@ export default function MovieCandidatesGrid({
                 {clipLabel(clip)}
               </button>
               <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="min-w-0 truncate text-sm font-medium text-neutral-100">{clipLabel(clip)}</div>
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-neutral-100">{clipLabel(clip)}</div>
+                  <div className="mt-1 flex gap-1">
+                    <MovieLifecycleBadge lifecycle={clip.lifecycle} />
+                    <MovieFlagBadges flags={clip.flags} />
+                  </div>
+                </div>
                 <div className="flex shrink-0 gap-1">
                   <button
                     type="button"

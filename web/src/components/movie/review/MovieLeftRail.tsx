@@ -4,9 +4,11 @@ import { Wand2 } from "lucide-react";
 import { createRuleBasedDirectorProposal } from "@/lib/movie-director";
 import { saveDirectorProposal } from "@/lib/movie-review-storage";
 import type { MovieReviewProject } from "@/lib/movie-review-types";
+import MovieDraftQueue from "./MovieDraftQueue";
 
 export default function MovieLeftRail({
   project,
+  onProjectChange,
 }: {
   project: MovieReviewProject;
   onProjectChange: (project: MovieReviewProject) => void;
@@ -25,10 +27,7 @@ export default function MovieLeftRail({
           <Wand2 className="h-4 w-4 text-orange-400" />
           Director Proposal
         </button>
-        <div className="rounded border border-neutral-800 p-3">
-          <div className="text-xs uppercase tracking-wide text-neutral-500">Draft queue</div>
-          <div className="mt-2 text-sm text-neutral-300">{project.committedClips.length} clips in current cut</div>
-        </div>
+        <MovieDraftQueue project={project} onProjectChange={onProjectChange} />
       </div>
     </aside>
   );

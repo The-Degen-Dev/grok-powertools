@@ -42,6 +42,10 @@ export function useMovieKeyboard(project: MovieReviewProject | null, setProject:
         event.preventDefault();
         setProject((current) => applyReviewCommand(current, { type: "set-mode", mode: "assemble" }));
       }
+      if (event.code === "Escape") {
+        event.preventDefault();
+        setProject((current) => applyReviewCommand(current, { type: "set-mode", mode: "review" }));
+      }
       if ((event.code === "ArrowLeft" || event.code === "ArrowRight") && project.selectedTarget?.type === "clip") {
         event.preventDefault();
         const clipId = project.selectedTarget.clipId;
