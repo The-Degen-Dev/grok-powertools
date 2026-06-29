@@ -38,7 +38,8 @@
     "canonicalIndex": "local_only_complete_with_gaps",
     "grokSavedInventory": "api_captured_post_identity_with_post_gaps",
     "canonicalSnapshotDryRun": "validated",
-    "canonicalSnapshotR2Write": "verified"
+    "canonicalSnapshotR2Write": "verified",
+    "d1CanonicalProjectionDryRun": "validated"
   },
   "blockers": [],
   "evidenceIndex": [
@@ -54,8 +55,8 @@
     },
     {
       "path": "implementation-notes.html",
-      "bytes": 30616,
-      "updatedAt": "2026-06-29T03:12:14.827Z"
+      "bytes": 36247,
+      "updatedAt": "2026-06-29T08:39:27.204Z"
     },
     {
       "path": "inventory/.gitkeep",
@@ -65,22 +66,22 @@
     {
       "path": "inventory/d1-metadata-snapshot-index.jsonl",
       "bytes": 1570,
-      "updatedAt": "2026-06-28T03:48:00.944Z"
+      "updatedAt": "2026-06-29T08:38:43.240Z"
     },
     {
       "path": "inventory/d1-r2-dedupe-index.jsonl",
       "bytes": 2463952,
-      "updatedAt": "2026-06-28T03:47:56.788Z"
+      "updatedAt": "2026-06-29T08:33:43.770Z"
     },
     {
       "path": "inventory/d1-schema.json",
       "bytes": 3442,
-      "updatedAt": "2026-06-28T03:47:52.436Z"
+      "updatedAt": "2026-06-29T08:33:37.541Z"
     },
     {
       "path": "inventory/d1-vault-overlays.jsonl",
       "bytes": 0,
-      "updatedAt": "2026-06-28T03:48:05.119Z"
+      "updatedAt": "2026-06-29T08:33:53.625Z"
     },
     {
       "path": "inventory/grok-assets-current-summary.json",
@@ -203,9 +204,14 @@
       "updatedAt": "2026-06-28T20:53:03.113Z"
     },
     {
+      "path": "logs/d1-canonical-projection-dry-run-validation.json",
+      "bytes": 2365,
+      "updatedAt": "2026-06-29T08:34:31.202Z"
+    },
+    {
       "path": "logs/d1-metadata_snapshot_index.json",
       "bytes": 670,
-      "updatedAt": "2026-06-28T03:48:00.942Z"
+      "updatedAt": "2026-06-29T08:33:48.647Z"
     },
     {
       "path": "logs/d1-preflight-schema-smoke.json",
@@ -215,17 +221,17 @@
     {
       "path": "logs/d1-r2_dedupe_index.json",
       "bytes": 652,
-      "updatedAt": "2026-06-28T03:47:56.756Z"
+      "updatedAt": "2026-06-29T08:33:43.715Z"
     },
     {
       "path": "logs/d1-schema.json",
       "bytes": 766,
-      "updatedAt": "2026-06-28T03:47:52.428Z"
+      "updatedAt": "2026-06-29T08:33:37.531Z"
     },
     {
       "path": "logs/d1-vault_overlays.json",
       "bytes": 642,
-      "updatedAt": "2026-06-28T03:48:05.118Z"
+      "updatedAt": "2026-06-29T08:33:53.623Z"
     },
     {
       "path": "logs/grok-assets-active-tab-capture.json",
@@ -380,7 +386,7 @@
     {
       "path": "logs/validate-artifacts.json",
       "bytes": 102,
-      "updatedAt": "2026-06-29T03:13:52.180Z"
+      "updatedAt": "2026-06-29T08:39:36.276Z"
     },
     {
       "path": "logs/web-build.txt",
@@ -508,6 +514,16 @@
       "updatedAt": "2026-06-29T00:47:23.188Z"
     },
     {
+      "path": "reconciliations/d1-canonical-projection-dry-run-summary.json",
+      "bytes": 7129,
+      "updatedAt": "2026-06-29T08:34:31.198Z"
+    },
+    {
+      "path": "reconciliations/d1-canonical-projection-schema.json",
+      "bytes": 22349,
+      "updatedAt": "2026-06-29T08:34:31.053Z"
+    },
+    {
       "path": "reconciliations/duplicate-groups.json",
       "bytes": 3176884,
       "updatedAt": "2026-06-28T04:00:48.323Z"
@@ -578,6 +594,11 @@
       "updatedAt": "2026-06-29T00:10:03.093Z"
     },
     {
+      "path": "report-d1-canonical-projection-dry-run.md",
+      "bytes": 2388,
+      "updatedAt": "2026-06-29T08:34:31.205Z"
+    },
+    {
       "path": "report.md",
       "bytes": 4741,
       "updatedAt": "2026-06-28T18:48:03.195Z"
@@ -614,13 +635,18 @@
     },
     {
       "path": "scripts/audit-production-r2-vault.mjs",
-      "bytes": 82745,
-      "updatedAt": "2026-06-29T00:43:12.973Z"
+      "bytes": 82932,
+      "updatedAt": "2026-06-29T08:35:13.466Z"
     },
     {
       "path": "scripts/build-canonical-snapshot-dry-run.mjs",
       "bytes": 33990,
       "updatedAt": "2026-06-29T00:47:02.235Z"
+    },
+    {
+      "path": "scripts/build-d1-canonical-projection-dry-run.mjs",
+      "bytes": 56231,
+      "updatedAt": "2026-06-29T08:34:20.064Z"
     },
     {
       "path": "scripts/build-local-canonical-index.mjs",
@@ -746,26 +772,26 @@
     }
   },
   "nextRecommendedPhase": {
-    "name": "d1_canonical_projection",
+    "name": "d1_canonical_projection_write",
     "scope": [
-      "derive D1 canonical index rows from the approved R2 JSON snapshot",
-      "keep R2 as the durable source and D1 as the app-facing query projection",
-      "validate D1 counts, canonical IDs, classifications, hashes, and snapshot version against the approved R2 object",
-      "update product reads only after projection validation and separate approval"
+      "write the validated projection rows to D1 only after separate explicit approval",
+      "keep the approved R2 snapshot as the rollback and recovery source",
+      "read back D1 row counts and status counts before any product route change",
+      "switch Worker/product reads only in a later separately approved phase"
     ],
     "stopBefore": [
+      "product route or read-path changes",
       "Grok actions",
-      "object moves",
-      "object deletes",
+      "R2 object moves",
+      "R2 object deletes",
       "repair or sync routes",
       "physical duplicate cleanup"
     ],
     "pauseForUser": [
-      "D1 schema or projection shape is ambiguous",
-      "approved R2 snapshot readback does not verify",
-      "projection would require changing Worker or product routes",
-      "raw prompts or private IDs would enter committed artifacts",
-      "any move, delete, repair, sync, or physical cleanup is proposed"
+      "D1 target database identity is uncertain",
+      "row counts do not match the dry-run summary",
+      "D1 schema migration would require changing product reads in the same phase",
+      "rollback plan cannot preserve the approved R2 snapshot as recovery source"
     ]
   },
   "currentCanonicalSnapshotDryRun": {
@@ -862,5 +888,68 @@
       "report": "report-canonical-snapshot-r2-write.md"
     },
     "nextAllowedPhase": "d1_canonical_projection_after_separate_approval"
+  },
+  "currentD1CanonicalProjectionDryRun": {
+    "generatedAt": "2026-06-29T08:34:27.391Z",
+    "schemaVersion": "d1-canonical-projection/v1",
+    "sourceSnapshot": {
+      "bucket": "grok-gallery-001",
+      "objectKey": "grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json",
+      "payloadSha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+      "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+      "schemaVersion": "r2-vault-canonical-snapshot/v1",
+      "snapshotKind": "local_dry_run",
+      "sourceBaselineCommit": "edaaf8134bb545969d6e8036952695a3d8102ca7"
+    },
+    "privateArtifacts": {
+      "snapshotIndex": "private/d1-canonical-projection-snapshot-index.json",
+      "assets": "private/d1-canonical-projection-assets.jsonl",
+      "storageObjects": "private/d1-canonical-projection-storage-objects.jsonl",
+      "promptRefs": "private/d1-canonical-projection-prompt-refs.jsonl",
+      "gaps": "private/d1-canonical-projection-gaps.jsonl",
+      "lookups": "private/d1-canonical-projection-lookups.jsonl"
+    },
+    "committedArtifacts": {
+      "schema": "reconciliations/d1-canonical-projection-schema.json",
+      "summary": "reconciliations/d1-canonical-projection-dry-run-summary.json",
+      "validation": "logs/d1-canonical-projection-dry-run-validation.json",
+      "report": "report-d1-canonical-projection-dry-run.md"
+    },
+    "rowCounts": {
+      "snapshotRows": 1,
+      "assetRows": 8080,
+      "storageRows": 15981,
+      "promptRows": 13914,
+      "gapRows": 7696,
+      "lookupRows": 92363,
+      "unlinkedStorageRows": 0,
+      "promptRowsWithBodyFields": 0,
+      "duplicateLookupKeys": 0
+    },
+    "reviewQueue": {
+      "reviewRequiredAssets": 5482,
+      "blockingGapRows": 6019,
+      "warningGapRows": 1677,
+      "orphanCandidateStorageRows": 466,
+      "needsHumanReviewStorageRows": 5553
+    },
+    "validation": {
+      "ok": true,
+      "errorCount": 0,
+      "warningCount": 0
+    },
+    "productionWrites": {
+      "d1Writes": 0,
+      "workerStateWrites": 0,
+      "grokActions": 0,
+      "r2Writes": 0,
+      "objectMoves": 0,
+      "objectDeletes": 0,
+      "repairRouteCalls": 0,
+      "syncRouteCalls": 0,
+      "physicalCleanupActions": 0
+    },
+    "nextAllowedPhase": "d1_canonical_projection_write_after_separate_approval",
+    "requiresExplicitUserApproval": true
   }
 }

@@ -1,0 +1,91 @@
+{
+  "generatedAt": "2026-06-29T08:34:29.804Z",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "productionWrites": {
+    "d1Writes": 0,
+    "workerStateWrites": 0,
+    "grokActions": 0,
+    "r2Writes": 0,
+    "objectMoves": 0,
+    "objectDeletes": 0,
+    "repairRouteCalls": 0,
+    "syncRouteCalls": 0,
+    "physicalCleanupActions": 0
+  },
+  "counts": {
+    "snapshotRows": 1,
+    "assetRows": 8080,
+    "storageRows": 15981,
+    "promptRows": 13914,
+    "gapRows": 7696,
+    "lookupRows": 92363,
+    "unlinkedStorageRows": 0,
+    "promptRowsWithBodyFields": 0,
+    "duplicateLookupKeys": 0
+  },
+  "sourceCounts": {
+    "logicalAssets": 8080,
+    "storageObjects": 15981,
+    "promptArchive": 13914,
+    "gapRecords": 7696
+  },
+  "classificationCounts": {
+    "orphan_candidate": 466,
+    "needs_human_review": 5553,
+    "date_folder_mapped": 5541,
+    "canonical": 4419,
+    "alternate_duplicate": 2
+  },
+  "storageStatusCounts": {
+    "alternate_duplicate": 2,
+    "canonical": 4419,
+    "date_folder_mapped": 5541,
+    "needs_human_review": 5553,
+    "orphan_candidate": 466
+  },
+  "sourceGapTypeCounts": {
+    "grok_conversation_response_gap": 1463,
+    "grok_media_post_response_gap": 214,
+    "needs_human_review": 5553,
+    "orphan_candidate": 466
+  },
+  "projectionGapTypeCounts": {
+    "grok_conversation_response_gap": 1463,
+    "grok_media_post_response_gap": 214,
+    "needs_human_review": 5553,
+    "orphan_candidate": 466
+  },
+  "primaryStatusCounts": {
+    "canonical": 2443,
+    "date_folder_mapped": 155,
+    "needs_human_review": 5016,
+    "orphan_candidate": 466
+  },
+  "verificationStatusCounts": {
+    "blocked": 5482,
+    "verified": 2598
+  },
+  "snapshotIdentityTypeCounts": {
+    "grokPostId": 1696,
+    "grokPostSet": 899,
+    "retainedStorageObjectKey": 5019,
+    "storageObjectKey": 466
+  },
+  "promptSourceCounts": {
+    "grok_conversation_response": 6606,
+    "grok_media_post": 7308
+  },
+  "gapSeverityCounts": {
+    "blocking": 6019,
+    "warning": 1677
+  },
+  "sourceSnapshot": {
+    "payloadSha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+    "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+    "schemaVersion": "r2-vault-canonical-snapshot/v1",
+    "snapshotKind": "local_dry_run",
+    "sourceBaselineCommit": "edaaf8134bb545969d6e8036952695a3d8102ca7"
+  }
+}

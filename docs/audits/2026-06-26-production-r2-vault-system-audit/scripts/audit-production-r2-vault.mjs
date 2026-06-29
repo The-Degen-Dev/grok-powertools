@@ -2042,6 +2042,8 @@ async function validateArtifacts() {
     'reconciliations/canonical-gap-report.json',
     'reconciliations/canonical-snapshot-schema.json',
     'reconciliations/canonical-snapshot-dry-run-summary.json',
+    'reconciliations/d1-canonical-projection-schema.json',
+    'reconciliations/d1-canonical-projection-dry-run-summary.json',
     'logs/web-vault-identity.json',
     'logs/web-vault-inventory-pages.json',
     'logs/web-vault-preview.json',
@@ -2051,6 +2053,7 @@ async function validateArtifacts() {
     'logs/grok-saved-browser-control-blocker.json',
     'logs/grok-assets-active-tab-capture.json',
     'logs/canonical-snapshot-dry-run-validation.json',
+    'logs/d1-canonical-projection-dry-run-validation.json',
     'reconciliations/sample-set.json'
   ];
   const requiredJsonl = [

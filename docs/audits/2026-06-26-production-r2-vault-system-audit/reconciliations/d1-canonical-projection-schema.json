@@ -1,0 +1,729 @@
+{
+  "schemaId": "d1-canonical-projection/v1",
+  "schemaKind": "local_only_d1_query_projection_contract",
+  "sourceSnapshot": {
+    "bucket": "grok-gallery-001",
+    "objectKey": "grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json",
+    "payloadSha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+    "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+    "schemaVersion": "r2-vault-canonical-snapshot/v1"
+  },
+  "productionWritePolicy": "dry_run_only_until_explicit_d1_write_approval",
+  "rawDataPolicy": {
+    "durableRawPlane": "approved append-only R2 canonical snapshot",
+    "d1Role": "query projection for product reads and review queues",
+    "promptBodies": "not stored in D1 projection rows; use prompt hashes and R2 snapshot pointers",
+    "privateIdentifiers": "allowed in ignored private dry-run rows and future private D1, not in committed summaries"
+  },
+  "tables": [
+    {
+      "name": "canonical_snapshot_index",
+      "purpose": "Registers the approved R2 snapshot that projection rows were derived from.",
+      "primaryKey": [
+        "snapshot_id"
+      ],
+      "columns": [
+        [
+          "snapshot_id",
+          "TEXT",
+          "public stable id derived from stable content hash"
+        ],
+        [
+          "schema_version",
+          "TEXT",
+          "projection schema id"
+        ],
+        [
+          "r2_bucket",
+          "TEXT",
+          "approved source bucket"
+        ],
+        [
+          "r2_object_key",
+          "TEXT",
+          "approved source object key"
+        ],
+        [
+          "payload_sha256",
+          "TEXT",
+          "approved payload byte hash"
+        ],
+        [
+          "stable_content_hash",
+          "TEXT",
+          "approved stable content hash"
+        ],
+        [
+          "source_baseline_commit",
+          "TEXT",
+          "source baseline evidence commit"
+        ],
+        [
+          "generated_at",
+          "TEXT",
+          "snapshot generated timestamp"
+        ],
+        [
+          "projected_at",
+          "TEXT",
+          "local projection generated timestamp"
+        ],
+        [
+          "logical_asset_count",
+          "INTEGER",
+          "source logical asset count"
+        ],
+        [
+          "storage_object_count",
+          "INTEGER",
+          "source storage object count"
+        ],
+        [
+          "prompt_ref_count",
+          "INTEGER",
+          "source prompt record count"
+        ],
+        [
+          "gap_record_count",
+          "INTEGER",
+          "source gap record count"
+        ],
+        [
+          "classification_counts_json",
+          "TEXT",
+          "JSON status counts"
+        ],
+        [
+          "gap_counts_json",
+          "TEXT",
+          "JSON gap counts"
+        ]
+      ]
+    },
+    {
+      "name": "canonical_asset_projection",
+      "purpose": "One row per logical canonical asset for product inventory and review filtering.",
+      "primaryKey": [
+        "snapshot_id",
+        "canonical_asset_id"
+      ],
+      "indexes": [
+        [
+          "snapshot_id",
+          "primary_status"
+        ],
+        [
+          "snapshot_id",
+          "review_required"
+        ],
+        [
+          "snapshot_id",
+          "identity_type",
+          "identity_value_hash"
+        ],
+        [
+          "snapshot_id",
+          "canonical_object_key_hash"
+        ]
+      ],
+      "columns": [
+        [
+          "snapshot_id",
+          "TEXT",
+          "source projection snapshot id"
+        ],
+        [
+          "canonical_asset_id",
+          "TEXT",
+          "stable logical asset id"
+        ],
+        [
+          "identity_type",
+          "TEXT",
+          "grokPostId, grokPostSet, retainedStorageObjectKey, or storageObjectKey"
+        ],
+        [
+          "identity_value",
+          "TEXT",
+          "private exact identity value for future D1 only"
+        ],
+        [
+          "identity_value_hash",
+          "TEXT",
+          "committed-safe identity hash"
+        ],
+        [
+          "canonical_object_key",
+          "TEXT",
+          "private exact R2 object key for serving media"
+        ],
+        [
+          "canonical_object_key_hash",
+          "TEXT",
+          "committed-safe object key hash"
+        ],
+        [
+          "media_type",
+          "TEXT",
+          "image, video, or unknown"
+        ],
+        [
+          "content_sha256",
+          "TEXT",
+          "canonical media content hash when known"
+        ],
+        [
+          "size_bytes",
+          "INTEGER",
+          "canonical media size when known"
+        ],
+        [
+          "primary_status",
+          "TEXT",
+          "query status derived without hiding review rows"
+        ],
+        [
+          "verification_status",
+          "TEXT",
+          "verified, blocked, failed, or unproven"
+        ],
+        [
+          "review_required",
+          "INTEGER",
+          "1 when human review is required"
+        ],
+        [
+          "gap_flags_json",
+          "TEXT",
+          "JSON gap flags"
+        ],
+        [
+          "status_counts_json",
+          "TEXT",
+          "JSON status counts"
+        ],
+        [
+          "reason_counts_json",
+          "TEXT",
+          "JSON reason counts"
+        ],
+        [
+          "storage_object_count",
+          "INTEGER",
+          "linked storage row count"
+        ],
+        [
+          "duplicate_group_count",
+          "INTEGER",
+          "linked duplicate group count"
+        ],
+        [
+          "prompt_ref_count",
+          "INTEGER",
+          "linked prompt ref count"
+        ],
+        [
+          "grok_post_id_count",
+          "INTEGER",
+          "linked Grok post id count"
+        ],
+        [
+          "media_uuid_count",
+          "INTEGER",
+          "linked media UUID count"
+        ],
+        [
+          "model_names_json",
+          "TEXT",
+          "selected display metadata from prompt/media-post evidence"
+        ],
+        [
+          "resolution_names_json",
+          "TEXT",
+          "selected display metadata from prompt/media-post evidence"
+        ],
+        [
+          "created_at",
+          "TEXT",
+          "source first-seen approximation"
+        ],
+        [
+          "updated_at",
+          "TEXT",
+          "projection timestamp"
+        ]
+      ]
+    },
+    {
+      "name": "canonical_storage_object_projection",
+      "purpose": "One row per R2 media object preserving duplicate, review, and object evidence.",
+      "primaryKey": [
+        "snapshot_id",
+        "storage_object_id"
+      ],
+      "indexes": [
+        [
+          "snapshot_id",
+          "canonical_asset_id"
+        ],
+        [
+          "snapshot_id",
+          "status"
+        ],
+        [
+          "snapshot_id",
+          "object_key_hash"
+        ],
+        [
+          "snapshot_id",
+          "content_sha256"
+        ]
+      ],
+      "columns": [
+        [
+          "snapshot_id",
+          "TEXT",
+          "source projection snapshot id"
+        ],
+        [
+          "storage_object_id",
+          "TEXT",
+          "stable storage row id"
+        ],
+        [
+          "canonical_asset_id",
+          "TEXT",
+          "linked logical asset id when known"
+        ],
+        [
+          "object_key",
+          "TEXT",
+          "private exact R2 object key"
+        ],
+        [
+          "object_key_hash",
+          "TEXT",
+          "committed-safe R2 object key hash"
+        ],
+        [
+          "user_id_hash",
+          "TEXT",
+          "hashed user id segment"
+        ],
+        [
+          "status",
+          "TEXT",
+          "canonical, date_folder_mapped, alternate_duplicate, needs_human_review, or orphan_candidate"
+        ],
+        [
+          "reason",
+          "TEXT",
+          "classification reason"
+        ],
+        [
+          "retained_canonical_key",
+          "TEXT",
+          "private exact retained key when applicable"
+        ],
+        [
+          "retained_canonical_key_hash",
+          "TEXT",
+          "retained key hash"
+        ],
+        [
+          "duplicate_group_id",
+          "TEXT",
+          "duplicate group id when applicable"
+        ],
+        [
+          "media_type",
+          "TEXT",
+          "image, video, or unknown"
+        ],
+        [
+          "size_bytes",
+          "INTEGER",
+          "R2 object size"
+        ],
+        [
+          "content_sha256",
+          "TEXT",
+          "media byte hash"
+        ],
+        [
+          "path_class",
+          "TEXT",
+          "R2 path class"
+        ],
+        [
+          "d1_covered",
+          "INTEGER",
+          "current D1 evidence coverage"
+        ],
+        [
+          "worker_covered",
+          "INTEGER",
+          "current Worker evidence coverage"
+        ],
+        [
+          "grok_api_covered",
+          "INTEGER",
+          "current Grok API evidence coverage"
+        ],
+        [
+          "verification_status",
+          "TEXT",
+          "current evidence status if known"
+        ],
+        [
+          "upload_status",
+          "TEXT",
+          "current upload status if known"
+        ],
+        [
+          "identity_links_json",
+          "TEXT",
+          "JSON identity links to retained candidate"
+        ],
+        [
+          "prompt_ref_ids_json",
+          "TEXT",
+          "JSON linked prompt refs"
+        ],
+        [
+          "source_url_hashes_json",
+          "TEXT",
+          "JSON source URL hashes"
+        ],
+        [
+          "created_at",
+          "TEXT",
+          "source first-seen approximation"
+        ],
+        [
+          "updated_at",
+          "TEXT",
+          "projection timestamp"
+        ]
+      ]
+    },
+    {
+      "name": "canonical_prompt_ref_projection",
+      "purpose": "Prompt lookup metadata without prompt bodies.",
+      "primaryKey": [
+        "snapshot_id",
+        "prompt_ref_id"
+      ],
+      "indexes": [
+        [
+          "snapshot_id",
+          "source"
+        ],
+        [
+          "snapshot_id",
+          "prompt_sha256"
+        ],
+        [
+          "snapshot_id",
+          "source_conversation_id_hash"
+        ],
+        [
+          "snapshot_id",
+          "grok_post_id_hash"
+        ]
+      ],
+      "columns": [
+        [
+          "snapshot_id",
+          "TEXT",
+          "source projection snapshot id"
+        ],
+        [
+          "prompt_ref_id",
+          "TEXT",
+          "stable prompt reference id"
+        ],
+        [
+          "source",
+          "TEXT",
+          "grok_conversation_response or grok_media_post"
+        ],
+        [
+          "captured_at",
+          "TEXT",
+          "capture timestamp"
+        ],
+        [
+          "prompt_sha256",
+          "TEXT",
+          "prompt body hash"
+        ],
+        [
+          "original_prompt_sha256",
+          "TEXT",
+          "original prompt body hash"
+        ],
+        [
+          "source_conversation_id",
+          "TEXT",
+          "private exact conversation id when applicable"
+        ],
+        [
+          "source_conversation_id_hash",
+          "TEXT",
+          "committed-safe conversation hash"
+        ],
+        [
+          "response_id",
+          "TEXT",
+          "private exact response id when applicable"
+        ],
+        [
+          "response_id_hash",
+          "TEXT",
+          "committed-safe response hash"
+        ],
+        [
+          "grok_post_id",
+          "TEXT",
+          "private exact post id when applicable"
+        ],
+        [
+          "grok_post_id_hash",
+          "TEXT",
+          "committed-safe post id hash"
+        ],
+        [
+          "linked_asset_count",
+          "INTEGER",
+          "logical assets linked to this prompt ref"
+        ],
+        [
+          "metadata_summary_json",
+          "TEXT",
+          "selected stable metadata only"
+        ],
+        [
+          "media_evidence_counts_json",
+          "TEXT",
+          "counts of media evidence arrays"
+        ],
+        [
+          "created_at",
+          "TEXT",
+          "capture timestamp or projection timestamp"
+        ],
+        [
+          "updated_at",
+          "TEXT",
+          "projection timestamp"
+        ]
+      ]
+    },
+    {
+      "name": "canonical_gap_projection",
+      "purpose": "Review and response-gap queue rows that must remain visible.",
+      "primaryKey": [
+        "snapshot_id",
+        "gap_id"
+      ],
+      "indexes": [
+        [
+          "snapshot_id",
+          "type"
+        ],
+        [
+          "snapshot_id",
+          "severity"
+        ],
+        [
+          "snapshot_id",
+          "canonical_asset_id"
+        ],
+        [
+          "snapshot_id",
+          "requires_human_review"
+        ]
+      ],
+      "columns": [
+        [
+          "snapshot_id",
+          "TEXT",
+          "source projection snapshot id"
+        ],
+        [
+          "gap_id",
+          "TEXT",
+          "stable gap id derived from the gap record"
+        ],
+        [
+          "type",
+          "TEXT",
+          "gap type"
+        ],
+        [
+          "severity",
+          "TEXT",
+          "info, warning, or blocking"
+        ],
+        [
+          "status",
+          "TEXT",
+          "HTTP status or review status"
+        ],
+        [
+          "canonical_asset_id",
+          "TEXT",
+          "linked logical asset id when known"
+        ],
+        [
+          "storage_object_id",
+          "TEXT",
+          "linked storage object id when known"
+        ],
+        [
+          "object_key_hash",
+          "TEXT",
+          "object hash when present"
+        ],
+        [
+          "source_conversation_id_hash",
+          "TEXT",
+          "conversation hash when present"
+        ],
+        [
+          "asset_id_hash",
+          "TEXT",
+          "Grok asset hash when present"
+        ],
+        [
+          "reason",
+          "TEXT",
+          "classification or response reason"
+        ],
+        [
+          "requires_human_review",
+          "INTEGER",
+          "1 for review/orphan rows"
+        ],
+        [
+          "requires_live_grok",
+          "INTEGER",
+          "1 for unresolved Grok response gaps"
+        ],
+        [
+          "requires_cloud_write",
+          "INTEGER",
+          "1 if later cloud write is needed to resolve"
+        ],
+        [
+          "evidence_json",
+          "TEXT",
+          "committed-safe evidence hashes and counts"
+        ],
+        [
+          "created_at",
+          "TEXT",
+          "capture timestamp or projection timestamp"
+        ],
+        [
+          "updated_at",
+          "TEXT",
+          "projection timestamp"
+        ]
+      ]
+    },
+    {
+      "name": "canonical_asset_lookup",
+      "purpose": "Lookup table for exact private identity values and committed-safe hashes.",
+      "primaryKey": [
+        "snapshot_id",
+        "lookup_type",
+        "lookup_hash",
+        "canonical_asset_id"
+      ],
+      "indexes": [
+        [
+          "snapshot_id",
+          "lookup_type",
+          "lookup_hash"
+        ],
+        [
+          "snapshot_id",
+          "canonical_asset_id"
+        ]
+      ],
+      "columns": [
+        [
+          "snapshot_id",
+          "TEXT",
+          "source projection snapshot id"
+        ],
+        [
+          "canonical_asset_id",
+          "TEXT",
+          "stable logical asset id"
+        ],
+        [
+          "lookup_type",
+          "TEXT",
+          "identity, grok_post_id, media_uuid, object_key, object_key_hash, prompt_ref_id, duplicate_group_id"
+        ],
+        [
+          "lookup_value",
+          "TEXT",
+          "private exact value where needed"
+        ],
+        [
+          "lookup_hash",
+          "TEXT",
+          "committed-safe hash or source-provided hash"
+        ],
+        [
+          "created_at",
+          "TEXT",
+          "projection timestamp"
+        ]
+      ]
+    }
+  ],
+  "sql": [
+    "CREATE TABLE canonical_snapshot_index (\n  snapshot_id TEXT PRIMARY KEY,\n  schema_version TEXT NOT NULL,\n  r2_bucket TEXT NOT NULL,\n  r2_object_key TEXT NOT NULL,\n  payload_sha256 TEXT NOT NULL,\n  stable_content_hash TEXT NOT NULL,\n  source_baseline_commit TEXT NOT NULL,\n  generated_at TEXT NOT NULL,\n  projected_at TEXT NOT NULL,\n  logical_asset_count INTEGER NOT NULL,\n  storage_object_count INTEGER NOT NULL,\n  prompt_ref_count INTEGER NOT NULL,\n  gap_record_count INTEGER NOT NULL,\n  classification_counts_json TEXT NOT NULL,\n  gap_counts_json TEXT NOT NULL\n);",
+    "CREATE TABLE canonical_asset_projection (\n  snapshot_id TEXT NOT NULL,\n  canonical_asset_id TEXT NOT NULL,\n  identity_type TEXT NOT NULL,\n  identity_value TEXT,\n  identity_value_hash TEXT,\n  canonical_object_key TEXT,\n  canonical_object_key_hash TEXT,\n  media_type TEXT NOT NULL,\n  content_sha256 TEXT,\n  size_bytes INTEGER,\n  primary_status TEXT NOT NULL,\n  verification_status TEXT NOT NULL,\n  review_required INTEGER NOT NULL,\n  gap_flags_json TEXT NOT NULL,\n  status_counts_json TEXT NOT NULL,\n  reason_counts_json TEXT NOT NULL,\n  storage_object_count INTEGER NOT NULL,\n  duplicate_group_count INTEGER NOT NULL,\n  prompt_ref_count INTEGER NOT NULL,\n  grok_post_id_count INTEGER NOT NULL,\n  media_uuid_count INTEGER NOT NULL,\n  model_names_json TEXT NOT NULL,\n  resolution_names_json TEXT NOT NULL,\n  created_at TEXT,\n  updated_at TEXT NOT NULL,\n  PRIMARY KEY (snapshot_id, canonical_asset_id)\n);",
+    "CREATE TABLE canonical_storage_object_projection (\n  snapshot_id TEXT NOT NULL,\n  storage_object_id TEXT NOT NULL,\n  canonical_asset_id TEXT,\n  object_key TEXT NOT NULL,\n  object_key_hash TEXT NOT NULL,\n  user_id_hash TEXT,\n  status TEXT NOT NULL,\n  reason TEXT,\n  retained_canonical_key TEXT,\n  retained_canonical_key_hash TEXT,\n  duplicate_group_id TEXT,\n  media_type TEXT NOT NULL,\n  size_bytes INTEGER,\n  content_sha256 TEXT,\n  path_class TEXT,\n  d1_covered INTEGER NOT NULL,\n  worker_covered INTEGER NOT NULL,\n  grok_api_covered INTEGER NOT NULL,\n  verification_status TEXT,\n  upload_status TEXT,\n  identity_links_json TEXT NOT NULL,\n  prompt_ref_ids_json TEXT NOT NULL,\n  source_url_hashes_json TEXT NOT NULL,\n  created_at TEXT,\n  updated_at TEXT NOT NULL,\n  PRIMARY KEY (snapshot_id, storage_object_id)\n);",
+    "CREATE TABLE canonical_prompt_ref_projection (\n  snapshot_id TEXT NOT NULL,\n  prompt_ref_id TEXT NOT NULL,\n  source TEXT NOT NULL,\n  captured_at TEXT,\n  prompt_sha256 TEXT,\n  original_prompt_sha256 TEXT,\n  source_conversation_id TEXT,\n  source_conversation_id_hash TEXT,\n  response_id TEXT,\n  response_id_hash TEXT,\n  grok_post_id TEXT,\n  grok_post_id_hash TEXT,\n  linked_asset_count INTEGER NOT NULL,\n  metadata_summary_json TEXT NOT NULL,\n  media_evidence_counts_json TEXT NOT NULL,\n  created_at TEXT,\n  updated_at TEXT NOT NULL,\n  PRIMARY KEY (snapshot_id, prompt_ref_id)\n);",
+    "CREATE TABLE canonical_gap_projection (\n  snapshot_id TEXT NOT NULL,\n  gap_id TEXT NOT NULL,\n  type TEXT NOT NULL,\n  severity TEXT NOT NULL,\n  status TEXT,\n  canonical_asset_id TEXT,\n  storage_object_id TEXT,\n  object_key_hash TEXT,\n  source_conversation_id_hash TEXT,\n  asset_id_hash TEXT,\n  reason TEXT,\n  requires_human_review INTEGER NOT NULL,\n  requires_live_grok INTEGER NOT NULL,\n  requires_cloud_write INTEGER NOT NULL,\n  evidence_json TEXT NOT NULL,\n  created_at TEXT,\n  updated_at TEXT NOT NULL,\n  PRIMARY KEY (snapshot_id, gap_id)\n);",
+    "CREATE TABLE canonical_asset_lookup (\n  snapshot_id TEXT NOT NULL,\n  canonical_asset_id TEXT NOT NULL,\n  lookup_type TEXT NOT NULL,\n  lookup_value TEXT,\n  lookup_hash TEXT NOT NULL,\n  created_at TEXT NOT NULL,\n  PRIMARY KEY (snapshot_id, lookup_type, lookup_hash, canonical_asset_id)\n);"
+  ],
+  "indexes": [
+    "CREATE INDEX idx_cap_status ON canonical_asset_projection (snapshot_id, primary_status);",
+    "CREATE INDEX idx_cap_review ON canonical_asset_projection (snapshot_id, review_required);",
+    "CREATE INDEX idx_cap_identity ON canonical_asset_projection (snapshot_id, identity_type, identity_value_hash);",
+    "CREATE INDEX idx_cap_object_hash ON canonical_asset_projection (snapshot_id, canonical_object_key_hash);",
+    "CREATE INDEX idx_csop_asset ON canonical_storage_object_projection (snapshot_id, canonical_asset_id);",
+    "CREATE INDEX idx_csop_status ON canonical_storage_object_projection (snapshot_id, status);",
+    "CREATE INDEX idx_csop_object_hash ON canonical_storage_object_projection (snapshot_id, object_key_hash);",
+    "CREATE INDEX idx_csop_sha ON canonical_storage_object_projection (snapshot_id, content_sha256);",
+    "CREATE INDEX idx_cprp_source ON canonical_prompt_ref_projection (snapshot_id, source);",
+    "CREATE INDEX idx_cprp_prompt_hash ON canonical_prompt_ref_projection (snapshot_id, prompt_sha256);",
+    "CREATE INDEX idx_cprp_conversation_hash ON canonical_prompt_ref_projection (snapshot_id, source_conversation_id_hash);",
+    "CREATE INDEX idx_cprp_post_hash ON canonical_prompt_ref_projection (snapshot_id, grok_post_id_hash);",
+    "CREATE INDEX idx_cgp_type ON canonical_gap_projection (snapshot_id, type);",
+    "CREATE INDEX idx_cgp_severity ON canonical_gap_projection (snapshot_id, severity);",
+    "CREATE INDEX idx_cgp_asset ON canonical_gap_projection (snapshot_id, canonical_asset_id);",
+    "CREATE INDEX idx_cgp_human_review ON canonical_gap_projection (snapshot_id, requires_human_review);",
+    "CREATE INDEX idx_cal_lookup ON canonical_asset_lookup (snapshot_id, lookup_type, lookup_hash);",
+    "CREATE INDEX idx_cal_asset ON canonical_asset_lookup (snapshot_id, canonical_asset_id);"
+  ],
+  "validationRules": [
+    "approved R2 payload byte SHA-256 must match the approved value",
+    "approved R2 stable content hash must match the approved value",
+    "projection row counts must match source snapshot counts",
+    "storage status counts must match source classification counts",
+    "gap projection type counts must match source gap record type counts",
+    "all storage projection rows should link to a logical asset",
+    "prompt projection rows must not include raw prompt or originalPrompt bodies",
+    "committed outputs must contain only schema, counts, hashes, validation status, and approval gates",
+    "productionWrites must remain false and D1 writes must remain zero"
+  ]
+}

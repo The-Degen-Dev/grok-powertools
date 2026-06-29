@@ -1,0 +1,219 @@
+{
+  "generatedAt": "2026-06-29T08:34:27.391Z",
+  "schemaVersion": "d1-canonical-projection/v1",
+  "mode": "d1_canonical_projection_local_dry_run",
+  "sourceSnapshot": {
+    "bucket": "grok-gallery-001",
+    "objectKey": "grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json",
+    "payloadSha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+    "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+    "schemaVersion": "r2-vault-canonical-snapshot/v1",
+    "snapshotKind": "local_dry_run",
+    "sourceBaselineCommit": "edaaf8134bb545969d6e8036952695a3d8102ca7"
+  },
+  "productionWrites": {
+    "d1Writes": 0,
+    "workerStateWrites": 0,
+    "grokActions": 0,
+    "r2Writes": 0,
+    "objectMoves": 0,
+    "objectDeletes": 0,
+    "repairRouteCalls": 0,
+    "syncRouteCalls": 0,
+    "physicalCleanupActions": 0
+  },
+  "privateArtifacts": {
+    "snapshotIndex": {
+      "path": "private/d1-canonical-projection-snapshot-index.json",
+      "private": true,
+      "bytes": 1464,
+      "sha256": "7ffd6b6e02b04a561939ae76632f88487747229ea5aee53fd5843f28629f88c6",
+      "rowCount": 1
+    },
+    "assets": {
+      "path": "private/d1-canonical-projection-assets.jsonl",
+      "private": true,
+      "bytes": 10029410,
+      "sha256": "e3fe4e3a30f6f6f0e4ded8ebbfda6f30f410b7fec3025d60120de789a97d203c",
+      "rowCount": 8080
+    },
+    "storageObjects": {
+      "path": "private/d1-canonical-projection-storage-objects.jsonl",
+      "private": true,
+      "bytes": 22156159,
+      "sha256": "c1ba84575779a5a506063139ff2231d2439c9e54d68881aa2400a414422f07a5",
+      "rowCount": 15981
+    },
+    "promptRefs": {
+      "path": "private/d1-canonical-projection-prompt-refs.jsonl",
+      "private": true,
+      "bytes": 15140389,
+      "sha256": "3a4b86df5794fca2ac86b4eaa9dd00e45c81a081a07ceac1ef2a23f5dc079ebe",
+      "rowCount": 13914
+    },
+    "gaps": {
+      "path": "private/d1-canonical-projection-gaps.jsonl",
+      "private": true,
+      "bytes": 6440518,
+      "sha256": "2cb2f2128f845a5dcb518681df75d3304da2976dbe533eecb5d91813a266c534",
+      "rowCount": 7696
+    },
+    "lookups": {
+      "path": "private/d1-canonical-projection-lookups.jsonl",
+      "private": true,
+      "bytes": 25841833,
+      "sha256": "866c8f0abdaaedd267582a6f1895add9df9d1671fa330fa41ef793b410278861",
+      "rowCount": 92363
+    },
+    "gitIgnored": true,
+    "containsPrivateObjectKeys": true,
+    "containsPrivateGrokIds": true,
+    "containsRawPromptBodies": false
+  },
+  "currentD1Comparison": {
+    "schemaArtifact": "inventory/d1-schema.json",
+    "generatedAt": "2026-06-29T08:33:37.540Z",
+    "database": "grok-powertools-db",
+    "databaseId": "ad89e4bb-0b68-4c72-93d9-b90e6eb45aa6",
+    "tableCount": 8,
+    "indexCount": 10,
+    "currentTables": [
+      "_cf_KV",
+      "collections",
+      "metadata_snapshot_index",
+      "movies",
+      "r2_dedupe_index",
+      "settings",
+      "users",
+      "vault_overlays"
+    ],
+    "requiredCurrentTablesPresent": {
+      "r2_dedupe_index": true,
+      "metadata_snapshot_index": true,
+      "vault_overlays": true
+    },
+    "proposedProjectionTablesAlreadyPresent": [],
+    "interpretation": "current production D1 is upload/object-key centered; this dry run adds a separate logical canonical projection contract and does not mutate D1"
+  },
+  "rowCounts": {
+    "snapshotRows": 1,
+    "assetRows": 8080,
+    "storageRows": 15981,
+    "promptRows": 13914,
+    "gapRows": 7696,
+    "lookupRows": 92363,
+    "unlinkedStorageRows": 0,
+    "promptRowsWithBodyFields": 0,
+    "duplicateLookupKeys": 0
+  },
+  "sourceCounts": {
+    "logicalAssets": 8080,
+    "storageObjects": 15981,
+    "promptArchive": 13914,
+    "gapRecords": 7696
+  },
+  "classificationCounts": {
+    "orphan_candidate": 466,
+    "needs_human_review": 5553,
+    "date_folder_mapped": 5541,
+    "canonical": 4419,
+    "alternate_duplicate": 2
+  },
+  "storageStatusCounts": {
+    "alternate_duplicate": 2,
+    "canonical": 4419,
+    "date_folder_mapped": 5541,
+    "needs_human_review": 5553,
+    "orphan_candidate": 466
+  },
+  "primaryStatusCounts": {
+    "canonical": 2443,
+    "date_folder_mapped": 155,
+    "needs_human_review": 5016,
+    "orphan_candidate": 466
+  },
+  "verificationStatusCounts": {
+    "blocked": 5482,
+    "verified": 2598
+  },
+  "gapCounts": {
+    "d1MissingCanonicalMedia": 1441,
+    "workerMissingCanonicalMedia": 1441,
+    "metadataLinkedMedia": 2090,
+    "metadataUnlinkedMedia": 13891,
+    "grokApiCoveredMedia": 6541,
+    "grokApiPromptLinkedMedia": 4707,
+    "grokMediaPostLinkedMedia": 6541,
+    "grokMediaPostPromptLinkedMedia": 3614,
+    "grokMediaPostUnlinkedMedia": 9440,
+    "grokApiUnlinkedMedia": 9440,
+    "needsHumanReview": 5553,
+    "orphanCandidates": 466,
+    "grokSavedInventoryBlocked": 0,
+    "grokSavedInventoryPartial": 0,
+    "grokSavedIdentityLimited": 0
+  },
+  "gapTypeCounts": {
+    "grok_conversation_response_gap": 1463,
+    "grok_media_post_response_gap": 214,
+    "needs_human_review": 5553,
+    "orphan_candidate": 466
+  },
+  "gapSeverityCounts": {
+    "blocking": 6019,
+    "warning": 1677
+  },
+  "promptSourceCounts": {
+    "grok_conversation_response": 6606,
+    "grok_media_post": 7308
+  },
+  "identityTypeCounts": {
+    "grokPostId": 1696,
+    "grokPostSet": 899,
+    "retainedStorageObjectKey": 5019,
+    "storageObjectKey": 466
+  },
+  "reviewQueue": {
+    "reviewRequiredAssets": 5482,
+    "blockingGapRows": 6019,
+    "warningGapRows": 1677,
+    "orphanCandidateStorageRows": 466,
+    "needsHumanReviewStorageRows": 5553
+  },
+  "validation": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0
+  },
+  "designDecisions": [
+    "R2 canonical snapshot remains the durable source of truth for raw prompts and bulky metadata.",
+    "D1 projection rows store query fields, lookup keys, hashes, counts, status, and selected display metadata only.",
+    "Private exact object keys and private exact Grok IDs are present only in ignored local dry-run rows for this phase.",
+    "Prompt projection rows store prompt hashes and metadata summaries, not prompt or originalPrompt bodies.",
+    "Review and orphan rows remain first-class projection rows and are not hidden or merged."
+  ],
+  "approvalGate": {
+    "nextAllowedPhase": "d1_canonical_projection_write_after_separate_approval",
+    "requiresExplicitUserApproval": true,
+    "approvalMustName": [
+      "target D1 database and database id",
+      "source R2 snapshot bucket and object key",
+      "source payload SHA-256",
+      "source stable content hash",
+      "projection schema id",
+      "expected D1 table names and row counts",
+      "rollback plan that leaves R2 snapshot as recovery source"
+    ],
+    "stillForbiddenWithoutSeparateApproval": [
+      "Worker state writes",
+      "product route or read-path changes",
+      "Grok actions",
+      "R2 object moves",
+      "R2 object deletes",
+      "repair route calls",
+      "sync route calls",
+      "physical duplicate cleanup"
+    ],
+    "dryRunValid": true
+  }
+}
