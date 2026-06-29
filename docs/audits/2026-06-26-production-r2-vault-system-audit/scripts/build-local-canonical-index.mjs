@@ -38,6 +38,10 @@ function shortHash(value, length = 16) {
   return hashString(value).slice(0, length);
 }
 
+function extractUuids(value) {
+  return [...String(value || '').matchAll(UUID_RE)].map((match) => match[0].toLowerCase());
+}
+
 async function readJson(relPath) {
   return JSON.parse(await fs.readFile(auditPath(relPath), 'utf8'));
 }
@@ -194,7 +198,9 @@ function chooseRetainedCandidate(group, evidenceByKey) {
 function scoreEvidence(evidence = {}) {
   let score = 0;
   if (evidence.d1Covered) score += 100;
+  if (evidence.grokApiCovered) score += 95;
   if (evidence.workerCovered) score += 90;
+  if (evidence.grokPostIds?.length) score += 25;
   if (evidence.pathClass === 'canonical-media') score += 50;
   if (evidence.pathClass === 'conflict-media') score -= 20;
   if (evidence.pathClass === 'legacy-date-media') score -= 10;
@@ -208,11 +214,76 @@ function identityLinks(left, right) {
   if (left.mediaUuid && right.mediaUuid && left.mediaUuid === right.mediaUuid) links.push('same_media_uuid');
   if (setIntersection(left.sourceUrlHashes, right.sourceUrlHashes).length) links.push('same_canonical_source_url_hash');
   if (setIntersection(left.promptSidecarKeys, right.promptSidecarKeys).length) links.push('same_prompt_sidecar_link');
-  if (left.grokPostId && right.grokPostId && left.grokPostId === right.grokPostId) links.push('same_grok_post_id');
+  const leftPostIds = [...(left.grokPostIds || []), left.grokPostId].filter(Boolean);
+  const rightPostIds = [...(right.grokPostIds || []), right.grokPostId].filter(Boolean);
+  if (setIntersection(leftPostIds, rightPostIds).length) links.push('same_grok_post_id');
   return links;
 }
 
-function grokSavedStatusFrom({ rows, summary }) {
+function grokSavedStatusFrom({ rows, summary, assetRows, assetSummary, responseRows, mediaPostRows }) {
+  if (assetRows.length || assetSummary) {
+    const completedApiPagination = Boolean(assetSummary?.traversal?.completedPagination);
+    const completedConversationResponses = Boolean(assetSummary?.responses?.completedResponses);
+    const failedConversationResponses = Number(assetSummary?.responses?.failedConversationResponses || 0);
+    const promptCandidateCount = Number(assetSummary?.responses?.summary?.promptCandidateCount || 0);
+    const completedMediaPosts = Boolean(assetSummary?.mediaPosts?.completedMediaPosts);
+    const allAssetIdsAttempted = Boolean(assetSummary?.mediaPosts?.allAssetIdsAttempted);
+    const failedMediaPosts = Number(assetSummary?.mediaPosts?.failedMediaPosts || 0);
+    const mediaPostPromptCount = Number(assetSummary?.mediaPosts?.summary?.promptPresent || 0);
+    const mediaPostOriginalPromptCount = Number(assetSummary?.mediaPosts?.summary?.originalPromptPresent || 0);
+    const mediaPostStatusCounts = assetSummary?.mediaPosts?.summary?.statusCounts || {};
+    const identityStatus = assetSummary?.identity?.status || 'api_identity_unknown';
+    if (completedApiPagination && completedConversationResponses && completedMediaPosts && allAssetIdsAttempted && assetRows.length > 0) {
+      return {
+        status: failedMediaPosts > 0 ? 'api_captured_post_identity_with_post_gaps' : 'verified',
+        rowCount: assetRows.length,
+        gridRowCount: rows.length,
+        assetApiRowCount: assetRows.length,
+        conversationResponseRows: responseRows.length,
+        mediaPostRows: mediaPostRows.length,
+        completedGridTraversal: Boolean(summary?.traversal?.completedGridTraversal),
+        completedApiPagination,
+        completedConversationResponses,
+        completedMediaPosts,
+        allAssetIdsAttempted,
+        promptMetadataStatus: failedConversationResponses > 0 || failedMediaPosts > 0 ? 'captured_with_response_gaps' : promptCandidateCount > 0 || mediaPostPromptCount > 0 ? 'captured' : 'no_prompt_candidates_found',
+        promptCandidateCount,
+        mediaPostPromptCount,
+        mediaPostOriginalPromptCount,
+        failedConversationResponses,
+        failedMediaPosts,
+        mediaPostStatusCounts,
+        identityStatus,
+        identityLimited: false,
+        limitation: failedMediaPosts > 0
+          ? `Media post identity was captured via /rest/media/post/get for successful rows, but ${failedMediaPosts} asset IDs still have media-post response gaps after retry.`
+          : assetSummary?.identity?.limitation || 'Media post identity was captured via /rest/media/post/get without opening detail routes.'
+      };
+    }
+    return {
+      status: assetRows.length ? 'partial' : 'blocked',
+      rowCount: assetRows.length,
+      gridRowCount: rows.length,
+      assetApiRowCount: assetRows.length,
+      conversationResponseRows: responseRows.length,
+      mediaPostRows: mediaPostRows.length,
+      completedGridTraversal: Boolean(summary?.traversal?.completedGridTraversal),
+      completedApiPagination,
+      completedConversationResponses,
+      completedMediaPosts,
+      allAssetIdsAttempted,
+      promptMetadataStatus: promptCandidateCount > 0 ? 'partial' : 'not_captured',
+      promptCandidateCount,
+      mediaPostPromptCount,
+      mediaPostOriginalPromptCount,
+      failedMediaPosts,
+      mediaPostStatusCounts,
+      identityStatus,
+      identityLimited: true,
+      limitation: assetSummary?.identity?.limitation || 'Grok Saved active-tab API capture did not complete.'
+    };
+  }
+
   const allRowsHavePostId = summary?.identity?.status === 'all_rows_have_grok_post_id';
   const identityLimited = rows.length > 0 && !allRowsHavePostId;
   if (!rows.length && !summary) {
@@ -258,10 +329,167 @@ function grokSavedStatusFrom({ rows, summary }) {
   };
 }
 
-function makeEvidence({ object, hashRow, d1ByKey, workerByKey, promptSidecarsByMediaKey }) {
+function collectGrokAssetUuids(asset) {
+  const uuids = new Set();
+  addExtractedUuids(uuids, asset.assetId);
+  addExtractedUuids(uuids, asset.rootAssetId);
+  addExtractedUuids(uuids, asset.key);
+  addExtractedUuids(uuids, asset.previewImageKey);
+  addExtractedUuids(uuids, asset.hdKey);
+  addExtractedUuids(uuids, asset.hd1080Key);
+  if (asset.auxKeys && typeof asset.auxKeys === 'object') {
+    for (const value of Object.values(asset.auxKeys)) addExtractedUuids(uuids, value);
+  }
+  return [...uuids];
+}
+
+function collectGrokPostUuids(post, seen = new Set(), depth = 0) {
+  if (!post || typeof post !== 'object' || depth > 3) return [];
+  if (post.id && seen.has(String(post.id))) return [];
+  if (post.id) seen.add(String(post.id));
+
+  const uuids = new Set();
+  addExtractedUuids(uuids, post.id);
+  addExtractedUuids(uuids, post.originalPostId);
+  addExtractedUuids(uuids, post.mediaUrl);
+  addExtractedUuids(uuids, post.thumbnailImageUrl);
+
+  for (const key of ['images', 'videos', 'childPosts', 'inputMediaItems', 'audioUrls']) {
+    const value = post[key];
+    if (!Array.isArray(value)) continue;
+    for (const item of value) {
+      if (item && typeof item === 'object') {
+        for (const uuid of collectGrokPostUuids(item, seen, depth + 1)) uuids.add(uuid);
+      } else {
+        addExtractedUuids(uuids, item);
+      }
+    }
+  }
+  if (post.originalPost && typeof post.originalPost === 'object') {
+    for (const uuid of collectGrokPostUuids(post.originalPost, seen, depth + 1)) uuids.add(uuid);
+  }
+  return [...uuids];
+}
+
+function addExtractedUuids(set, value) {
+  for (const uuid of extractUuids(value)) set.add(uuid);
+}
+
+function makeEmptyGrokApiEvidence(mediaUuid) {
+  return {
+    mediaUuid,
+    assetIds: new Set(),
+    responseIds: new Set(),
+    sourceConversationIds: new Set(),
+    rootAssetIds: new Set(),
+    assetKeys: new Set(),
+    promptMessageHashes: new Set(),
+    promptMessageCount: 0,
+    responseCount: 0,
+    grokPostIds: new Set(),
+    originalPostIds: new Set(),
+    mediaPostPromptHashes: new Set(),
+    mediaPostOriginalPromptHashes: new Set(),
+    mediaPostPromptCount: 0,
+    mediaPostOriginalPromptCount: 0,
+    mediaPostModelNames: new Set(),
+    mediaPostMediaTypes: new Set()
+  };
+}
+
+function addMediaPostEvidence(current, post) {
+  if (!post || typeof post !== 'object') return;
+  if (post.id) current.grokPostIds.add(String(post.id));
+  if (post.originalPostId) current.originalPostIds.add(String(post.originalPostId));
+  if (post.modelName) current.mediaPostModelNames.add(String(post.modelName));
+  if (post.mediaType) current.mediaPostMediaTypes.add(String(post.mediaType));
+  if (typeof post.prompt === 'string' && post.prompt.length > 0) {
+    current.mediaPostPromptHashes.add(hashString(post.prompt));
+    current.mediaPostPromptCount += 1;
+  }
+  if (typeof post.originalPrompt === 'string' && post.originalPrompt.length > 0) {
+    current.mediaPostOriginalPromptHashes.add(hashString(post.originalPrompt));
+    current.mediaPostOriginalPromptCount += 1;
+  }
+}
+
+function buildGrokApiEvidenceByMediaUuid(assetRows, responseRows, mediaPostRows) {
+  const responsesByConversation = new Map();
+  for (const row of responseRows) {
+    if (!row.sourceConversationId) continue;
+    responsesByConversation.set(String(row.sourceConversationId), row);
+  }
+
+  const postsByAssetId = new Map();
+  for (const row of mediaPostRows) {
+    const post = row.parsed?.post;
+    if (row.status === 200 && post && row.assetId) postsByAssetId.set(String(row.assetId), post);
+  }
+
+  const byMediaUuid = new Map();
+  for (const row of assetRows) {
+    const asset = row.asset || {};
+    const uuids = collectGrokAssetUuids(asset);
+    const conversation = asset.sourceConversationId ? responsesByConversation.get(String(asset.sourceConversationId)) : null;
+    const responses = Array.isArray(conversation?.parsed?.responses) ? conversation.parsed.responses : [];
+    const promptMessages = responses.filter((response) => response.sender === 'human' && response.message).map((response) => response.message);
+    const post = asset.assetId ? postsByAssetId.get(String(asset.assetId)) : null;
+    if (post) {
+      for (const uuid of collectGrokPostUuids(post)) uuids.push(uuid);
+    }
+    for (const uuid of uuids) {
+      const current = byMediaUuid.get(uuid) || makeEmptyGrokApiEvidence(uuid);
+      if (asset.assetId) current.assetIds.add(String(asset.assetId));
+      if (asset.responseId) current.responseIds.add(String(asset.responseId));
+      if (asset.sourceConversationId) current.sourceConversationIds.add(String(asset.sourceConversationId));
+      if (asset.rootAssetId) current.rootAssetIds.add(String(asset.rootAssetId));
+      if (asset.key) current.assetKeys.add(String(asset.key));
+      current.responseCount += responses.length;
+      current.promptMessageCount += promptMessages.length;
+      for (const message of promptMessages) current.promptMessageHashes.add(hashString(message));
+      addMediaPostEvidence(current, post);
+      byMediaUuid.set(uuid, current);
+    }
+  }
+
+  for (const row of mediaPostRows) {
+    const post = row.parsed?.post;
+    if (row.status !== 200 || !post) continue;
+    for (const uuid of collectGrokPostUuids(post)) {
+      const current = byMediaUuid.get(uuid) || makeEmptyGrokApiEvidence(uuid);
+      if (row.assetId) current.assetIds.add(String(row.assetId));
+      addMediaPostEvidence(current, post);
+      byMediaUuid.set(uuid, current);
+    }
+  }
+
+  return new Map([...byMediaUuid.entries()].map(([uuid, value]) => [uuid, {
+    mediaUuid: uuid,
+    assetIds: [...value.assetIds],
+    responseIds: [...value.responseIds],
+    sourceConversationIds: [...value.sourceConversationIds],
+    rootAssetIds: [...value.rootAssetIds],
+    assetKeys: [...value.assetKeys],
+    promptMessageHashes: [...value.promptMessageHashes],
+    promptMessageCount: value.promptMessageCount,
+    responseCount: value.responseCount,
+    grokPostIds: [...value.grokPostIds],
+    originalPostIds: [...value.originalPostIds],
+    mediaPostPromptHashes: [...value.mediaPostPromptHashes],
+    mediaPostOriginalPromptHashes: [...value.mediaPostOriginalPromptHashes],
+    mediaPostPromptCount: value.mediaPostPromptCount,
+    mediaPostOriginalPromptCount: value.mediaPostOriginalPromptCount,
+    mediaPostModelNames: [...value.mediaPostModelNames],
+    mediaPostMediaTypes: [...value.mediaPostMediaTypes]
+  }]));
+}
+
+function makeEvidence({ object, hashRow, d1ByKey, workerByKey, promptSidecarsByMediaKey, grokApiByMediaUuid }) {
   const d1 = d1ByKey.get(object.key) || null;
   const worker = workerByKey.get(object.key) || null;
   const customMetadata = object.customMetadata || {};
+  const mediaUuid = mediaUuidFromKey(object.key);
+  const grokApi = mediaUuid ? grokApiByMediaUuid.get(mediaUuid) || null : null;
   const sourceUrlHashes = [
     customMetadata['source-url-hash'],
     ...parseMaybeList(d1?.source_url_hashes),
@@ -275,13 +503,29 @@ function makeEvidence({ object, hashRow, d1ByKey, workerByKey, promptSidecarsByM
     mediaType: object.mediaType,
     size: Number(object.size || 0),
     sha256: hashRow?.sha256 || customMetadata.sha256 || d1?.content_sha256 || worker?.sha256 || null,
-    mediaUuid: mediaUuidFromKey(object.key),
-    grokPostId: null,
+    mediaUuid,
+    grokPostId: grokApi?.grokPostIds?.length === 1 ? grokApi.grokPostIds[0] : null,
+    grokPostIds: grokApi?.grokPostIds || [],
+    grokOriginalPostIds: grokApi?.originalPostIds || [],
     sourceUrlHashes: [...new Set(sourceUrlHashes)],
     promptSidecarKeys: [...(promptSidecarsByMediaKey.get(object.key) || [])],
     assetId: object.assetId || customMetadata['asset-id'] || d1?.asset_id || worker?.assetId || null,
     d1Covered: Boolean(d1),
     workerCovered: Boolean(worker),
+    grokApiCovered: Boolean(grokApi),
+    grokApiAssetIds: grokApi?.assetIds || [],
+    grokApiResponseIds: grokApi?.responseIds || [],
+    grokApiSourceConversationIds: grokApi?.sourceConversationIds || [],
+    grokApiRootAssetIds: grokApi?.rootAssetIds || [],
+    grokApiPromptMessageHashes: grokApi?.promptMessageHashes || [],
+    grokApiPromptMessageCount: grokApi?.promptMessageCount || 0,
+    grokApiResponseCount: grokApi?.responseCount || 0,
+    grokMediaPostPromptHashes: grokApi?.mediaPostPromptHashes || [],
+    grokMediaPostOriginalPromptHashes: grokApi?.mediaPostOriginalPromptHashes || [],
+    grokMediaPostPromptCount: grokApi?.mediaPostPromptCount || 0,
+    grokMediaPostOriginalPromptCount: grokApi?.mediaPostOriginalPromptCount || 0,
+    grokMediaPostModelNames: grokApi?.mediaPostModelNames || [],
+    grokMediaPostMediaTypes: grokApi?.mediaPostMediaTypes || [],
     uploadStatus: d1?.upload_status || null,
     verificationStatus: worker?.verificationStatus || null,
     hashStatus: hashRow?.status || (hashRow?.sha256 ? 'ok' : 'missing')
@@ -307,8 +551,14 @@ function classifyStorageObject({ object, evidence, duplicateInfo }) {
   if (duplicateInfo?.isHashOnlyDuplicate) {
     return { status: 'needs_human_review', reason: 'same_sha256_without_accepted_identity_link' };
   }
+  if (object.pathClass === 'legacy-date-media' && evidence.grokApiCovered) {
+    return { status: 'date_folder_mapped', reason: 'date_folder_media_seen_in_current_grok_saved_api' };
+  }
   if (object.pathClass === 'canonical-media' && (evidence.d1Covered || evidence.workerCovered)) {
     return { status: 'canonical', reason: 'canonical_media_indexed_by_d1_or_worker' };
+  }
+  if (object.pathClass === 'canonical-media' && evidence.grokApiCovered) {
+    return { status: 'canonical', reason: 'canonical_media_seen_in_current_grok_saved_api' };
   }
   if (object.pathClass === 'canonical-media') {
     return { status: 'needs_human_review', reason: 'canonical_media_missing_d1_worker_and_grok_saved_evidence' };
@@ -344,11 +594,16 @@ async function buildCanonicalIndex() {
   const localSummary = await readJson('inventory/local-media-summary.json');
   const grokSavedRows = await optionalJsonl('private/grok-saved-current-inventory.jsonl');
   const grokSavedSummary = await optionalJson('inventory/grok-saved-current-summary.json');
+  const grokAssetRows = await optionalJsonl('private/grok-assets-current-inventory.jsonl');
+  const grokAssetSummary = await optionalJson('inventory/grok-assets-current-summary.json');
+  const grokConversationRows = await optionalJsonl('private/grok-conversation-responses-current.jsonl');
+  const grokMediaPostRows = await optionalJsonl('private/grok-media-posts-current.jsonl');
 
   const mediaObjects = r2Objects.filter((object) => object.isMedia);
   const hashByKey = new Map(r2Hashes.map((row) => [row.objectKey, row]));
   const d1ByKey = new Map(d1Rows.filter((row) => row.canonical_object_key).map((row) => [row.canonical_object_key, row]));
   const workerByKey = new Map(workerRows.filter((row) => row.canonicalObjectKey).map((row) => [row.canonicalObjectKey, row]));
+  const grokApiByMediaUuid = buildGrokApiEvidenceByMediaUuid(grokAssetRows, grokConversationRows, grokMediaPostRows);
   const promptSidecarsByMediaKey = new Map();
   for (const ref of metadataRefs.references || []) {
     for (const objectKey of ref.objectKeys || []) {
@@ -365,7 +620,8 @@ async function buildCanonicalIndex() {
       hashRow: hashByKey.get(object.key),
       d1ByKey,
       workerByKey,
-      promptSidecarsByMediaKey
+      promptSidecarsByMediaKey,
+      grokApiByMediaUuid
     }));
   }
 
@@ -438,11 +694,19 @@ async function buildCanonicalIndex() {
   const d1MissingCanonicalMedia = indexRows.filter((row) => row.evidence.pathClass === 'canonical-media' && !row.evidence.d1Covered).length;
   const workerMissingCanonicalMedia = indexRows.filter((row) => row.evidence.pathClass === 'canonical-media' && !row.evidence.workerCovered).length;
   const metadataLinkedMedia = indexRows.filter((row) => row.evidence.promptSidecarKeys.length > 0).length;
+  const grokApiCoveredMedia = indexRows.filter((row) => row.evidence.grokApiCovered).length;
+  const grokApiPromptLinkedMedia = indexRows.filter((row) => row.evidence.grokApiPromptMessageCount > 0).length;
+  const grokMediaPostLinkedMedia = indexRows.filter((row) => row.evidence.grokPostIds.length > 0).length;
+  const grokMediaPostPromptLinkedMedia = indexRows.filter((row) => row.evidence.grokMediaPostPromptCount > 0 || row.evidence.grokMediaPostOriginalPromptCount > 0).length;
   const hashOnlyDuplicateObjects = indexRows.filter((row) => row.reason === 'same_sha256_without_accepted_identity_link').length;
   const acceptedLinkedDuplicateObjects = indexRows.filter((row) => row.identityLinksToRetained.length > 0).length;
   const grokSavedInventoryStatus = grokSavedStatusFrom({
     rows: grokSavedRows,
-    summary: grokSavedSummary
+    summary: grokSavedSummary,
+    assetRows: grokAssetRows,
+    assetSummary: grokAssetSummary,
+    responseRows: grokConversationRows,
+    mediaPostRows: grokMediaPostRows
   });
 
   const summary = {
@@ -464,7 +728,11 @@ async function buildCanonicalIndex() {
       metadataReferences: 'inventory/metadata-references.json',
       localSummary: 'inventory/local-media-summary.json',
       grokSavedInventory: grokSavedRows.length ? 'private/grok-saved-current-inventory.jsonl' : null,
-      grokSavedSummary: grokSavedSummary ? 'inventory/grok-saved-current-summary.json' : null
+      grokSavedSummary: grokSavedSummary ? 'inventory/grok-saved-current-summary.json' : null,
+      grokAssetsInventory: grokAssetRows.length ? 'private/grok-assets-current-inventory.jsonl' : null,
+      grokAssetsSummary: grokAssetSummary ? 'inventory/grok-assets-current-summary.json' : null,
+      grokConversationResponses: grokConversationRows.length ? 'private/grok-conversation-responses-current.jsonl' : null,
+      grokMediaPosts: grokMediaPostRows.length ? 'private/grok-media-posts-current.jsonl' : null
     },
     sourceCounts: {
       r2Objects: r2Objects.length,
@@ -474,7 +742,11 @@ async function buildCanonicalIndex() {
       workerRows: workerRows.length,
       metadataReferences: metadataRefs.references?.length || 0,
       localFiles: localSummary.counts?.total || localSummary.totalFiles || localSummary.files || null,
-      grokSavedRows: grokSavedRows.length
+      grokSavedRows: grokAssetRows.length || grokSavedRows.length,
+      grokSavedGridRows: grokSavedRows.length,
+      grokAssetApiRows: grokAssetRows.length,
+      grokConversationResponseRows: grokConversationRows.length,
+      grokMediaPostRows: grokMediaPostRows.length
     },
     grokSavedInventoryStatus,
     classification: {
@@ -494,6 +766,12 @@ async function buildCanonicalIndex() {
       workerMissingCanonicalMedia,
       metadataLinkedMedia,
       metadataUnlinkedMedia: mediaObjects.length - metadataLinkedMedia,
+      grokApiCoveredMedia,
+      grokApiPromptLinkedMedia,
+      grokMediaPostLinkedMedia,
+      grokMediaPostPromptLinkedMedia,
+      grokMediaPostUnlinkedMedia: mediaObjects.length - grokMediaPostLinkedMedia,
+      grokApiUnlinkedMedia: mediaObjects.length - grokApiCoveredMedia,
       needsHumanReview: statusCounts.needs_human_review || 0,
       orphanCandidates: statusCounts.orphan_candidate || 0,
       grokSavedInventoryBlocked: grokSavedInventoryStatus.status === 'blocked' ? 1 : 0,
@@ -501,7 +779,8 @@ async function buildCanonicalIndex() {
       grokSavedIdentityLimited: grokSavedInventoryStatus.identityLimited ? 1 : 0
     },
     confidenceLimits: [
-      'Current Grok Saved logical completeness is not proven until every Saved item has an authoritative logical identity, preferably grokPostId from /imagine/post/{uuid}.',
+      'Grok media post IDs were captured through the read-style /rest/media/post/get API; individual /imagine/post/{uuid} routes were not opened per item.',
+      `${grokSavedInventoryStatus.failedMediaPosts || 0} Grok media-post rows remain response gaps after retry and are reported as metadata/post-identity gaps rather than inferred missing media.`,
       'D1 asset_id is preserved as evidence but is not treated as primary Grok identity.',
       'Same SHA-256 without an accepted identity-link signal remains needs_human_review.',
       'This is a local-only canonical index proposal and does not authorize production writes, object moves, deletes, or repair actions.'
@@ -541,11 +820,13 @@ async function buildCanonicalIndex() {
     status: grokSavedInventoryStatus.status,
     visibleWindowPreviouslyVerified: true,
     visibleUrlPath: 'grok.com/imagine/saved',
-    activeTabBrowserControl: grokSavedRows.length ? 'verified' : 'not_captured',
+    activeTabBrowserControl: grokAssetRows.length || grokMediaPostRows.length ? 'verified' : 'not_captured',
     blockedRequirement: 'current Grok Saved inventory from the existing authenticated Chrome tab',
     nextAction: grokSavedInventoryStatus.status === 'blocked'
       ? 'Capture the current Grok Saved inventory from the visible authenticated tab.'
-      : 'Capture detail-page grokPostId evidence for rows without logical identity, without production writes or Grok actions.'
+      : grokSavedInventoryStatus.identityLimited
+        ? 'Capture detail-page grokPostId evidence for rows without logical identity, without production writes or Grok actions.'
+        : 'Review and, if needed, retry remaining media-post response gaps; do not treat them as physical duplicate cleanup approval.'
   });
   await writeText('report-canonical.md', renderMarkdownReport(summary));
 
@@ -555,14 +836,14 @@ async function buildCanonicalIndex() {
     manifest.subsystems.canonicalIndex = grokSavedInventoryStatus.status === 'verified' ? 'verified' : 'partial';
     manifest.subsystems.grokSavedInventory = grokSavedInventoryStatus.status;
     manifest.blockers = (manifest.blockers || []).filter((blocker) => blocker.mode !== 'grokSavedInventory');
-    if (grokSavedInventoryStatus.status !== 'verified') {
+    if (grokSavedInventoryStatus.status === 'blocked' || grokSavedInventoryStatus.identityLimited) {
       manifest.blockers.push({
         mode: 'grokSavedInventory',
         recordedAt: generatedAt,
         reason: grokSavedInventoryStatus.limitation || grokSavedInventoryStatus.blocker || 'Current Grok Saved logical completeness is not proven.',
         nextAction: grokSavedInventoryStatus.status === 'blocked'
           ? 'Capture the current Grok Saved inventory from the visible authenticated tab.'
-          : 'Use a safer full Saved export/API path or explicitly approve controlled detail-page navigation to capture grokPostId identity without production writes.'
+          : 'Review whether the active-tab API asset/response identity is sufficient for this read-only audit, or explicitly approve controlled detail-page navigation to capture grokPostId identity without production writes.'
       });
     }
     manifest.finalVerdicts ||= {};
@@ -591,7 +872,7 @@ This report is redacted. It contains counts and hashes only, not raw prompts, co
 - Production writes: ${summary.productionWrites ? 'yes' : 'no'}
 - Raw local canonical index: \`${summary.privateArtifacts.localCanonicalIndexJsonl}\` (gitignored)
 - Grok Saved inventory: ${summary.grokSavedInventoryStatus.status}
-- Canonical index status: ${summary.grokSavedInventoryStatus.status === 'verified' ? 'complete for captured sources' : 'partial because current Grok Saved logical identity is not fully proven'}
+- Canonical index status: ${summary.grokSavedInventoryStatus.identityLimited ? 'partial because current Grok Saved logical identity is not fully proven' : 'complete for captured sources, with reported response gaps where present'}
 
 ## Source Counts
 
@@ -602,6 +883,10 @@ This report is redacted. It contains counts and hashes only, not raw prompts, co
 - Worker rows: ${summary.sourceCounts.workerRows}
 - Metadata references: ${summary.sourceCounts.metadataReferences}
 - Grok Saved rows: ${summary.sourceCounts.grokSavedRows}
+- Grok Saved grid rows: ${summary.sourceCounts.grokSavedGridRows}
+- Grok asset API rows: ${summary.sourceCounts.grokAssetApiRows}
+- Grok conversation response rows: ${summary.sourceCounts.grokConversationResponseRows}
+- Grok media post rows: ${summary.sourceCounts.grokMediaPostRows}
 
 ## Classification Counts
 

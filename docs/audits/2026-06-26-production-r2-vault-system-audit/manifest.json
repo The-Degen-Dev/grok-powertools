@@ -35,16 +35,9 @@
     "liveGrok": "verified",
     "reconciliation": "dirty",
     "canonicalIndex": "partial",
-    "grokSavedInventory": "partial"
+    "grokSavedInventory": "api_captured_post_identity_with_post_gaps"
   },
-  "blockers": [
-    {
-      "mode": "grokSavedInventory",
-      "recordedAt": "2026-06-28T21:45:25.541Z",
-      "reason": "Saved grid traversal did not reach a verified end state, and captured grid rows do not have complete logical grokPostId identity.",
-      "nextAction": "Use a safer full Saved export/API path or explicitly approve controlled detail-page navigation to capture grokPostId identity without production writes."
-    }
-  ],
+  "blockers": [],
   "evidenceIndex": [
     {
       "path": "browser-samples/.gitkeep",
@@ -58,8 +51,8 @@
     },
     {
       "path": "implementation-notes.html",
-      "bytes": 14486,
-      "updatedAt": "2026-06-28T21:44:46.004Z"
+      "bytes": 23418,
+      "updatedAt": "2026-06-29T00:10:44.562Z"
     },
     {
       "path": "inventory/.gitkeep",
@@ -85,6 +78,11 @@
       "path": "inventory/d1-vault-overlays.jsonl",
       "bytes": 0,
       "updatedAt": "2026-06-28T03:48:05.119Z"
+    },
+    {
+      "path": "inventory/grok-assets-current-summary.json",
+      "bytes": 73732,
+      "updatedAt": "2026-06-29T00:06:33.570Z"
     },
     {
       "path": "inventory/grok-saved-current-summary.json",
@@ -217,14 +215,19 @@
       "updatedAt": "2026-06-28T03:48:05.118Z"
     },
     {
+      "path": "logs/grok-assets-active-tab-capture.json",
+      "bytes": 818,
+      "updatedAt": "2026-06-29T00:06:33.577Z"
+    },
+    {
       "path": "logs/grok-saved-active-tab-capture.json",
       "bytes": 500,
       "updatedAt": "2026-06-28T21:41:47.800Z"
     },
     {
       "path": "logs/grok-saved-browser-control-blocker.json",
-      "bytes": 437,
-      "updatedAt": "2026-06-28T21:45:25.627Z"
+      "bytes": 476,
+      "updatedAt": "2026-06-29T00:10:03.092Z"
     },
     {
       "path": "logs/live-grok-extension-summary-2026-06-28.json",
@@ -364,7 +367,7 @@
     {
       "path": "logs/validate-artifacts.json",
       "bytes": 102,
-      "updatedAt": "2026-06-28T21:45:37.912Z"
+      "updatedAt": "2026-06-29T00:11:06.100Z"
     },
     {
       "path": "logs/web-build.txt",
@@ -478,8 +481,8 @@
     },
     {
       "path": "reconciliations/canonical-gap-report.json",
-      "bytes": 3784,
-      "updatedAt": "2026-06-28T21:45:25.626Z"
+      "bytes": 5032,
+      "updatedAt": "2026-06-29T00:10:03.092Z"
     },
     {
       "path": "reconciliations/duplicate-groups.json",
@@ -488,8 +491,8 @@
     },
     {
       "path": "reconciliations/local-canonical-index-summary.json",
-      "bytes": 10593,
-      "updatedAt": "2026-06-28T21:45:25.625Z"
+      "bytes": 12098,
+      "updatedAt": "2026-06-29T00:10:03.091Z"
     },
     {
       "path": "reconciliations/malformed-keys.json",
@@ -538,8 +541,8 @@
     },
     {
       "path": "report-canonical.md",
-      "bytes": 1779,
-      "updatedAt": "2026-06-28T21:45:25.627Z"
+      "bytes": 2265,
+      "updatedAt": "2026-06-29T00:10:03.093Z"
     },
     {
       "path": "report.md",
@@ -578,13 +581,18 @@
     },
     {
       "path": "scripts/audit-production-r2-vault.mjs",
-      "bytes": 82475,
-      "updatedAt": "2026-06-28T20:52:23.995Z"
+      "bytes": 82573,
+      "updatedAt": "2026-06-28T22:32:09.669Z"
     },
     {
       "path": "scripts/build-local-canonical-index.mjs",
-      "bytes": 25896,
-      "updatedAt": "2026-06-28T21:45:16.658Z"
+      "bytes": 40614,
+      "updatedAt": "2026-06-29T00:09:47.747Z"
+    },
+    {
+      "path": "scripts/capture-grok-assets-active-tab.mjs",
+      "bytes": 60687,
+      "updatedAt": "2026-06-28T23:37:08.181Z"
     },
     {
       "path": "scripts/capture-grok-saved-active-tab.mjs",
@@ -594,7 +602,7 @@
   ],
   "finalVerdicts": {
     "productionR2InternalCorrectness": "dirty",
-    "currentGrokSavedCompleteness": "partial",
+    "currentGrokSavedCompleteness": "api_captured_post_identity_with_post_gaps",
     "localSystemHealth": "clean"
   },
   "repoSnapshots": [
@@ -634,6 +642,30 @@
       "identityStatus": "grid_has_no_grok_post_ids",
       "committedSummary": "inventory/grok-saved-current-summary.json",
       "rawInventory": "private/grok-saved-current-inventory.jsonl"
+    },
+    "grokSavedActiveTabApi": {
+      "generatedAt": "2026-06-29T00:06:33.451Z",
+      "status": "api_captured_post_identity_with_post_gaps",
+      "method": "active_chrome_front_tab_same_origin_api",
+      "route": "/imagine/saved",
+      "assetRows": 12446,
+      "uniqueSourceConversationIds": 7985,
+      "promptCandidateCount": 6606,
+      "mediaPostPromptCount": 7308,
+      "mediaPostOriginalPromptCount": 7308,
+      "mediaPostCaptureMode": "async_worker",
+      "completedAssetPagination": true,
+      "completedConversationResponses": true,
+      "allConversationIdsAttempted": true,
+      "failedConversationResponses": 1463,
+      "completedMediaPosts": true,
+      "allAssetIdsAttempted": true,
+      "failedMediaPosts": 214,
+      "committedSummary": "inventory/grok-assets-current-summary.json",
+      "rawAssetInventory": "private/grok-assets-current-inventory.jsonl",
+      "rawConversationResponses": "private/grok-conversation-responses-current.jsonl",
+      "rawMediaPosts": "private/grok-media-posts-current.jsonl",
+      "identityStatus": "api_media_post_ids_captured"
     }
   }
 }

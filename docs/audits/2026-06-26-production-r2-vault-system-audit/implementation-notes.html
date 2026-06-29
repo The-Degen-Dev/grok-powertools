@@ -52,6 +52,11 @@
     <li>The Grok Saved page uses an internal main gallery scroller rather than window scroll. The verified scroller is the large content container at the right of the sidebar, with <code>clientHeight=1070</code> and <code>scrollHeight=7029</code> in the current session.</li>
     <li>The Saved capture script writes raw visible card data only to ignored <code>private/grok-saved-current-inventory.jsonl</code> and writes committed evidence only as counts and hashes in <code>inventory/grok-saved-current-summary.json</code> and <code>logs/grok-saved-active-tab-capture.json</code>.</li>
     <li>The Saved capture script now merges with an existing private inventory by candidate signature. This prevents a later memory-guarded early stop from shrinking a better previous partial inventory.</li>
+    <li>The current primary Grok Saved inventory path is no longer gallery scrolling. It uses read-only same-origin active-tab API requests from the visible <code>https://grok.com/imagine/saved</code> page: <code>/rest/assets</code> for media inventory and <code>/rest/app-chat/conversations/{sourceConversationId}/responses</code> for prompt and response metadata.</li>
+    <li>The active-tab API capture stores exact asset IDs, source conversation IDs, media keys, and raw prompt messages only in ignored private artifacts. Committed artifacts remain count/hash/status summaries.</li>
+    <li>The read-only API path captures <code>assetId</code>, <code>responseId</code>, <code>sourceConversationId</code>, media keys, prompt messages, and response metadata, but it does not expose <code>grokPostId</code> from <code>/imagine/post/{uuid}</code>. The canonical index therefore treats this as stronger current-Saved evidence than the grid scrape, but still identity-limited.</li>
+    <li>Media-post identity capture now uses a page-resident async worker installed into the active Grok Saved tab. AppleScript is limited to narrow route probes, worker install/enqueue/drain/stop calls, and checkpointed result drains; bulk synchronous in-page XHR is restricted to tiny <code>sync_debug</code> probes.</li>
+    <li>The full async-worker media-post pass attempted all <code>12,446</code> captured Grok asset IDs. After two retry passes over failures, <code>12,232</code> media-post rows returned <code>200</code>, <code>213</code> returned stable <code>404</code>, and <code>1</code> returned a persistent <code>500</code>. These are recorded as media-post response gaps, not inferred physical media loss.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -67,6 +72,9 @@
     <li>The canonicalization pass reuses the existing same-day R2/D1/Worker/local/metadata artifacts instead of rehashing all production media again. Full current-state proof still requires either a fresh approved R2 hash rerun or accepting the existing hash snapshot as the read-only source artifact for this pass.</li>
     <li>The bundled Chrome controller connected, but <code>browser.tabs.selected()</code> did not expose the focused user tab. I did not call <code>browser.user.openTabs()</code> because that would be whole-profile tab discovery on a Chrome profile with many tabs. Active-tab Chrome scripting was used instead.</li>
     <li>The current Saved browser artifact is a partial grid inventory, not an authoritative logical Saved inventory. Bounded traversal captured <code>821</code> unique grid candidates, but the run stopped on the memory guard and the grid did not expose <code>/imagine/post/{uuid}</code> identifiers.</li>
+    <li>The active-tab API inventory supersedes the grid scrape as the main current-Saved media inventory. The grid scrape is retained as corroborating partial evidence only.</li>
+    <li>Conversation response capture treats <code>404</code> responses as prompt/detail gaps instead of fatal capture errors. Retryable HTTP failures, parse errors, and memory-guard stops still stop the run so they can be resumed safely.</li>
+    <li>A synchronous media-post batch of <code>100</code> made the visible Grok tab show Chrome unresponsive alerts. The implementation now forbids high-volume synchronous media-post capture; future full runs must use the async worker or stop before resuming the Goal.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -76,6 +84,11 @@
     <li>The safe Grok Saved strategy is bounded viewport stepping: capture one visible gallery slice, scroll the main gallery container by less than one viewport, wait briefly, capture the next slice, and stop on memory or route guardrails. A one-step probe moved the main scroller from <code>0</code> to <code>802</code>, loaded only a small next slice, then restored the position to <code>0</code>.</li>
     <li>The Saved grid appears lazy-loaded or virtualized. Longer scroll passes expanded the scroll range and sometimes shifted scroll position backward after new batches loaded. Continuing blindly would increase Chrome pressure without proving completion, so the report keeps Grok Saved status <code>partial</code>.</li>
     <li>A narrow resource-path probe found only media asset paths and <code>/api/log_metric</code>; it did not reveal a Saved-feed API path suitable for a safer full enumeration.</li>
+    <li>The first full API response capture stopped after <code>3,020</code> conversation rows because the script treated five <code>404</code> response endpoints as fatal. The script was changed to record <code>404</code> as gaps and continue.</li>
+    <li>A later response resume stopped on the Chrome memory delta guard after <code>3,390</code> conversation rows. The script was changed to reuse the already completed asset inventory so subsequent resumes do not re-page assets or add unnecessary browser pressure.</li>
+    <li>The completed response pass attempted all <code>7,985</code> source conversations. It captured <code>6,522</code> successful response payloads and recorded <code>1,463</code> <code>404</code> response gaps.</li>
+    <li>The async media-post worker trades slightly more bookkeeping for a safer browser profile: results are drained in bounded chunks to ignored JSONL checkpoints, while fetches run asynchronously with limited concurrency so Chrome's UI thread is not held by thousands of blocking requests.</li>
+    <li>One media-post endpoint kept returning <code>500</code> after retry. I stopped retrying after the second low-concurrency retry pass because the remaining count was isolated and the canonical report can carry it as a residual response gap without risking unnecessary API churn.</li>
   </ul>
 
   <h2>Open Questions</h2>
@@ -83,6 +96,8 @@
     <li>Authoritative current Grok Saved inventory is no longer blocked on browser control, but it is still incomplete. Current evidence is a partial grid scrape with <code>821</code> unique candidates, <code>1027</code> unique media URL hashes, and <code>694</code> unique media UUID hashes. Do not claim current Grok Saved completeness until traversal reaches a verified end state and logical identity is captured.</li>
     <li>The Saved grid did not expose <code>grokPostId</code> values. Detail-page capture or another identity source is required before using Grok Saved as authoritative logical identity. Opening detail pages may require explicit approval because the objective prohibits route mutation during browser work.</li>
     <li>Current local canonical index artifacts: raw ignored <code>private/local-canonical-index.jsonl</code>, redacted <code>reconciliations/local-canonical-index-summary.json</code>, redacted <code>reconciliations/canonical-gap-report.json</code>, and redacted <code>report-canonical.md</code>.</li>
+    <li>The active-tab API inventory captured <code>12,446</code> Grok assets across <code>208</code> asset pages and attempted all <code>7,985</code> source conversations. It found <code>6,606</code> prompt candidates. Media-post identity is now captured from <code>/rest/media/post/get</code> for successful rows, but detail-route equivalence was not opened per item.</li>
+    <li>The media-post API now provides post identity for successful rows without route mutation. Detail-route equivalence was not opened per item, and <code>214</code> media-post response gaps remain after retry.</li>
   </ul>
 
   <h2>Commands Run</h2>
@@ -97,6 +112,19 @@
     <li><code>npm run lint</code> passed.</li>
     <li><code>git diff --check</code> passed.</li>
     <li>A targeted leak scan for exact Grok asset URLs, exact post routes, signed URL markers, bearer strings, cookie strings, and API-key markers in committed-safe changed artifacts returned no matches.</li>
+    <li><code>node --check docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/capture-grok-assets-active-tab.mjs</code></li>
+    <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/capture-grok-assets-active-tab.mjs</code> captured the full asset inventory and partial conversation responses.</li>
+    <li><code>GROK_ASSET_CAPTURE_REUSE_ASSETS=1 GROK_ASSET_CAPTURE_MAX_CHROME_RSS_DELTA_MB=4000 node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/capture-grok-assets-active-tab.mjs</code> completed all conversation response attempts without re-paginating assets.</li>
+    <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/build-local-canonical-index.mjs</code> rebuilt the local canonical index and redacted reports after the API inventory.</li>
+    <li><code>node --check docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/capture-grok-assets-active-tab.mjs</code> passed after the async-worker media-post hardening.</li>
+    <li><code>GROK_ASSET_CAPTURE_REUSE_ASSETS=1 GROK_ASSET_CAPTURE_MAX_MEDIA_POSTS=2 GROK_ASSET_CAPTURE_MEDIA_POST_WORKER_CONCURRENCY=2 ... node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/capture-grok-assets-active-tab.mjs</code> smoke-tested the async media-post worker. It completed in about two seconds, added two successful media-post rows, left the worker idle and drained, and did not trigger a Chrome unresponsive alert.</li>
+    <li><code>GROK_ASSET_CAPTURE_REUSE_ASSETS=1 GROK_ASSET_CAPTURE_MEDIA_POST_WORKER_CONCURRENCY=4 ... node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/capture-grok-assets-active-tab.mjs</code> completed the full async media-post capture from the active Grok Saved tab.</li>
+    <li><code>GROK_ASSET_CAPTURE_REUSE_ASSETS=1 GROK_ASSET_CAPTURE_RETRY_FAILED_MEDIA_POSTS=1 ... node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/capture-grok-assets-active-tab.mjs</code> ran two bounded retry passes over media-post failures. The first recovered <code>11</code> rows; the second confirmed the final <code>214</code> response gaps.</li>
+    <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/build-local-canonical-index.mjs</code> rebuilt the local canonical index and redacted reports after media-post identity integration.</li>
+    <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/audit-production-r2-vault.mjs validate-artifacts</code> passed after the async-worker smoke.</li>
+    <li><code>npm run lint</code>, <code>npm run test:unit</code>, and <code>npm run test:e2e</code> passed after the hardening change.</li>
+    <li><code>git diff --check</code> passed after generated artifact updates. <code>git check-ignore</code> confirmed the raw private Grok asset, conversation, and media-post JSONL artifacts remain ignored.</li>
+    <li>A targeted scan of committed-safe changed files for bearer tokens, cookies, signed URL markers, exact Grok post routes, and exact Grok media host URLs found no secret or raw media URL leakage beyond existing policy prose.</li>
   </ul>
 
   <h2>Artifacts Produced</h2>
@@ -106,7 +134,15 @@
     <li><code>private/grok-saved-current-summary.json</code>: ignored raw capture summary.</li>
     <li><code>inventory/grok-saved-current-summary.json</code>: committed-safe redacted/hash-only capture summary.</li>
     <li><code>logs/grok-saved-active-tab-capture.json</code>: committed-safe capture status summary.</li>
-    <li><code>reconciliations/local-canonical-index-summary.json</code>, <code>reconciliations/canonical-gap-report.json</code>, and <code>report-canonical.md</code>: regenerated with Grok Saved status <code>partial</code>.</li>
+    <li><code>reconciliations/local-canonical-index-summary.json</code>, <code>reconciliations/canonical-gap-report.json</code>, and <code>report-canonical.md</code>: previously regenerated with Grok Saved status <code>partial</code> after the grid-only capture.</li>
+    <li><code>scripts/capture-grok-assets-active-tab.mjs</code>: active-tab-only read-only Grok asset and conversation-response API capture script.</li>
+    <li><code>scripts/capture-grok-assets-active-tab.mjs</code> now also contains the async media-post worker path for read-only post identity/prompt capture from the active Grok Saved tab.</li>
+    <li><code>private/grok-assets-current-inventory.jsonl</code>: ignored raw Grok asset inventory from <code>/rest/assets</code>.</li>
+    <li><code>private/grok-conversation-responses-current.jsonl</code>: ignored raw conversation-response inventory containing prompt candidates and response metadata.</li>
+    <li><code>private/grok-media-posts-current.jsonl</code>: ignored raw media-post identity and prompt metadata inventory from <code>/rest/media/post/get</code>.</li>
+    <li><code>inventory/grok-assets-current-summary.json</code>: committed-safe redacted/hash-only asset and prompt-response summary.</li>
+    <li><code>logs/grok-assets-active-tab-capture.json</code>: committed-safe API capture status summary.</li>
+    <li><code>reconciliations/local-canonical-index-summary.json</code>, <code>reconciliations/canonical-gap-report.json</code>, and <code>report-canonical.md</code>: regenerated with Grok Saved status <code>api_captured_identity_limited</code>.</li>
   </ul>
 </body>
 </html>

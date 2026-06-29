@@ -2028,6 +2028,7 @@ async function validateArtifacts() {
     'inventory/metadata-objects.json',
     'inventory/metadata-references.json',
     'inventory/local-media-summary.json',
+    'inventory/grok-assets-current-summary.json',
     'reconciliations/r2-d1-delta.json',
     'reconciliations/r2-metadata-delta.json',
     'reconciliations/r2-local-delta.json',
@@ -2046,6 +2047,7 @@ async function validateArtifacts() {
     'logs/web-route-smoke-summary.json',
     'logs/web-ui-smoke.json',
     'logs/grok-saved-browser-control-blocker.json',
+    'logs/grok-assets-active-tab-capture.json',
     'reconciliations/sample-set.json'
   ];
   const requiredJsonl = [

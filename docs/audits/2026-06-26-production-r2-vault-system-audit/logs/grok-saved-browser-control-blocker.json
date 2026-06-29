@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-06-28T21:45:25.541Z",
-  "status": "partial",
+  "generatedAt": "2026-06-29T00:10:02.882Z",
+  "status": "api_captured_post_identity_with_post_gaps",
   "visibleWindowPreviouslyVerified": true,
   "visibleUrlPath": "grok.com/imagine/saved",
   "activeTabBrowserControl": "verified",
   "blockedRequirement": "current Grok Saved inventory from the existing authenticated Chrome tab",
-  "nextAction": "Capture detail-page grokPostId evidence for rows without logical identity, without production writes or Grok actions."
+  "nextAction": "Review and, if needed, retry remaining media-post response gaps; do not treat them as physical duplicate cleanup approval."
 }

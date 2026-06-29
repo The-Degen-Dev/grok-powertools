@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-28T21:45:25.541Z",
+  "generatedAt": "2026-06-29T00:10:02.882Z",
   "schemaVersion": 1,
   "mode": "read_only_local_canonical_index",
   "productionWrites": false,
@@ -17,7 +17,11 @@
     "metadataReferences": "inventory/metadata-references.json",
     "localSummary": "inventory/local-media-summary.json",
     "grokSavedInventory": "private/grok-saved-current-inventory.jsonl",
-    "grokSavedSummary": "inventory/grok-saved-current-summary.json"
+    "grokSavedSummary": "inventory/grok-saved-current-summary.json",
+    "grokAssetsInventory": "private/grok-assets-current-inventory.jsonl",
+    "grokAssetsSummary": "inventory/grok-assets-current-summary.json",
+    "grokConversationResponses": "private/grok-conversation-responses-current.jsonl",
+    "grokMediaPosts": "private/grok-media-posts-current.jsonl"
   },
   "sourceCounts": {
     "r2Objects": 18083,
@@ -27,37 +31,61 @@
     "workerRows": 4647,
     "metadataReferences": 2100,
     "localFiles": 8532,
-    "grokSavedRows": 821
+    "grokSavedRows": 12446,
+    "grokSavedGridRows": 821,
+    "grokAssetApiRows": 12446,
+    "grokConversationResponseRows": 7985,
+    "grokMediaPostRows": 12446
   },
   "grokSavedInventoryStatus": {
-    "status": "partial",
-    "rowCount": 821,
+    "status": "api_captured_post_identity_with_post_gaps",
+    "rowCount": 12446,
+    "gridRowCount": 821,
+    "assetApiRowCount": 12446,
+    "conversationResponseRows": 7985,
+    "mediaPostRows": 12446,
     "completedGridTraversal": false,
-    "identityStatus": "grid_has_no_grok_post_ids",
-    "identityLimited": true,
-    "limitation": "Saved grid traversal did not reach a verified end state, and captured grid rows do not have complete logical grokPostId identity."
+    "completedApiPagination": true,
+    "completedConversationResponses": true,
+    "completedMediaPosts": true,
+    "allAssetIdsAttempted": true,
+    "promptMetadataStatus": "captured_with_response_gaps",
+    "promptCandidateCount": 6606,
+    "mediaPostPromptCount": 7308,
+    "mediaPostOriginalPromptCount": 7308,
+    "failedConversationResponses": 1463,
+    "failedMediaPosts": 214,
+    "mediaPostStatusCounts": {
+      "200": 12232,
+      "404": 213,
+      "500": 1
+    },
+    "identityStatus": "api_media_post_ids_captured",
+    "identityLimited": false,
+    "limitation": "Media post identity was captured via /rest/media/post/get for successful rows, but 214 asset IDs still have media-post response gaps after retry."
   },
   "classification": {
     "statusCounts": {
-      "orphan_candidate": 1679,
-      "needs_human_review": 5687,
-      "date_folder_mapped": 4194,
+      "orphan_candidate": 466,
+      "needs_human_review": 5553,
+      "date_folder_mapped": 5541,
       "canonical": 4419,
       "alternate_duplicate": 2
     },
     "reasonCounts": {
-      "date_folder_media_not_linked_to_canonical_identity": 1679,
+      "date_folder_media_not_linked_to_canonical_identity": 466,
       "retained_hash_group_candidate_without_index_or_grok_saved_evidence": 2926,
-      "same_sha256_without_accepted_identity_link": 2761,
-      "duplicate_hash_plus_identity_link_to_retained_candidate": 4196,
+      "same_sha256_without_accepted_identity_link": 2627,
+      "duplicate_hash_plus_identity_link_to_retained_candidate": 4330,
+      "date_folder_media_seen_in_current_grok_saved_api": 1213,
       "retained_duplicate_group_candidate": 2190,
       "canonical_media_indexed_by_d1_or_worker": 2229
     },
     "pathClassStatusMatrix": {
       "legacy-date-media": {
-        "orphan_candidate": 1679,
-        "needs_human_review": 4020,
-        "date_folder_mapped": 4194
+        "orphan_candidate": 466,
+        "needs_human_review": 3886,
+        "date_folder_mapped": 5541
       },
       "canonical-media": {
         "canonical": 4419,
@@ -69,8 +97,8 @@
   "duplicateClassification": {
     "sameHashGroupCount": 5116,
     "sameHashObjectCount": 12073,
-    "acceptedLinkedDuplicateObjects": 4196,
-    "hashOnlyDuplicateObjects": 2761,
+    "acceptedLinkedDuplicateObjects": 4330,
+    "hashOnlyDuplicateObjects": 2627,
     "groupSummaries": [
       {
         "duplicateGroupId": "04c8565d3c321c38",
@@ -205,9 +233,9 @@
       {
         "duplicateGroupId": "05dfb5cc28c4bf73",
         "objectCount": 4,
-        "retainedKeyHash": "14692079c7ee6140",
-        "linkedDuplicateCount": 0,
-        "hashOnlyDuplicateCount": 3,
+        "retainedKeyHash": "11ea14641c7bb5e0",
+        "linkedDuplicateCount": 1,
+        "hashOnlyDuplicateCount": 2,
         "pathClassComposition": {
           "legacy-date-media": 4
         }
@@ -215,9 +243,9 @@
       {
         "duplicateGroupId": "4a28d38a5b769ce7",
         "objectCount": 3,
-        "retainedKeyHash": "3555adff81d6f4fd",
-        "linkedDuplicateCount": 0,
-        "hashOnlyDuplicateCount": 2,
+        "retainedKeyHash": "e63a574017af4364",
+        "linkedDuplicateCount": 1,
+        "hashOnlyDuplicateCount": 1,
         "pathClassComposition": {
           "legacy-date-media": 3
         }
@@ -235,9 +263,9 @@
       {
         "duplicateGroupId": "6690c693c780a641",
         "objectCount": 3,
-        "retainedKeyHash": "c50e4dc866ff0065",
-        "linkedDuplicateCount": 0,
-        "hashOnlyDuplicateCount": 2,
+        "retainedKeyHash": "f66b7e3da220c580",
+        "linkedDuplicateCount": 1,
+        "hashOnlyDuplicateCount": 1,
         "pathClassComposition": {
           "legacy-date-media": 3
         }
@@ -329,14 +357,21 @@
     "workerMissingCanonicalMedia": 1441,
     "metadataLinkedMedia": 2090,
     "metadataUnlinkedMedia": 13891,
-    "needsHumanReview": 5687,
-    "orphanCandidates": 1679,
+    "grokApiCoveredMedia": 6541,
+    "grokApiPromptLinkedMedia": 4707,
+    "grokMediaPostLinkedMedia": 6541,
+    "grokMediaPostPromptLinkedMedia": 3614,
+    "grokMediaPostUnlinkedMedia": 9440,
+    "grokApiUnlinkedMedia": 9440,
+    "needsHumanReview": 5553,
+    "orphanCandidates": 466,
     "grokSavedInventoryBlocked": 0,
-    "grokSavedInventoryPartial": 1,
-    "grokSavedIdentityLimited": 1
+    "grokSavedInventoryPartial": 0,
+    "grokSavedIdentityLimited": 0
   },
   "confidenceLimits": [
-    "Current Grok Saved logical completeness is not proven until every Saved item has an authoritative logical identity, preferably grokPostId from /imagine/post/{uuid}.",
+    "Grok media post IDs were captured through the read-style /rest/media/post/get API; individual /imagine/post/{uuid} routes were not opened per item.",
+    "214 Grok media-post rows remain response gaps after retry and are reported as metadata/post-identity gaps rather than inferred missing media.",
     "D1 asset_id is preserved as evidence but is not treated as primary Grok identity.",
     "Same SHA-256 without an accepted identity-link signal remains needs_human_review.",
     "This is a local-only canonical index proposal and does not authorize production writes, object moves, deletes, or repair actions."
