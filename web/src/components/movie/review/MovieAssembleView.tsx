@@ -36,7 +36,7 @@ export default function MovieAssembleView({
   const totalDuration = clips.reduce((sum, clip) => sum + clipDurationSeconds(clip), 0) || 1;
 
   return (
-    <main className="grid min-h-0 gap-3 overflow-y-auto p-4 lg:grid-rows-[minmax(0,1fr)_auto_auto]">
+    <main className="movie-review-center grid min-h-0 gap-3 overflow-y-auto p-4 lg:grid-rows-[minmax(0,1fr)_auto_auto]">
       <MoviePreview clip={activeClip} videos={videos} />
       <section role="region" aria-label="Time-proportional ribbon" className="rounded border border-neutral-800 bg-neutral-900 p-3">
         <div className="flex items-center justify-between gap-3">

@@ -183,3 +183,20 @@ test("Assemble mode shows continuous preview, ribbon, waveform controls, and aud
   await expect(page.getByRole("slider", { name: /Trim out/i })).toBeVisible();
   await expect(page.getByText(/Source audio/i)).toBeVisible();
 });
+
+test("Review Bay remains usable at phone width", async ({ page }) => {
+  const movieId = await seedReviewMovie(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/movie?id=${movieId}`);
+  await expect(page.getByRole("region", { name: /Candidates Grid/i })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Focus/i })).toBeVisible();
+});
+
+test("Review Bay status indicators have accessible names", async ({ page }) => {
+  const movieId = await seedReviewMovie(page);
+  await page.goto(`/movie?id=${movieId}`);
+  await expectReviewReady(page);
+  await page.keyboard.press("KeyK");
+  await expect(page.getByLabel(/lifecycle kept/i).first()).toBeVisible();
+});

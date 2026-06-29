@@ -1728,6 +1728,70 @@ Export blocked button not found; export UI missing.</code></pre>
                             <code>aac</code> with local <code>ffprobe</code>.
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added a scoped Review Bay grid contract with named layout classes for
+                            the header, left rail, center work area, inspector, and clip strip. The
+                            desktop/tablet layout keeps review controls visible around the main work
+                            area, while phone-width layout preserves the candidates grid, mode
+                            controls, and clip strip in the first usable viewport.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Deviations</td>
+                        <td>
+                            The new phone-width and accessibility tests passed before the CSS
+                            contract was added, so there was no hard failing layout bug. I still
+                            added the scoped classes because the previous Tailwind-only grid made the
+                            responsive surface harder to reason about and easier to regress.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            On narrow phones, the draft/director rail and inspector are hidden
+                            instead of squeezed into the main column. Fine editing remains a
+                            tablet/desktop workflow, and the primary mobile recovery path stays
+                            review, focus, and the committed strip.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Validation</td>
+                        <td>
+                            Review Bay E2E:
+                            <pre><code>Running 9 tests using 1 worker
+  ✓ Review Bay first viewport exposes operator regions
+  ✓ Keyboard keep and reject move candidates into the right lanes
+  ✓ Review Bay keeps Candidates Grid separate from committed Clip Strip
+  ✓ Inspector updates trim and audio state for selected committed clip
+  ✓ Focus mode supports Enter to keep and Escape to return to Review
+  ✓ Draft Queue applies only project-scoped versions with repaired selection
+  ✓ Assemble mode shows continuous preview, ribbon, waveform controls, and audio lane
+  ✓ Review Bay remains usable at phone width
+  ✓ Review Bay status indicators have accessible names
+
+  9 passed (16.1s)</code></pre>
+                            Lint and build:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>

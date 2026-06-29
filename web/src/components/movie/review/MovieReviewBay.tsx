@@ -30,8 +30,8 @@ export default function MovieReviewBay({ movie }: { movie: Movie }) {
   }
 
   return (
-    <div className="grid h-[calc(100vh-3.5rem)] grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] overflow-y-auto bg-neutral-950 text-neutral-100 lg:grid-cols-[16rem_minmax(0,1fr)_18rem] lg:grid-rows-[auto_minmax(0,1fr)_auto] lg:overflow-hidden">
-      <div className="lg:col-span-3">
+    <div className="movie-review-grid h-[calc(100vh-3.5rem)] overflow-hidden bg-neutral-950 text-neutral-100">
+      <div className="movie-review-header">
         <MovieReviewHeader project={project} onProjectChange={setProject} />
       </div>
       <MovieLeftRail project={project} onProjectChange={setProject} />
@@ -43,7 +43,7 @@ export default function MovieReviewBay({ movie }: { movie: Movie }) {
         <MovieCandidatesGrid project={project} onProjectChange={setProject} />
       )}
       <MovieInspector project={project} onProjectChange={setProject} />
-      <div className="lg:col-span-3">
+      <div className="movie-review-strip">
         <MovieClipStrip project={project} onProjectChange={setProject} />
       </div>
     </div>

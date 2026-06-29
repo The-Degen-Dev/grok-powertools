@@ -169,3 +169,36 @@ html.dark .skeleton {
   );
   background-size: 400% 100%;
 }
+
+/* Movie Review Bay */
+.movie-review-grid {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(260px, 320px);
+}
+
+.movie-review-header {
+  grid-column: 1 / -1;
+}
+
+.movie-review-left,
+.movie-review-center,
+.movie-review-inspector {
+  min-height: 0;
+}
+
+.movie-review-strip {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 800px) {
+  .movie-review-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .movie-review-left,
+  .movie-review-inspector {
+    display: none;
+  }
+}

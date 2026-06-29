@@ -17,7 +17,7 @@ export default function MovieFocusLoupe({
 }) {
   const clip = project.candidates[project.activeIndex];
   return (
-    <section role="region" aria-label="Focus Loupe" className="flex min-h-0 flex-col p-4">
+    <section role="region" aria-label="Focus Loupe" className="movie-review-center flex min-h-0 flex-col p-4">
       {clip ? (
         <div className="flex min-h-0 flex-1 flex-col rounded border border-orange-500/40 bg-orange-500/10 p-4">
           <div className="flex items-center justify-between gap-3">

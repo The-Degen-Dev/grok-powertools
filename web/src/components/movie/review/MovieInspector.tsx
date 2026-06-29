@@ -27,7 +27,7 @@ export default function MovieInspector({
   const committed = clip ? project.committedClips.some((item) => item.id === clip.id) : false;
   const trimOut = clip?.trimEndSeconds || clip?.durationSeconds || 5;
   return (
-    <aside role="region" aria-label="Inspector" className="min-h-0 overflow-y-auto border-l border-neutral-800 p-4">
+    <aside role="region" aria-label="Inspector" className="movie-review-inspector min-h-0 overflow-y-auto border-l border-neutral-800 p-4">
       {clip ? (
         <div className="space-y-4">
           <div>

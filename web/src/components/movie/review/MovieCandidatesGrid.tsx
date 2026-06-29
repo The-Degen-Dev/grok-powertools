@@ -17,7 +17,7 @@ export default function MovieCandidatesGrid({
   onProjectChange: (project: MovieReviewProject) => void;
 }) {
   return (
-    <section aria-label="Candidates Grid" className="min-h-0 overflow-y-auto p-4">
+    <section aria-label="Candidates Grid" className="movie-review-center min-h-0 overflow-y-auto p-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {project.candidates.map((clip, index) => {
           const selected = project.activeIndex === index;

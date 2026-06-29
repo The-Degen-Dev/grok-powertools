@@ -15,7 +15,7 @@ export default function MovieLeftRail({
 }) {
   const [activeTab, setActiveTab] = useState<"drafts" | "director">("drafts");
   return (
-    <aside role="region" aria-label="Drafts and Director" className="min-h-0 overflow-y-auto border-r border-neutral-800 p-3">
+    <aside role="region" aria-label="Drafts and Director" className="movie-review-left min-h-0 overflow-y-auto border-r border-neutral-800 p-3">
       <div className="space-y-3">
         <div role="tablist" aria-label="Movie side rail" className="grid grid-cols-2 rounded border border-neutral-800 bg-neutral-900 p-1">
           <button
