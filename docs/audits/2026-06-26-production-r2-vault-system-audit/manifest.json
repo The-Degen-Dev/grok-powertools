@@ -53,8 +53,8 @@
     },
     {
       "path": "implementation-notes.html",
-      "bytes": 27834,
-      "updatedAt": "2026-06-29T00:50:47.839Z"
+      "bytes": 30025,
+      "updatedAt": "2026-06-29T00:57:43.977Z"
     },
     {
       "path": "inventory/.gitkeep",
@@ -374,7 +374,7 @@
     {
       "path": "logs/validate-artifacts.json",
       "bytes": 102,
-      "updatedAt": "2026-06-29T00:51:04.390Z"
+      "updatedAt": "2026-06-29T00:58:49.013Z"
     },
     {
       "path": "logs/web-build.txt",
@@ -558,8 +558,8 @@
     },
     {
       "path": "report-canonical-snapshot-dry-run.md",
-      "bytes": 2897,
-      "updatedAt": "2026-06-29T00:50:47.839Z"
+      "bytes": 4457,
+      "updatedAt": "2026-06-29T00:57:43.978Z"
     },
     {
       "path": "report-canonical.md",
@@ -735,29 +735,30 @@
     }
   },
   "nextRecommendedPhase": {
-    "name": "canonical_snapshot_schema_and_local_dry_run",
+    "name": "append_only_r2_canonical_snapshot_write",
     "scope": [
-      "freeze the current evidence baseline in docs",
-      "define the append-only R2 JSON canonical snapshot schema",
-      "generate the exact snapshot payload locally from ignored/private evidence",
-      "validate parseability, counts, hashes, status totals, gap totals, and source references",
-      "produce committed-safe summaries and ignored raw dry-run artifacts"
+      "re-verify the ignored local dry-run payload hash",
+      "write the exact append-only R2 JSON snapshot only after explicit approval",
+      "read the R2 object back and verify byte SHA-256 plus stable content hash",
+      "record committed-safe write/readback evidence",
+      "stop before D1 projection and all other writes"
     ],
     "stopBefore": [
-      "production R2 writes",
       "D1 writes",
       "Worker state writes",
       "Grok actions",
       "object moves",
       "deletes",
-      "repair or sync routes"
+      "repair or sync routes",
+      "physical duplicate cleanup"
     ],
     "pauseForUser": [
-      "any production write would be needed",
-      "schema ambiguity would change classification or identity",
-      "raw prompts, cookies, signed URLs, or exact private IDs would enter committed artifacts",
-      "existing artifacts fail validation or disagree on baseline counts",
-      "local dry-run payload cannot be made repeatable"
+      "explicit write approval is missing",
+      "target bucket or exact object key is uncertain",
+      "target object already exists",
+      "local payload hash or stable content hash does not match approval",
+      "readback verification fails",
+      "any write beyond the single append-only R2 snapshot would be needed"
     ]
   },
   "currentCanonicalSnapshotDryRun": {
@@ -774,5 +775,33 @@
     "productionWrites": false,
     "nextAllowedPhase": "append_only_r2_json_snapshot_write",
     "requiresExplicitUserApproval": true
+  },
+  "currentCanonicalSnapshotWriteGate": {
+    "checkedAt": "2026-06-29T00:55:59Z",
+    "status": "paused_for_missing_explicit_write_approval",
+    "productionWrites": false,
+    "target": {
+      "accountId": "ba5339fd86e87c226bdc306347636042",
+      "bucket": "grok-gallery-001",
+      "prefix": "grok-powertools/v1",
+      "proposedObjectKey": "grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json",
+      "proposedObjectExists": false
+    },
+    "verified": {
+      "privatePayloadIgnored": true,
+      "privatePayloadSha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+      "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+      "headBucket": "ok",
+      "prefixHasObjects": true,
+      "proposedObjectHeadStatus": "not_found_404"
+    },
+    "approvalRequired": {
+      "targetBucket": "grok-gallery-001",
+      "exactObjectKey": "grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json",
+      "payloadSha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+      "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+      "sourceBaselineCommit": "edaaf8134bb545969d6e8036952695a3d8102ca7",
+      "rollbackReadbackPlan": "put the exact ignored dry-run payload to the unused object key once, read it back through R2 S3, verify byte SHA-256 and stable content hash, then keep the append-only object as the rollback/recovery source without D1, Worker, Grok, move, delete, repair, sync, or physical cleanup actions"
+    }
   }
 }

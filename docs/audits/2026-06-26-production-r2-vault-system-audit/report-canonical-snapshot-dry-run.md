@@ -55,6 +55,29 @@ This report is redacted. It contains counts and hashes only. The exact dry-run p
 
 The next phase is an append-only R2 JSON snapshot write. It requires explicit user approval naming the target bucket/key, payload SHA-256, stable content hash, source baseline commit, and rollback/readback verification plan. D1 writes, Worker writes, Grok actions, object moves, deletes, repair routes, sync routes, and physical cleanup remain forbidden without separate approval.
 
+## Write Gate Check
+
+Checked: 2026-06-29T00:55:59Z
+
+- Target account: `ba5339fd86e87c226bdc306347636042`
+- Target bucket: `grok-gallery-001`
+- Target prefix: `grok-powertools/v1`
+- Proposed object key: `grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json`
+- Private payload ignored by git: yes
+- Private payload SHA-256 verified: yes
+- R2 bucket reachable: yes
+- R2 prefix has existing objects: yes
+- Proposed object already exists: no
+- Production writes performed: no
+
+The write remains paused because the Goal text did not explicitly approve the exact object key above.
+
+Exact approval needed:
+
+```text
+I explicitly approve writing the append-only R2 canonical snapshot to bucket grok-gallery-001 at object key grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json, using private payload SHA-256 21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6 and stable content hash 4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1, from source baseline commit edaaf8134bb545969d6e8036952695a3d8102ca7. Rollback/readback plan: write the exact ignored dry-run payload once, read it back through R2 S3, verify byte SHA-256 and stable content hash, then keep the append-only object as the rollback/recovery source without D1, Worker, Grok, move, delete, repair, sync, or physical cleanup actions.
+```
+
 ## Next Staged Plan
 
 This dry run is not the final clean state. It is the approval object for the first durable canonical snapshot.
