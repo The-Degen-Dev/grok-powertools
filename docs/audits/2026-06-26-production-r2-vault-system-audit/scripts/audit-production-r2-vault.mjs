@@ -2054,6 +2054,8 @@ async function validateArtifacts() {
     'logs/grok-assets-active-tab-capture.json',
     'logs/canonical-snapshot-dry-run-validation.json',
     'logs/d1-canonical-projection-dry-run-validation.json',
+    'logs/d1-canonical-projection-write-plan.json',
+    'logs/d1-canonical-projection-write-readback.json',
     'reconciliations/sample-set.json'
   ];
   const requiredJsonl = [

@@ -69,6 +69,8 @@
     <li>The projection contract defines separate snapshot, logical asset, storage object, prompt reference, gap, and lookup tables. This is intentionally separate from the existing <code>r2_dedupe_index</code>, which is upload/object-key centered and cannot represent the canonical logical asset, prompt link, and review queue model by itself.</li>
     <li>Prompt bodies and bulky raw metadata remain in the approved R2 snapshot data plane. The D1 projection rows include prompt reference IDs, prompt hashes, selected metadata summaries, and media evidence counts, but no raw <code>prompt</code> or <code>originalPrompt</code> bodies.</li>
     <li>The local projection dry run produced <code>1</code> snapshot row, <code>8080</code> asset rows, <code>15981</code> storage rows, <code>13914</code> prompt reference rows, <code>7696</code> gap rows, and <code>92363</code> lookup rows. All exact row payloads are ignored under <code>private/</code>.</li>
+    <li>After explicit approval, the D1 projection write inserted the validated projection into <code>grok-powertools-db</code> and readback verified <code>1</code> snapshot row, <code>8080</code> asset rows, <code>15981</code> storage rows, <code>13914</code> prompt rows, <code>7696</code> gap rows, and <code>92363</code> lookup rows.</li>
+    <li>The D1 snapshot marker row was inserted last. This preserves the approved R2 canonical snapshot as the recovery source and avoids switching any product route or Worker read path during the write phase.</li>
   </ul>
 
   <h2>Deviations</h2>
@@ -88,6 +90,7 @@
     <li>Conversation response capture treats <code>404</code> responses as prompt/detail gaps instead of fatal capture errors. Retryable HTTP failures, parse errors, and memory-guard stops still stop the run so they can be resumed safely.</li>
     <li>A synchronous media-post batch of <code>100</code> made the visible Grok tab show Chrome unresponsive alerts. The implementation now forbids high-volume synchronous media-post capture; future full runs must use the async worker or stop before resuming the Goal.</li>
     <li>The D1 projection dry run uses a new dedicated script, <code>scripts/build-d1-canonical-projection-dry-run.mjs</code>, instead of adding another mode to the broad inventory runner. This keeps the production inventory runner focused on read-only evidence collection while making the projection stage repeatable from the approved snapshot.</li>
+    <li>The first D1 write attempt stopped after schema creation because Wrangler returned non-JSON progress output for <code>--file</code> imports despite <code>--json</code>. I verified the projection tables existed with zero snapshot rows before resuming; the executor now treats successful file imports as success even when Wrangler emits human progress output, while still requiring JSON for SELECT readback commands.</li>
   </ul>
 
   <h2>Tradeoffs</h2>
@@ -106,6 +109,8 @@
     <li>The first snapshot key uses the dry-run generated timestamp and stable content hash instead of the current execution time. This makes the key deterministic for the approved payload and avoids creating multiple equivalent snapshot keys while waiting for approval.</li>
     <li>The projection includes a private lookup table with exact values plus hashes, which creates <code>92363</code> lookup rows. That is more rows than the asset table, but it avoids overloading one asset row with many optional lookup semantics and keeps later D1 read queries straightforward.</li>
     <li>The projection stores private exact object keys and Grok IDs in ignored local row artifacts because a future private D1 query projection will need them to serve media and resolve identity. Committed artifacts keep only counts, hashes, schemas, and approval gates.</li>
+    <li>D1 limits SQL statements to <code>100 KB</code>, so the write path splits raw SQL into statements under <code>90 KB</code> and files under <code>3 MB</code>. One composite <code>grokPostSet</code> identity value and one matching lookup value were too large to inline; those D1 values are stored as <code>NULL</code> while their hashes and individual <code>grok_post_id</code> lookup rows preserve query identity.</li>
+    <li>Nine storage rows had oversized <code>prompt_ref_ids_json</code> arrays for the same high-fanout asset. D1 stores small sentinel JSON for those fields; the individual <code>prompt_ref_id</code> lookup rows preserve the query links.</li>
   </ul>
 
   <h2>Open Questions</h2>
@@ -120,6 +125,7 @@
     <li>The 2026-06-29 write-gate check verified the private payload is ignored by git, the private payload SHA-256 still matches <code>21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6</code>, the R2 bucket <code>grok-gallery-001</code> and prefix <code>grok-powertools/v1</code> are reachable, and the proposed object key is unused. The Goal text did not explicitly approve that exact key, so no R2 write was performed.</li>
     <li>The D1 projection dry run is complete and validated locally. The next approval gate is a D1 projection write to <code>grok-powertools-db</code> only after explicit approval naming the target database, source R2 snapshot, payload SHA-256, stable content hash, projection schema id, expected table names and row counts, and rollback plan.</li>
     <li>Product route and read-path changes remain a later phase after D1 projection write/readback verification. Physical duplicate cleanup still comes later, after logical state and product-visible projection are proven.</li>
+    <li>The D1 projection write is complete and verified. The next phase is product/Worker read-path design against this verified projection, after separate approval. No product route, Worker read path, Grok action, R2 move/delete, repair/sync route, or physical cleanup was performed in the D1 write phase.</li>
   </ul>
 
   <h2>Commands Run</h2>
@@ -163,6 +169,9 @@
     <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/audit-production-r2-vault.mjs validate-artifacts</code> passed after adding the D1 projection artifacts to the required artifact set.</li>
     <li><code>git diff --check</code>, <code>npm run lint</code>, <code>npm run test:unit</code>, <code>npm run test:e2e</code>, and <code>npm run typecheck</code> in <code>cloud/</code> passed for this projection dry-run phase.</li>
     <li>A targeted scan of generated committed-safe data artifacts found no credential markers, signed URL markers, exact Grok post routes, Grok media URLs, or raw <code>prompt</code>/<code>originalPrompt</code> JSON fields.</li>
+    <li><code>node --check docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/write-d1-canonical-projection.mjs</code> passed.</li>
+    <li><code>node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/write-d1-canonical-projection.mjs --prepare-only</code> first exposed D1 raw SQL statement-limit issues for oversized composite identity and prompt-ref-list fields, then passed after write-only compaction was added. It generated <code>18</code> row SQL batch files under ignored <code>private/</code>.</li>
+    <li><code>AUDIT_D1_PROJECTION_WRITE_APPROVED=1 node docs/audits/2026-06-26-production-r2-vault-system-audit/scripts/write-d1-canonical-projection.mjs</code> executed the approved D1 projection write. The first run stopped after schema creation because Wrangler returned non-JSON progress output for the schema file; a SELECT check showed the six projection tables existed and the snapshot had no rows. The resumed run completed and readback verified the expected counts.</li>
   </ul>
 
   <h2>Artifacts Produced</h2>
@@ -195,6 +204,11 @@
     <li><code>reconciliations/d1-canonical-projection-dry-run-summary.json</code>: committed-safe projection row counts, review queue counts, current D1 comparison, validation summary, and approval gate.</li>
     <li><code>logs/d1-canonical-projection-dry-run-validation.json</code>: committed-safe projection validation result.</li>
     <li><code>report-d1-canonical-projection-dry-run.md</code>: committed-safe human summary and approval gate for the D1 projection write phase.</li>
+    <li><code>scripts/write-d1-canonical-projection.mjs</code>: approved-write executor for the D1 projection, with local prepare-only mode and readback verification.</li>
+    <li><code>private/d1-canonical-projection-write-sql/</code>: ignored generated SQL files used for the production D1 write.</li>
+    <li><code>logs/d1-canonical-projection-write-plan.json</code>: committed-safe write plan, SQL batch summary, and D1 write adaptations.</li>
+    <li><code>logs/d1-canonical-projection-write-readback.json</code>: committed-safe production D1 write/readback evidence.</li>
+    <li><code>report-d1-canonical-projection-write.md</code>: committed-safe human summary for the D1 projection write.</li>
   </ul>
 </body>
 </html>

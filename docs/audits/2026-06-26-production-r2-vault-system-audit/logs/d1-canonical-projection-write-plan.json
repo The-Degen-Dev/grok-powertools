@@ -1,0 +1,199 @@
+{
+  "generatedAt": "2026-06-29T09:07:47.703Z",
+  "status": "planned_for_approved_execution",
+  "target": {
+    "database": "grok-powertools-db",
+    "databaseId": "ad89e4bb-0b68-4c72-93d9-b90e6eb45aa6"
+  },
+  "sourceSnapshot": {
+    "bucket": "grok-gallery-001",
+    "objectKey": "grok-powertools/v1/users/_system/canonical-snapshots/r2-vault-canonical-snapshot-v1/2026-06-29T004723Z-4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1.json",
+    "payloadSha256": "21c49f43c6692eff5b31ea0cb9ebaa882840e19895bf90c3cd35ada0e75e9fb6",
+    "stableContentHash": "4100f2c3c2d3837a212125c39b6d926cefa31c7453af4a5df9d1d49d6b4f2ef1",
+    "sourceBaselineCommit": "edaaf8134bb545969d6e8036952695a3d8102ca7"
+  },
+  "projection": {
+    "schemaVersion": "d1-canonical-projection/v1",
+    "snapshotId": "snapshot_4100f2c3c2d3837a"
+  },
+  "sqlPlan": {
+    "statementByteLimit": 90000,
+    "fileByteLimit": 3000000,
+    "maxInlineIdentityValueBytes": 50000,
+    "maxInlineJsonValueBytes": 50000,
+    "writeAdaptations": [
+      {
+        "table": "canonical_asset_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "identityType": "grokPostSet",
+        "identityValueHash": "5c0e3c4e515ca7d8",
+        "originalByteLength": 452583,
+        "d1Value": null,
+        "reason": "composite identity_value exceeds D1 raw SQL statement limits; identity hash and individual lookup rows preserve query identity"
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "storageObjectId": "storage_728dc902e1f84b02",
+        "objectKeyHash": "728dc902e1f84b02",
+        "field": "prompt_ref_ids_json",
+        "promptRefCount": 13914,
+        "originalByteLength": 473077,
+        "reason": "oversized prompt ref list exceeds D1 raw SQL statement limits; canonical_asset_lookup prompt_ref_id rows preserve query links"
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "storageObjectId": "storage_a88b16c22aa1a13d",
+        "objectKeyHash": "a88b16c22aa1a13d",
+        "field": "prompt_ref_ids_json",
+        "promptRefCount": 13914,
+        "originalByteLength": 473077,
+        "reason": "oversized prompt ref list exceeds D1 raw SQL statement limits; canonical_asset_lookup prompt_ref_id rows preserve query links"
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "storageObjectId": "storage_819f6355c84ad1d8",
+        "objectKeyHash": "819f6355c84ad1d8",
+        "field": "prompt_ref_ids_json",
+        "promptRefCount": 13914,
+        "originalByteLength": 473077,
+        "reason": "oversized prompt ref list exceeds D1 raw SQL statement limits; canonical_asset_lookup prompt_ref_id rows preserve query links"
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "storageObjectId": "storage_d49fc93311529769",
+        "objectKeyHash": "d49fc93311529769",
+        "field": "prompt_ref_ids_json",
+        "promptRefCount": 13914,
+        "originalByteLength": 473077,
+        "reason": "oversized prompt ref list exceeds D1 raw SQL statement limits; canonical_asset_lookup prompt_ref_id rows preserve query links"
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "storageObjectId": "storage_c086640a488e4c5d",
+        "objectKeyHash": "c086640a488e4c5d",
+        "field": "prompt_ref_ids_json",
+        "promptRefCount": 13914,
+        "originalByteLength": 473077,
+        "reason": "oversized prompt ref list exceeds D1 raw SQL statement limits; canonical_asset_lookup prompt_ref_id rows preserve query links"
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "storageObjectId": "storage_7e6a91ec5e6de352",
+        "objectKeyHash": "7e6a91ec5e6de352",
+        "field": "prompt_ref_ids_json",
+        "promptRefCount": 13914,
+        "originalByteLength": 473077,
+        "reason": "oversized prompt ref list exceeds D1 raw SQL statement limits; canonical_asset_lookup prompt_ref_id rows preserve query links"
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "storageObjectId": "storage_57a25db5d59a60d5",
+        "objectKeyHash": "57a25db5d59a60d5",
+        "field": "prompt_ref_ids_json",
+        "promptRefCount": 13914,
+        "originalByteLength": 473077,
+        "reason": "oversized prompt ref list exceeds D1 raw SQL statement limits; canonical_asset_lookup prompt_ref_id rows preserve query links"
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "storageObjectId": "storage_4dd9309ee0a73520",
+        "objectKeyHash": "4dd9309ee0a73520",
+        "field": "prompt_ref_ids_json",
+        "promptRefCount": 13914,
+        "originalByteLength": 473077,
+        "reason": "oversized prompt ref list exceeds D1 raw SQL statement limits; canonical_asset_lookup prompt_ref_id rows preserve query links"
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "storageObjectId": "storage_469f2bc25a3f181b",
+        "objectKeyHash": "469f2bc25a3f181b",
+        "field": "prompt_ref_ids_json",
+        "promptRefCount": 13914,
+        "originalByteLength": 473077,
+        "reason": "oversized prompt ref list exceeds D1 raw SQL statement limits; canonical_asset_lookup prompt_ref_id rows preserve query links"
+      },
+      {
+        "table": "canonical_asset_lookup",
+        "canonicalAssetId": "asset_882a258a6d2cf2896e7e45d9901735e4",
+        "lookupType": "identity",
+        "lookupHash": "5c0e3c4e515ca7d8",
+        "originalByteLength": 452583,
+        "d1Value": null,
+        "reason": "composite identity lookup_value exceeds D1 raw SQL statement limits; lookup hash and individual grok_post_id lookup rows preserve query identity"
+      }
+    ],
+    "schemaFile": {
+      "relPath": "private/d1-canonical-projection-write-sql/schema.sql",
+      "bytes": 3778,
+      "sha256": "b4d1b67ea82df6f1809bcc77f12d15b977a2c55db426ef2e5dfa3d7d7be8b128",
+      "statementCount": 6
+    },
+    "rowFileGroups": [
+      {
+        "table": "canonical_asset_projection",
+        "expectedRows": 8080,
+        "sourceRelPath": "private/d1-canonical-projection-assets.jsonl",
+        "fileCount": 2,
+        "statementCount": 66,
+        "bytes": 5883185
+      },
+      {
+        "table": "canonical_storage_object_projection",
+        "expectedRows": 15981,
+        "sourceRelPath": "private/d1-canonical-projection-storage-objects.jsonl",
+        "fileCount": 4,
+        "statementCount": 125,
+        "bytes": 11145479
+      },
+      {
+        "table": "canonical_prompt_ref_projection",
+        "expectedRows": 13914,
+        "sourceRelPath": "private/d1-canonical-projection-prompt-refs.jsonl",
+        "fileCount": 4,
+        "statementCount": 117,
+        "bytes": 10443266
+      },
+      {
+        "table": "canonical_gap_projection",
+        "expectedRows": 7696,
+        "sourceRelPath": "private/d1-canonical-projection-gaps.jsonl",
+        "fileCount": 2,
+        "statementCount": 49,
+        "bytes": 4325223
+      },
+      {
+        "table": "canonical_asset_lookup",
+        "expectedRows": 92363,
+        "sourceRelPath": "private/d1-canonical-projection-lookups.jsonl",
+        "fileCount": 6,
+        "statementCount": 196,
+        "bytes": 17566419
+      }
+    ],
+    "indexFile": {
+      "relPath": "private/d1-canonical-projection-write-sql/indexes.sql",
+      "bytes": 1978,
+      "sha256": "838388ca6d379803ec09928dd0cd4a7f8d54d02e53d7234aa13a5dd04f077555",
+      "statementCount": 18
+    },
+    "snapshotFiles": [
+      {
+        "relPath": "private/d1-canonical-projection-write-sql/batches/0001-canonical_snapshot_index.sql",
+        "bytes": 1440,
+        "sha256": "311aa831bf1aefbec7b2c3fab83f67b3740f90217497d54aefd054839b864931",
+        "statementCount": 1
+      }
+    ]
+  },
+  "productionWritesApproved": true,
+  "note": "Exact SQL files are ignored under private/. Snapshot commit row is inserted last."
+}
