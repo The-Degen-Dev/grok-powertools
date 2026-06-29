@@ -4,6 +4,7 @@ import { ArrowLeft, LayoutGrid, ListVideo, type LucideIcon } from "lucide-react"
 import { useRouter } from "next/navigation";
 import { applyReviewCommand } from "@/lib/movie-review-reducer";
 import type { MovieReviewProject } from "@/lib/movie-review-types";
+import MovieExportGate from "./MovieExportGate";
 import MovieStatusBadges from "./MovieStatusBadges";
 
 const modes: Array<{ mode: MovieReviewProject["mode"]; Icon: LucideIcon }> = [
@@ -36,6 +37,7 @@ export default function MovieReviewHeader({
       </div>
       <div className="ml-auto flex items-center gap-2">
         <MovieStatusBadges project={project} />
+        <MovieExportGate project={project} />
         <div className="flex rounded border border-neutral-800 bg-neutral-900 p-1">
           {modes.map(({ mode, Icon }) => (
             <button

@@ -36,6 +36,7 @@ function imageUrlFromClip(clip: MovieClip): string | undefined {
 }
 
 export function reviewClipFromMovieClip(clip: MovieClip, position: number, timestamp = now()): ReviewClip {
+  const flags: ReviewClip["flags"] = clip.sourceAssetId?.includes("asset-video-audio-") ? ["has-source-audio"] : [];
   return {
     id: clip.id || uuidv4(),
     movieClipId: clip.id,
@@ -47,7 +48,7 @@ export function reviewClipFromMovieClip(clip: MovieClip, position: number, times
     titleText: clip.titleText,
     position,
     lifecycle: "proposed",
-    flags: [],
+    flags,
     trimStartSeconds: clip.trimStart || 0,
     trimEndSeconds: clip.trimEnd,
     durationSeconds: clip.type === "image" ? clip.stillDuration || 3 : clip.type === "title" ? clip.titleDuration || 3 : undefined,

@@ -9,6 +9,7 @@ const headerName = "x-gpt-api-key";
 const requestLog = [];
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const playableVideo = fs.readFileSync(path.join(__dirname, "tiny-video.mp4"));
+const playableVideoWithAudio = fs.readFileSync(path.join(__dirname, "tiny-video-with-audio.mp4"));
 
 const fixtureAssets = [
   {
@@ -256,6 +257,15 @@ const server = http.createServer((req, res) => {
   if (url.pathname === "/v1/vault/media") {
     const assetId = url.searchParams.get("assetId");
     const objectKey = url.searchParams.get("objectKey");
+    if (
+      assetId === "asset-video-audio-1" ||
+      assetId === "asset-video-audio-2" ||
+      objectKey?.includes("asset-video-audio-1") ||
+      objectKey?.includes("asset-video-audio-2")
+    ) {
+      res.writeHead(200, { "content-type": "video/mp4", "cache-control": "no-store" });
+      return res.end(playableVideoWithAudio);
+    }
     if (assetId === "asset-image-1" || objectKey?.endsWith("zz-page-2-image.png")) {
       const png = Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lp7dNwAAAABJRU5ErkJggg==",
