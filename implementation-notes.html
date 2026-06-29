@@ -907,6 +907,69 @@
                             <code>npx playwright test -c playwright.web.config.js tests/e2e-web/movie-phase0.spec.js</code>
                             passed 2 tests. <code>npm --prefix web run test:unit</code> passed 1 file
                             and 5 tests. <code>npm --prefix web run lint</code> passed.
+                            <pre><code>Running 2 tests using 1 worker
+  ✓  1 [chromium] › tests/e2e-web/movie-phase0.spec.js:55:1 › Phase 0 preserves Vault-to-Movie draft creation (3.9s)
+  ✓  2 [chromium] › tests/e2e-web/movie-phase0.spec.js:66:1 › Phase 0 keeps current Movie list usable (1.9s)
+
+  2 passed (8.5s)</code></pre>
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)</code></pre>
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Selected single-thread FFmpeg.wasm for Phase 1 MP4 export and kept
+                            WebM as the fallback. Browser proof remains required in Task 10 before
+                            completion.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Deviations</td>
+                        <td>
+                            Did not install or proof Mediabunny in this task. The conservative
+                            FFmpeg path is already in the dependency graph, and the plan allows
+                            Mediabunny to remain a later export-engine spike unless clear same-fixture
+                            evidence beats FFmpeg.wasm during this decision task.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Avoided Remotion server rendering, FFmpeg multithread, and WebCodecs-only
+                            export for Phase 1 because each adds either licensing/server scope,
+                            cross-origin isolation work, or muxing/cleanup risk beyond the current
+                            local Review Bay foundation.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Open questions</td>
+                        <td>
+                            None now. Pause later if browser MP4 export cannot prove an AAC stream
+                            with the fixture media.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Validation</td>
+                        <td>
+                            Generated <code>tests/e2e-web/fixtures/tiny-video-with-audio.mp4</code>.
+                            <code>ffprobe</code> returned <code>aac</code> for the fixture. Checked
+                            npm versions: <code>@ffmpeg/core 0.12.10</code>,
+                            <code>@ffmpeg/core-mt 0.12.10</code>,
+                            <code>@ffmpeg/ffmpeg 0.12.15</code>, <code>mediabunny 1.49.0</code>,
+                            and <code>remotion 4.0.484</code>. Local FFmpeg round-trip output
+                            also returned <code>aac</code>, duration <code>1.514000</code>, size
+                            <code>26195</code>.
                         </td>
                     </tr>
                 </tbody>
