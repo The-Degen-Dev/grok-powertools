@@ -866,6 +866,49 @@
                             <span class="pass">origin/main is included</span>.
                         </td>
                     </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added persistent Playwright coverage for the existing Vault-to-Movie
+                            draft flow and the current Movie list creation flow before replacing the
+                            editor with Review Bay.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Deviations</td>
+                        <td>
+                            Tightened the plan's sample assertions to match current repo reality:
+                            empty IndexedDB cleanup now skips empty transactions, the duplicate
+                            <code>New Movie</code> buttons are disambiguated with <code>.first()</code>,
+                            and the draft-open assertion checks exact <code>2 clips</code> text instead
+                            of a broad <code>/clip/i</code> locator.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Verified current behavior with browser E2E instead of adding Node
+                            IndexedDB unit coverage, because existing IndexedDB test coverage is
+                            browser-backed and there is no fake IndexedDB unit setup yet.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Validation</td>
+                        <td>
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/movie-phase0.spec.js</code>
+                            passed 2 tests. <code>npm --prefix web run test:unit</code> passed 1 file
+                            and 5 tests. <code>npm --prefix web run lint</code> passed.
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </main>
