@@ -1,16 +1,13 @@
 "use client";
 
 import { AlertTriangle, Check, Diamond, Music, Scissors, VolumeX, X } from "lucide-react";
+import StatusFlag from "@/components/ui/StatusFlag";
 import type { ClipFlag, ClipLifecycle, MovieReviewProject } from "@/lib/movie-review-types";
 
 export function MovieLifecycleBadge({ lifecycle }: { lifecycle: ClipLifecycle }) {
   const Icon = lifecycle === "kept" ? Check : lifecycle === "rejected" ? X : Diamond;
-  return (
-    <span aria-label={`lifecycle ${lifecycle}`} className="inline-flex items-center gap-1 rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-neutral-300">
-      <Icon className="h-3 w-3" />
-      {lifecycle}
-    </span>
-  );
+  const tone = lifecycle === "kept" ? "kept" : lifecycle === "rejected" ? "rejected" : "accent";
+  return <StatusFlag tone={tone} icon={Icon} label={lifecycle} compact={false} />;
 }
 
 export function MovieFlagBadges({ flags }: { flags: ClipFlag[] }) {
@@ -28,14 +25,13 @@ export function MovieFlagBadges({ flags }: { flags: ClipFlag[] }) {
                   ? AlertTriangle
                   : Check;
         return (
-          <span
+          <StatusFlag
             key={flag}
-            role="img"
-            aria-label={flag.replaceAll("-", " ")}
-            className="inline-flex items-center rounded border border-neutral-700 px-1 py-0.5 text-neutral-300"
-          >
-            <Icon className="h-3 w-3" />
-          </span>
+            tone={flag === "needs-attention" ? "attention" : flag === "muted-in-mix" ? "muted" : "kept"}
+            icon={Icon}
+            label={flag.replaceAll("-", " ")}
+            compact
+          />
         );
       })}
     </span>
@@ -46,9 +42,9 @@ export default function MovieStatusBadges({ project }: { project: MovieReviewPro
   const unresolved = project.candidates.filter((clip) => clip.lifecycle !== "rejected").length;
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="rounded border border-orange-500/40 bg-orange-500/10 px-2 py-1 text-orange-200">{project.mode}</span>
-      <span className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300">{unresolved} candidates</span>
-      <span className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300">{project.committedClips.length} committed</span>
+      <StatusFlag tone="accent" label={project.mode} />
+      <StatusFlag tone="muted" label={`${unresolved} candidates`} />
+      <StatusFlag tone="kept" label={`${project.committedClips.length} committed`} />
     </div>
   );
 }

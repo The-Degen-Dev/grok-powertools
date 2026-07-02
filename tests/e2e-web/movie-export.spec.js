@@ -8,14 +8,18 @@ test.setTimeout(240000);
 
 async function expectReviewReady(page) {
   await expect(page.getByRole("banner", { name: /Movie Review Header/i })).toBeVisible();
-  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-video-audio-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "Select Clip 1" }).first()).toBeVisible();
 }
 
 test("Export pre-flight blocks unresolved candidates and enables clean cut", async ({ page }) => {
   const movieId = await seedReviewMovie(page, { useAudioFixture: true });
   await page.goto(`/movie?id=${movieId}`);
   await expectReviewReady(page);
-  await expect(page.getByRole("button", { name: /Export blocked/i })).toBeDisabled();
+  const exportBlocked = page.getByRole("button", { name: /Export blocked/i });
+  await expect(exportBlocked).toBeEnabled();
+  await exportBlocked.click();
+  await expect(page.getByText(/Resolve before export/i)).toBeVisible();
+  await expect(page.getByText("2 candidates still awaiting keep or reject.")).toBeVisible();
   await page.keyboard.press("KeyK");
   await page.keyboard.press("KeyK");
   await expect(page.getByRole("button", { name: /^Export movie$/i })).toBeEnabled();

@@ -35,6 +35,13 @@ function imageUrlFromClip(clip: MovieClip): string | undefined {
   return clip.imageUrl;
 }
 
+function initialClipTitle(clip: MovieClip, position: number): string {
+  if (clip.titleText?.trim()) return clip.titleText.trim();
+  if (clip.type === "title") return `Title ${position + 1}`;
+  if (clip.type === "image") return `Image ${position + 1}`;
+  return `Clip ${position + 1}`;
+}
+
 export function reviewClipFromMovieClip(clip: MovieClip, position: number, timestamp = now()): ReviewClip {
   const flags: ReviewClip["flags"] = clip.sourceAssetId?.includes("asset-video-audio-") ? ["has-source-audio"] : [];
   return {
@@ -45,7 +52,8 @@ export function reviewClipFromMovieClip(clip: MovieClip, position: number, times
     mediaRef: mediaRefFromClip(clip),
     videoUrl: mediaUrlFromClip(clip),
     imageUrl: imageUrlFromClip(clip),
-    titleText: clip.titleText,
+    titleText: initialClipTitle(clip, position),
+    tags: [],
     position,
     lifecycle: "proposed",
     flags,

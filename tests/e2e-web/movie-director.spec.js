@@ -3,7 +3,7 @@ const { seedReviewMovie } = require("./support/movie-fixtures");
 
 async function expectReviewReady(page) {
   await expect(page.getByRole("banner", { name: /Movie Review Header/i })).toBeVisible();
-  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-video-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "Select Clip 1" }).first()).toBeVisible();
 }
 
 test("Director creates reviewable proposals without mutating the current cut", async ({ page }) => {
@@ -26,5 +26,6 @@ test("Director partial accept applies selected changes only", async ({ page }) =
   await page.getByRole("button", { name: /Run rule-based Director/i }).click();
   await page.getByLabel(/Select Director change 1/i).check();
   await page.getByRole("button", { name: /Apply selected changes/i }).click();
-  await expect(page.getByText(/partially applied/i)).toBeVisible();
+  await expect(page.getByLabel(/^Partial$/i)).toBeVisible();
+  await expect(page.locator('[title="Partially applied"]')).toBeVisible();
 });

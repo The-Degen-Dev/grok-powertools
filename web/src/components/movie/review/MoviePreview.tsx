@@ -2,10 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { ReviewClip } from "@/lib/movie-review-types";
-
-function clipLabel(clip: ReviewClip): string {
-  return clip.sourceAssetId || (clip.mediaRef.type === "vault" ? clip.mediaRef.assetId : clip.titleText || clip.id);
-}
+import { clipDisplayTitle } from "./movieReviewPresentation";
 
 export default function MoviePreview({
   clip,
@@ -36,7 +33,7 @@ export default function MoviePreview({
   const placeholder = !clip
     ? "Keep a clip to preview the cut."
     : clip.mediaType !== "video"
-      ? clipLabel(clip)
+      ? clipDisplayTitle(clip)
       : hasVideo
         ? ""
         : "Preparing preview...";
@@ -45,11 +42,11 @@ export default function MoviePreview({
     <section role="region" aria-label="Clip preview" className="flex min-h-0 flex-col rounded border border-neutral-800 bg-neutral-950 p-3">
       <div className="mb-2 flex items-center justify-between gap-3">
         <h2 className="text-sm font-medium text-neutral-100">Clip preview</h2>
-        <span className="truncate text-xs text-neutral-500">{clip ? clipLabel(clip) : "No committed clip"}</span>
+        <span className="truncate text-xs text-neutral-400">{clip ? clipDisplayTitle(clip) : "No committed clip"}</span>
       </div>
       <div className="relative min-h-64 flex-1 rounded bg-black">
         <div ref={hostRef} className="absolute inset-0 flex items-center justify-center" />
-        {placeholder && <div className="absolute inset-0 flex items-center justify-center text-sm text-neutral-500">{placeholder}</div>}
+        {placeholder && <div className="absolute inset-0 flex items-center justify-center text-sm text-neutral-400">{placeholder}</div>}
       </div>
     </section>
   );

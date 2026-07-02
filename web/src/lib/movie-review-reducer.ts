@@ -10,7 +10,8 @@ export type ReviewCommand =
   | { type: "set-trim"; clipId: string; trimStartSeconds?: number; trimEndSeconds?: number }
   | { type: "apply-version"; clips: ReviewClip[] }
   | { type: "set-audio"; clipId: string; volume: number; muted: boolean; solo: boolean }
-  | { type: "set-source-audio"; clipId: string; hasSourceAudio: boolean };
+  | { type: "set-source-audio"; clipId: string; hasSourceAudio: boolean }
+  | { type: "set-metadata"; clipId: string; titleText?: string; tags?: string[]; notes?: string };
 
 function timestampProject(project: MovieReviewProject): MovieReviewProject {
   return { ...project, updatedAt: new Date().toISOString() };
@@ -34,6 +35,14 @@ function flagClip(clip: ReviewClip, flag: ReviewClip["flags"][number], enabled: 
 function updateCommittedClip(project: MovieReviewProject, clipId: string, update: (clip: ReviewClip) => ReviewClip): MovieReviewProject {
   return {
     ...project,
+    committedClips: project.committedClips.map((clip) => (clip.id === clipId ? update(clip) : clip)),
+  };
+}
+
+function updateClip(project: MovieReviewProject, clipId: string, update: (clip: ReviewClip) => ReviewClip): MovieReviewProject {
+  return {
+    ...project,
+    candidates: project.candidates.map((clip) => (clip.id === clipId ? update(clip) : clip)),
     committedClips: project.committedClips.map((clip) => (clip.id === clipId ? update(clip) : clip)),
   };
 }
@@ -141,6 +150,15 @@ export function applyReviewCommand(project: MovieReviewProject, command: ReviewC
     case "set-source-audio":
       return timestampProject(
         updateCommittedClip(project, command.clipId, (clip) => flagClip(clip, "has-source-audio", command.hasSourceAudio)),
+      );
+    case "set-metadata":
+      return timestampProject(
+        updateClip(project, command.clipId, (clip) => ({
+          ...clip,
+          titleText: command.titleText ?? clip.titleText,
+          tags: command.tags ?? clip.tags,
+          notes: command.notes ?? clip.notes,
+        })),
       );
   }
 }

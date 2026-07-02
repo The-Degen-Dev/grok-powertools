@@ -3,7 +3,7 @@ const { seedReviewMovie } = require("./support/movie-fixtures");
 
 async function expectReviewReady(page) {
   await expect(page.getByRole("banner", { name: /Movie Review Header/i })).toBeVisible();
-  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-video-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "Select Clip 1" }).first()).toBeVisible();
 }
 
 test("Movie Review Bay avoids repeated active-video seek spam", async ({ page }) => {
@@ -11,7 +11,7 @@ test("Movie Review Bay avoids repeated active-video seek spam", async ({ page })
   await page.goto(`/movie?id=${movieId}`);
   await expectReviewReady(page);
   await page.keyboard.press("KeyK");
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-1").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("Clip 1").first()).toBeVisible();
   await page.keyboard.press("Digit3");
   await expect(page.getByRole("region", { name: /Clip preview/i })).toBeVisible();
   const seekCount = await page.evaluate(async () => {

@@ -198,6 +198,7 @@ describe("movie review storage", () => {
             mediaType: "video",
             mediaRef: { type: "vault", assetId: "asset-video-1" },
             videoUrl: "/api/vault/media/asset-video-1",
+            tags: [],
             position: 0,
             lifecycle: "kept",
             flags: [],

@@ -48,7 +48,7 @@ export default function MovieDraftQueue({
 
   return (
     <div className="rounded border border-neutral-800 p-3">
-      <div className="text-xs uppercase tracking-wide text-neutral-500">Draft queue</div>
+      <div className="text-xs uppercase tracking-wide text-neutral-400">Draft queue</div>
       <div className="mt-2 text-sm text-neutral-300">{project.committedClips.length} clips in current cut</div>
       <div className="mt-3 space-y-2">
         {versions.map((version) => (
@@ -63,7 +63,7 @@ export default function MovieDraftQueue({
             {version.name}
           </button>
         ))}
-        {versions.length === 0 && <div className="text-xs text-neutral-500">No alternate versions.</div>}
+        {versions.length === 0 && <div className="text-xs text-neutral-400">No alternate versions.</div>}
       </div>
     </div>
   );

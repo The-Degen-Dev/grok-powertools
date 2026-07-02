@@ -23,7 +23,7 @@ export default function MovieLeftRail({
             role="tab"
             aria-selected={activeTab === "drafts"}
             onClick={() => setActiveTab("drafts")}
-            className={`rounded px-2 py-1 text-xs ${activeTab === "drafts" ? "bg-orange-600 text-white" : "text-neutral-400 hover:bg-neutral-800"}`}
+            className={`rounded px-2 py-1 text-xs ${activeTab === "drafts" ? "bg-(--state-accent) text-white" : "text-neutral-400 hover:bg-neutral-800"}`}
           >
             Drafts
           </button>
@@ -32,7 +32,7 @@ export default function MovieLeftRail({
             role="tab"
             aria-selected={activeTab === "director"}
             onClick={() => setActiveTab("director")}
-            className={`rounded px-2 py-1 text-xs ${activeTab === "director" ? "bg-orange-600 text-white" : "text-neutral-400 hover:bg-neutral-800"}`}
+            className={`rounded px-2 py-1 text-xs ${activeTab === "director" ? "bg-(--state-accent) text-white" : "text-neutral-400 hover:bg-neutral-800"}`}
           >
             Director
           </button>

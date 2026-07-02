@@ -24,7 +24,10 @@ export default function MovieReviewHeader({
 }) {
   const router = useRouter();
   return (
-    <header aria-label="Movie Review Header" className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-3">
+    <header
+      aria-label="Movie Review Header"
+      className="movie-review-header-shell flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-3"
+    >
       <button
         type="button"
         aria-label="Back to movies"
@@ -33,23 +36,23 @@ export default function MovieReviewHeader({
       >
         <ArrowLeft className="h-4 w-4" />
       </button>
-      <div className="min-w-0">
+      <div className="movie-review-header-title min-w-0">
         <h1 className="truncate text-base font-semibold text-neutral-100">{project.title}</h1>
-        <p className="text-xs text-neutral-500">Movie Review Bay</p>
+        <p className="text-xs text-neutral-400">Movie Review Bay</p>
       </div>
-      <div className="ml-auto flex items-center gap-2">
+      <div className="movie-review-header-actions ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
         <button
           type="button"
           aria-label="Add Clip"
           onClick={onAddClipClick}
-          className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+          className="shrink-0 rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
         >
           <Plus className="mr-1 inline h-3 w-3" />
           <span className="hidden sm:inline">Add Clip</span>
         </button>
         <MovieStatusBadges project={project} />
         <MovieExportGate project={project} />
-        <div className="flex rounded border border-neutral-800 bg-neutral-900 p-1">
+        <div className="movie-review-mode-switch flex min-w-0 rounded border border-neutral-800 bg-neutral-900 p-1">
           {modes.map(({ mode, Icon }) => (
             <button
               key={mode}
@@ -58,11 +61,11 @@ export default function MovieReviewHeader({
               aria-pressed={project.mode === mode}
               onClick={() => onProjectChange(applyReviewCommand(project, { type: "set-mode", mode }))}
               className={`rounded px-2 py-1 text-xs capitalize ${
-                project.mode === mode ? "bg-orange-600 text-white" : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+                project.mode === mode ? "bg-(--state-accent) text-white" : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
               }`}
             >
               <Icon className="mr-1 inline h-3 w-3" />
-              {mode}
+              <span className="movie-review-mode-label">{mode}</span>
             </button>
           ))}
         </div>

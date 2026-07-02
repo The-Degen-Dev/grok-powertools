@@ -1878,6 +1878,164 @@ test-results/manual-review-bay/04-mobile-review-bay.png</code></pre>
                     </tr>
                 </tbody>
             </table>
+
+            <h2>Task 13: Phase 1 Fixes And Phase 2 Review Bay UI</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Vault and Review Bay candidates now share the same card body. The card
+                            frame changed to 4:3 with 240px responsive columns so desktop cards land
+                            in the approved 200-260px range while keeping the poster dominant. Review
+                            Bay candidate cards use an explicit dark card theme instead of forcing a
+                            global dark mode class.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Director violet was nudged to fuchsia
+                            <code>#d946ef</code> in dark mode and <code>#c026d3</code> in light mode
+                            because the original violet was too close to the indigo selection ring.
+                            Review Bay primary controls use the state-accent channel instead of brand
+                            orange so amber attention dots do not read as action buttons.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            ReviewClip now stores local <code>tags</code> plus initial human
+                            <code>titleText</code> values at hydration time. This keeps titles stable
+                            after candidates move between lanes without adding cloud, R2, or
+                            processed-ID state. The Inspector commits metadata on change through the
+                            reducer rather than keeping deferred dirty form state.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None blocking. The Review Bay remains dark-first visually, with state
+                            tokens verified in both light and dark variable modes.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            <pre><code>npm --prefix web run lint
+passed
+
+npm --prefix web run build
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)
+
+npm --prefix web run test:unit
+Test Files  7 passed (7)
+Tests       42 passed (42)
+
+npx playwright test -c playwright.web.config.js
+60 passed</code></pre>
+                            Manual proof artifacts:
+                            <pre><code>.artifacts/vault-review-phase2/vault-desktop.png
+.artifacts/vault-review-phase2/vault-phone.png
+.artifacts/vault-review-phase2/review-bay-desktop.png
+.artifacts/vault-review-phase2/review-bay-phone.png
+.artifacts/vault-review-phase2/review-bay-director-pending.png
+.artifacts/vault-review-phase2/review-bay-director-partial.png</code></pre>
+                            Manual metrics: Vault desktop card <code>254px</code> high,
+                            <code>272px</code> wide, poster ratio <code>0.796</code>, grid top
+                            <code>410px</code>. Director pending was <code>rgb(192, 38, 211)</code>
+                            versus selection/action <code>rgb(79, 70, 229)</code>; partial dot was
+                            amber <code>rgb(217, 119, 6)</code>.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Task 13.1: Phase 2.1 Review Bay Defect Fixes</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Review Bay now scopes its own dark surface and state tokens inside
+                            <code>.movie-review-grid</code> so Inspector, Director proposal cards,
+                            selected cards, and Clip Strip surfaces cannot inherit light app tokens.
+                            The global app header also compresses icon padding and hides breadcrumbs
+                            on small screens because measured overflow came from the top nav, not
+                            only the Review/Focus/Assemble switcher.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Export blocked is no longer a disabled button. It is an enabled red
+                            gate that opens exact preflight blocker details while still withholding
+                            export actions until blockers are resolved. The awaiting-review card
+                            flag moved from an accent hollow circle to an attention-channel
+                            <code>Review</code> badge, and partial Director state now renders as
+                            <code>Partial</code> with <code>Partially applied</code> in the title.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The Review Bay remains dark-first in both app theme modes. This avoids
+                            mixing light panels into a dense video workstation, but it means light
+                            mode changes the shell header more than the actual Review Bay canvas.
+                            Proof used an isolated Playwright browser and fake Vault worker so no
+                            live R2, D1, env, extension storage, processed IDs, or Chrome state were
+                            touched.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>None blocking before Phase 3.</td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            <pre><code>npm --prefix web run lint
+passed
+
+npm --prefix web run test:unit
+Test Files  7 passed (7)
+Tests       42 passed (42)
+
+npm --prefix web run build
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)
+
+npx playwright test -c playwright.web.config.js
+60 passed
+
+npx playwright test -c .artifacts/playwright.phase2.config.js
+1 passed</code></pre>
+                            Phase 2.1 proof artifacts:
+                            <pre><code>.artifacts/vault-review-phase2-1/review-bay-light.png
+.artifacts/vault-review-phase2-1/review-bay-dark.png
+.artifacts/vault-review-phase2-1/review-bay-phone.png
+.artifacts/vault-review-phase2-1/contrast-report.json</code></pre>
+                            Contrast report minimum targeted ratio was <code>10.71:1</code>.
+                            Phone proof measured <code>overflow=false</code>,
+                            Review mode switch box within <code>390px</code>, and export popover
+                            bounds <code>x=12</code>, <code>width=320</code>.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </main>
     </body>
 </html>

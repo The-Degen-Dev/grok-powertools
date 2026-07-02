@@ -21,6 +21,7 @@ function project() {
         mediaType: "video",
         mediaRef: { type: "vault", assetId: "a" },
         videoUrl: "/api/vault/media/a",
+        tags: [],
         position: 0,
         lifecycle: "proposed",
         flags: [],

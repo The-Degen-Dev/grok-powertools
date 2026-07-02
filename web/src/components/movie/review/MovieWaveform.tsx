@@ -2,11 +2,8 @@
 
 import { applyReviewCommand } from "@/lib/movie-review-reducer";
 import type { ReviewClip } from "@/lib/movie-review-types";
+import { clipDisplayTitle } from "./movieReviewPresentation";
 import type { MovieReviewProjectUpdate } from "./useMovieReviewProject";
-
-function clipLabel(clip: ReviewClip): string {
-  return clip.sourceAssetId || (clip.mediaRef.type === "vault" ? clip.mediaRef.assetId : clip.titleText || clip.id);
-}
 
 export default function MovieWaveform({
   clip,
@@ -23,7 +20,7 @@ export default function MovieWaveform({
     <section role="region" aria-label="Clip waveform" className="rounded border border-neutral-800 bg-neutral-900 p-3">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-medium text-neutral-100">Waveform</h2>
-        <span className="truncate text-xs text-neutral-500">{clip ? clipLabel(clip) : "No committed clip"}</span>
+        <span className="truncate text-xs text-neutral-400">{clip ? clipDisplayTitle(clip) : "No committed clip"}</span>
       </div>
       <div
         className="mt-3 grid h-12 items-end gap-1 rounded bg-neutral-950 p-2"
@@ -33,7 +30,7 @@ export default function MovieWaveform({
         {Array.from({ length: 16 }).map((_, index) => (
           <span
             key={index}
-            className="rounded-sm bg-orange-500/70"
+            className="rounded-sm bg-(--state-accent)"
             style={{ height: `${20 + ((index * 13) % 28)}px` }}
           />
         ))}
@@ -60,7 +57,7 @@ export default function MovieWaveform({
                 }),
               );
             }}
-            className="mt-2 w-full accent-orange-500"
+            className="mt-2 w-full accent-(--state-accent)"
           />
         </label>
         <label className="text-xs text-neutral-400">
@@ -84,7 +81,7 @@ export default function MovieWaveform({
                 }),
               );
             }}
-            className="mt-2 w-full accent-orange-500"
+            className="mt-2 w-full accent-(--state-accent)"
           />
         </label>
       </div>

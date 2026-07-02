@@ -3,7 +3,7 @@ const { seedReviewMovie } = require("./support/movie-fixtures");
 
 async function expectReviewReady(page) {
   await expect(page.getByRole("banner", { name: /Movie Review Header/i })).toBeVisible();
-  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-video-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "Select Clip 1" }).first()).toBeVisible();
 }
 
 async function readActiveReviewProject(page, movieId) {
@@ -95,16 +95,15 @@ test("Keyboard keep and reject move candidates into the right lanes", async ({ p
   await page.goto(`/movie?id=${movieId}`);
   await expectReviewReady(page);
   await page.keyboard.press("KeyK");
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-1").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("Clip 1").first()).toBeVisible();
   await page.getByRole("button", { name: /Back to movies/i }).click();
   await expect(page).toHaveURL(/\/movie$/);
   await page.goto(`/movie?id=${movieId}`);
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-1").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("Clip 1").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByText("Clip 2").first()).toBeVisible();
+  await page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "Select Clip 2" }).first().click();
   await page.keyboard.press("KeyX");
-  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByText("asset-video-2").first()).toBeVisible();
-  await page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-video-2", exact: true }).click();
-  await page.keyboard.press("KeyX");
-  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByText("asset-video-2")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByText("Clip 2")).toHaveCount(0);
 });
 
 test("Review Bay keeps Candidates Grid separate from committed Clip Strip", async ({ page }) => {
@@ -112,8 +111,8 @@ test("Review Bay keeps Candidates Grid separate from committed Clip Strip", asyn
   await page.goto(`/movie?id=${movieId}`);
   await expectReviewReady(page);
   await page.keyboard.press("KeyK");
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-1").first()).toBeVisible();
-  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByText("asset-video-1")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("Clip 1").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByText("Clip 1")).toHaveCount(0);
 });
 
 test("Inspector updates trim and audio state for selected committed clip", async ({ page }) => {
@@ -121,18 +120,24 @@ test("Inspector updates trim and audio state for selected committed clip", async
   await page.goto(`/movie?id=${movieId}`);
   await expectReviewReady(page);
   await page.keyboard.press("KeyK");
+  await page.getByLabel(/^Title for/i).fill("Opening cut");
+  await page.getByLabel(/^Tags for/i).fill("keeper, intro");
+  await page.getByLabel(/^Notes for/i).fill("Use the audio swell here.");
   await page.getByLabel(/Trim in/i).fill("0.4");
   await page.getByLabel(/Trim out/i).fill("1.4");
   await page.getByLabel(/Clip volume/i).fill("0.5");
   await page.getByRole("button", { name: /Confirm source audio/i }).click();
   await page.getByRole("button", { name: /Mute clip/i }).click();
   await page.getByRole("button", { name: /Solo clip/i }).click();
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByRole("img", { name: /trimmed/i })).toBeVisible();
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByRole("img", { name: /source audio/i })).toBeVisible();
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByRole("img", { name: /muted in mix/i })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByLabel(/trimmed/i)).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByLabel(/source audio/i)).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByLabel(/muted in mix/i)).toBeVisible();
   await page.waitForTimeout(400);
   const project = await readActiveReviewProject(page, movieId);
   expect(project.committedClips[0]).toMatchObject({
+    titleText: "Opening cut",
+    tags: ["keeper", "intro"],
+    notes: "Use the audio swell here.",
     trimStartSeconds: 0.4,
     trimEndSeconds: 1.4,
     volume: 0.5,
@@ -141,6 +146,9 @@ test("Inspector updates trim and audio state for selected committed clip", async
   });
   expect(project.committedClips[0].flags).toContain("has-source-audio");
   await page.reload();
+  await expect(page.getByLabel(/^Title for/i)).toHaveValue("Opening cut");
+  await expect(page.getByLabel(/^Tags for/i)).toHaveValue("keeper, intro");
+  await expect(page.getByLabel(/^Notes for/i)).toHaveValue("Use the audio swell here.");
   await expect(page.getByLabel(/Trim in/i)).toHaveValue("0.4");
   await expect(page.getByRole("region", { name: /Inspector/i }).getByRole("button", { name: /Clear source audio/i })).toBeVisible();
   await expect(page.getByRole("region", { name: /Inspector/i }).getByRole("button", { name: /Unmute clip/i })).toBeVisible();
@@ -154,8 +162,8 @@ test("Focus mode supports Enter to keep and Escape to return to Review", async (
   await page.keyboard.press("Digit2");
   await expect(page.getByRole("region", { name: /Focus Loupe/i })).toBeVisible();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-1").first()).toBeVisible();
-  await expect(page.getByRole("region", { name: /Focus Loupe/i }).getByText("asset-video-2").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("Clip 1").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /Focus Loupe/i }).getByText("Clip 2").first()).toBeVisible();
   await page.keyboard.press("KeyX");
   await expect(page.getByRole("region", { name: /Focus Loupe/i }).getByText(/No candidate in focus/i)).toBeVisible();
   await page.keyboard.press("Escape");
@@ -167,15 +175,15 @@ test("Draft Queue applies only project-scoped versions with repaired selection",
   await page.goto(`/movie?id=${movieId}`);
   await expectReviewReady(page);
   await page.keyboard.press("KeyK");
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-1").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("Clip 1").first()).toBeVisible();
   await page.waitForTimeout(400);
   await seedMovieVersion(page, movieId);
   await page.reload();
   await expect(page.getByRole("button", { name: /Version B/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Stale Other Project/i })).toHaveCount(0);
   await page.getByRole("button", { name: /Version B/i }).click();
-  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("asset-video-2").first()).toBeVisible();
-  await expect(page.getByRole("region", { name: /Inspector/i }).getByText("asset-video-2")).toBeVisible();
+  await expect(page.getByRole("region", { name: /Clip Strip/i }).getByText("Clip 1").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /Inspector/i }).getByText("Clip 1")).toBeVisible();
 });
 
 test("Assemble mode shows continuous preview, ribbon, waveform controls, and audio lane", async ({ page }) => {
@@ -198,6 +206,11 @@ test("Review Bay remains usable at phone width", async ({ page }) => {
   await expect(page.getByRole("region", { name: /Candidates Grid/i })).toBeVisible();
   await expect(page.getByRole("region", { name: /Clip Strip/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Focus/i })).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  expect(overflow).toBe(false);
+  const modeSwitchBox = await page.locator(".movie-review-mode-switch").boundingBox();
+  expect(modeSwitchBox).not.toBeNull();
+  expect(modeSwitchBox.x + modeSwitchBox.width).toBeLessThanOrEqual(390);
 });
 
 test("Review Bay status indicators have accessible names", async ({ page }) => {
@@ -205,5 +218,5 @@ test("Review Bay status indicators have accessible names", async ({ page }) => {
   await page.goto(`/movie?id=${movieId}`);
   await expectReviewReady(page);
   await page.keyboard.press("KeyK");
-  await expect(page.getByLabel(/lifecycle kept/i).first()).toBeVisible();
+  await expect(page.getByLabel(/^kept$/i).first()).toBeVisible();
 });

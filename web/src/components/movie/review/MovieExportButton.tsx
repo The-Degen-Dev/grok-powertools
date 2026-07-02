@@ -110,7 +110,7 @@ export default function MovieExportButton({
       >
         Export {format.toUpperCase()}
       </button>
-      {status && <div className="text-xs text-neutral-500">{status}</div>}
+      {status && <div className="text-xs text-neutral-400">{status}</div>}
     </div>
   );
 }

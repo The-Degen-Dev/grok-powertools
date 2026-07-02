@@ -10,6 +10,7 @@ function clip(id: string, patch: Partial<ReviewClip> = {}): ReviewClip {
     mediaType: "video",
     mediaRef: { type: "vault", assetId: id },
     videoUrl: `/api/vault/media/${id}`,
+    tags: [],
     position: 0,
     lifecycle: "kept",
     flags: [],

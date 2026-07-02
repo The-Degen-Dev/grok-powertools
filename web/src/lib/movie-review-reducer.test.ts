@@ -9,6 +9,7 @@ function clip(id: string, position = 0): ReviewClip {
     mediaType: "video",
     mediaRef: { type: "vault", assetId: id },
     videoUrl: `/api/vault/media/${id}`,
+    tags: [],
     position,
     lifecycle: "proposed",
     flags: [],
