@@ -42,6 +42,11 @@ function searchableAssetText(asset: VaultAsset): string {
     .toLowerCase();
 }
 
+function searchableOverlayText(overlay?: VaultOverlay): string {
+  if (!overlay) return "";
+  return [overlay.title, overlay.notes, ...(overlay.tags || [])].filter(Boolean).join(" ").toLowerCase();
+}
+
 async function writeClipboardText(text: string): Promise<void> {
   try {
     if (navigator.clipboard?.writeText) {
@@ -66,6 +71,7 @@ async function writeClipboardText(text: string): Promise<void> {
 
 export default function VaultPage() {
   const [preview, setPreview] = useState<VaultPreview | null>(null);
+  const [initializing, setInitializing] = useState(true);
   const [loading, setLoading] = useState(false);
   const [assets, setAssets] = useState<VaultAsset[]>([]);
   const [overlays, setOverlays] = useState<VaultOverlay[]>([]);
@@ -89,6 +95,9 @@ export default function VaultPage() {
       .catch(() => {
         setAssets([]);
         setOverlays([]);
+      })
+      .finally(() => {
+        setInitializing(false);
       });
   }, []);
 
@@ -105,7 +114,7 @@ export default function VaultPage() {
       if (statusFilter !== "all" && asset.verificationStatus !== statusFilter) return false;
       if (visibilityFilter === "visible" && overlay?.hidden) return false;
       if (visibilityFilter === "hidden" && !overlay?.hidden) return false;
-      if (query && !searchableAssetText(asset).includes(query)) return false;
+      if (query && !`${searchableAssetText(asset)} ${searchableOverlayText(overlay)}`.includes(query)) return false;
       return true;
     });
   }, [assets, mediaFilter, overlayByAssetId, search, statusFilter, visibilityFilter]);
@@ -190,7 +199,7 @@ export default function VaultPage() {
     });
   }
 
-  async function handleOverlayChange(assetId: string, patch: Partial<Pick<VaultOverlay, "favorite" | "hidden" | "notes" | "tags">>) {
+  async function handleOverlayChange(assetId: string, patch: Partial<Pick<VaultOverlay, "favorite" | "hidden" | "notes" | "tags" | "title">>) {
     const current = overlayByAssetId.get(assetId) || emptyOverlay(assetId);
     const nextOverlay: VaultOverlay = {
       ...current,
@@ -218,24 +227,25 @@ export default function VaultPage() {
   }
 
   return (
-    <div className="mx-auto max-w-screen-2xl px-6 py-8">
+    <div className="mx-auto max-w-screen-2xl px-4 py-4 sm:px-6">
       <VaultLoadPanel onPreview={handlePreview} />
-      {loading && <p className="mt-4 text-sm text-(--color-surface-500)">Loading Vault preview...</p>}
+      {loading && <p className="mt-2 text-[length:var(--text-12)] text-(--color-surface-500)">Loading Vault preview...</p>}
       {preview && (
-        <section className="mt-6 rounded-(--radius-card) border border-(--color-surface-200) bg-(--color-surface-0) p-4 dark:border-(--color-surface-800) dark:bg-(--color-surface-900)">
-          <h2 className="text-sm font-semibold">Preview</h2>
-          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-(--color-surface-500)">
-              {preview.counts.assets} assets, {preview.counts.images} images, {preview.counts.videos} videos, {preview.counts.prompts} prompts.
+        <section className="mt-2 rounded-(--radius) border border-(--hairline) bg-(--surface-raised) p-[var(--space-3)] dark:bg-(--surface-panel)">
+          <div className="flex flex-col gap-[var(--space-2)] sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[length:var(--text-13)] text-(--color-surface-500)">
+              <span className="font-medium text-(--color-surface-800) dark:text-(--color-surface-100)">Preview</span>
+              {" · "}
+              {preview.counts.assets} assets, {preview.counts.images} images, {preview.counts.videos} videos, {preview.counts.prompts} prompts
             </p>
-            <Button variant="primary" onClick={handleCommit}>
+            <Button size="sm" variant="primary" onClick={handleCommit}>
               Commit Vault
             </Button>
           </div>
         </section>
       )}
       <VaultRepairWorkbench />
-      <section className="mt-6">
+      <section className="mt-3">
         <VaultGrid
           assets={filteredAssets}
           allAssetsCount={assets.length}
@@ -246,6 +256,7 @@ export default function VaultPage() {
           statusFilter={statusFilter}
           visibilityFilter={visibilityFilter}
           selectedAssetIds={selectedAssetIds}
+          loading={initializing}
           onViewModeChange={setViewMode}
           onSearchChange={setSearch}
           onMediaFilterChange={setMediaFilter}
@@ -263,7 +274,12 @@ export default function VaultPage() {
           onBuildMovies={() => setShowMovieDraftModal(true)}
         />
       </section>
-      <VaultMediaViewer asset={viewerAsset} onClose={() => setViewerAsset(null)} />
+      <VaultMediaViewer
+        asset={viewerAsset}
+        overlay={viewerAsset ? overlayByAssetId.get(viewerAsset.assetId) : undefined}
+        onOverlayChange={handleOverlayChange}
+        onClose={() => setViewerAsset(null)}
+      />
       <VaultMovieDraftModal
         open={showMovieDraftModal}
         onClose={() => setShowMovieDraftModal(false)}

@@ -49,7 +49,7 @@ async function commitVaultPreview(page) {
   await page.goto("/vault");
   await page.getByRole("button", { name: /Preview Vault/i }).click();
   await page.getByRole("button", { name: /Commit Vault/i }).click();
-  await expect(page.getByText("asset-video-1", { exact: true })).toBeVisible();
+  await expect(page.locator('article[data-asset-id="asset-video-1"]')).toBeVisible();
 }
 
 test("Phase 0 preserves Vault-to-Movie draft creation", async ({ page }) => {
@@ -61,7 +61,7 @@ test("Phase 0 preserves Vault-to-Movie draft creation", async ({ page }) => {
   await page.getByRole("button", { name: /Create movie drafts/i }).click();
   await expect(page).toHaveURL(/\/movie\?id=/);
   await expect(page.getByText("2 candidates")).toBeVisible();
-  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "asset-video-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: /Candidates Grid/i }).getByRole("button", { name: "Select Clip 1" }).first()).toBeVisible();
 });
 
 test("Phase 0 keeps current Movie list usable", async ({ page }) => {

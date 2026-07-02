@@ -46,7 +46,7 @@ async function commitVault(page) {
   await page.goto("/vault");
   await page.getByRole("button", { name: /Preview Vault/i }).click();
   await page.getByRole("button", { name: /Commit Vault/i }).click();
-  await expect(page.getByText("asset-video-1", { exact: true })).toBeVisible();
+  await expect(page.locator('article[data-asset-id="asset-video-1"]')).toBeVisible();
 }
 
 async function readMovies(page) {
@@ -105,7 +105,9 @@ test("Vault Build Movies uses current filtered visible set when nothing is selec
 test("Vault Build Movies can create favorite drafts", async ({ page }) => {
   await resetDb(page);
   await commitVault(page);
-  await page.getByRole("button", { name: /Favorite asset-video-2/i }).click();
+  const card = page.locator('article[data-asset-id="asset-video-2"]');
+  await card.hover();
+  await card.getByRole("button", { name: /Favorite asset-video-2/i }).click();
   await page.getByRole("button", { name: /Build Movies/i }).click();
   await page.getByLabel(/Source scope/i).selectOption("favorites");
   await page.getByLabel(/Recipe/i).selectOption("favorites");

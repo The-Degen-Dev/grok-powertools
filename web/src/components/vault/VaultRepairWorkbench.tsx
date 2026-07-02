@@ -180,31 +180,34 @@ export default function VaultRepairWorkbench() {
   }
 
   return (
-    <section className="mt-6 rounded-(--radius-card) border border-(--color-surface-200) bg-(--color-surface-0) p-4 dark:border-(--color-surface-800) dark:bg-(--color-surface-900)">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-sm font-semibold">Repair Workbench</h2>
-        <Button variant="secondary" onClick={handleScan} disabled={loading}>
+    <section className="mt-2 rounded-(--radius) border border-(--hairline) bg-(--surface-raised) p-[var(--space-3)] dark:bg-(--surface-panel)">
+      <div className="flex flex-col gap-[var(--space-2)] sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-[length:var(--text-13)] font-semibold leading-[var(--leading-tight-ui)]">Repair Workbench</h2>
+          <p className="text-[length:var(--text-12)] text-(--color-surface-500)">Scan, approve, and run guarded repair plans.</p>
+        </div>
+        <Button size="sm" variant="secondary" onClick={handleScan} disabled={loading}>
           {loading ? "Scanning..." : "Scan for Repair Issues"}
         </Button>
       </div>
 
       {scan && (
-        <div className="mt-4 grid gap-3 sm:grid-cols-4">
-          <div className="rounded border border-(--color-surface-200) p-3 dark:border-(--color-surface-800)">
+        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+          <div className="rounded-(--radius-sm) border border-(--hairline) p-[var(--space-2)]">
             <div className="text-xs text-(--color-surface-500)">Issues</div>
-            <div className="text-lg font-semibold">{scan.summary.totalIssues} issues</div>
+            <div className="text-sm font-semibold">{scan.summary.totalIssues} issues</div>
           </div>
-          <div className="rounded border border-(--color-surface-200) p-3 dark:border-(--color-surface-800)">
+          <div className="rounded-(--radius-sm) border border-(--hairline) p-[var(--space-2)]">
             <div className="text-xs text-(--color-surface-500)">Writable</div>
-            <div className="text-lg font-semibold">{scan.summary.writableIssues} writable</div>
+            <div className="text-sm font-semibold">{scan.summary.writableIssues} writable</div>
           </div>
-          <div className="rounded border border-(--color-surface-200) p-3 dark:border-(--color-surface-800)">
+          <div className="rounded-(--radius-sm) border border-(--hairline) p-[var(--space-2)]">
             <div className="text-xs text-(--color-surface-500)">Blocked</div>
-            <div className="text-lg font-semibold">{scan.summary.blockedIssues} blocked</div>
+            <div className="text-sm font-semibold">{scan.summary.blockedIssues} blocked</div>
           </div>
-          <div className="rounded border border-(--color-surface-200) p-3 dark:border-(--color-surface-800)">
+          <div className="rounded-(--radius-sm) border border-(--hairline) p-[var(--space-2)]">
             <div className="text-xs text-(--color-surface-500)">Selected</div>
-            <div className="text-lg font-semibold">{selectedIssues.length} selected</div>
+            <div className="text-sm font-semibold">{selectedIssues.length} selected</div>
           </div>
         </div>
       )}
