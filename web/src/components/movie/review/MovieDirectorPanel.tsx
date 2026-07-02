@@ -192,7 +192,11 @@ export default function MovieDirectorPanel({
             </article>
           );
         })}
-        {proposals.length === 0 && <div className="rounded-(--radius) border border-(--hairline) p-3 text-sm text-neutral-400">No Director proposals yet.</div>}
+        {proposals.length === 0 && (
+          <div className="rounded-(--radius) border border-(--hairline) bg-(--surface-panel) p-3 text-sm text-neutral-400">
+            No Director proposals yet. Run the rule-based Director to create a local changeset without changing the cut.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { Film, Trash2 } from "lucide-react";
 import { applyReviewCommand } from "@/lib/movie-review-reducer";
 import type { MovieReviewProject } from "@/lib/movie-review-types";
 import { MovieFlagBadges, MovieLifecycleBadge } from "./MovieStatusBadges";
@@ -53,8 +53,10 @@ export default function MovieClipStrip({
           );
         })}
         {project.committedClips.length === 0 && (
-          <div className="flex min-h-24 flex-1 items-center justify-center rounded border border-neutral-800 text-sm text-neutral-400">
-            No clips committed locally.
+          <div className="flex min-h-24 flex-1 flex-col items-center justify-center rounded border border-neutral-800 text-center text-sm text-neutral-400">
+            <Film className="mb-1 h-5 w-5" aria-hidden="true" />
+            <div className="font-medium text-neutral-200">No committed clips</div>
+            <div className="text-xs">Keep a candidate to add it to the cut.</div>
           </div>
         )}
       </div>

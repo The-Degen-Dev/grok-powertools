@@ -74,6 +74,10 @@ test("Vault Build Movies creates local selected video drafts with cut transition
   await page.getByLabel(/Select asset-video-1/i).check();
   await page.getByLabel(/Select asset-video-2/i).check();
   await page.getByRole("button", { name: /Build Movies/i }).click();
+  await expect(page.getByRole("heading", { name: /What will happen/i })).toBeVisible();
+  await expect(page.getByText("2 eligible videos", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 local movie draft", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Cut transition/i)).toBeVisible();
   await page.getByLabel(/Recipe/i).selectOption("selected");
   await page.getByLabel(/Max clips per movie/i).fill("10");
   await page.getByLabel(/Max movies/i).fill("2");
@@ -119,11 +123,27 @@ test("Vault Build Movies can create favorite drafts", async ({ page }) => {
   expect(draft.clips.map((clip) => clip.sourceAssetId)).toEqual(["asset-video-2"]);
 });
 
+test("Vault Build Movies explains empty eligible scopes with recovery", async ({ page }) => {
+  await resetDb(page);
+  await commitVault(page);
+  await page.getByRole("button", { name: /Build Movies/i }).click();
+  await page.getByLabel(/Source scope/i).selectOption("favorites");
+  await expect(page.getByText(/No eligible videos for this setup/i)).toBeVisible();
+  await expect(page.getByText(/not favorite/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Create movie drafts/i })).toBeDisabled();
+  await page.getByRole("button", { name: /Use visible verified videos/i }).click();
+  await expect(page.getByText("2 eligible videos", { exact: true })).toBeVisible();
+});
+
 test("Movie Maker exposes Build from Vault after Vault assets are committed", async ({ page }) => {
   await resetDb(page);
   await commitVault(page);
   await page.goto("/movie");
+  await expect(page.getByRole("heading", { name: /Movie Maker/i })).toBeVisible();
+  await expect(page.getByText(/0 movies/i)).toBeVisible();
+  await expect(page.getByText(/4 Vault assets/i)).toBeVisible();
   await page.getByRole("button", { name: /Build from Vault/i }).click();
+  await expect(page.getByRole("heading", { name: /What will happen/i })).toBeVisible();
   await page.getByLabel(/Recipe/i).selectOption("recent");
   await page.getByRole("button", { name: /Create movie drafts/i }).click();
   await expect(page).toHaveURL(/\/movie\?id=/);

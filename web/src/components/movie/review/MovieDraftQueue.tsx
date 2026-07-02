@@ -63,7 +63,11 @@ export default function MovieDraftQueue({
             {version.name}
           </button>
         ))}
-        {versions.length === 0 && <div className="text-xs text-neutral-400">No alternate versions.</div>}
+        {versions.length === 0 && (
+          <div className="rounded-(--radius-sm) border border-neutral-800 bg-neutral-950 p-2 text-xs text-neutral-400">
+            No saved versions yet. Applying a saved Director changeset later will snapshot the current cut first.
+          </div>
+        )}
       </div>
     </div>
   );

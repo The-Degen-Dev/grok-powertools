@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, CircleDashed, FileText, Image as ImageIcon, Play, X } from "lucide-react";
+import { Check, CircleDashed, FileText, Image as ImageIcon, Inbox, Play, X } from "lucide-react";
 import Card from "@/components/ui/Card";
 import IconButton from "@/components/ui/IconButton";
 import StatusFlag from "@/components/ui/StatusFlag";
@@ -94,8 +94,10 @@ export default function MovieCandidatesGrid({
         })}
       </div>
       {project.candidates.length === 0 && (
-        <div className="flex h-full min-h-64 items-center justify-center rounded-(--radius) border border-(--hairline) text-sm text-neutral-400">
-          No candidates in review.
+        <div className="flex h-full min-h-64 flex-col items-center justify-center gap-2 rounded-(--radius) border border-(--hairline) bg-(--surface-panel) p-4 text-center">
+          <Inbox className="h-6 w-6 text-neutral-400" aria-hidden="true" />
+          <div className="text-sm font-medium text-neutral-100">No candidates in review</div>
+          <div className="max-w-sm text-xs text-neutral-400">Keep building from Vault or use Add Clip to bring more source media into review.</div>
         </div>
       )}
     </section>

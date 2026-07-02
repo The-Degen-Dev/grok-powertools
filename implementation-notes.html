@@ -2036,6 +2036,97 @@ npx playwright test -c .artifacts/playwright.phase2.config.js
                     </tr>
                 </tbody>
             </table>
+            <h2>2026-07-02 Phase 3 Build Movies And List Completion</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            The Build Movies modal now explains scope, recipe, eligible counts,
+                            skipped counts, draft names, and what will happen before any local
+                            movie draft is created. The <code>/movie</code> list now acts as a
+                            working operator surface instead of a sparse list: it shows movie,
+                            clip, Vault asset, and Vault video counts, plus direct Build from
+                            Vault and New Movie actions.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            No cloud or repair behavior was added in Phase 3. Build Movies remains
+                            local-only through IndexedDB and the existing Vault draft builder. The
+                            modal says this explicitly because it is easy to confuse local draft
+                            creation with R2, D1, Worker, or processed-ID writes.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The dark-mode leak found during screenshot review was fixed by adding
+                            Tailwind v4's class-based <code>dark</code> variant to match the
+                            existing theme provider, which already toggles <code>html.dark</code>.
+                            This is a shared styling bridge, not a Movie-only patch, and it makes
+                            existing <code>dark:</code> utilities respond to the app theme. Disabled
+                            buttons now use the muted state channel instead of opacity so disabled
+                            text remains readable.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None blocking. The current recipe system still only offers cut
+                            transitions, matching the existing draft creation model.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            <pre><code>npm --prefix web run lint
+passed
+
+npm --prefix web run test:unit
+Test Files  7 passed (7)
+Tests       42 passed (42)
+
+npm --prefix web run build
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)
+
+npx playwright test -c playwright.web.config.js
+61 passed
+
+npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-proof.spec.js
+1 passed</code></pre>
+                            Phase 3 proof artifacts:
+                            <pre><code>.artifacts/vault-review-phase3/movie-list-light.png
+.artifacts/vault-review-phase3/movie-list-dark.png
+.artifacts/vault-review-phase3/build-movies-modal-light.png
+.artifacts/vault-review-phase3/build-movies-modal-dark.png
+.artifacts/vault-review-phase3/build-movies-empty-scope-light.png
+.artifacts/vault-review-phase3/build-movies-empty-scope-dark.png
+.artifacts/vault-review-phase3/review-bay-empty-review-light.png
+.artifacts/vault-review-phase3/review-bay-empty-review-dark.png
+.artifacts/vault-review-phase3/review-bay-empty-director-light.png
+.artifacts/vault-review-phase3/review-bay-empty-director-dark.png
+.artifacts/vault-review-phase3/review-bay-empty-focus-light.png
+.artifacts/vault-review-phase3/review-bay-empty-focus-dark.png
+.artifacts/vault-review-phase3/movie-list-phone.png
+.artifacts/vault-review-phase3/build-movies-modal-phone.png
+.artifacts/vault-review-phase3/phase3-proof.json</code></pre>
+                            Phone proof checks assert no horizontal overflow at <code>390px</code>
+                            for the movie list and Build Movies modal. Visual review confirmed the
+                            modal, list, and Review Bay empty states render in both light and dark
+                            modes without the white-panel leak.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </main>
     </body>
 </html>

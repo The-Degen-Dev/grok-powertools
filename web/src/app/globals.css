@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
   /* Typography */
   --font-display: var(--font-geist-sans), system-ui, sans-serif;

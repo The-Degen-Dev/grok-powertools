@@ -38,7 +38,7 @@ export default function Button({
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center rounded-(--radius-btn) font-medium transition-colors duration-(--duration-fast) disabled:opacity-40 disabled:cursor-not-allowed ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
+      className={`inline-flex items-center justify-center rounded-(--radius-btn) font-medium transition-colors duration-(--duration-fast) disabled:cursor-not-allowed disabled:border-(--state-muted-border) disabled:bg-(--state-muted-bg-subtle) disabled:text-(--state-muted-fg) disabled:shadow-none ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
       {...props}
     >
       {children}

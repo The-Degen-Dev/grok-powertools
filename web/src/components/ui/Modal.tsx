@@ -35,7 +35,7 @@ export default function Modal({
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === overlayRef.current) onClose();
       }}
@@ -44,7 +44,7 @@ export default function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
-        className={`w-full max-w-lg rounded-(--radius-overlay) bg-(--color-surface-0) p-6 shadow-(--shadow-overlay) animate-scale-in dark:bg-(--color-surface-900) ${className}`}
+        className={`max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-(--radius-overlay) bg-(--color-surface-0) p-6 shadow-(--shadow-overlay) animate-scale-in dark:bg-(--color-surface-900) ${className}`}
       >
         {title && (
           <div className="mb-4 flex items-center justify-between">

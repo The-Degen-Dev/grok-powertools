@@ -47,7 +47,10 @@ export default function MovieFocusLoupe({
           <div className="mt-4 flex min-h-80 flex-1 items-center justify-center rounded bg-neutral-950 text-sm text-neutral-400">{title}</div>
         </div>
       ) : (
-        <div className="flex h-full min-h-64 items-center justify-center rounded border border-neutral-800 text-sm text-neutral-400">No candidate in focus.</div>
+        <div className="flex h-full min-h-64 flex-col items-center justify-center rounded border border-neutral-800 bg-neutral-950 text-center text-sm text-neutral-400">
+          <div className="font-medium text-neutral-200">No candidate in focus</div>
+          <div className="mt-1 text-xs">Return to Review or add clips to continue triage.</div>
+        </div>
       )}
     </section>
   );
