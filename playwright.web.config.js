@@ -8,6 +8,7 @@ const webPort = 43118;
 module.exports = defineConfig({
   testDir: "./tests/e2e-web",
   fullyParallel: false,
+  workers: 1,
   timeout: 120000,
   reporter: "list",
   use: {

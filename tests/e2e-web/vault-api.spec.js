@@ -14,17 +14,17 @@ test("Vault preview returns inventory, prompts, gaps, and counts", async ({ requ
   const res = await request.get("/api/vault/preview");
   expect(res.ok()).toBe(true);
   const body = await res.json();
-  expect(body.assets).toHaveLength(3);
+  expect(body.assets).toHaveLength(4);
   expect(body.prompts).toHaveLength(2);
   expect(body.gaps).toHaveLength(2);
-  expect(body.counts.assets).toBe(3);
+  expect(body.counts.assets).toBe(4);
   expect(body.counts.images).toBe(2);
-  expect(body.counts.videos).toBe(1);
-  expect(body.counts.verified).toBe(3);
+  expect(body.counts.videos).toBe(2);
+  expect(body.counts.verified).toBe(4);
   expect(body.scanTruncated).toBe(false);
   expect(body.warnings).toEqual(
     expect.arrayContaining([
-      expect.stringContaining("inventory.items[2]"),
+      expect.stringContaining("inventory.items[3]"),
       expect.stringContaining("metadata.prompts[2]"),
     ]),
   );

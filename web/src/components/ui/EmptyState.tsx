@@ -14,19 +14,19 @@ export default function EmptyState({
   action,
 }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="mb-4 rounded-xl border border-dashed border-(--color-surface-300) p-4 dark:border-(--color-surface-700)">
-        <Icon className="h-8 w-8 text-(--color-surface-300) dark:text-(--color-surface-600)" />
+    <div className="flex flex-col items-center justify-center rounded-(--radius) border border-dashed border-(--hairline) bg-(--surface-panel) px-[var(--space-4)] py-14 text-center">
+      <div className="mb-[var(--space-3)] rounded-(--radius) border border-(--hairline) p-[var(--space-3)]">
+        <Icon className="h-6 w-6 text-(--state-muted-fg)" />
       </div>
-      <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-(--color-surface-700) dark:text-(--color-surface-300)">
+      <h2 className="font-[family-name:var(--font-display)] text-[length:var(--text-16)] font-semibold leading-[var(--leading-ui)] text-(--color-surface-700) dark:text-(--color-surface-200)">
         {title}
       </h2>
       {description && (
-        <p className="mt-2 max-w-sm text-sm text-(--color-surface-500)">
+        <p className="mt-[var(--space-1)] max-w-sm text-[length:var(--text-13)] leading-[var(--leading-ui)] text-(--color-surface-500)">
           {description}
         </p>
       )}
-      {action && <div className="mt-4">{action}</div>}
+      {action && <div className="mt-[var(--space-3)]">{action}</div>}
     </div>
   );
 }

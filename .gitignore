@@ -24,6 +24,7 @@ npm-debug.log*
 .gemini/
 
 # Temporary
+.artifacts/
 temp_ref/
 test-results/
 playwright-report/

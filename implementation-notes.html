@@ -510,6 +510,171 @@
                 </tbody>
             </table>
 
+            <h2>Vault Movie Drafts Goal Run</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Note</th>
+                        <th>Evidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Started execution for Vault movie draft generation and Movie Maker
+                            playback stabilization in an isolated worktree.
+                        </td>
+                        <td>
+                            Original checkout was on <code>codex/video-gif-recreate</code> with
+                            unrelated dirty extension/recreate files and did not contain the
+                            approved Vault movie plan/spec. Created
+                            <code>codex/vault-movie-drafts-exec</code> at
+                            <code>492dfc5</code> under
+                            <code>/Users/philipbankier/.codex/worktrees/vault-movie-drafts-exec/chrome-extension-powertools</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Preserved this existing release ledger and appended a new Goal run
+                            section instead of replacing prior notes.
+                        </td>
+                        <td>
+                            The objective requires <code>implementation-notes.html</code> to remain
+                            the live audit log. Earlier release entries remain above this section.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Task 1 builder work was implemented by subagent Hooke and reviewed by
+                            the controller.
+                        </td>
+                        <td>
+                            Commit <code>843ada4</code> added
+                            <code>web/src/lib/vault-movie-drafts.ts</code>,
+                            <code>web/src/lib/vault-movie-drafts.test.ts</code>, and Vitest wiring.
+                            Worker evidence included a failing-first focused test, passing focused
+                            test, passing web lint, passing web build, and staged secret scan. The
+                            controller reran
+                            <code>npm --prefix web run test:unit -- vault-movie-drafts</code>; all
+                            five tests passed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Controller tightened the hidden-overlay rule before moving to UI work.
+                        </td>
+                        <td>
+                            Commit <code>5948b52</code> changed draft building to exclude hidden
+                            local overlays for the visible verified scope. Evidence:
+                            <code>npm --prefix web run test:unit -- vault-movie-drafts</code>,
+                            <code>npm --prefix web run lint</code>, and
+                            <code>npm --prefix web run build</code> all passed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Task 2 Vault draft UI was completed after taking over a partial
+                            subagent patch.
+                        </td>
+                        <td>
+                            Commit <code>9b16ddd</code> added the Vault Build Movies modal,
+                            persistence helper, fake second video asset, and browser coverage for
+                            selected, filtered, and favorite draft creation. Evidence:
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-movie-drafts.spec.js</code>
+                            passed three tests, and
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js</code>
+                            passed eleven tests.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Deviation: controller added an IndexedDB upgrade hardening commit while
+                            validating Task 2.
+                        </td>
+                        <td>
+                            Commit <code>8dfd7a2</code> makes base local stores/indexes presence
+                            checked during upgrades. This was not in the original Task 2 file list,
+                            but validation exposed a real browser crash when an empty version-1
+                            IndexedDB existed before the app opened its version-5 schema. Evidence:
+                            the focused failing Vault UI path passed after the fix; web unit,
+                            lint, and build gates passed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Task 3 added the Movie Maker <code>Build from Vault</code> entry point.
+                        </td>
+                        <td>
+                            Commit <code>26609db</code> loads committed Vault assets from IndexedDB
+                            on <code>/movie</code>, opens the existing draft modal, and defaults
+                            that entry point to open the first created draft. Evidence: the new
+                            failing-first Playwright test initially timed out waiting for
+                            <code>Build from Vault</code>; after implementation,
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-movie-drafts.spec.js</code>
+                            passed four tests, and web lint/build passed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Task 4 stabilized Movie Maker preview playback for generated Vault
+                            videos.
+                        </td>
+                        <td>
+                            Commit <code>a2fce6b</code> added a 13 KB playable MP4 fixture, made the
+                            fake Vault worker serve real video bytes, labeled transport buttons,
+                            stopped restarting playback on every time tick, throttled video seeks,
+                            and cached last drawn video frames. Evidence: the new playback
+                            stability spec failed first on the unlabeled play button and black
+                            scrub frame, then passed two tests after the fix. Existing
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-ui.spec.js -g "Movie Maker"</code>,
+                            web lint, and web build also passed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Final integrated validation passed for the web app feature branch.
+                        </td>
+                        <td>
+                            Evidence:
+                            <code>npm --prefix web run test:unit -- vault-movie-drafts</code>
+                            passed five tests;
+                            <code>npm --prefix web run lint</code> passed;
+                            <code>npm --prefix web run build</code> passed;
+                            focused
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/vault-movie-drafts.spec.js tests/e2e-web/movie-player-stability.spec.js</code>
+                            passed six tests; and full
+                            <code>npx playwright test -c playwright.web.config.js</code> passed
+                            forty-four tests after commit <code>8db2889</code> updated the API
+                            fixture count assertions for the second video asset.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>2026-06-24</td>
+                        <td>
+                            Final surface audit found no forbidden runtime systems touched.
+                        </td>
+                        <td>
+                            <code>git diff --name-only origin/main...HEAD</code> showed docs, web
+                            package files, web app files, and web E2E/unit fixtures only. No Chrome
+                            extension files, Cloud Worker files, R2/D1 state, processed IDs,
+                            environment files, OAuth files, or secrets were changed. Ports
+                            <code>43117</code> and <code>43118</code> were not left listening after
+                            validation.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
             <h2>Open Questions</h2>
             <ul>
                 <li>
@@ -645,6 +810,1323 @@
                 <li class="pass">Extension overlay reported <code>Generated video ready.</code> after reload and rerun with the post-navigation recovery patch.</li>
                 <li class="pending">Draft PR opened with green CI; merge is pending final notes commit.</li>
             </ul>
+
+            <h2>Movie Maker Review Bay Goal Run</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Task</th>
+                        <th>Category</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Execute Phase 0 and Phase 1 only from
+                            <code>docs/superpowers/plans/2026-06-28-movie-maker-review-bay-phase0-phase1.md</code>.
+                            Later phases remain gated by a separate plan after this Review Bay is
+                            verified in local use.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Deviations</td>
+                        <td>
+                            The existing notes file already contained prior Goal evidence, so this
+                            run appends a new section instead of replacing the file with a fresh
+                            minimal template.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Preserve historical implementation context while keeping all current
+                            Movie Review Bay decisions and validation evidence under this dedicated
+                            section.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 0: Preflight</td>
+                        <td>Validation</td>
+                        <td>
+                            <code>pwd</code> returned
+                            <code>/Users/philipbankier/.codex/worktrees/vault-movie-drafts-exec/chrome-extension-powertools</code>.
+                            <code>git status --short --branch</code> returned
+                            <code>## codex/vault-movie-drafts-exec</code>.
+                            <code>git merge-base --is-ancestor origin/main HEAD</code> passed with
+                            <span class="pass">origin/main is included</span>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added persistent Playwright coverage for the existing Vault-to-Movie
+                            draft flow and the current Movie list creation flow before replacing the
+                            editor with Review Bay.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Deviations</td>
+                        <td>
+                            Tightened the plan's sample assertions to match current repo reality:
+                            empty IndexedDB cleanup now skips empty transactions, the duplicate
+                            <code>New Movie</code> buttons are disambiguated with <code>.first()</code>,
+                            and the draft-open assertion checks exact <code>2 clips</code> text instead
+                            of a broad <code>/clip/i</code> locator.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Verified current behavior with browser E2E instead of adding Node
+                            IndexedDB unit coverage, because existing IndexedDB test coverage is
+                            browser-backed and there is no fake IndexedDB unit setup yet.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 1: Phase 0 Safety</td>
+                        <td>Validation</td>
+                        <td>
+                            <code>npx playwright test -c playwright.web.config.js tests/e2e-web/movie-phase0.spec.js</code>
+                            passed 2 tests. <code>npm --prefix web run test:unit</code> passed 1 file
+                            and 5 tests. <code>npm --prefix web run lint</code> passed.
+                            <pre><code>Running 2 tests using 1 worker
+  ✓  1 [chromium] › tests/e2e-web/movie-phase0.spec.js:55:1 › Phase 0 preserves Vault-to-Movie draft creation (3.9s)
+  ✓  2 [chromium] › tests/e2e-web/movie-phase0.spec.js:66:1 › Phase 0 keeps current Movie list usable (1.9s)
+
+  2 passed (8.5s)</code></pre>
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)</code></pre>
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Selected single-thread FFmpeg.wasm for Phase 1 MP4 export and kept
+                            WebM as the fallback. Browser proof remains required in Task 10 before
+                            completion.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Deviations</td>
+                        <td>
+                            Did not install or proof Mediabunny in this task. The conservative
+                            FFmpeg path is already in the dependency graph, and the plan allows
+                            Mediabunny to remain a later export-engine spike unless clear same-fixture
+                            evidence beats FFmpeg.wasm during this decision task.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Avoided Remotion server rendering, FFmpeg multithread, and WebCodecs-only
+                            export for Phase 1 because each adds either licensing/server scope,
+                            cross-origin isolation work, or muxing/cleanup risk beyond the current
+                            local Review Bay foundation.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Open questions</td>
+                        <td>
+                            None now. Pause later if browser MP4 export cannot prove an AAC stream
+                            with the fixture media.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 2: Export Engine Decision</td>
+                        <td>Validation</td>
+                        <td>
+                            Generated <code>tests/e2e-web/fixtures/tiny-video-with-audio.mp4</code>.
+                            <code>ffprobe</code> returned <code>aac</code> for the fixture. Checked
+                            npm versions: <code>@ffmpeg/core 0.12.10</code>,
+                            <code>@ffmpeg/core-mt 0.12.10</code>,
+                            <code>@ffmpeg/ffmpeg 0.12.15</code>, <code>mediabunny 1.49.0</code>,
+                            and <code>remotion 4.0.484</code>. Local FFmpeg round-trip output
+                            also returned <code>aac</code>, duration <code>1.514000</code>, size
+                            <code>26195</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added Zod schemas as the Review Bay persistence contract, derived
+                            TypeScript types from those schemas, and added five additive
+                            IndexedDB stores under database version <code>6</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Deviations</td>
+                        <td>
+                            Added <code>fake-indexeddb</code> as a web dev dependency because the
+                            current repo had no Node IndexedDB unit-test setup. Kept
+                            <code>zod</code> in runtime dependencies because app code imports schemas
+                            outside tests. Review Bay hydration derives same-origin Vault media URLs
+                            from <code>sourceAssetId</code> and does not copy legacy
+                            <code>objectKey</code> query strings into Review Bay state.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Used direct <code>fake-indexeddb/auto</code> import in the storage test
+                            rather than introducing a global Vitest config before more tests need it.
+                            This keeps the setup scoped to the first IndexedDB unit test.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Open questions</td>
+                        <td>
+                            None. The Node <code>v23.11.0</code> install path emits engine warnings
+                            for Vitest and eslint internals that declare even-major Node ranges, but
+                            the focused tests and lint passed in this environment.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first run:
+                            <pre><code>FAIL  src/lib/movie-review-storage.test.ts
+Error: Cannot find module './movie-review-storage'</code></pre>
+                            Passing storage run:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-review-storage
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)</code></pre>
+                            Existing draft builder run:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run vault-movie-drafts
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage Review Follow-Up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Normalized Vault-backed image clip URLs to the same canonical
+                            <code>/api/vault/media/:assetId</code> form as video clips. This keeps
+                            Review Bay durable state aligned around <code>mediaRef</code> and avoids
+                            persisting stale <code>objectKey</code> query strings.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 3: Schema-First Storage Review Follow-Up</td>
+                        <td>Validation</td>
+                        <td>
+                            Expanded the storage hydration test to include a Vault-backed image clip
+                            and reran <code>npm --prefix web run test:unit -- movie-review-storage</code>.
+                            It passed 1 file and 3 tests.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added a <code>30000</code>-tick integer movie timebase, a pure timeline
+                            model for trim and export preflight, and a pure reducer for Review Bay
+                            selection, keep/reject, trim, reorder, delete, mute, and solo state.
+                            Added a shared effective-gain predicate so preview and export can use
+                            the same solo semantics.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Deviations</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Kept this layer UI-free and storage-free so later components can reuse
+                            the same reducer and timeline predicates without duplicating business
+                            rules in React.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Timebase And Reducer</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first run:
+                            <pre><code>FAIL  src/lib/movie-review-reducer.test.ts
+Error: Cannot find module './movie-review-reducer'
+
+FAIL  src/lib/movie-timeline-model.test.ts
+Error: Cannot find module './movie-timebase'</code></pre>
+                            Passing run:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-timeline-model movie-review-reducer
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Review Hardening Follow-Up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Kept unknown video duration nonzero with the existing Movie Maker
+                            provisional <code>5</code>-second fallback until media metadata is
+                            available. Limited audio-intent export blockers to video clips, added
+                            image media presence checks, ignored invalid trim commands, clamped
+                            volume to schema bounds, and retargeted or cleared selection when
+                            rejected or deleted clips disappear.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Review Hardening Follow-Up</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The provisional duration is a warning state, not final export proof.
+                            Later preview/export work still needs real media metadata before claiming
+                            MP4 timing and audio correctness.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 4: Review Hardening Follow-Up</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first Task 4 hardening run exposed 5 failures across provisional
+                            duration, image/audio preflight, invalid reducer inputs, and stale
+                            selection. After fixes:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-timeline-model movie-review-reducer movie-review-storage
+
+ Test Files  3 passed (3)
+      Tests  17 passed (17)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added a proposal-only Director domain module with rule-based fallback,
+                            strict provider payload parsing, project clip-target validation, and a
+                            server-only OpenAI-compatible chat-completions route. The route reports
+                            configured status without exposing credentials and posts only from the
+                            server boundary.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Deviations</td>
+                        <td>
+                            Required an explicit <code>MOVIE_DIRECTOR_MODEL</code> or
+                            <code>CLIPROXYAPI_MODEL</code> instead of hardcoding the plan sketch's
+                            sample model name. Also used relative imports in the new route because
+                            this repo has no Vitest alias config for direct route imports.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Requiring an explicit model adds setup friction, but avoids stale-model
+                            assumptions. The provider path is unit-tested with a mocked
+                            OpenAI-compatible endpoint, not a live provider call, because this task
+                            is the boundary and contract layer rather than UI/provider acceptance.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Open questions</td>
+                        <td>
+                            Which local CLIProxyAPI model should be set for real Director calls
+                            remains a later setup choice. The route fails closed until that env value
+                            is explicit.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Director Boundary</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first run:
+                            <pre><code>FAIL  src/lib/movie-director.test.ts
+Error: Cannot find module './movie-director'</code></pre>
+                            Passing run:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-director route
+
+ Test Files  2 passed (2)
+      Tests  7 passed (7)</code></pre>
+                            Full unit suite:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  6 passed (6)
+      Tests  29 passed (29)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Review Hardening Follow-Up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added committed-clip reorder application, made Director target validation
+                            action-aware, and normalized non-object JSON bodies plus provider network
+                            failures into typed route errors.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 5: Review Hardening Follow-Up</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first tests reproduced accepted-but-ignored reorder,
+                            wrong-lane targets, JSON <code>null</code>, and rejected provider fetch
+                            failures. After fixes:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-director route
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)</code></pre>
+                            Full unit suite:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  6 passed (6)
+      Tests  33 passed (33)</code></pre>
+                            Lint run:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Replaced the simple <code>/movie?id=...</code> wrapper with a local
+                            Review Bay shell backed by real IndexedDB Review project state. Added
+                            accessible operator regions for the header, Director rail, Candidates
+                            Grid, Inspector, and Clip Strip, plus keyboard keep/reject and mode
+                            commands through the reducer.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Deviations</td>
+                        <td>
+                            The E2E waits for the seeded candidate to be visible before sending
+                            keyboard input because Review project hydration is asynchronous. The
+                            rail and inspector use explicit <code>role="region"</code> because
+                            <code>aside</code> exposes as complementary by default.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Kept Task 6 visually plain and state-focused. Preview, richer surfaces,
+                            and deeper responsive polish remain in the later planned UI tasks, while
+                            this slice proves the shell and reducer wiring.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Bay Shell</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first E2E:
+                            <pre><code>Locator: getByRole('banner', { name: /Movie Review Header/i })
+Expected: visible
+Error: element(s) not found</code></pre>
+                            Passing focused E2E:
+                            <pre><code>Running 2 tests using 1 worker
+  ✓  1 [chromium] › tests/e2e-web/movie-review-bay.spec.js:4:1 › Review Bay first viewport exposes operator regions (2.5s)
+  ✓  2 [chromium] › tests/e2e-web/movie-review-bay.spec.js:14:1 › Keyboard keep and reject move candidates into the right lanes (1.2s)
+
+  2 passed (6.6s)</code></pre>
+                            Full unit suite:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  6 passed (6)
+      Tests  33 passed (33)</code></pre>
+                            Lint and build:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Hardening Follow-Up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Fixed the review findings before Task 7: project updates now use a
+                            current-state ref plus functional updater support, pending saves flush on
+                            unmount, keyboard reject applies only to a visible selected candidate,
+                            mode buttons expose <code>aria-pressed</code>, and the Review Bay layout
+                            stacks at narrow widths.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Hardening Follow-Up</td>
+                        <td>Deviations</td>
+                        <td>
+                            The original Task 6 note under-recorded scope: the shell already included
+                            basic trim, volume, mute, and a rule-based Director proposal button.
+                            Those are still minimal controls, but they are real state-writing
+                            surfaces, not only placeholders.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Hardening Follow-Up</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Reject-by-key now requires a selected candidate. This removes the hidden
+                            mutation where pressing <code>X</code> after keeping a clip rejected the
+                            next active candidate while the inspector showed the committed clip.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 6: Review Hardening Follow-Up</td>
+                        <td>Validation</td>
+                        <td>
+                            Passing focused E2E with persistence check:
+                            <pre><code>Running 2 tests using 1 worker
+  ✓  1 [chromium] › tests/e2e-web/movie-review-bay.spec.js:4:1 › Review Bay first viewport exposes operator regions (2.7s)
+  ✓  2 [chromium] › tests/e2e-web/movie-review-bay.spec.js:14:1 › Keyboard keep and reject move candidates into the right lanes (2.0s)
+
+  2 passed (8.1s)</code></pre>
+                            Lint, full unit suite, and build passed after the hook and keyboard
+                            fixes.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added lifecycle and flag badges to both candidates and committed clips,
+                            replaced the static draft queue with a real version list, added a Focus
+                            Loupe mode, and expanded the inspector to expose trim-in, trim-out,
+                            volume, and mute controls for selected committed clips.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Deviations</td>
+                        <td>
+                            The Task 7 E2E tests use an explicit <code>expectReviewReady</code>
+                            helper before keyboard input. Review project hydration is asynchronous,
+                            so the test waits for the visible seeded candidate instead of sending
+                            keys while the loading state may still own the page.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Draft Queue applies saved whole-cut versions instead of merging
+                            individual clips. That keeps this phase safe and reversible while later
+                            timeline work can add granular version comparison.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Review Surfaces</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first focused E2E added coverage for separated candidates,
+                            inspector trim/audio edits, and Focus mode. Initial failures were a
+                            missing <code>onProjectChange</code> prop destructure and keyboard tests
+                            firing before hydrated UI readiness:
+                            <pre><code>ReferenceError path: MovieLeftRail used onProjectChange without destructuring it
+locator.fill timed out waiting for getByLabel(/Trim in/i)
+Focus Loupe region not found after Digit2 before readiness wait</code></pre>
+                            Passing focused E2E:
+                            <pre><code>Running 5 tests using 1 worker
+  ✓  1 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Review Bay first viewport exposes operator regions
+  ✓  2 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Keyboard keep and reject move candidates into the right lanes
+  ✓  3 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Review Bay keeps Candidates Grid separate from committed Clip Strip
+  ✓  4 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Inspector updates trim and audio state for selected committed clip
+  ✓  5 [chromium] › tests/e2e-web/movie-review-bay.spec.js › Focus mode supports Enter to keep and Escape to return to Review
+
+  5 passed (10.4s)</code></pre>
+                            Targeted unit, lint, and build:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-review-reducer movie-timeline-model
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+
+&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Subagent Review Hardening</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Addressed the Task 7 review findings before moving to media work:
+                            Focus-mode <code>X</code> rejects the visible loupe candidate, trim-in
+                            updates no longer invent an unknown trim end, Draft Queue lists only
+                            versions for the current review project, version application snapshots
+                            the current cut first, version clips are normalized through the reducer,
+                            and icon-only flag badges expose <code>role="img"</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Subagent Review Hardening</td>
+                        <td>Deviations</td>
+                        <td>
+                            Used an automatic safety snapshot instead of a confirmation dialog for
+                            Draft Queue version application. This keeps the action reversible without
+                            adding modal state or extra manual steps in the Review Bay.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Subagent Review Hardening</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The trim-out control still displays an estimated fallback for
+                            unknown-duration video until Task 8 metadata detection exists, but
+                            editing Trim in alone does not persist that estimate. Task 8 should
+                            replace the estimate with real media duration when available.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Subagent Review Hardening</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 7: Subagent Review Hardening</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first targeted unit/storage run:
+                            <pre><code>Test Files  2 failed (2)
+Tests  4 failed | 10 passed (14)
+Failures covered trim start without trim end, focus reject selection, apply-version normalization, and project-scoped version listing.</code></pre>
+                            Failing-first browser run:
+                            <pre><code>Running 6 tests using 1 worker
+3 failed, 3 passed
+Failures covered role-based flag badges, focus reject after keep, and Draft Queue version visibility.</code></pre>
+                            Passing focused unit/storage:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-review-reducer movie-review-storage
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)</code></pre>
+                            Passing Review Bay E2E:
+                            <pre><code>Running 6 tests using 1 worker
+  ✓ Review Bay first viewport exposes operator regions
+  ✓ Keyboard keep and reject move candidates into the right lanes
+  ✓ Review Bay keeps Candidates Grid separate from committed Clip Strip
+  ✓ Inspector updates trim and audio state for selected committed clip
+  ✓ Focus mode supports Enter to keep and Escape to return to Review
+  ✓ Draft Queue applies only project-scoped versions with repaired selection
+
+  6 passed (14.5s)</code></pre>
+                            Full unit, lint, and build:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  6 passed (6)
+      Tests  37 passed (37)
+
+&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 8: Media Engine And Assemble Mode</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added a shared browser media-engine hook that owns video elements, an
+                            audio-preview hook for gain/mute/solo routing, and an Assemble mode
+                            surface with clip preview, time-proportional ribbon, waveform trim
+                            sliders, and source-audio lane. The preview attaches the media-engine
+                            video element instead of creating ad hoc video elements inside render.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 8: Media Engine And Assemble Mode</td>
+                        <td>Deviations</td>
+                        <td>
+                            Replaced the stale canvas-player stability spec with a Review Bay
+                            stability spec because <code>/movie?id=...</code> now delegates to
+                            Review Bay. Also set <code>workers: 1</code> in
+                            <code>playwright.web.config.js</code> after the two new Review Bay specs
+                            passed serially but one file navigated during parallel workers. The web
+                            E2E suite shares a dev server and repeatedly opens/deletes the same
+                            IndexedDB name, so serial execution is the deterministic local default.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 8: Media Engine And Assemble Mode</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The media engine currently preloads metadata and exposes browser video
+                            controls. It does not yet perform frame-accurate timeline playback or
+                            metadata duration writes; those remain tied to the export and deeper
+                            timeline phases.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 8: Media Engine And Assemble Mode</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 8: Media Engine And Assemble Mode</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first E2E:
+                            <pre><code>Running 8 tests using 2 workers
+2 failed, 6 passed
+Failures: Clip preview region missing in Assemble mode and stability spec.</code></pre>
+                            Passing focused E2E with config command:
+                            <pre><code>Running 8 tests using 1 worker
+  ✓ Movie Review Bay avoids repeated active-video seek spam
+  ✓ Review Bay first viewport exposes operator regions
+  ✓ Keyboard keep and reject move candidates into the right lanes
+  ✓ Review Bay keeps Candidates Grid separate from committed Clip Strip
+  ✓ Inspector updates trim and audio state for selected committed clip
+  ✓ Focus mode supports Enter to keep and Escape to return to Review
+  ✓ Draft Queue applies only project-scoped versions with repaired selection
+  ✓ Assemble mode shows continuous preview, ribbon, waveform controls, and audio lane
+
+  8 passed (15.5s)</code></pre>
+                            Full unit, lint, and build:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  6 passed (6)
+      Tests  37 passed (37)
+
+&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Replaced the one-off Director Proposal button with Drafts and Director
+                            tabs in the left rail. The Director panel stores proposal records in
+                            IndexedDB, checks provider configuration through the server route before
+                            enabling provider calls, applies only selected changes through
+                            <code>applyDirectorChanges</code>, snapshots the current cut before
+                            mutation, persists the updated project, and then marks proposals
+                            <code>partially-applied</code> or <code>applied</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Deviations</td>
+                        <td>
+                            The rule-based Director now proposes a conservative second change when a
+                            second candidate exists, so partial application is meaningful in the UI.
+                            Provider execution is present but remains disabled unless the server
+                            reports configured credentials and model.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Proposal cards are intentionally compact in the rail. Deeper proposal
+                            diffing stays out of this phase, but selected-change application is real
+                            and state-backed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 9: Director UI</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first E2E:
+                            <pre><code>Locator: getByRole('tab', { name: /Director/i })
+Error: waiting for missing Director tab</code></pre>
+                            Passing Director unit/storage and E2E:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run movie-director movie-review-storage
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+
+Running 2 tests using 1 worker
+  ✓ Director creates reviewable proposals without mutating the current cut
+  ✓ Director partial accept applies selected changes only
+
+  2 passed (8.3s)</code></pre>
+                            Regression, lint, and build:
+                            <pre><code>Running 7 tests using 1 worker
+  7 passed (14.1s)
+
+&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 10: Export Gate</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added a header Export Gate that blocks unresolved cuts, uses the shared
+                            FFmpeg wrapper for MP4 and WebM exports, records export runs with audio
+                            proof metadata, and keeps export history visible in the export panel.
+                            Audio fixture clips hydrate with <code>has-source-audio</code> flags so
+                            export preflight requires explicit audio intent instead of assuming all
+                            video clips are safe.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 10: Export Gate</td>
+                        <td>Deviations</td>
+                        <td>
+                            Hardened <code>useFFmpeg</code> beyond the version bump: load calls now
+                            share an in-flight promise, and file operations read from the FFmpeg ref
+                            instead of stale React <code>loaded</code> closures. This was required
+                            because the E2E clicks Load and Export back-to-back.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 10: Export Gate</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Browser-side export saves an audio-proof record based on known input
+                            intent, while the E2E independently verifies the downloaded MP4 with
+                            <code>ffprobe</code>. In-app stream probing remains a later hardening
+                            option.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 10: Export Gate</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 10: Export Gate</td>
+                        <td>Validation</td>
+                        <td>
+                            Failing-first checks:
+                            <pre><code>&gt; vitest run movie-export-args
+Cannot find module './movie-export-args'
+
+Export E2E:
+Export blocked button not found; export UI missing.</code></pre>
+                            Passing unit, lint, and build:
+                            <pre><code>&gt; web@0.1.0 test:unit
+&gt; vitest run
+
+ Test Files  7 passed (7)
+      Tests  39 passed (39)
+
+&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                            Passing affected E2E:
+                            <pre><code>Running 11 tests using 1 worker
+  ✓ Director creates reviewable proposals without mutating the current cut
+  ✓ Director partial accept applies selected changes only
+  ✓ Export pre-flight blocks unresolved candidates and enables clean cut
+  ✓ Movie export creates MP4 with an audio stream and keeps WebM fallback
+  ✓ Review Bay first viewport exposes operator regions
+  ✓ Keyboard keep and reject move candidates into the right lanes
+  ✓ Review Bay keeps Candidates Grid separate from committed Clip Strip
+  ✓ Inspector updates trim and audio state for selected committed clip
+  ✓ Focus mode supports Enter to keep and Escape to return to Review
+  ✓ Draft Queue applies only project-scoped versions with repaired selection
+  ✓ Assemble mode shows continuous preview, ribbon, waveform controls, and audio lane
+
+  11 passed (23.1s)</code></pre>
+                            The export E2E saved the downloaded MP4 and verified
+                            <code>aac</code> with local <code>ffprobe</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Added a scoped Review Bay grid contract with named layout classes for
+                            the header, left rail, center work area, inspector, and clip strip. The
+                            desktop/tablet layout keeps review controls visible around the main work
+                            area, while phone-width layout preserves the candidates grid, mode
+                            controls, and clip strip in the first usable viewport.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Deviations</td>
+                        <td>
+                            The new phone-width and accessibility tests passed before the CSS
+                            contract was added, so there was no hard failing layout bug. I still
+                            added the scoped classes because the previous Tailwind-only grid made the
+                            responsive surface harder to reason about and easier to regress.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            On narrow phones, the draft/director rail and inspector are hidden
+                            instead of squeezed into the main column. Fine editing remains a
+                            tablet/desktop workflow, and the primary mobile recovery path stays
+                            review, focus, and the committed strip.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Open questions</td>
+                        <td>None.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 11: UI Polish</td>
+                        <td>Validation</td>
+                        <td>
+                            Review Bay E2E:
+                            <pre><code>Running 9 tests using 1 worker
+  ✓ Review Bay first viewport exposes operator regions
+  ✓ Keyboard keep and reject move candidates into the right lanes
+  ✓ Review Bay keeps Candidates Grid separate from committed Clip Strip
+  ✓ Inspector updates trim and audio state for selected committed clip
+  ✓ Focus mode supports Enter to keep and Escape to return to Review
+  ✓ Draft Queue applies only project-scoped versions with repaired selection
+  ✓ Assemble mode shows continuous preview, ribbon, waveform controls, and audio lane
+  ✓ Review Bay remains usable at phone width
+  ✓ Review Bay status indicators have accessible names
+
+  9 passed (16.1s)</code></pre>
+                            Lint and build:
+                            <pre><code>&gt; web@0.1.0 lint
+&gt; eslint
+
+&gt; web@0.1.0 build
+&gt; next build
+
+                            ✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)</code></pre>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Design decisions</td>
+                        <td>
+                            Restored the Review Bay add-clip path so the existing Movie Maker source
+                            picker still works after the Review Bay replacement. Added clips are
+                            persisted into the legacy <code>Movie</code> record and then promoted as
+                            Review Bay candidates, preserving <code>sourceAssetId</code> for Vault
+                            media traceability. Added visible <code>Solo</code> and
+                            <code>Unsolo</code> inspector controls because the goal required user
+                            facing mute and solo control, not reducer-only state. Changed the WebM
+                            fallback export to conservative VP8/Vorbis arguments after browser
+                            validation exposed that the prior VP9/Opus fallback could fail.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Deviations</td>
+                        <td>
+                            Manual validation used an isolated Playwright browser with the local fake
+                            Vault worker because connecting to the user's existing Chrome through
+                            Peekaboo/DevTools timed out during tab discovery. This kept validation
+                            real against the app UI while avoiding any changes to Chrome state,
+                            R2, D1, Worker routes, extension storage, processed IDs, env files, or
+                            live Grok.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The compatibility add-clip path reuses the existing source picker and
+                            routes new clips through candidate review first instead of reviving the
+                            old full editor interaction model. The WebM fallback now prioritizes
+                            reliable browser export over newer codec preference.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Open questions</td>
+                        <td>None for Phase 0 and Phase 1.</td>
+                    </tr>
+                    <tr>
+                        <td>Task 12: Full Validation Follow-up</td>
+                        <td>Validation</td>
+                        <td>
+                            Final automated gates:
+                            <pre><code>npm --prefix web run test:unit
+Test Files  7 passed (7)
+Tests       40 passed (40)
+
+npx playwright test -c playwright.web.config.js
+58 passed
+
+npm --prefix web run lint
+passed
+
+npm --prefix web run build
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)
+
+npm run test:unit
+Test Suites: 23 passed, 23 total
+Tests:       321 passed, 321 total
+
+npm run lint
+passed</code></pre>
+                            Manual validation covered New Movie, Review Bay Add Clip/source picker,
+                            candidate review, focus mode, Director partial apply, trim, volume,
+                            mute, solo, Assemble mode, ribbon, waveform, source audio, MP4 export
+                            with <code>aac</code> audio proof, WebM fallback download, and phone-width
+                            Review Bay rendering. Artifacts:
+                            <pre><code>test-results/manual-review-bay/manual-review-bay-export.mp4
+test-results/manual-review-bay/manual-review-bay-export.webm
+test-results/manual-review-bay/01-review-candidates.png
+test-results/manual-review-bay/02-assemble-audio-controls.png
+test-results/manual-review-bay/03-export-history.png
+test-results/manual-review-bay/04-mobile-review-bay.png</code></pre>
+                            Boundary checks found no changes to env files, cloud code, extension
+                            runtime files, popup files, or cloud sync helpers, and no secret-like
+                            patterns in the diff. The temporary fake Worker and app validation
+                            servers were stopped.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Task 13: Phase 1 Fixes And Phase 2 Review Bay UI</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Vault and Review Bay candidates now share the same card body. The card
+                            frame changed to 4:3 with 240px responsive columns so desktop cards land
+                            in the approved 200-260px range while keeping the poster dominant. Review
+                            Bay candidate cards use an explicit dark card theme instead of forcing a
+                            global dark mode class.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Director violet was nudged to fuchsia
+                            <code>#d946ef</code> in dark mode and <code>#c026d3</code> in light mode
+                            because the original violet was too close to the indigo selection ring.
+                            Review Bay primary controls use the state-accent channel instead of brand
+                            orange so amber attention dots do not read as action buttons.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            ReviewClip now stores local <code>tags</code> plus initial human
+                            <code>titleText</code> values at hydration time. This keeps titles stable
+                            after candidates move between lanes without adding cloud, R2, or
+                            processed-ID state. The Inspector commits metadata on change through the
+                            reducer rather than keeping deferred dirty form state.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None blocking. The Review Bay remains dark-first visually, with state
+                            tokens verified in both light and dark variable modes.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            <pre><code>npm --prefix web run lint
+passed
+
+npm --prefix web run build
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)
+
+npm --prefix web run test:unit
+Test Files  7 passed (7)
+Tests       42 passed (42)
+
+npx playwright test -c playwright.web.config.js
+60 passed</code></pre>
+                            Manual proof artifacts:
+                            <pre><code>.artifacts/vault-review-phase2/vault-desktop.png
+.artifacts/vault-review-phase2/vault-phone.png
+.artifacts/vault-review-phase2/review-bay-desktop.png
+.artifacts/vault-review-phase2/review-bay-phone.png
+.artifacts/vault-review-phase2/review-bay-director-pending.png
+.artifacts/vault-review-phase2/review-bay-director-partial.png</code></pre>
+                            Manual metrics: Vault desktop card <code>254px</code> high,
+                            <code>272px</code> wide, poster ratio <code>0.796</code>, grid top
+                            <code>410px</code>. Director pending was <code>rgb(192, 38, 211)</code>
+                            versus selection/action <code>rgb(79, 70, 229)</code>; partial dot was
+                            amber <code>rgb(217, 119, 6)</code>.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Task 13.1: Phase 2.1 Review Bay Defect Fixes</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Review Bay now scopes its own dark surface and state tokens inside
+                            <code>.movie-review-grid</code> so Inspector, Director proposal cards,
+                            selected cards, and Clip Strip surfaces cannot inherit light app tokens.
+                            The global app header also compresses icon padding and hides breadcrumbs
+                            on small screens because measured overflow came from the top nav, not
+                            only the Review/Focus/Assemble switcher.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Export blocked is no longer a disabled button. It is an enabled red
+                            gate that opens exact preflight blocker details while still withholding
+                            export actions until blockers are resolved. The awaiting-review card
+                            flag moved from an accent hollow circle to an attention-channel
+                            <code>Review</code> badge, and partial Director state now renders as
+                            <code>Partial</code> with <code>Partially applied</code> in the title.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The Review Bay remains dark-first in both app theme modes. This avoids
+                            mixing light panels into a dense video workstation, but it means light
+                            mode changes the shell header more than the actual Review Bay canvas.
+                            Proof used an isolated Playwright browser and fake Vault worker so no
+                            live R2, D1, env, extension storage, processed IDs, or Chrome state were
+                            touched.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>None blocking before Phase 3.</td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            <pre><code>npm --prefix web run lint
+passed
+
+npm --prefix web run test:unit
+Test Files  7 passed (7)
+Tests       42 passed (42)
+
+npm --prefix web run build
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)
+
+npx playwright test -c playwright.web.config.js
+60 passed
+
+npx playwright test -c .artifacts/playwright.phase2.config.js
+1 passed</code></pre>
+                            Phase 2.1 proof artifacts:
+                            <pre><code>.artifacts/vault-review-phase2-1/review-bay-light.png
+.artifacts/vault-review-phase2-1/review-bay-dark.png
+.artifacts/vault-review-phase2-1/review-bay-phone.png
+.artifacts/vault-review-phase2-1/contrast-report.json</code></pre>
+                            Contrast report minimum targeted ratio was <code>10.71:1</code>.
+                            Phone proof measured <code>overflow=false</code>,
+                            Review mode switch box within <code>390px</code>, and export popover
+                            bounds <code>x=12</code>, <code>width=320</code>.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-07-02 Phase 3 Build Movies And List Completion</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            The Build Movies modal now explains scope, recipe, eligible counts,
+                            skipped counts, draft names, and what will happen before any local
+                            movie draft is created. The <code>/movie</code> list now acts as a
+                            working operator surface instead of a sparse list: it shows movie,
+                            clip, Vault asset, and Vault video counts, plus direct Build from
+                            Vault and New Movie actions.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            No cloud or repair behavior was added in Phase 3. Build Movies remains
+                            local-only through IndexedDB and the existing Vault draft builder. The
+                            modal says this explicitly because it is easy to confuse local draft
+                            creation with R2, D1, Worker, or processed-ID writes.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The dark-mode leak found during screenshot review was fixed by adding
+                            Tailwind v4's class-based <code>dark</code> variant to match the
+                            existing theme provider, which already toggles <code>html.dark</code>.
+                            This is a shared styling bridge, not a Movie-only patch, and it makes
+                            existing <code>dark:</code> utilities respond to the app theme. Disabled
+                            buttons now use the muted state channel instead of opacity so disabled
+                            text remains readable.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None blocking. The current recipe system still only offers cut
+                            transitions, matching the existing draft creation model.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            <pre><code>npm --prefix web run lint
+passed
+
+npm --prefix web run test:unit
+Test Files  7 passed (7)
+Tests       42 passed (42)
+
+npm --prefix web run build
+✓ Compiled successfully
+✓ Generating static pages using 11 workers (29/29)
+
+npx playwright test -c playwright.web.config.js
+61 passed
+
+npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-proof.spec.js
+1 passed</code></pre>
+                            Phase 3 proof artifacts:
+                            <pre><code>.artifacts/vault-review-phase3/movie-list-light.png
+.artifacts/vault-review-phase3/movie-list-dark.png
+.artifacts/vault-review-phase3/build-movies-modal-light.png
+.artifacts/vault-review-phase3/build-movies-modal-dark.png
+.artifacts/vault-review-phase3/build-movies-empty-scope-light.png
+.artifacts/vault-review-phase3/build-movies-empty-scope-dark.png
+.artifacts/vault-review-phase3/review-bay-empty-review-light.png
+.artifacts/vault-review-phase3/review-bay-empty-review-dark.png
+.artifacts/vault-review-phase3/review-bay-empty-director-light.png
+.artifacts/vault-review-phase3/review-bay-empty-director-dark.png
+.artifacts/vault-review-phase3/review-bay-empty-focus-light.png
+.artifacts/vault-review-phase3/review-bay-empty-focus-dark.png
+.artifacts/vault-review-phase3/movie-list-phone.png
+.artifacts/vault-review-phase3/build-movies-modal-phone.png
+.artifacts/vault-review-phase3/phase3-proof.json</code></pre>
+                            Phone proof checks assert no horizontal overflow at <code>390px</code>
+                            for the movie list and Build Movies modal. Visual review confirmed the
+                            modal, list, and Review Bay empty states render in both light and dark
+                            modes without the white-panel leak.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </main>
     </body>
 </html>

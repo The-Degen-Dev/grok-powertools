@@ -1,9 +1,15 @@
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const port = Number(process.env.FAKE_VAULT_WORKER_PORT || 43117);
 const apiKey = process.env.FAKE_VAULT_WORKER_API_KEY || "client-sample";
 const headerName = "x-gpt-api-key";
 const requestLog = [];
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const playableVideo = fs.readFileSync(path.join(__dirname, "tiny-video.mp4"));
+const playableVideoWithAudio = fs.readFileSync(path.join(__dirname, "tiny-video-with-audio.mp4"));
 
 const fixtureAssets = [
   {
@@ -26,6 +32,27 @@ const fixtureAssets = [
     gapCodes: [],
     createdAt: "2026-06-18T00:00:00.000Z",
     updatedAt: "2026-06-18T00:00:00.000Z",
+  },
+  {
+    assetId: "asset-video-2",
+    mediaType: "video",
+    canonicalObjectKey: "grok-powertools/v1/users/greymaker/media/by-asset/asset-video-2.mp4",
+    legacyObjectKeys: [],
+    contentType: "video/mp4",
+    sizeBytes: 1024,
+    etag: "etag-video-2",
+    sha256: "sha-video-2",
+    sourceUrl: "https://grok.com/imagine/post/post-video-2",
+    grokPostId: "post-video-2",
+    promptId: "prompt-1",
+    promptText: "A cinematic neon canyon flythrough.",
+    durationSeconds: 5,
+    firstSeenAt: "2026-06-18T00:00:02.000Z",
+    lastSeenAt: "2026-06-18T00:00:02.000Z",
+    verificationStatus: "verified",
+    gapCodes: [],
+    createdAt: "2026-06-18T00:00:02.000Z",
+    updatedAt: "2026-06-18T00:00:02.000Z",
   },
   {
     assetId: "asset-image-1",
@@ -87,8 +114,8 @@ const fixturePrompts = [
     id: "prompt-1",
     text: "A cinematic neon canyon flythrough.",
     tags: ["vault"],
-    sourceAssetIds: ["asset-video-1"],
-    usageCount: 1,
+    sourceAssetIds: ["asset-video-1", "asset-video-2"],
+    usageCount: 2,
     createdAt: "2026-06-18T00:00:00.000Z",
   },
   {
@@ -166,7 +193,7 @@ const server = http.createServer((req, res) => {
       ok: true,
       items: fixtureAssets,
       nextCursor: "page-2",
-      counts: { assets: 3, images: 1, videos: 1, verified: 3, blocked: 0, failed: 0, unproven: 0 },
+      counts: { assets: 4, images: 1, videos: 2, verified: 4, blocked: 0, failed: 0, unproven: 0 },
     });
   }
 
@@ -230,6 +257,15 @@ const server = http.createServer((req, res) => {
   if (url.pathname === "/v1/vault/media") {
     const assetId = url.searchParams.get("assetId");
     const objectKey = url.searchParams.get("objectKey");
+    if (
+      assetId === "asset-video-audio-1" ||
+      assetId === "asset-video-audio-2" ||
+      objectKey?.includes("asset-video-audio-1") ||
+      objectKey?.includes("asset-video-audio-2")
+    ) {
+      res.writeHead(200, { "content-type": "video/mp4", "cache-control": "no-store" });
+      return res.end(playableVideoWithAudio);
+    }
     if (assetId === "asset-image-1" || objectKey?.endsWith("zz-page-2-image.png")) {
       const png = Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lp7dNwAAAABJRU5ErkJggg==",
@@ -239,7 +275,7 @@ const server = http.createServer((req, res) => {
       return res.end(png);
     }
     res.writeHead(200, { "content-type": "video/mp4", "cache-control": "no-store" });
-    return res.end(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 109, 112, 52, 50]));
+    return res.end(playableVideo);
   }
 
   return sendJson(res, 404, { ok: false, error: `Unhandled ${url.pathname}` });

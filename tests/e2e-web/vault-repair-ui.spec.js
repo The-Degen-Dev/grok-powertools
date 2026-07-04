@@ -143,7 +143,7 @@ test("Vault repair stores exist after IndexedDB upgrade", async ({ page }) => {
     });
   });
 
-  expect(database.version).toBe(5);
+  expect(database.version).toBe(6);
   expect(database.stores).toMatchObject({
     vault_repair_scans: ["by-scanned"],
     vault_repair_issues: ["by-tier", "by-write-class"],

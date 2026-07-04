@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 interface ModalProps {
@@ -19,6 +19,7 @@ export default function Modal({
   className = "",
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -34,17 +35,20 @@ export default function Modal({
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === overlayRef.current) onClose();
       }}
     >
       <div
-        className={`w-full max-w-lg rounded-(--radius-overlay) bg-(--color-surface-0) p-6 shadow-(--shadow-overlay) animate-scale-in dark:bg-(--color-surface-900) ${className}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        className={`max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-(--radius-overlay) bg-(--color-surface-0) p-6 shadow-(--shadow-overlay) animate-scale-in dark:bg-(--color-surface-900) ${className}`}
       >
         {title && (
           <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-(--color-surface-900) dark:text-(--color-surface-100)">
+            <h3 id={titleId} className="font-[family-name:var(--font-display)] text-lg font-semibold text-(--color-surface-900) dark:text-(--color-surface-100)">
               {title}
             </h3>
             <button

@@ -67,6 +67,27 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function shouldSyncVideo(video: HTMLVideoElement, targetTime: number, isPlaying: boolean, clipChanged: boolean): boolean {
+  if (!isPlaying) return Math.abs(video.currentTime - targetTime) > 0.05;
+  if (clipChanged) return true;
+  return Math.abs(video.currentTime - targetTime) > 0.75;
+}
+
+function drawLetterboxed(
+  ctx: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  width: number,
+  height: number,
+): void {
+  if (sourceWidth <= 0 || sourceHeight <= 0) return;
+  const scale = Math.min(width / sourceWidth, height / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  ctx.drawImage(source, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+}
+
 export default function CanvasPlayer({
   clips,
   resolution,
@@ -83,13 +104,21 @@ export default function CanvasPlayer({
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const imageRefs = useRef<Map<string, HTMLImageElement>>(new Map());
   const videoDurations = useRef<Map<string, number>>(new Map());
+  const lastDrawnVideoFrames = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  const activeVideoIdRef = useRef<string | null>(null);
+  const lastSeekAtRef = useRef<Map<string, number>>(new Map());
   const rafRef = useRef<number>(0);
   const playStartRef = useRef<number>(0);
   const timeOffsetRef = useRef<number>(0);
+  const currentTimeValueRef = useRef(0);
   const [localTime, setLocalTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
 
   const currentTimeValue = externalTime ?? localTime;
+
+  useEffect(() => {
+    currentTimeValueRef.current = currentTimeValue;
+  }, [currentTimeValue]);
 
   // Notify parent of total duration changes
   useEffect(() => {
@@ -115,8 +144,8 @@ export default function CanvasPlayer({
 
     const w = resolution.w;
     const h = resolution.h;
-    canvas.width = w;
-    canvas.height = h;
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
 
     const timeline = buildTimeline(clips, videoDurations.current);
     const t = currentTimeValue;
@@ -127,6 +156,7 @@ export default function CanvasPlayer({
 
     // Find active entries
     const active = timeline.filter((e) => t >= e.startTime && t < e.endTime);
+    const activeVideoIds = new Set<string>();
 
     for (const entry of active) {
       const clip = clips[entry.clipIndex];
@@ -185,20 +215,35 @@ export default function CanvasPlayer({
 
       if (clip.type === "video") {
         const video = videoRefs.current.get(clip.id);
-        if (video && video.readyState >= 2) {
-          // Seek video to correct position
+        if (video) {
+          activeVideoIds.add(clip.id);
           const clipLocalTime = (t - entry.startTime) + entry.clipStart;
-          if (Math.abs(video.currentTime - clipLocalTime) > 0.1) {
+          const clipChanged = activeVideoIdRef.current !== clip.id;
+          if (clipChanged) {
+            activeVideoIdRef.current = clip.id;
+          }
+
+          const lastSeekAt = lastSeekAtRef.current.get(clip.id) || 0;
+          const canSeekNow = performance.now() - lastSeekAt > 250;
+          if (canSeekNow && shouldSyncVideo(video, clipLocalTime, isPlaying, clipChanged)) {
+            lastSeekAtRef.current.set(clip.id, performance.now());
             video.currentTime = clipLocalTime;
           }
-          // Draw with letterboxing
-          const vw = video.videoWidth;
-          const vh = video.videoHeight;
-          if (vw > 0 && vh > 0) {
-            const scale = Math.min(w / vw, h / vh);
-            const dw = vw * scale;
-            const dh = vh * scale;
-            ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
+
+          if (isPlaying && video.paused && video.readyState >= 2) {
+            video.play().catch(() => {});
+          }
+
+          if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+            drawLetterboxed(ctx, video, video.videoWidth, video.videoHeight, w, h);
+            const cache = lastDrawnVideoFrames.current.get(clip.id) || document.createElement("canvas");
+            cache.width = w;
+            cache.height = h;
+            cache.getContext("2d")?.drawImage(canvas, 0, 0);
+            lastDrawnVideoFrames.current.set(clip.id, cache);
+          } else {
+            const cached = lastDrawnVideoFrames.current.get(clip.id);
+            if (cached) drawLetterboxed(ctx, cached, cached.width, cached.height, w, h);
           }
         }
       } else if (clip.type === "image") {
@@ -233,7 +278,13 @@ export default function CanvasPlayer({
 
       ctx.restore();
     }
-  }, [clips, resolution, currentTimeValue]);
+
+    for (const [id, video] of videoRefs.current) {
+      if (!activeVideoIds.has(id) && !video.paused) {
+        video.pause();
+      }
+    }
+  }, [clips, isPlaying, resolution, currentTimeValue]);
 
   // Create/update media elements when clips change
   useEffect(() => {
@@ -245,6 +296,8 @@ export default function CanvasPlayer({
         el.pause();
         videoRefs.current.delete(id);
         videoDurations.current.delete(id);
+        lastDrawnVideoFrames.current.delete(id);
+        lastSeekAtRef.current.delete(id);
       }
     }
     for (const id of imageRefs.current.keys()) {
@@ -266,6 +319,9 @@ export default function CanvasPlayer({
             setTotalDuration(timeline[timeline.length - 1].endTime);
           }
         });
+        video.addEventListener("loadeddata", render);
+        video.addEventListener("canplay", render);
+        video.addEventListener("seeked", render);
         video.load();
         videoRefs.current.set(clip.id, video);
       } else if (clip.type === "image" && clip.imageUrl && !imageRefs.current.has(clip.id)) {
@@ -290,7 +346,7 @@ export default function CanvasPlayer({
     }
 
     playStartRef.current = performance.now();
-    timeOffsetRef.current = currentTimeValue;
+    timeOffsetRef.current = currentTimeValueRef.current;
 
     const loop = () => {
       const elapsed = (performance.now() - playStartRef.current) / 1000;
@@ -313,7 +369,7 @@ export default function CanvasPlayer({
     rafRef.current = requestAnimationFrame(loop);
 
     return () => cancelAnimationFrame(rafRef.current);
-  }, [isPlaying, totalDuration, onPlayingChange, onTimeUpdate, currentTimeValue]);
+  }, [isPlaying, totalDuration, onPlayingChange, onTimeUpdate]);
 
   // Render on every time/clip change
   useEffect(() => {
@@ -361,6 +417,7 @@ export default function CanvasPlayer({
       <div className="flex items-center justify-center gap-3 border-t border-neutral-800 py-2 px-4">
         <button
           type="button"
+          aria-label={isPlaying ? "Pause" : "Play"}
           onClick={() => onPlayingChange(!isPlaying)}
           className="rounded p-2 text-neutral-300 hover:bg-neutral-800"
         >
@@ -385,6 +442,7 @@ export default function CanvasPlayer({
         {onFullscreenChange && (
           <button
             type="button"
+            aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
             onClick={() => onFullscreenChange(!fullscreen)}
             className="rounded p-2 text-neutral-300 hover:bg-neutral-800"
           >

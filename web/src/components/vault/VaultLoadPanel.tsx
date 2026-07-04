@@ -26,23 +26,23 @@ export default function VaultLoadPanel({ onPreview }: { onPreview: () => void })
   }, []);
 
   return (
-    <section className="rounded-(--radius-card) border border-(--color-surface-200) bg-(--color-surface-0) p-5 shadow-(--shadow-card) dark:border-(--color-surface-800) dark:bg-(--color-surface-900)">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-(--color-surface-900) dark:text-(--color-surface-100)">
+    <section className="rounded-(--radius) border border-(--hairline) bg-(--surface-raised) p-[var(--space-3)] dark:bg-(--surface-panel)">
+      <div className="flex flex-col gap-[var(--space-3)] sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-[family-name:var(--font-display)] text-[length:var(--text-20)] font-semibold leading-[var(--leading-tight-ui)] text-(--color-surface-900) dark:text-(--color-surface-100)">
             Vault
           </h1>
-          <p className="mt-2 max-w-2xl text-sm text-(--color-surface-500)">
+          <p className="mt-1 max-w-2xl truncate text-[length:var(--text-13)] text-(--color-surface-500)">
             Load the backed-up Grok saved gallery from R2 into local owner mode. Preview is read-only.
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-(--color-surface-500)">
-            <Cloud className="h-4 w-4 text-(--color-accent)" />
+          <div className="mt-2 flex flex-wrap items-center gap-[var(--space-2)] text-[length:var(--text-12)] text-(--color-surface-500)">
+            <Cloud className="h-3.5 w-3.5 text-(--color-accent)" />
             <span>{loading ? "Checking Worker..." : identityLabel}</span>
             {keyPrefix && <span>Prefix {keyPrefix}</span>}
           </div>
         </div>
-        <Button variant="primary" onClick={onPreview} disabled={loading || identity?.ok === false}>
-          <RefreshCw className="h-4 w-4" />
+        <Button size="sm" variant="primary" onClick={onPreview} disabled={loading || identity?.ok === false}>
+          <RefreshCw className="h-3.5 w-3.5" />
           Preview Vault
         </Button>
       </div>
