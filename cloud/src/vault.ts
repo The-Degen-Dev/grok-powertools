@@ -252,13 +252,13 @@ export async function readVaultMetadata(env: Env, kind: string) {
     };
 }
 
-export async function findVaultMediaObject(env: Env, assetId: string) {
+export async function findVaultMediaObject(env: Env, assetId: string, options?: R2GetOptions) {
     let cursor: string | null = null;
     for (let page = 0; page < 100; page += 1) {
         const inventory = await listVaultInventory(env, cursor, 1000);
         const match = inventory.items.find((item) => item.assetId === assetId);
         const objectKey = match?.canonicalObjectKey || match?.legacyObjectKeys[0];
-        if (objectKey) return env.R2_BUCKET.get(objectKey);
+        if (objectKey) return env.R2_BUCKET.get(objectKey, options);
         cursor = inventory.nextCursor || null;
         if (!cursor) return null;
     }

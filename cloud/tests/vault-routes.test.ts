@@ -298,6 +298,42 @@ test('Vault media streams exact objectKey without inventory lookup', async () =>
     assert.equal(response.headers.get('content-type'), 'video/mp4');
 });
 
+test('Vault media returns byte ranges for video decoding', async () => {
+    const objectKey = 'grok-powertools/v1/users/greymaker/media/by-asset/asset-video-1.mp4';
+    let receivedRange: string | null = null;
+    const response = await worker.fetch(
+        new Request(`https://worker.example/v1/vault/media?assetId=asset-video-1&objectKey=${encodeURIComponent(objectKey)}`, {
+            headers: { [headerName]: sampleKey, range: 'bytes=1-2' },
+        }),
+        env({
+            R2_BUCKET: {
+                get: async (key: string, options?: { range?: Headers }) => {
+                    assert.equal(key, objectKey);
+                    receivedRange = options?.range?.get('range') || null;
+                    return {
+                        body: new ReadableStream({
+                            start(controller) {
+                                controller.enqueue(new Uint8Array([2, 3]));
+                                controller.close();
+                            },
+                        }),
+                        size: 3,
+                        range: { offset: 1, length: 2 },
+                        httpEtag: '"etag-1"',
+                        httpMetadata: { contentType: 'video/mp4' },
+                    };
+                },
+            },
+        })
+    );
+    assert.equal(response.status, 206);
+    assert.equal(receivedRange, 'bytes=1-2');
+    assert.equal(response.headers.get('content-type'), 'video/mp4');
+    assert.equal(response.headers.get('accept-ranges'), 'bytes');
+    assert.equal(response.headers.get('content-length'), '2');
+    assert.equal(response.headers.get('content-range'), 'bytes 1-2/3');
+});
+
 test('Vault media rejects invalid objectKey', async () => {
     const response = await worker.fetch(
         new Request('https://worker.example/v1/vault/media?assetId=asset-video-1&objectKey=../secret.mp4', {

@@ -53,6 +53,7 @@ function corsHeaders(): HeadersInit {
             'Content-Type',
             API_KEY_HEADER,
             'Authorization',
+            'Range',
             ACCEPTANCE_RUN_ID_HEADER,
             ACCEPTANCE_CORRELATION_ID_HEADER
         ].join(',')
@@ -71,6 +72,49 @@ function jsonResponse(data: unknown, status = 200): Response {
 
 function errorResponse(message: string, status = 400): Response {
     return jsonResponse({ ok: false, error: message }, status);
+}
+
+function r2RangeOptions(rangeHeader: string | null): R2GetOptions | undefined {
+    const normalized = rangeHeader?.trim();
+    if (!normalized) return undefined;
+    return { range: new Headers({ Range: normalized }) };
+}
+
+function normalizedR2Range(object: R2ObjectBody): { offset: number; length: number } | null {
+    const range = object.range;
+    if (!range || !('offset' in range) || !('length' in range)) return null;
+    const offset = Number(range.offset || 0);
+    const length = Number(range.length || 0);
+    if (!Number.isFinite(offset) || !Number.isFinite(length) || length <= 0) return null;
+    return { offset, length };
+}
+
+function buildVaultMediaHeaders(object: R2ObjectBody, rangeRequested: boolean): { headers: Headers; status: number } {
+    const headers = new Headers(corsHeaders());
+    const contentType = object.httpMetadata?.contentType;
+    if (contentType) headers.set('content-type', contentType);
+    headers.set('cache-control', 'private, no-store');
+    headers.set('accept-ranges', 'bytes');
+    if (object.httpEtag) headers.set('etag', object.httpEtag);
+
+    const range = normalizedR2Range(object);
+    const objectSize = Number(object.size);
+    const partial =
+        rangeRequested &&
+        range &&
+        Number.isFinite(objectSize) &&
+        objectSize > 0 &&
+        (range.offset > 0 || range.length < objectSize);
+
+    if (partial) {
+        const end = range.offset + range.length - 1;
+        headers.set('content-range', `bytes ${range.offset}-${end}/${objectSize}`);
+        headers.set('content-length', String(range.length));
+        return { headers, status: 206 };
+    }
+
+    if (Number.isFinite(objectSize) && objectSize > 0) headers.set('content-length', String(objectSize));
+    return { headers, status: 200 };
 }
 
 function acceptanceRunId(request: Request): string | null {
@@ -729,12 +773,12 @@ export default {
                 if (objectKey && !isValidObjectKey(objectKey, keyPrefix)) {
                     return errorResponse('Invalid object key.', 400);
                 }
-                const object = objectKey ? await env.R2_BUCKET.get(objectKey) : await findVaultMediaObject(env, assetId);
+                const rangeHeader = request.headers.get('range');
+                const rangeOptions = r2RangeOptions(rangeHeader);
+                const object = objectKey ? await env.R2_BUCKET.get(objectKey, rangeOptions) : await findVaultMediaObject(env, assetId, rangeOptions);
                 if (!object?.body) return errorResponse('MEDIA_OBJECT_MISSING', 404);
-                const headers = new Headers(corsHeaders());
-                if (object.httpMetadata?.contentType) headers.set('content-type', object.httpMetadata.contentType);
-                headers.set('cache-control', 'private, no-store');
-                return new Response(object.body, { status: 200, headers });
+                const response = buildVaultMediaHeaders(object, Boolean(rangeHeader));
+                return new Response(object.body, response);
             }
         }
 

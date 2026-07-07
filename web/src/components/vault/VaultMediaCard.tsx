@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ElementType, type KeyboardEventHandler } from "react";
+import { useEffect, useRef, useState, type ElementType, type KeyboardEventHandler } from "react";
 import {
   AlertTriangle,
   Ban,
@@ -22,6 +22,27 @@ import { isVaultImageAsset } from "@/lib/vault-media";
 import { vaultMediaUrl } from "@/lib/vault-media-url";
 
 type OverlayPatch = Partial<Pick<VaultOverlay, "favorite" | "hidden" | "notes" | "tags" | "title">>;
+
+const videoVisibilityCallbacks = new WeakMap<Element, () => void>();
+let sharedVideoObserver: IntersectionObserver | null = null;
+
+function getSharedVideoObserver() {
+  if (typeof window === "undefined" || !("IntersectionObserver" in window)) return null;
+  if (!sharedVideoObserver) {
+    sharedVideoObserver = new IntersectionObserver(
+      (entries, observer) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting && entry.intersectionRatio <= 0) continue;
+          videoVisibilityCallbacks.get(entry.target)?.();
+          videoVisibilityCallbacks.delete(entry.target);
+          observer.unobserve(entry.target);
+        }
+      },
+      { rootMargin: "720px 0px" },
+    );
+  }
+  return sharedVideoObserver;
+}
 
 function formatDuration(seconds?: number): string | undefined {
   if (!seconds || !Number.isFinite(seconds)) return undefined;
@@ -95,6 +116,109 @@ function SourceAction({ asset }: { asset: VaultAsset }) {
     >
       <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
     </a>
+  );
+}
+
+function VideoThumbnail({ src }: { src: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pendingSeekRef = useRef(false);
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const [frameState, setFrameState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node || shouldLoad) return undefined;
+
+    const observer = getSharedVideoObserver();
+    if (!observer) {
+      const frame = window.requestAnimationFrame(() => {
+        setShouldLoad(true);
+        setFrameState((current) => (current === "idle" ? "loading" : current));
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    const load = () => {
+      setShouldLoad(true);
+      setFrameState((current) => (current === "idle" ? "loading" : current));
+    };
+    videoVisibilityCallbacks.set(node, load);
+    observer.observe(node);
+
+    return () => {
+      observer.unobserve(node);
+      videoVisibilityCallbacks.delete(node);
+    };
+  }, [shouldLoad]);
+
+  function markReady() {
+    setFrameState((current) => (current === "failed" ? current : "ready"));
+  }
+
+  function handleLoadedFrame() {
+    if (!pendingSeekRef.current) markReady();
+  }
+
+  function handleLoadedMetadata() {
+    const video = videoRef.current;
+    if (!video) return;
+    const targetTime = Number.isFinite(video.duration) && video.duration > 0.5 ? Math.min(0.75, Math.max(0.25, video.duration * 0.1)) : 0;
+    if (targetTime > 0 && Math.abs(video.currentTime - targetTime) > 0.05) {
+      try {
+        pendingSeekRef.current = true;
+        video.currentTime = targetTime;
+      } catch {
+        pendingSeekRef.current = false;
+        markReady();
+      }
+    } else {
+      pendingSeekRef.current = false;
+    }
+  }
+
+  function handleSeeked() {
+    pendingSeekRef.current = false;
+    markReady();
+  }
+
+  const loaded = frameState === "ready";
+  const failed = frameState === "failed";
+
+  return (
+    <div
+      ref={containerRef}
+      data-vault-video-thumbnail={frameState}
+      className="relative h-full w-full overflow-hidden bg-[linear-gradient(135deg,#171717,#2a2a2a_48%,#111)]"
+    >
+      {shouldLoad && !failed && (
+        <video
+          ref={videoRef}
+          src={src}
+          muted
+          playsInline
+          preload="metadata"
+          aria-hidden="true"
+          className={`h-full w-full object-cover transition-opacity duration-(--duration-normal) ${loaded ? "opacity-100" : "opacity-0"}`}
+          onLoadedMetadata={handleLoadedMetadata}
+          onLoadedData={handleLoadedFrame}
+          onCanPlay={handleLoadedFrame}
+          onSeeked={handleSeeked}
+          onError={() => setFrameState("failed")}
+        />
+      )}
+      {!loaded && (
+        <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.18),rgba(255,255,255,0.04)_34%,rgba(0,0,0,0.35)_72%)] text-white/75">
+          <span className="sr-only">{failed ? "Video preview unavailable" : "Loading video preview"}</span>
+        </div>
+      )}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 via-black/0 to-black/10" />
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full border border-white/55 bg-black/20 text-white/85 shadow-(--shadow-overlay)">
+          <Play className="ml-0.5 h-6 w-6" aria-hidden="true" />
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -201,9 +325,7 @@ export default function VaultMediaCard({
     // eslint-disable-next-line @next/next/no-img-element -- R2 media is served through the local API proxy.
     <img src={mediaUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
   ) : (
-    <div className="flex h-full w-full items-center justify-center bg-black text-white/75">
-      <Play className="h-9 w-9" aria-hidden="true" />
-    </div>
+    <VideoThumbnail src={mediaUrl} />
   );
 
   const quickActions = (

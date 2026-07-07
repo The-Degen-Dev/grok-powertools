@@ -142,6 +142,25 @@ test("preview commit stores Vault assets and survives reload", async ({ page }) 
   await expect(assetCard(page, "zz-page-2-image")).toBeVisible();
 });
 
+test("Vault video cards render lazy real video thumbnails", async ({ page }) => {
+  await resetDb(page);
+  await page.goto("/vault");
+  await page.getByRole("button", { name: /Preview Vault/i }).click();
+  await page.getByRole("button", { name: /Commit Vault/i }).click();
+
+  const card = assetCard(page, "asset-video-1");
+  await expect(card).toBeVisible();
+  const thumbnail = card.locator("[data-vault-video-thumbnail]");
+  await expect(thumbnail).toHaveAttribute("data-vault-video-thumbnail", "ready", { timeout: 15000 });
+  await expect(thumbnail.locator("video")).toHaveAttribute("src", /asset-video-1/);
+
+  await page.waitForFunction(() => {
+    const video = document.querySelector('article[data-asset-id="asset-video-1"] video');
+    if (!video || video.readyState < 2 || !video.muted || video.controls) return false;
+    return !Number.isFinite(video.duration) || video.duration <= 0.5 || video.currentTime > 0.05;
+  });
+});
+
 test("Vault viewer opens image and video assets", async ({ page }) => {
   await resetDb(page);
   await page.goto("/vault");
@@ -150,11 +169,15 @@ test("Vault viewer opens image and video assets", async ({ page }) => {
   await openAsset(page, "asset-image-1");
   const imageDialog = page.getByRole("dialog", { name: /Vault media viewer/i });
   await expect(imageDialog).toBeVisible();
+  await expect(imageDialog).toHaveAttribute("data-vault-media-viewer", "lightbox");
+  await expect(page).toHaveURL(/\/vault$/);
+  await expect(assetCard(page, "asset-video-1")).toBeAttached();
   await expect(imageDialog.locator("img[alt*='glass library']")).toBeVisible();
   await page.getByRole("button", { name: /Close/i }).click();
   await openAsset(page, "asset-video-1");
   const videoDialog = page.getByRole("dialog", { name: /Vault media viewer/i });
   await expect(videoDialog).toBeVisible();
+  await expect(videoDialog).toHaveAttribute("data-vault-media-viewer", "lightbox");
   await expect(videoDialog.getByText(/video \/ verified/i)).toBeVisible();
   await expect(videoDialog.locator("video")).toHaveAttribute("src", /asset-video-1/);
 });
