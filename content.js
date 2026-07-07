@@ -1,4 +1,5 @@
 // Grok Power Tools - Content Script
+(function () {
 
 const ProviderRegistry = (typeof globalThis !== 'undefined' && globalThis.GrokPowerToolsProviderRegistry)
     ? globalThis.GrokPowerToolsProviderRegistry
@@ -40,6 +41,136 @@ function isChatGptImagesProvider(provider) {
     return provider && provider.id === 'chatgpt-images';
 }
 
+const EXTENSION_CONTEXT_REFRESHED_MESSAGE = 'Grok Power Tools reloaded. Refresh this Grok tab before continuing.';
+
+function isExtensionContextInvalidatedError(error) {
+    const message = String(error && (error.message || error) || '');
+    return message.includes('Extension context invalidated') || message.includes('Extension context was invalidated');
+}
+
+function getChromeRuntime() {
+    try {
+        if (typeof chrome === 'undefined' || !chrome.runtime) return null;
+        if (Object.prototype.hasOwnProperty.call(chrome.runtime, 'id') && !chrome.runtime.id) return null;
+        return chrome.runtime;
+    } catch {
+        return null;
+    }
+}
+
+function getChromeStorageArea(areaName, methodName) {
+    try {
+        if (!getChromeRuntime()) return null;
+        const area = chrome.storage && chrome.storage[areaName];
+        if (!area || typeof area[methodName] !== 'function') return null;
+        return area;
+    } catch {
+        return null;
+    }
+}
+
+function contextInvalidatedResult(operation, value) {
+    return { ok: false, invalidated: true, operation, value };
+}
+
+async function safeChromeStorageGet(areaName, keys, fallback = {}, operation = 'load storage') {
+    const area = getChromeStorageArea(areaName, 'get');
+    if (!area) return contextInvalidatedResult(operation, fallback);
+    try {
+        return { ok: true, invalidated: false, operation, value: await area.get(keys) };
+    } catch (error) {
+        if (isExtensionContextInvalidatedError(error)) return contextInvalidatedResult(operation, fallback);
+        throw error;
+    }
+}
+
+async function safeChromeStorageSet(areaName, values, operation = 'save storage') {
+    const area = getChromeStorageArea(areaName, 'set');
+    if (!area) return contextInvalidatedResult(operation, undefined);
+    try {
+        await area.set(values);
+        return { ok: true, invalidated: false, operation };
+    } catch (error) {
+        if (isExtensionContextInvalidatedError(error)) return contextInvalidatedResult(operation, undefined);
+        throw error;
+    }
+}
+
+async function safeChromeRuntimeSendMessage(message, operation = 'send message', fallback = undefined) {
+    const runtime = getChromeRuntime();
+    if (!runtime || typeof runtime.sendMessage !== 'function') return contextInvalidatedResult(operation, fallback);
+    try {
+        const mockImplementation = typeof runtime.sendMessage.getMockImplementation === 'function'
+            ? runtime.sendMessage.getMockImplementation()
+            : null;
+        const expectsCallback = runtime.sendMessage.length >= 2 || (mockImplementation && mockImplementation.length >= 2);
+
+        if (expectsCallback) {
+            const value = await new Promise((resolve, reject) => {
+                let settled = false;
+                let fallbackTimer = null;
+                const settle = (nextValue) => {
+                    if (settled) return;
+                    settled = true;
+                    if (fallbackTimer) clearTimeout(fallbackTimer);
+                    resolve(nextValue);
+                };
+                try {
+                    const maybePromise = runtime.sendMessage(message, settle);
+                    if (maybePromise && typeof maybePromise.then === 'function') {
+                        maybePromise.then((nextValue) => {
+                            if (typeof nextValue !== 'undefined') settle(nextValue);
+                        }, reject);
+                    }
+                    fallbackTimer = setTimeout(() => settle(undefined), 1000);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+            return { ok: true, invalidated: false, operation, value };
+        }
+
+        return { ok: true, invalidated: false, operation, value: await runtime.sendMessage(message) };
+    } catch (error) {
+        if (isExtensionContextInvalidatedError(error)) return contextInvalidatedResult(operation, fallback);
+        throw error;
+    }
+}
+
+function safeChromeRuntimeSendMessageSoon(message, operation = 'send message') {
+    safeChromeRuntimeSendMessage(message, operation).catch(() => {});
+}
+
+function safeChromeAddListener(getTarget, listener, operation = 'add listener') {
+    if (!getChromeRuntime()) return contextInvalidatedResult(operation, false);
+    try {
+        const target = getTarget();
+        if (!target || typeof target.addListener !== 'function') return contextInvalidatedResult(operation, false);
+        target.addListener(listener);
+        return { ok: true, invalidated: false, operation, value: true };
+    } catch (error) {
+        if (isExtensionContextInvalidatedError(error)) return contextInvalidatedResult(operation, false);
+        throw error;
+    }
+}
+
+function safeChromeRuntimeGetURL(path) {
+    const runtime = getChromeRuntime();
+    if (!runtime || typeof runtime.getURL !== 'function') return null;
+    try {
+        return runtime.getURL(path);
+    } catch (error) {
+        if (isExtensionContextInvalidatedError(error)) return null;
+        throw error;
+    }
+}
+
+function showExtensionContextRefreshed(target) {
+    if (target && typeof target.setStatus === 'function') {
+        target.setStatus(EXTENSION_CONTEXT_REFRESHED_MESSAGE, 'error');
+    }
+}
+
 // --- PAGE-WORLD BRIDGE ---
 // Loads bridge.js in the page's MAIN world (bypasses CSP since it's a file, not inline).
 // bridge.js provides access to TipTap editor and Grok's fetch via custom DOM events.
@@ -48,7 +179,9 @@ function isChatGptImagesProvider(provider) {
     if (!isGrokProvider(detectCurrentProvider())) return;
 
     const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('bridge.js');
+    const bridgeUrl = safeChromeRuntimeGetURL('bridge.js');
+    if (!bridgeUrl) return;
+    script.src = bridgeUrl;
     (document.head || document.documentElement).appendChild(script);
 
     // Listen for upload completion events from the page world
@@ -453,22 +586,24 @@ class SettingsManager {
         this.init();
     }
     async init() {
-        const stored = await chrome.storage.sync.get(['gptGlobalSettings']);
+        const storedResult = await safeChromeStorageGet('sync', ['gptGlobalSettings'], {}, 'load settings');
+        if (storedResult.invalidated) return;
+        const stored = storedResult.value;
         if (stored.gptGlobalSettings) {
             this.settings = { ...this.settings, ...stored.gptGlobalSettings };
         }
         this.notify();
-        chrome.storage.onChanged.addListener((changes, area) => {
+        safeChromeAddListener(() => chrome.storage.onChanged, (changes, area) => {
             if (area === 'sync' && changes.gptGlobalSettings) {
                 this.settings = { ...this.settings, ...changes.gptGlobalSettings.newValue };
                 this.notify();
             }
-        });
+        }, 'listen for settings changes');
     }
     get(key) { return this.settings[key]; }
     set(key, value) { this.settings[key] = value; this.save(); this.notify(); }
     setAll(updates) { this.settings = { ...this.settings, ...updates }; this.save(); this.notify(); }
-    save() { chrome.storage.sync.set({ gptGlobalSettings: this.settings }); }
+    save() { safeChromeStorageSet('sync', { gptGlobalSettings: this.settings }, 'save settings').catch(() => {}); }
     subscribe(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
     notify() { this.listeners.forEach(cb => cb(this.settings)); }
     export() { return JSON.stringify(this.settings, null, 2); }
@@ -489,12 +624,13 @@ class SettingsManager {
 
             // 2. Processed IDs (History)
             if (parsed.processedIds && Array.isArray(parsed.processedIds)) {
-                chrome.storage.local.get(['processedIds'], (res) => {
-                    const existing = new Set(res.processedIds || []);
+                safeChromeStorageGet('local', ['processedIds'], {}, 'load imported processed IDs').then((result) => {
+                    if (result.invalidated) return;
+                    const existing = new Set(result.value.processedIds || []);
                     parsed.processedIds.forEach(id => existing.add(id));
-                    chrome.storage.local.set({ processedIds: Array.from(existing) });
+                    safeChromeStorageSet('local', { processedIds: Array.from(existing) }, 'save imported processed IDs').catch(() => {});
                     console.log(`Imported ${parsed.processedIds.length} IDs. Total: ${existing.size}`);
-                });
+                }).catch(console.error);
             }
             return true;
         }
@@ -508,17 +644,13 @@ class PromptHistoryManager {
         this.settingsManager = settingsManager;
         this.history = [];
         this.listeners = new Set();
-        this.lastContextWarningAt = 0;
         this.init();
         this.setupCapture();
     }
     async init() {
-        try {
-            const stored = await chrome.storage.local.get(['promptHistory']);
-            if (stored.promptHistory) { this.history = stored.promptHistory; this.notify(); }
-        } catch {
-            this.warnContextInvalid('load history');
-        }
+        const storedResult = await safeChromeStorageGet('local', ['promptHistory'], {}, 'load history');
+        if (storedResult.invalidated) return;
+        if (storedResult.value.promptHistory) { this.history = storedResult.value.promptHistory; this.notify(); }
     }
     setupCapture() {
         // Use Capture Phase ({capture: true}) to intercept events BEFORE the app handles/clears them.
@@ -618,18 +750,8 @@ class PromptHistoryManager {
         this.save();
     }
     save() {
-        try {
-            chrome.storage.local.set({ promptHistory: this.history });
-        } catch {
-            this.warnContextInvalid('save history');
-        }
+        safeChromeStorageSet('local', { promptHistory: this.history }, 'save history').catch(() => {});
         this.notify();
-    }
-    warnContextInvalid(operation) {
-        const now = Date.now();
-        if (now - this.lastContextWarningAt < 30000) return;
-        this.lastContextWarningAt = now;
-        console.warn(`GPT: Extension context refreshed; skipped ${operation}. This is expected right after extension reloads.`);
     }
     clear() { this.history = []; this.save(); }
     subscribe(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
@@ -670,7 +792,12 @@ class GrokOverlay {
     }
 
     async restoreState() {
-        const stored = await chrome.storage.local.get(['overlayState']);
+        const storedResult = await safeChromeStorageGet('local', ['overlayState'], {}, 'load overlay state');
+        if (storedResult.invalidated) {
+            showExtensionContextRefreshed(this);
+            return;
+        }
+        const stored = storedResult.value;
         if (stored.overlayState) {
             this.state = { ...this.state, ...stored.overlayState };
             if (this.state.minimized) this.minimize(true);
@@ -698,7 +825,9 @@ class GrokOverlay {
     }
 
     saveState() {
-        chrome.storage.local.set({ overlayState: this.state });
+        safeChromeStorageSet('local', { overlayState: this.state }, 'save overlay state').then((result) => {
+            if (result.invalidated) showExtensionContextRefreshed(this);
+        }).catch(() => {});
     }
 
     render() {
@@ -1147,7 +1276,7 @@ class GrokOverlay {
         });
         this.el.querySelector('#gptRecreateStopBtn').addEventListener('click', async () => {
             if (!this.recreateRunning) return;
-            const chromeRuntime = typeof chrome !== 'undefined' ? chrome.runtime : null;
+            const chromeRuntime = getChromeRuntime();
             if (!chromeRuntime || typeof chromeRuntime.sendMessage !== 'function') {
                 this.setRecreateStatus('workflow_unavailable', 'error');
                 return;
@@ -1156,7 +1285,12 @@ class GrokOverlay {
             this.setRecreateStopping(true);
             this.setRecreateStatus('Stopping...', 'info');
             try {
-                await chromeRuntime.sendMessage({ action: 'ABORT_GPT_RECREATE' });
+                const result = await safeChromeRuntimeSendMessage({ action: 'ABORT_GPT_RECREATE' }, 'abort recreate workflow');
+                if (result.invalidated) {
+                    this.recreateAbortRequested = false;
+                    this.setRecreateStopping(false);
+                    this.setRecreateStatus(EXTENSION_CONTEXT_REFRESHED_MESSAGE, 'error');
+                }
             } catch (error) {
                 this.recreateAbortRequested = false;
                 this.setRecreateStopping(false);
@@ -1354,7 +1488,15 @@ class GrokOverlay {
         if (!this.providerRunLedger || typeof this.providerRunLedger.appendProviderRunLedgerEntry !== 'function') {
             return null;
         }
-        return this.providerRunLedger.appendProviderRunLedgerEntry(entry);
+        try {
+            return await this.providerRunLedger.appendProviderRunLedgerEntry(entry);
+        } catch (error) {
+            if (isExtensionContextInvalidatedError(error)) {
+                showExtensionContextRefreshed(this);
+                return null;
+            }
+            throw error;
+        }
     }
 
     setupChatGptNativeSubmitTracking() {
@@ -1452,14 +1594,23 @@ class GrokOverlay {
     }
 
     async loadSavedPrompts() {
-        const stored = await chrome.storage.local.get(['savedPrompts']);
+        const storedResult = await safeChromeStorageGet('local', ['savedPrompts'], {}, 'load saved prompts');
+        if (storedResult.invalidated) {
+            showExtensionContextRefreshed(this);
+            return;
+        }
+        const stored = storedResult.value;
         const original = Array.isArray(stored.savedPrompts) ? stored.savedPrompts : [];
         const normalized = normalizeSavedPrompts(original);
         const migrated = JSON.stringify(original) !== JSON.stringify(normalized);
 
         this.savedPrompts = normalized;
         if (migrated) {
-            await chrome.storage.local.set({ savedPrompts: normalized });
+            const result = await safeChromeStorageSet('local', { savedPrompts: normalized }, 'migrate saved prompts');
+            if (result.invalidated) {
+                showExtensionContextRefreshed(this);
+                return;
+            }
         }
         this.renderSavedList();
     }
@@ -1582,8 +1733,13 @@ class GrokOverlay {
     async persistSavedPrompts(nextPrompts) {
         const normalized = normalizeSavedPrompts(nextPrompts);
         this.savedPrompts = normalized;
-        await chrome.storage.local.set({ savedPrompts: normalized });
+        const result = await safeChromeStorageSet('local', { savedPrompts: normalized }, 'save prompts');
+        if (result.invalidated) {
+            showExtensionContextRefreshed(this);
+            return false;
+        }
         this.renderSavedList();
+        return true;
     }
 
     async saveCurrentPrompt(type = SAVED_PROMPT_TYPES.partial) {
@@ -1851,7 +2007,7 @@ class GrokOverlay {
             return;
         }
 
-        const chromeRuntime = typeof chrome !== 'undefined' ? chrome.runtime : null;
+        const chromeRuntime = getChromeRuntime();
         if (!chromeRuntime || typeof chromeRuntime.sendMessage !== 'function') {
             this.setRecreateStatus('workflow_unavailable', 'error');
             return;
@@ -1863,11 +2019,16 @@ class GrokOverlay {
 
         try {
             const bestPracticesEnabled = !!this.el.querySelector('#gptRecreateBestPractices')?.checked;
-            const response = await chromeRuntime.sendMessage({
+            const responseResult = await safeChromeRuntimeSendMessage({
                 action: 'START_GPT_RECREATE',
                 reference: this.recreateReference,
                 bestPracticesEnabled
-            });
+            }, 'start recreate workflow');
+            if (responseResult.invalidated) {
+                this.setRecreateStatus(EXTENSION_CONTEXT_REFRESHED_MESSAGE, 'error');
+                return;
+            }
+            const response = responseResult.value;
 
             if (this.recreateAbortRequested) {
                 return;
@@ -3160,7 +3321,7 @@ class RecreateWorkflowContentBridge {
         this.overlay = overlay;
         this.historyManager = historyManager;
         this.actions = options.actions || (typeof window !== 'undefined' ? window.GrokRecreateContentActions : null);
-        this.chromeRuntime = options.chromeRuntime || (typeof chrome !== 'undefined' ? chrome.runtime : null);
+        this.chromeRuntime = options.chromeRuntime || getChromeRuntime();
         this.documentRef = options.documentRef || (typeof document !== 'undefined' ? document : null);
         this.locationRef = options.locationRef || (typeof window !== 'undefined' ? window.location : null);
     }
@@ -3168,7 +3329,7 @@ class RecreateWorkflowContentBridge {
     setupListeners() {
         if (!this.chromeRuntime || !this.chromeRuntime.onMessage) return;
 
-        this.chromeRuntime.onMessage.addListener((request, _sender, sendResponse) => {
+        const listener = (request, _sender, sendResponse) => {
             if (request.action === 'GPT_RECREATE_STATUS') {
                 this.handleStatus(request);
                 sendResponse({ ok: true, runId: request.runId });
@@ -3201,7 +3362,14 @@ class RecreateWorkflowContentBridge {
             }
 
             return false;
-        });
+        };
+
+        if (this.chromeRuntime === getChromeRuntime()) {
+            safeChromeAddListener(() => chrome.runtime.onMessage, listener, 'listen for recreate workflow messages');
+            return;
+        }
+
+        this.chromeRuntime.onMessage.addListener(listener);
     }
 
     handleStatus(request) {
@@ -3268,8 +3436,21 @@ class GrokScraper {
     }
     setOverlay(overlay) { this.overlay = overlay; }
 
+    handleExtensionContextInvalidated() {
+        this._backupStartPending = false;
+        this.backupMode = false;
+        this.state.isRunning = false;
+        showExtensionContextRefreshed(this.overlay);
+        return true;
+    }
+
     async init() {
-        const stored = await chrome.storage.local.get(['scraperState', 'currentIndex', 'processedIds']);
+        const storedResult = await safeChromeStorageGet('local', ['scraperState', 'currentIndex', 'processedIds'], {}, 'load scraper state');
+        if (storedResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return;
+        }
+        const stored = storedResult.value;
         if (stored.processedIds) {
             this.processedIds = new Set(stored.processedIds);
             console.log(`Loaded ${this.processedIds.size} processed items.`);
@@ -3285,12 +3466,15 @@ class GrokScraper {
                 if (parts.length > 1) {
                     const userId = parts[1].split('/')[0];
                     if (userId && userId.length > 5) {
-                        chrome.storage.local.get(['activeGrokUserId'], (res) => {
-                            if (res.activeGrokUserId !== userId) {
+                        safeChromeStorageGet('local', ['activeGrokUserId'], {}, 'load active Grok user').then((res) => {
+                            if (res.invalidated) return this.handleExtensionContextInvalidated();
+                            if (res.value.activeGrokUserId !== userId) {
                                 console.log('Switching Account Context to:', userId);
-                                chrome.storage.local.set({ activeGrokUserId: userId });
+                                safeChromeStorageSet('local', { activeGrokUserId: userId }, 'save active Grok user').then((result) => {
+                                    if (result.invalidated) this.handleExtensionContextInvalidated();
+                                }).catch(() => {});
                             }
-                        });
+                        }).catch(() => {});
                     }
                 }
             }
@@ -3305,7 +3489,7 @@ class GrokScraper {
     }
 
     setupListeners() {
-        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        safeChromeAddListener(() => chrome.runtime.onMessage, (request, sender, sendResponse) => {
             if (request.action === 'INIT_SCRAPE') {
                 this.start();
                 sendResponse({ status: 'started' });
@@ -3323,13 +3507,13 @@ class GrokScraper {
                 console.log('Processed IDs cleared in-memory.');
                 sendResponse({ status: 'cleared', size: 0 });
             }
-        });
+        }, 'listen for scraper messages');
 
         // Fallback stop signal via storage.onChanged. chrome.tabs.sendMessage can be
         // dropped silently (stale currentTabId, invalidated context, etc.), leaving the
         // scraper running after a Stop click. Storage-change events always reach every
         // context, so this catches stops the direct-message path misses.
-        chrome.storage.onChanged.addListener((changes, area) => {
+        safeChromeAddListener(() => chrome.storage.onChanged, (changes, area) => {
             if (area !== 'local') return;
             const stopSignal =
                 changes.isR2Backup?.newValue === false ||
@@ -3341,7 +3525,7 @@ class GrokScraper {
                 if (this.backupMode) this.stopBackupMode();
                 else this.stop();
             }
-        });
+        }, 'listen for scraper stop signals');
 
         // Page-world bridge: allows triggering actions via DOM CustomEvents
         // (useful for browser automation tools that run in the page context)
@@ -3367,7 +3551,9 @@ class GrokScraper {
             this.stop();
         } else if (action === 'RESET_PROCESSED_IDS') {
             this.processedIds = new Set();
-            chrome.storage.local.set({ processedIds: [] });
+            safeChromeStorageSet('local', { processedIds: [] }, 'reset processed IDs').then((result) => {
+                if (result.invalidated) this.handleExtensionContextInvalidated();
+            }).catch(() => {});
             console.log('[GrokScraper] processedIds cleared via custom event');
         }
     }
@@ -3403,7 +3589,11 @@ class GrokScraper {
 
     async start() {
         this.log('Scraping initialized.', 'success');
-        await chrome.storage.local.set({ scraperState: 'running', currentIndex: 0 });
+        const result = await safeChromeStorageSet('local', { scraperState: 'running', currentIndex: 0 }, 'start scrape');
+        if (result.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return;
+        }
         this.state.isRunning = true;
         this.state.currentIndex = 0;
         this.determineModeAndExecute();
@@ -3411,7 +3601,11 @@ class GrokScraper {
 
     async stop() {
         console.log('Stopping scrape run.');
-        await chrome.storage.local.set({ scraperState: 'idle' });
+        const result = await safeChromeStorageSet('local', { scraperState: 'idle' }, 'stop scrape');
+        if (result.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return;
+        }
         this.log('Scraping stopped.', 'neutral');
         this.state.isRunning = false;
     }
@@ -3425,9 +3619,12 @@ class GrokScraper {
         this._backupStartPending = true;
         // Validate cloud config before starting R2 backup
         try {
-            const validation = await new Promise((resolve) => {
-                chrome.runtime.sendMessage({ action: 'VALIDATE_CLOUD_CONFIG' }, resolve);
-            });
+            const validationResult = await safeChromeRuntimeSendMessage({ action: 'VALIDATE_CLOUD_CONFIG' }, 'validate cloud config');
+            if (validationResult.invalidated) {
+                this.handleExtensionContextInvalidated();
+                return;
+            }
+            const validation = validationResult.value;
             if (!validation?.valid) {
                 this.log(`R2 Backup aborted: ${validation?.error || 'Cloud config invalid.'}`, 'error');
                 console.error('R2 Backup config validation failed:', validation?.error);
@@ -3451,11 +3648,15 @@ class GrokScraper {
         this._backupVisited = new Set();
         this.state.isRunning = true;
         this.state.currentIndex = 0;
-        await chrome.storage.local.set({
+        const startResult = await safeChromeStorageSet('local', {
             scraperState: 'running',
             currentIndex: 0,
             r2BackupState: { isRunning: true, ...this.backupStats }
-        });
+        }, 'start R2 backup');
+        if (startResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return;
+        }
         this.log(this.backupOptions.mode === 'canary' ? 'R2 Canary Backup started.' : 'R2 Full Media Backup started.', 'success');
         this.determineModeAndExecute();
     }
@@ -3464,12 +3665,16 @@ class GrokScraper {
         this.backupMode = false;
         this.state.isRunning = false;
         const finalStats = { ...this.backupStats, stopReason };
-        await chrome.storage.local.set({
+        const stopResult = await safeChromeStorageSet('local', {
             scraperState: 'idle',
             r2BackupState: { isRunning: false, ...finalStats }
-        });
+        }, 'stop R2 backup');
+        if (stopResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return;
+        }
         this.log(`R2 Backup stopped. Uploaded: ${this.backupStats.uploaded}, Already present: ${this.backupStats.alreadyPresent || 0}, Queued: ${this.backupStats.queued || 0}, Errors: ${this.backupStats.errors}`, 'neutral');
-        chrome.runtime.sendMessage({ action: 'R2_BACKUP_COMPLETE', stats: finalStats }).catch(() => {});
+        safeChromeRuntimeSendMessageSoon({ action: 'R2_BACKUP_COMPLETE', stats: finalStats }, 'complete R2 backup');
     }
 
     async determineModeAndExecute() {
@@ -3634,7 +3839,13 @@ class GrokScraper {
         if (!this.state.isRunning) return;
         targetItem.style.outline = "2px solid rgba(29,155,240,0.5)";
         this.log(`Opening item...`);
-        if (cleanId) await chrome.storage.local.set({ currentItemId: cleanId });
+        if (cleanId) {
+            const result = await safeChromeStorageSet('local', { currentItemId: cleanId }, 'save current item ID');
+            if (result.invalidated) {
+                this.handleExtensionContextInvalidated();
+                return;
+            }
+        }
         targetItem.click();
         await this.sleep(this.Config.navWait);
         if (!this.state.isRunning) return;
@@ -3645,7 +3856,12 @@ class GrokScraper {
         if (!this.state.isRunning) return;
 
         // Deduplication
-        const storedState = await chrome.storage.local.get(['currentItemId']);
+        const storedStateResult = await safeChromeStorageGet('local', ['currentItemId'], {}, 'load current item ID');
+        if (storedStateResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return;
+        }
+        const storedState = storedStateResult.value;
         let currentId = storedState.currentItemId;
         if (!currentId) {
             const mediaEl = selectBackupMediaElement(document);
@@ -3659,16 +3875,20 @@ class GrokScraper {
             if (!this.backupMode) {
                 // Normal scrape: mark processed immediately (download via native button always works)
                 this.processedIds.add(currentId);
-                await chrome.storage.local.set({ processedIds: Array.from(this.processedIds) });
+                const result = await safeChromeStorageSet('local', { processedIds: Array.from(this.processedIds) }, 'save scrape processed IDs');
+                if (result.invalidated) {
+                    this.handleExtensionContextInvalidated();
+                    return;
+                }
             } else {
                 // Backup mode: only track visit, NOT processedIds
                 // processedIds is updated inside performBackupUpload after successful upload
                 this._backupVisited.add(currentId);
                 this.backupStats.totalSeen++;
-                chrome.runtime.sendMessage({
+                safeChromeRuntimeSendMessageSoon({
                     action: 'R2_BACKUP_PROGRESS',
                     stats: this.backupStats
-                }).catch(() => {});
+                }, 'send R2 backup progress');
             }
         }
 
@@ -3806,17 +4026,20 @@ class GrokScraper {
                 console.warn('[BackupUpload] Bridge fetch failed, background will retry:', fetchErr.message);
             }
 
-            const response = await new Promise((resolve) => {
-                chrome.runtime.sendMessage({
-                    action: 'R2_BACKUP_UPLOAD',
-                    url: src,
-                    isVideo,
-                    promptText,
-                    blobDataUrl: blobData,
-                    skipLocalDownload: alreadyLocal,
-                    acceptance: this.backupOptions && this.backupOptions.acceptance
-                }, resolve);
-            });
+            const responseResult = await safeChromeRuntimeSendMessage({
+                action: 'R2_BACKUP_UPLOAD',
+                url: src,
+                isVideo,
+                promptText,
+                blobDataUrl: blobData,
+                skipLocalDownload: alreadyLocal,
+                acceptance: this.backupOptions && this.backupOptions.acceptance
+            }, 'upload R2 backup');
+            if (responseResult.invalidated) {
+                this.handleExtensionContextInvalidated();
+                return;
+            }
+            const response = responseResult.value;
             if (recordBackupUploadStatus(this.backupStats, response?.status)) {
                 const actionLabel = response.status === 'queued'
                     ? 'Queued for R2'
@@ -3825,15 +4048,23 @@ class GrokScraper {
                 // Mark as processed only after R2 says the asset is present.
                 const cleanId = this.getCleanId(src);
                 if (cleanId && shouldPersistBackupProcessedId(response.status)) {
-                    const latest = await chrome.storage.local.get(['processedIds']);
+                    const latestResult = await safeChromeStorageGet('local', ['processedIds'], {}, 'load backup processed IDs');
+                    if (latestResult.invalidated) {
+                        this.handleExtensionContextInvalidated();
+                        return;
+                    }
                     const processedIds = mergeBackupProcessedIdsForStorage(
-                        latest.processedIds,
+                        latestResult.value.processedIds,
                         this.processedIds,
                         cleanId,
                         response.backupProcessedId
                     );
                     this.processedIds = new Set(processedIds);
-                    await chrome.storage.local.set({ processedIds });
+                    const saveResult = await safeChromeStorageSet('local', { processedIds }, 'save backup processed IDs');
+                    if (saveResult.invalidated) {
+                        this.handleExtensionContextInvalidated();
+                        return;
+                    }
                 }
             } else {
                 this.backupStats.errors++;
@@ -3893,7 +4124,7 @@ class GrokScraper {
     log(msg, type = 'neutral') {
         if (this.overlay) this.overlay.setStatus(msg, type);
         // Also log to background for legacy compatibility/debugging
-        chrome.runtime.sendMessage({ action: 'ADD_LOG', text: msg, type: type }).catch(() => { });
+        safeChromeRuntimeSendMessageSoon({ action: 'ADD_LOG', text: msg, type: type }, 'add log');
     }
 }
 
@@ -3953,6 +4184,12 @@ if (typeof module === 'undefined') {
         mergeBackupProcessedIdsForStorage,
         getR2BackupCanaryStopReason,
         getR2BackupPageCommandOptions,
-        shouldPersistBackupProcessedId
+        shouldPersistBackupProcessedId,
+        EXTENSION_CONTEXT_REFRESHED_MESSAGE,
+        isExtensionContextInvalidatedError,
+        safeChromeStorageGet,
+        safeChromeStorageSet,
+        safeChromeRuntimeSendMessage
     };
 }
+})();
