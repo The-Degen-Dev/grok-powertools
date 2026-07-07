@@ -141,6 +141,33 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function sendMedia(req, res, body, contentType) {
+  const rangeHeader = req.headers.range;
+  const headers = {
+    "content-type": contentType,
+    "cache-control": "no-store",
+    "accept-ranges": "bytes",
+  };
+  const match = typeof rangeHeader === "string" ? rangeHeader.match(/^bytes=(\d+)-(\d*)$/) : null;
+  if (match) {
+    const start = Number(match[1]);
+    const requestedEnd = match[2] ? Number(match[2]) : body.byteLength - 1;
+    const end = Math.min(requestedEnd, body.byteLength - 1);
+    if (Number.isFinite(start) && Number.isFinite(end) && start <= end && start < body.byteLength) {
+      const chunk = body.subarray(start, end + 1);
+      res.writeHead(206, {
+        ...headers,
+        "content-length": String(chunk.byteLength),
+        "content-range": `bytes ${start}-${end}/${body.byteLength}`,
+      });
+      return res.end(chunk);
+    }
+  }
+
+  res.writeHead(200, { ...headers, "content-length": String(body.byteLength) });
+  return res.end(body);
+}
+
 function authorized(req) {
   return req.headers[headerName] === apiKey;
 }
@@ -263,19 +290,16 @@ const server = http.createServer((req, res) => {
       objectKey?.includes("asset-video-audio-1") ||
       objectKey?.includes("asset-video-audio-2")
     ) {
-      res.writeHead(200, { "content-type": "video/mp4", "cache-control": "no-store" });
-      return res.end(playableVideoWithAudio);
+      return sendMedia(req, res, playableVideoWithAudio, "video/mp4");
     }
     if (assetId === "asset-image-1" || objectKey?.endsWith("zz-page-2-image.png")) {
       const png = Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lp7dNwAAAABJRU5ErkJggg==",
         "base64",
       );
-      res.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" });
-      return res.end(png);
+      return sendMedia(req, res, png, "image/png");
     }
-    res.writeHead(200, { "content-type": "video/mp4", "cache-control": "no-store" });
-    return res.end(playableVideo);
+    return sendMedia(req, res, playableVideo, "video/mp4");
   }
 
   return sendJson(res, 404, { ok: false, error: `Unhandled ${url.pathname}` });
