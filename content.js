@@ -335,6 +335,115 @@ function getBackupMediaElementSrc(el) {
     return el.currentSrc || el.src || '';
 }
 
+const SCRAPE_SURFACES = Object.freeze({
+    savedGallery: 'saved_gallery',
+    agentMedia: 'agent_media',
+    legacyDetail: 'legacy_detail',
+    unsupported: 'unsupported'
+});
+
+function getScrapePathname(locationValue) {
+    const href = typeof locationValue === 'string'
+        ? locationValue
+        : (locationValue && locationValue.href) || '';
+    try {
+        return new URL(href, 'https://grok.com').pathname;
+    } catch {
+        return '';
+    }
+}
+
+function detectGrokScrapeSurface(root = document, locationValue = window.location) {
+    const pathname = getScrapePathname(locationValue);
+    if (/^\/imagine\/agent(?:\/|$)/.test(pathname)) return SCRAPE_SURFACES.agentMedia;
+    if (/^\/imagine\/post(?:\/|$)/.test(pathname)) return SCRAPE_SURFACES.legacyDetail;
+    if (/^\/imagine\/saved(?:\/|$)/.test(pathname)) return SCRAPE_SURFACES.savedGallery;
+    if (root?.querySelector?.('[aria-label="Download"], .lucide-download')) return SCRAPE_SURFACES.legacyDetail;
+    return SCRAPE_SURFACES.unsupported;
+}
+
+function getGrokMediaIdentity(value) {
+    const text = String(value || '');
+    const uuid = text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+    if (uuid) return uuid[0].toLowerCase();
+    try {
+        const url = new URL(text, 'https://grok.com');
+        return `${url.origin}${url.pathname}`;
+    } catch {
+        return text.split('?')[0];
+    }
+}
+
+function findMatchingAgentMedia(root = document, expectedIdentity = '') {
+    const normalizedExpected = getGrokMediaIdentity(expectedIdentity);
+    if (!normalizedExpected) return { status: 'missing', media: null, sourceUrl: '' };
+
+    const matchingNodes = Array.from(root.querySelectorAll('.react-flow__node-asset'))
+        .map((node) => {
+            const candidates = Array.from(node.querySelectorAll('video, img'))
+                .map((media) => ({ media, sourceUrl: getBackupMediaElementSrc(media) }))
+                .filter((candidate) => candidate.sourceUrl && getGrokMediaIdentity(candidate.sourceUrl) === normalizedExpected);
+            const preferred = candidates.find((candidate) => candidate.media.tagName?.toLowerCase() === 'video') || candidates[0];
+            return preferred || null;
+        })
+        .filter(Boolean);
+
+    if (matchingNodes.length === 1) return { status: 'matched', ...matchingNodes[0] };
+    if (matchingNodes.length > 1) return { status: 'ambiguous', media: null, sourceUrl: '' };
+    return { status: 'missing', media: null, sourceUrl: '' };
+}
+
+function isSuccessfulMediaTransferStatus(status) {
+    return status === 'queued'
+        || status === 'cloud_queued'
+        || status === 'uploaded'
+        || status === 'already_present'
+        || status === 'conflict_uploaded';
+}
+
+function shouldStopScraperForStorageChanges(changes = {}, backupMode = false) {
+    if (changes.scraperState?.newValue === 'idle') return true;
+    if (backupMode) {
+        return changes.isR2Backup?.newValue === false
+            || changes.r2BackupState?.newValue?.isRunning === false;
+    }
+    return changes.isScraping?.newValue === false;
+}
+
+async function fetchMediaDataUrlViaBridge(sourceUrl, root = document, timeoutMs = 30000) {
+    const requestId = `fetch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const result = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            root.removeEventListener('__gpt_fetch_media_result', handleResult);
+            reject(new Error('Bridge fetch timeout'));
+        }, timeoutMs);
+        function handleResult(event) {
+            if (event.detail?.requestId !== requestId) return;
+            root.removeEventListener('__gpt_fetch_media_result', handleResult);
+            clearTimeout(timeout);
+            if (event.detail.error) reject(new Error(event.detail.error));
+            else resolve(event.detail);
+        }
+        root.addEventListener('__gpt_fetch_media_result', handleResult);
+        root.dispatchEvent(new CustomEvent('__gpt_fetch_media', { detail: { url: sourceUrl, requestId } }));
+    });
+
+    if (result.blobUrl) {
+        const blobResponse = await fetch(result.blobUrl);
+        const blob = await blobResponse.blob();
+        const reader = new FileReader();
+        const dataUrl = await new Promise((resolve, reject) => {
+            reader.onerror = () => reject(reader.error || new Error('Media encoding failed'));
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+        });
+        URL.revokeObjectURL(result.blobUrl);
+        return { dataUrl, size: result.size || blob.size, type: result.type || blob.type };
+    }
+    if (result.dataUrl) return { dataUrl: result.dataUrl, size: result.size || 0, type: result.type || '' };
+    throw new Error('Bridge fetch returned no media data');
+}
+
 function getBackupElementBox(el) {
     const rect = el.getBoundingClientRect?.() || { width: 0, height: 0, top: 0, bottom: 0 };
     return {
@@ -432,7 +541,7 @@ function recordBackupUploadStatus(stats, status) {
 }
 
 function shouldPersistBackupProcessedId(status) {
-    return status === 'uploaded' || status === 'already_present' || status === 'conflict_uploaded';
+    return status === 'queued' || status === 'uploaded' || status === 'already_present' || status === 'conflict_uploaded';
 }
 
 function getR2BackupCanaryStopReason(options = {}, stats = {}) {
@@ -3431,7 +3540,9 @@ class GrokScraper {
         this.backupOptions = { mode: 'full', limit: null, options: {} };
         this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
         this._backupVisited = new Set();
-        this.Config = { actionWait: 600, navWait: 800 };
+        this.runToken = null;
+        this.pendingNavigation = null;
+        this.Config = { actionWait: 600, navWait: 800, surfaceWait: 10000, historyWait: 1500 };
         this.init();
     }
     setOverlay(overlay) { this.overlay = overlay; }
@@ -3440,12 +3551,23 @@ class GrokScraper {
         this._backupStartPending = false;
         this.backupMode = false;
         this.state.isRunning = false;
+        this.runToken = null;
+        this.pendingNavigation = null;
         showExtensionContextRefreshed(this.overlay);
         return true;
     }
 
     async init() {
-        const storedResult = await safeChromeStorageGet('local', ['scraperState', 'currentIndex', 'processedIds'], {}, 'load scraper state');
+        const storedResult = await safeChromeStorageGet('local', [
+            'scraperState',
+            'currentIndex',
+            'processedIds',
+            'scrapeRunToken',
+            'scrapeNavigation',
+            'scrapeBackupOptions',
+            'isR2Backup',
+            'r2BackupState'
+        ], {}, 'load scraper state');
         if (storedResult.invalidated) {
             this.handleExtensionContextInvalidated();
             return;
@@ -3457,6 +3579,25 @@ class GrokScraper {
         }
         this.state.isRunning = stored.scraperState === 'running';
         this.state.currentIndex = stored.currentIndex || 0;
+        this.runToken = stored.scrapeRunToken || null;
+        this.pendingNavigation = stored.scrapeNavigation || null;
+        this.backupMode = stored.isR2Backup === true;
+        if (this.backupMode) {
+            this.backupOptions = stored.scrapeBackupOptions || this.backupOptions;
+            this.backupStats = {
+                ...this.backupStats,
+                ...(stored.r2BackupState || {})
+            };
+        }
+
+        if (this.state.isRunning && !this.runToken) {
+            this.runToken = this.createRunToken();
+            const tokenResult = await safeChromeStorageSet('local', { scrapeRunToken: this.runToken }, 'repair scrape run token');
+            if (tokenResult.invalidated) {
+                this.handleExtensionContextInvalidated();
+                return;
+            }
+        }
 
         // --- USER IDENTIFICATION LOGIC (Restored) ---
         try {
@@ -3482,7 +3623,9 @@ class GrokScraper {
 
         if (this.state.isRunning) {
             console.log(`Resuming Scraper. Index: ${this.state.currentIndex}`);
-            this.determineModeAndExecute();
+            Promise.resolve(this.determineModeAndExecute(this.runToken)).catch((error) => {
+                if (this.state.isRunning) this.failRun(error.message || 'Scrape resume failed.', 'resume_failed');
+            });
         }
 
         this.setupListeners();
@@ -3491,14 +3634,18 @@ class GrokScraper {
     setupListeners() {
         safeChromeAddListener(() => chrome.runtime.onMessage, (request, sender, sendResponse) => {
             if (request.action === 'INIT_SCRAPE') {
-                this.start();
-                sendResponse({ status: 'started' });
+                this.start().then(sendResponse, (error) => {
+                    sendResponse({ status: 'error', surface: this.getCurrentSurface(), error: error.message });
+                });
+                return true;
             } else if (request.action === 'ABORT_SCRAPE') {
                 this.stop();
                 sendResponse({ status: 'stopped' });
             } else if (request.action === 'INIT_R2_BACKUP') {
-                this.startBackupMode(request);
-                sendResponse({ status: 'started' });
+                this.startBackupMode(request).then(sendResponse, (error) => {
+                    sendResponse({ status: 'error', surface: this.getCurrentSurface(), error: error.message });
+                });
+                return true;
             } else if (request.action === 'ABORT_R2_BACKUP') {
                 this.stopBackupMode();
                 sendResponse({ status: 'stopped' });
@@ -3507,6 +3654,7 @@ class GrokScraper {
                 console.log('Processed IDs cleared in-memory.');
                 sendResponse({ status: 'cleared', size: 0 });
             }
+            return false;
         }, 'listen for scraper messages');
 
         // Fallback stop signal via storage.onChanged. chrome.tabs.sendMessage can be
@@ -3515,11 +3663,7 @@ class GrokScraper {
         // context, so this catches stops the direct-message path misses.
         safeChromeAddListener(() => chrome.storage.onChanged, (changes, area) => {
             if (area !== 'local') return;
-            const stopSignal =
-                changes.isR2Backup?.newValue === false ||
-                changes.isScraping?.newValue === false ||
-                changes.scraperState?.newValue === 'idle' ||
-                changes.r2BackupState?.newValue?.isRunning === false;
+            const stopSignal = shouldStopScraperForStorageChanges(changes, this.backupMode);
             if (stopSignal && this.state.isRunning) {
                 console.log('GrokScraper: stop signal received via storage.onChanged');
                 if (this.backupMode) this.stopBackupMode();
@@ -3540,13 +3684,13 @@ class GrokScraper {
         const backupOptions = getR2BackupPageCommandOptions(command);
 
         if (backupOptions) {
-            this.startBackupMode(backupOptions);
+            Promise.resolve(this.startBackupMode(backupOptions)).catch(() => {});
         } else if (action === 'INIT_R2_BACKUP') {
             console.warn('[GrokScraper] ignored page-origin R2 backup command without canary mode');
         } else if (action === 'ABORT_R2_BACKUP') {
             this.stopBackupMode();
         } else if (action === 'INIT_SCRAPE') {
-            this.start();
+            Promise.resolve(this.start()).catch(() => {});
         } else if (action === 'ABORT_SCRAPE') {
             this.stop();
         } else if (action === 'RESET_PROCESSED_IDS') {
@@ -3559,6 +3703,19 @@ class GrokScraper {
     }
 
     getCleanId(url) { if (!url) return null; try { return url.split('?')[0]; } catch { return url; } }
+
+    getCurrentSurface() {
+        return detectGrokScrapeSurface(document, window.location);
+    }
+
+    createRunToken() {
+        return `scrape_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    isRunActive(runToken = this.runToken) {
+        if (!runToken) return this.state.isRunning && !this.runToken;
+        return this.state.isRunning && this.runToken === runToken;
+    }
 
     getGalleryScroller() {
         return document.querySelector('.overflow-scroll') || document.querySelector('[role="list"]')?.parentElement || window;
@@ -3588,32 +3745,69 @@ class GrokScraper {
     }
 
     async start() {
+        const surface = this.getCurrentSurface();
+        if (surface !== SCRAPE_SURFACES.savedGallery) {
+            const error = 'Open Grok Imagine Saved before starting sync.';
+            this.log(error, 'error');
+            return { status: 'invalid_context', surface, error };
+        }
+        if (this.state.isRunning) {
+            return { status: 'error', surface, error: 'Sync is already running.' };
+        }
+
+        const runToken = this.createRunToken();
         this.log('Scraping initialized.', 'success');
-        const result = await safeChromeStorageSet('local', { scraperState: 'running', currentIndex: 0 }, 'start scrape');
+        const result = await safeChromeStorageSet('local', {
+            scraperState: 'running',
+            currentIndex: 0,
+            scrapeRunToken: runToken,
+            scrapeBackupOptions: null
+        }, 'start scrape');
         if (result.invalidated) {
             this.handleExtensionContextInvalidated();
-            return;
+            return { status: 'error', surface, error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
         }
         this.state.isRunning = true;
         this.state.currentIndex = 0;
-        this.determineModeAndExecute();
+        this.runToken = runToken;
+        this.pendingNavigation = null;
+        Promise.resolve(this.determineModeAndExecute(runToken)).catch((error) => {
+            if (this.isRunActive(runToken)) this.failRun(error.message || 'Sync failed to start.', 'start_failed');
+        });
+        return { status: 'started', surface };
     }
 
-    async stop() {
+    async stop(stopReason = 'stopped') {
         console.log('Stopping scrape run.');
-        const result = await safeChromeStorageSet('local', { scraperState: 'idle' }, 'stop scrape');
+        this.state.isRunning = false;
+        this.runToken = null;
+        this.pendingNavigation = null;
+        const result = await safeChromeStorageSet('local', {
+            scraperState: 'idle',
+            scrapeRunToken: null,
+            scrapeNavigation: null,
+            currentItemId: null,
+            scrapeBackupOptions: null,
+            isR2Backup: false,
+            scrapeStopReason: stopReason
+        }, 'stop scrape');
         if (result.invalidated) {
             this.handleExtensionContextInvalidated();
             return;
         }
         this.log('Scraping stopped.', 'neutral');
-        this.state.isRunning = false;
     }
 
     async startBackupMode(options = {}) {
+        const surface = this.getCurrentSurface();
+        if (surface !== SCRAPE_SURFACES.savedGallery) {
+            const error = 'Open Grok Imagine Saved before starting backup.';
+            this.log(error, 'error');
+            return { status: 'invalid_context', surface, error };
+        }
         if (this._backupStartPending || this.state.isRunning) {
             this.log('R2 Backup already running or starting.', 'warning');
-            return;
+            return { status: 'error', surface, error: 'R2 Backup is already running or starting.' };
         }
 
         this._backupStartPending = true;
@@ -3622,17 +3816,17 @@ class GrokScraper {
             const validationResult = await safeChromeRuntimeSendMessage({ action: 'VALIDATE_CLOUD_CONFIG' }, 'validate cloud config');
             if (validationResult.invalidated) {
                 this.handleExtensionContextInvalidated();
-                return;
+                return { status: 'error', surface, error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
             }
             const validation = validationResult.value;
             if (!validation?.valid) {
                 this.log(`R2 Backup aborted: ${validation?.error || 'Cloud config invalid.'}`, 'error');
                 console.error('R2 Backup config validation failed:', validation?.error);
-                return;
+                return { status: 'error', surface, error: validation?.error || 'Cloud config invalid.' };
             }
         } catch {
             this.log('R2 Backup aborted: Could not validate cloud config.', 'error');
-            return;
+            return { status: 'error', surface, error: 'Could not validate cloud config.' };
         } finally {
             this._backupStartPending = false;
         }
@@ -3646,27 +3840,42 @@ class GrokScraper {
         };
         this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0, startedAt: Date.now() };
         this._backupVisited = new Set();
+        const runToken = this.createRunToken();
         this.state.isRunning = true;
         this.state.currentIndex = 0;
+        this.runToken = runToken;
+        this.pendingNavigation = null;
         const startResult = await safeChromeStorageSet('local', {
             scraperState: 'running',
             currentIndex: 0,
+            scrapeRunToken: runToken,
+            scrapeBackupOptions: this.backupOptions,
             r2BackupState: { isRunning: true, ...this.backupStats }
         }, 'start R2 backup');
         if (startResult.invalidated) {
             this.handleExtensionContextInvalidated();
-            return;
+            return { status: 'error', surface, error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
         }
         this.log(this.backupOptions.mode === 'canary' ? 'R2 Canary Backup started.' : 'R2 Full Media Backup started.', 'success');
-        this.determineModeAndExecute();
+        Promise.resolve(this.determineModeAndExecute(runToken)).catch((error) => {
+            if (this.isRunActive(runToken)) this.failRun(error.message || 'R2 Backup failed to start.', 'start_failed');
+        });
+        return { status: 'started', surface };
     }
 
     async stopBackupMode(stopReason = 'stopped') {
         this.backupMode = false;
         this.state.isRunning = false;
+        this.runToken = null;
+        this.pendingNavigation = null;
         const finalStats = { ...this.backupStats, stopReason };
         const stopResult = await safeChromeStorageSet('local', {
             scraperState: 'idle',
+            scrapeRunToken: null,
+            scrapeNavigation: null,
+            currentItemId: null,
+            scrapeBackupOptions: null,
+            isR2Backup: false,
             r2BackupState: { isRunning: false, ...finalStats }
         }, 'stop R2 backup');
         if (stopResult.invalidated) {
@@ -3677,65 +3886,93 @@ class GrokScraper {
         safeChromeRuntimeSendMessageSoon({ action: 'R2_BACKUP_COMPLETE', stats: finalStats }, 'complete R2 backup');
     }
 
-    async determineModeAndExecute() {
-        if (!this.state.isRunning) return;
+    async determineModeAndExecute(runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return;
 
-        // --- DRIFT GUARD (Restored) ---
-        // Guard: If we drifted to main feed (/imagine without /favorites) while running, force back.
-        const isMainFeed = window.location.href.match(/\/imagine\/?$/);
-        const shouldBeInFavorites = this.state.isRunning && isMainFeed;
-
-        if (shouldBeInFavorites) {
-            const favButton = document.querySelector('img[alt="219e8040-acaa-435e-ba7f-14702e307a32"]')
-                || document.querySelector('img.border-white.rounded-xl')
-                || Array.from(document.querySelectorAll('a, button, [role="button"]')).find(el => {
-                    const label = (el.ariaLabel || el.textContent || "").toLowerCase();
-                    return (label.includes('favorite') || label.includes('gallery') || label.includes('saved')) && !label.includes('tweet');
-                });
-
-            if (favButton) {
-                if (favButton.classList.contains('border-white') && favButton.classList.contains('border-2')) {
-                    // Already selected
-                } else {
-                    this.log('Restoring Favorites context...', 'warning');
-                    favButton.click();
-                    await this.sleep(3000);
-                    if (!this.state.isRunning) return;
-                    return; // Return to refresh context
-                }
-            } else {
-                this.log('Drifted to Main Feed but cannot find Favorites button!', 'error');
-            }
-        }
-        // ------------------------------
-
-        // Quick scroll jiggle to trigger lazy loading
-        window.scrollBy(0, 10);
-        await this.sleep(200);
-        window.scrollBy(0, -10);
-        await this.sleep(this.Config.navWait);
-        if (!this.state.isRunning) return;
-
-        const downloadBtn = document.querySelector('[aria-label="Download"], .lucide-download');
-
-        if (downloadBtn) {
-            console.log('Detected Mode: DETAIL_VIEW');
-            this.state.mode = 'DETAIL';
-            this.executeDetailView();
-        } else {
-            console.log('Detected Mode: LIST_VIEW');
+        const surface = this.getCurrentSurface();
+        if (surface === SCRAPE_SURFACES.savedGallery) {
             this.state.mode = 'LIST';
-            this.executeListView();
+            await this.restorePendingGalleryContext(runToken);
+            if (this.isRunActive(runToken)) await this.executeListView(runToken);
+            return;
+        }
+        if (surface === SCRAPE_SURFACES.agentMedia) {
+            this.state.mode = 'AGENT';
+            await this.executeAgentView(runToken);
+            return;
+        }
+        if (surface === SCRAPE_SURFACES.legacyDetail) {
+            this.state.mode = 'DETAIL';
+            await this.executeDetailView(runToken);
+            return;
+        }
+
+        await this.failRun('Sync left Grok Imagine Saved and did not reach supported media.', 'unsupported_surface');
+    }
+
+    async failRun(message, stopReason = 'error', countBackupError = true) {
+        if (!this.state.isRunning) return;
+        this.log(message, 'error');
+        if (this.backupMode) {
+            if (countBackupError) this.backupStats.errors++;
+            await this.stopBackupMode(stopReason);
+        } else {
+            await this.stop(stopReason);
         }
     }
 
-    async executeListView() {
-        if (!this.state.isRunning) return;
+    async persistBackupProgress(runToken = this.runToken) {
+        if (!this.backupMode || !this.isRunActive(runToken)) return false;
+        const result = await safeChromeStorageSet('local', {
+            r2BackupState: { isRunning: true, ...this.backupStats }
+        }, 'save R2 backup progress');
+        if (result.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return false;
+        }
+        safeChromeRuntimeSendMessageSoon({
+            action: 'R2_BACKUP_PROGRESS',
+            stats: this.backupStats
+        }, 'send R2 backup progress');
+        return true;
+    }
 
-        // Safety Check
-        if (window.location.href.match(/\/imagine\/?$/)) {
-            console.log('On Main Feed. Deferring to Drift Guard.');
-            this.determineModeAndExecute();
+    async waitForSurface(predicate, runToken = this.runToken, timeout = this.Config.surfaceWait) {
+        const startedAt = Date.now();
+        while (this.isRunActive(runToken) && Date.now() - startedAt < timeout) {
+            const surface = this.getCurrentSurface();
+            if (predicate(surface)) return surface;
+            await this.sleep(200);
+        }
+        return null;
+    }
+
+    async restorePendingGalleryContext(runToken = this.runToken) {
+        const pending = this.pendingNavigation;
+        if (!pending || pending.runToken !== runToken) return;
+        await this.sleep(300);
+        if (!this.isRunActive(runToken) || this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) return;
+
+        const scroller = this.getGalleryScroller();
+        const scrollTop = Number(pending.galleryScrollTop) || 0;
+        if (scroller === window) {
+            window.scrollTo(0, scrollTop);
+        } else {
+            scroller.scrollTop = scrollTop;
+        }
+
+        this.pendingNavigation = null;
+        const result = await safeChromeStorageSet('local', {
+            scrapeNavigation: null,
+            currentItemId: null
+        }, 'clear completed scrape navigation');
+        if (result.invalidated) this.handleExtensionContextInvalidated();
+    }
+
+    async executeListView(runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return;
+        if (this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) {
+            await this.determineModeAndExecute(runToken);
             return;
         }
 
@@ -3748,7 +3985,11 @@ class GrokScraper {
 
         await this.sleep(300);
 
-        while (this.state.isRunning && scrollAttempts < MAX_SCROLL_ATTEMPTS) {
+        while (this.isRunActive(runToken) && scrollAttempts < MAX_SCROLL_ATTEMPTS) {
+            if (this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) {
+                await this.determineModeAndExecute(runToken);
+                return;
+            }
             const items = Array.from(document.querySelectorAll(cardSelector));
             const uniqueItems = items.filter((img, index, self) =>
                 index === self.findIndex((t) => t === img) && img.naturalWidth > 50
@@ -3787,7 +4028,7 @@ class GrokScraper {
                 if (cleanId && !alreadyDone) {
                     targetItem = itemObj.element;
                     this.log(`new item: ...${cleanId.slice(-6)}`, 'success');
-                    await this.processItem(targetItem, cleanId);
+                    await this.processItem(targetItem, cleanId, runToken);
                     return; // Action Taken
                 }
             }
@@ -3799,7 +4040,7 @@ class GrokScraper {
             const beforeSignature = this.getGalleryCardSignature(cardSelector);
             scroller.scrollBy(0, window.innerHeight);
             await this.sleep(600);
-            if (!this.state.isRunning) return;
+            if (!this.isRunActive(runToken)) return;
             const after = this.getScrollerSnapshot(scroller);
             const afterSignature = this.getGalleryCardSignature(cardSelector);
             const outcome = resolveBackupScrollAttempt({
@@ -3819,7 +4060,7 @@ class GrokScraper {
         }
 
         if (exhausted || scrollAttempts >= MAX_SCROLL_ATTEMPTS) {
-            if (!this.state.isRunning) return;
+            if (!this.isRunActive(runToken)) return;
             if (this.backupMode) {
                 if (exhausted) {
                     this.log(`Backup complete. ${this.backupStats.uploaded} uploaded, ${this.backupStats.alreadyPresent || 0} already present, ${this.backupStats.queued || 0} queued, ${this.backupStats.errors} errors.`, 'success');
@@ -3835,25 +4076,161 @@ class GrokScraper {
         }
     }
 
-    async processItem(targetItem, cleanId) {
-        if (!this.state.isRunning) return;
+    async processItem(targetItem, cleanId, runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return;
+        const sourceUrl = targetItem.currentSrc || targetItem.src || '';
+        const expectedIdentity = getGrokMediaIdentity(sourceUrl);
+        if (!expectedIdentity) {
+            await this.failRun('Could not identify the selected Saved media.', 'gallery_identity_missing');
+            return;
+        }
+
+        const scroller = this.getGalleryScroller();
+        const pendingNavigation = {
+            runToken,
+            currentItemId: cleanId,
+            expectedIdentity,
+            sourceUrl,
+            galleryUrl: window.location.href,
+            galleryScrollTop: this.getScrollerSnapshot(scroller).scrollTop,
+            createdAt: Date.now()
+        };
         targetItem.style.outline = "2px solid rgba(29,155,240,0.5)";
         this.log(`Opening item...`);
-        if (cleanId) {
-            const result = await safeChromeStorageSet('local', { currentItemId: cleanId }, 'save current item ID');
-            if (result.invalidated) {
-                this.handleExtensionContextInvalidated();
-                return;
-            }
+        const result = await safeChromeStorageSet('local', {
+            currentItemId: cleanId,
+            scrapeNavigation: pendingNavigation
+        }, 'save scrape navigation');
+        if (result.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return;
         }
+        if (!this.isRunActive(runToken)) return;
+        this.pendingNavigation = pendingNavigation;
         targetItem.click();
-        await this.sleep(this.Config.navWait);
-        if (!this.state.isRunning) return;
-        this.determineModeAndExecute();
+        const nextSurface = await this.waitForSurface(
+            (surface) => surface !== SCRAPE_SURFACES.savedGallery,
+            runToken
+        );
+        if (!this.isRunActive(runToken)) return;
+        if (!nextSurface) {
+            await this.failRun('The selected Saved card did not open a supported media surface.', 'surface_transition_timeout');
+            return;
+        }
+        await this.determineModeAndExecute(runToken);
     }
 
-    async executeDetailView() {
-        if (!this.state.isRunning) return;
+    async waitForMatchingAgentMedia(expectedIdentity, runToken = this.runToken) {
+        const startedAt = Date.now();
+        let lastResult = { status: 'missing', media: null, sourceUrl: '' };
+        while (this.isRunActive(runToken) && Date.now() - startedAt < this.Config.surfaceWait) {
+            lastResult = findMatchingAgentMedia(document, expectedIdentity);
+            if (lastResult.status === 'matched') return lastResult;
+            await this.sleep(200);
+        }
+        return lastResult;
+    }
+
+    async persistProcessedId(currentItemId, runToken = this.runToken) {
+        if (!currentItemId || !this.isRunActive(runToken)) return false;
+        const latestResult = await safeChromeStorageGet('local', ['processedIds'], {}, 'load scrape processed IDs');
+        if (latestResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return false;
+        }
+        if (!this.isRunActive(runToken)) return false;
+        const merged = new Set(Array.isArray(latestResult.value.processedIds) ? latestResult.value.processedIds : []);
+        this.processedIds.forEach((id) => merged.add(id));
+        merged.add(currentItemId);
+        this.processedIds = merged;
+        const saveResult = await safeChromeStorageSet('local', { processedIds: Array.from(merged) }, 'save scrape processed IDs');
+        if (saveResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return false;
+        }
+        return true;
+    }
+
+    async executeAgentView(runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return;
+        const pending = this.pendingNavigation;
+        if (!pending || pending.runToken !== runToken || !pending.expectedIdentity) {
+            await this.failRun('Agent Mode opened without a pending Saved media identity.', 'agent_identity_missing');
+            return;
+        }
+
+        const match = await this.waitForMatchingAgentMedia(pending.expectedIdentity, runToken);
+        if (!this.isRunActive(runToken)) return;
+        if (match.status !== 'matched' || !match.media) {
+            const reason = match.status === 'ambiguous' ? 'agent_media_ambiguous' : 'agent_media_missing';
+            const message = match.status === 'ambiguous'
+                ? 'Agent Mode exposed more than one match for the selected Saved media.'
+                : 'Agent Mode did not expose the selected Saved media.';
+            await this.failRun(message, reason);
+            return;
+        }
+
+        if (this.backupMode && !this._backupVisited.has(pending.currentItemId)) {
+            this._backupVisited.add(pending.currentItemId);
+            this.backupStats.totalSeen++;
+            await this.persistBackupProgress(runToken);
+            if (!this.isRunActive(runToken)) return;
+        }
+
+        const response = await this.performDownload(match.media, pending.currentItemId, runToken);
+        if (!this.isRunActive(runToken)) return;
+        if (!isSuccessfulMediaTransferStatus(response?.status)) {
+            await this.failRun(
+                response?.error || 'The selected Agent media could not be transferred.',
+                'media_transfer_failed',
+                false
+            );
+            return;
+        }
+
+        if (!this.backupMode) await this.persistProcessedId(pending.currentItemId, runToken);
+        if (!this.isRunActive(runToken)) return;
+
+        const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
+        if (this.backupMode && canaryStopReason) {
+            await this.stopBackupMode(canaryStopReason);
+            return;
+        }
+        await this.returnToSavedGallery(runToken);
+    }
+
+    async returnToSavedGallery(runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return;
+        const galleryUrl = this.pendingNavigation?.galleryUrl;
+        this.log('Returning to Saved...', 'neutral');
+        window.history.back();
+        const returnedSurface = await this.waitForSurface(
+            (surface) => surface === SCRAPE_SURFACES.savedGallery,
+            runToken,
+            this.Config.historyWait || 1500
+        );
+        if (!this.isRunActive(runToken)) return;
+        if (returnedSurface) {
+            await this.determineModeAndExecute(runToken);
+            return;
+        }
+        if (!galleryUrl) {
+            await this.failRun('Could not return to Grok Imagine Saved.', 'gallery_return_failed');
+            return;
+        }
+        try {
+            this.navigateToGalleryUrl(galleryUrl);
+        } catch {
+            await this.failRun('Could not return to Grok Imagine Saved.', 'gallery_return_failed');
+        }
+    }
+
+    navigateToGalleryUrl(galleryUrl) {
+        window.location.assign(galleryUrl);
+    }
+
+    async executeDetailView(runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return;
 
         // Deduplication
         const storedStateResult = await safeChromeStorageGet('local', ['currentItemId'], {}, 'load current item ID');
@@ -3871,25 +4248,11 @@ class GrokScraper {
             }
         }
 
-        if (currentId) {
-            if (!this.backupMode) {
-                // Normal scrape: mark processed immediately (download via native button always works)
-                this.processedIds.add(currentId);
-                const result = await safeChromeStorageSet('local', { processedIds: Array.from(this.processedIds) }, 'save scrape processed IDs');
-                if (result.invalidated) {
-                    this.handleExtensionContextInvalidated();
-                    return;
-                }
-            } else {
-                // Backup mode: only track visit, NOT processedIds
-                // processedIds is updated inside performBackupUpload after successful upload
-                this._backupVisited.add(currentId);
-                this.backupStats.totalSeen++;
-                safeChromeRuntimeSendMessageSoon({
-                    action: 'R2_BACKUP_PROGRESS',
-                    stats: this.backupStats
-                }, 'send R2 backup progress');
-            }
+        if (currentId && this.backupMode) {
+            this._backupVisited.add(currentId);
+            this.backupStats.totalSeen++;
+            await this.persistBackupProgress(runToken);
+            if (!this.isRunActive(runToken)) return;
         }
 
         // MULTI-VIDEO SUPPORT
@@ -3904,6 +4267,7 @@ class GrokScraper {
         const thumbnailButtons = Array.from(document.querySelectorAll('button img[alt^="Thumbnail"]'))
             .map(img => img.closest('button'))
             .filter(btn => btn);
+        let normalTransferSucceeded = !this.backupMode;
 
         if (thumbnailButtons.length > 0) {
             console.log(`Multi-Video Detected: ${thumbnailButtons.length} versions.`);
@@ -3914,12 +4278,14 @@ class GrokScraper {
             const scrollContainer = thumbnailButtons[0].closest('.overflow-y-auto');
 
             for (let i = 0; i < thumbnailButtons.length; i++) {
+                if (!this.isRunActive(runToken)) return;
                 const btn = thumbnailButtons[i];
 
                 // Scroll into view if needed
                 if (scrollContainer) {
                     btn.scrollIntoView({ behavior: 'instant', block: 'center' });
                     await this.sleep(200);
+                    if (!this.isRunActive(runToken)) return;
                 }
 
                 this.log(`Processing Version ${i + 1}/${thumbnailButtons.length}...`);
@@ -3927,8 +4293,14 @@ class GrokScraper {
 
                 // Wait for video/image to swap after thumbnail click
                 await this.sleep(500);
+                if (!this.isRunActive(runToken)) return;
 
-                await this.performDownload();
+                const response = await this.performDownload(null, currentId, runToken);
+                if (!this.backupMode && !isSuccessfulMediaTransferStatus(response?.status)) {
+                    normalTransferSucceeded = false;
+                    await this.failRun(response?.error || 'Legacy media download failed.', 'media_transfer_failed');
+                    return;
+                }
                 const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
                 if (this.backupMode && canaryStopReason) {
                     await this.stopBackupMode(canaryStopReason);
@@ -3939,7 +4311,12 @@ class GrokScraper {
             // Fallback: No thumbnails found? Maybe it's a single video without thumbnails?
             // Or maybe our selector missed. Check if there's just a generated video/image.
             console.log('No thumbnails found. Assuming single item.');
-            await this.performDownload();
+            const response = await this.performDownload(null, currentId, runToken);
+            if (!this.backupMode && !isSuccessfulMediaTransferStatus(response?.status)) {
+                normalTransferSucceeded = false;
+                await this.failRun(response?.error || 'Legacy media download failed.', 'media_transfer_failed');
+                return;
+            }
             const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
             if (this.backupMode && canaryStopReason) {
                 await this.stopBackupMode(canaryStopReason);
@@ -3947,17 +4324,19 @@ class GrokScraper {
             }
         }
 
-        if (!this.state.isRunning) return;
+        if (!this.isRunActive(runToken)) return;
+        if (normalTransferSucceeded && currentId) await this.persistProcessedId(currentId, runToken);
+        if (!this.isRunActive(runToken)) return;
 
         // Back Button
         const backBtn = await this.waitForSelector('[aria-label="Back"], .lucide-arrow-left', 5000);
         if (backBtn) {
+            if (!this.isRunActive(runToken)) return;
             backBtn.click();
             await this.sleep(this.Config.navWait);
-            this.determineModeAndExecute();
+            if (this.isRunActive(runToken)) await this.determineModeAndExecute(runToken);
         } else {
-            console.error('Back button not found!');
-            this.stop();
+            await this.failRun('Legacy detail view did not expose a Back control.', 'gallery_return_failed');
         }
     }
 
@@ -3966,12 +4345,11 @@ class GrokScraper {
         return videoEl.src || videoEl.currentSrc || videoEl.querySelector?.('source')?.src || null;
     }
 
-    async performBackupUpload() {
-        if (!this.state.isRunning) return;
+    async performBackupUpload(mediaEl = null, currentItemId = null, runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
 
-        let mediaEl = null;
         const mediaStart = Date.now();
-        while (Date.now() - mediaStart < 3000) {
+        while (!mediaEl && this.isRunActive(runToken) && Date.now() - mediaStart < 3000) {
             mediaEl = selectBackupMediaElement(document);
             if (mediaEl && getBackupMediaElementSrc(mediaEl)) break;
             await this.sleep(200);
@@ -3985,46 +4363,24 @@ class GrokScraper {
         if (!src) {
             this.backupStats.errors++;
             this.log('No media element found for backup.', 'error');
-            return;
+            return { status: 'error', error: 'No media element found for backup.' };
         }
 
-        const alreadyLocal = this.processedIds.has(this.getCleanId(src));
+        const alreadyLocal = this.processedIds.has(this.getCleanId(src)) || this.processedIds.has(currentItemId);
         const promptText = this.overlay?.readCurrentPromptInput?.() || '';
         if (promptText) console.log('[BackupUpload] Prompt:', promptText.slice(0, 60));
 
         try {
-            // Fetch the media blob via bridge.js (runs in page's MAIN world with cookies)
-            // Content script's fetch() runs in isolated world without page cookies
             let blobData = null;
             try {
-                const requestId = 'fetch_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-                const fetchPromise = new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => reject(new Error('Bridge fetch timeout')), 30000);
-                    document.addEventListener('__gpt_fetch_media_result', function handler(e) {
-                        if (e.detail?.requestId !== requestId) return;
-                        document.removeEventListener('__gpt_fetch_media_result', handler);
-                        clearTimeout(timeout);
-                        if (e.detail.error) reject(new Error(e.detail.error));
-                        else resolve(e.detail);
-                    });
-                });
-                document.dispatchEvent(new CustomEvent('__gpt_fetch_media', { detail: { url: src, requestId } }));
-                const result = await fetchPromise;
-                // Bridge returns a blob URL — fetch it from content script (blob URLs are cross-world)
-                // Then convert to base64 in chunks to avoid message size limits
-                if (result.blobUrl) {
-                    const blobResp = await fetch(result.blobUrl);
-                    const blob = await blobResp.blob();
-                    const reader = new FileReader();
-                    blobData = await new Promise(r => { reader.onloadend = () => r(reader.result); reader.readAsDataURL(blob); });
-                    URL.revokeObjectURL(result.blobUrl);
-                } else if (result.dataUrl) {
-                    blobData = result.dataUrl;
-                }
+                const result = await fetchMediaDataUrlViaBridge(src);
+                blobData = result.dataUrl;
                 console.log('[BackupUpload] Bridge fetched blob:', result.size, 'bytes, type:', result.type);
             } catch (fetchErr) {
                 console.warn('[BackupUpload] Bridge fetch failed, background will retry:', fetchErr.message);
             }
+
+            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
 
             const responseResult = await safeChromeRuntimeSendMessage({
                 action: 'R2_BACKUP_UPLOAD',
@@ -4037,9 +4393,10 @@ class GrokScraper {
             }, 'upload R2 backup');
             if (responseResult.invalidated) {
                 this.handleExtensionContextInvalidated();
-                return;
+                return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
             }
             const response = responseResult.value;
+            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
             if (recordBackupUploadStatus(this.backupStats, response?.status)) {
                 const actionLabel = response.status === 'queued'
                     ? 'Queued for R2'
@@ -4051,11 +4408,14 @@ class GrokScraper {
                     const latestResult = await safeChromeStorageGet('local', ['processedIds'], {}, 'load backup processed IDs');
                     if (latestResult.invalidated) {
                         this.handleExtensionContextInvalidated();
-                        return;
+                        return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
                     }
+                    if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
+                    const inMemoryIds = new Set(this.processedIds);
+                    if (currentItemId) inMemoryIds.add(currentItemId);
                     const processedIds = mergeBackupProcessedIdsForStorage(
                         latestResult.value.processedIds,
-                        this.processedIds,
+                        inMemoryIds,
                         cleanId,
                         response.backupProcessedId
                     );
@@ -4063,30 +4423,74 @@ class GrokScraper {
                     const saveResult = await safeChromeStorageSet('local', { processedIds }, 'save backup processed IDs');
                     if (saveResult.invalidated) {
                         this.handleExtensionContextInvalidated();
-                        return;
+                        return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
                     }
                 }
             } else {
                 this.backupStats.errors++;
                 this.log(`Backup error: ${response?.error || 'unknown'}`, 'error');
             }
-        } catch {
+            await this.persistBackupProgress(runToken);
+            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
+            await this.sleep(this.Config.actionWait);
+            return response || { status: 'error', error: 'R2 backup returned no response.' };
+        } catch (error) {
             this.backupStats.errors++;
+            return { status: 'error', error: error.message || 'R2 backup failed.' };
         }
-
-        await this.sleep(this.Config.actionWait);
     }
 
-    async performDownload() {
-        if (!this.state.isRunning) return;
-        // In backup mode, use bridge.js MAIN world fetch (has page cookies + CORS allowed)
-        if (this.backupMode) return this.performBackupUpload();
+    async performDownload(mediaEl = null, currentItemId = null, runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
+        if (this.backupMode) return this.performBackupUpload(mediaEl, currentItemId, runToken);
+
+        if (mediaEl) {
+            const src = getBackupMediaElementSrc(mediaEl);
+            if (!src) return { status: 'error', error: 'Agent media URL is missing.' };
+            const configResult = await safeChromeRuntimeSendMessage({ action: 'GET_CLOUD_CONFIG' }, 'load media transfer mode');
+            if (configResult.invalidated) {
+                this.handleExtensionContextInvalidated();
+                return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
+            }
+            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
+
+            const cloudOnly = configResult.value?.config?.mode === 'cloud_only';
+            let blobDataUrl = null;
+            if (cloudOnly) {
+                try {
+                    const bridgeResult = await fetchMediaDataUrlViaBridge(src);
+                    blobDataUrl = bridgeResult.dataUrl;
+                } catch (error) {
+                    return { status: 'error', error: `Authenticated media fetch failed: ${error.message}` };
+                }
+            }
+            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
+
+            const promptText = this.overlay?.readCurrentPromptInput?.() || '';
+            const responseResult = await safeChromeRuntimeSendMessage({
+                action: 'DOWNLOAD_MEDIA',
+                url: src,
+                isVideo: mediaEl.tagName?.toLowerCase() === 'video',
+                promptText,
+                blobDataUrl
+            }, 'transfer Agent media');
+            if (responseResult.invalidated) {
+                this.handleExtensionContextInvalidated();
+                return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
+            }
+            const response = responseResult.value || { status: 'error', error: 'Media transfer returned no response.' };
+            if (isSuccessfulMediaTransferStatus(response.status)) {
+                this.log(cloudOnly ? 'Uploaded to R2.' : 'Download queued.', 'success');
+            }
+            await this.sleep(this.Config.actionWait);
+            return response;
+        }
 
         // Click Download
         let downloadBtn = null;
         const start = Date.now();
         while (!downloadBtn && Date.now() - start < 5000) {
-            if (!this.state.isRunning) return;
+            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
             downloadBtn = document.querySelector('button[aria-label="Download"]')
                 || document.querySelector('.lucide-download')
                 || document.querySelector('[role="button"][aria-label="Download"]');
@@ -4104,8 +4508,10 @@ class GrokScraper {
                 targetToClick.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
             });
             await this.sleep(this.Config.actionWait);
+            return { status: 'queued' };
         } else {
             this.log('Download button missing.', 'error');
+            return { status: 'error', error: 'Download button missing.' };
         }
     }
 
@@ -4178,6 +4584,13 @@ if (typeof module === 'undefined') {
         mergePromptTextForAppend,
         appendSnippetAtCursor,
         getBackupMediaElementSrc,
+        SCRAPE_SURFACES,
+        detectGrokScrapeSurface,
+        findMatchingAgentMedia,
+        getGrokMediaIdentity,
+        isSuccessfulMediaTransferStatus,
+        shouldStopScraperForStorageChanges,
+        fetchMediaDataUrlViaBridge,
         recordBackupUploadStatus,
         resolveBackupScrollAttempt,
         selectBackupMediaElement,

@@ -584,11 +584,11 @@ describe('Grok backup upload stats', () => {
         });
     });
 
-    test('does not persist processed IDs for queued uploads before R2 success is proven', () => {
+    test('persists processed IDs once a durable queue accepts the upload', () => {
         expect(shouldPersistBackupProcessedId('uploaded')).toBe(true);
         expect(shouldPersistBackupProcessedId('already_present')).toBe(true);
         expect(shouldPersistBackupProcessedId('conflict_uploaded')).toBe(true);
-        expect(shouldPersistBackupProcessedId('queued')).toBe(false);
+        expect(shouldPersistBackupProcessedId('queued')).toBe(true);
     });
 
     test('preserves background-persisted processed IDs when content records backup success', () => {
@@ -717,6 +717,7 @@ describe('Grok backup canary flow', () => {
         };
         const scraper = Object.create(GrokScraper.prototype);
         scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
+        scraper.getCurrentSurface = jest.fn(() => 'saved_gallery');
         scraper.log = jest.fn();
         scraper.determineModeAndExecute = jest.fn();
 
@@ -755,7 +756,8 @@ describe('Grok backup canary flow', () => {
             },
             storage: {
                 local: {
-                    get: jest.fn(() => Promise.resolve({ currentItemId: 'media-clean-id' }))
+                    get: jest.fn(() => Promise.resolve({ currentItemId: 'media-clean-id' })),
+                    set: jest.fn(() => Promise.resolve())
                 }
             }
         };

@@ -207,6 +207,8 @@ console.log('Grok Downloader Background Service Started');
 let isScraping = false;
 let isR2Backup = false;
 let currentTabId = null;
+let scrapeStartPending = false;
+let scrapeStartEpoch = 0;
 const MAX_LOGS = 100;
 const CLOUD_ALARM_NAME = 'gptCloudRetry';
 const CLOUD_METADATA_DEBOUNCE_MS = 2000;
@@ -1478,44 +1480,205 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     scheduleMetadataSyncForChanges(changes);
 });
 
+function isGrokSavedUrl(value) {
+    try {
+        const url = new URL(String(value || ''));
+        return (url.hostname === 'grok.com' || url.hostname.endsWith('.grok.com'))
+            && /^\/imagine\/saved(?:\/|$)/.test(url.pathname);
+    } catch {
+        return false;
+    }
+}
+
+function queryActiveTab() {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (tabs) => {
+            if (settled) return;
+            settled = true;
+            const error = chrome.runtime.lastError;
+            if (error) reject(new Error(error.message));
+            else resolve(Array.isArray(tabs) ? tabs[0] || null : null);
+        };
+        try {
+            const result = chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => finish(tabs));
+            if (result && typeof result.then === 'function') result.then((tabs) => finish(tabs), reject);
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+function sendMessageToTab(tabId, message) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (response) => {
+            if (settled) return;
+            settled = true;
+            const error = chrome.runtime.lastError;
+            if (error) reject(new Error(error.message));
+            else resolve(response);
+        };
+        try {
+            const result = chrome.tabs.sendMessage(tabId, message, (response) => finish(response));
+            if (result && typeof result.then === 'function') result.then((response) => finish(response), reject);
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+function injectContentScripts(tabId) {
+    const files = [
+        'providerRegistry.js',
+        'providerRunLedger.js',
+        'chatgptImagesContent.js',
+        'recreateWorkflowUtils.js',
+        'recreateWorkflowContent.js',
+        'content.js'
+    ];
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            const error = chrome.runtime.lastError;
+            if (error) reject(new Error(error.message));
+            else resolve();
+        };
+        try {
+            const result = chrome.scripting.executeScript({ target: { tabId }, files }, finish);
+            if (result && typeof result.then === 'function') result.then(finish, reject);
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+function queueChromeDownload(options) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (downloadId) => {
+            if (settled) return;
+            settled = true;
+            const error = chrome.runtime.lastError;
+            if (error) {
+                reject(new Error(error.message));
+                return;
+            }
+            if (!Number.isInteger(downloadId)) {
+                reject(new Error('Chrome did not accept the download.'));
+                return;
+            }
+            resolve(downloadId);
+        };
+        try {
+            const result = chrome.downloads.download(options, finish);
+            if (result && typeof result.then === 'function') result.then(finish, reject);
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+async function sendScrapeInitWithInjection(tabId, initMessage) {
+    try {
+        return await sendMessageToTab(tabId, initMessage);
+    } catch (firstError) {
+        if (!/receiving end does not exist|could not establish connection/i.test(firstError.message)) throw firstError;
+        await injectContentScripts(tabId);
+        return sendMessageToTab(tabId, initMessage);
+    }
+}
+
+async function initializeScrapeInActiveTab(initMessage, { backup = false } = {}) {
+    if (isScraping || scrapeStartPending) {
+        return { status: 'error', surface: 'unsupported', error: 'A sync or backup run is already active.' };
+    }
+
+    scrapeStartPending = true;
+    const startEpoch = scrapeStartEpoch;
+    try {
+        const tab = await queryActiveTab();
+        if (!tab || !isGrokSavedUrl(tab.url)) {
+            isScraping = false;
+            isR2Backup = false;
+            await chrome.storage.local.set({ isScraping: false, isR2Backup: false });
+            return {
+                status: 'invalid_context',
+                surface: 'unsupported',
+                error: backup
+                    ? 'Open Grok Imagine Saved before starting backup.'
+                    : 'Open Grok Imagine Saved before starting sync.'
+            };
+        }
+
+        const initResponse = await sendScrapeInitWithInjection(tab.id, initMessage);
+        if (startEpoch !== scrapeStartEpoch) {
+            await sendMessageToTab(tab.id, { action: backup ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE' }).catch(() => {});
+            return { status: 'error', surface: initResponse?.surface || 'saved_gallery', error: 'Start was cancelled.' };
+        }
+        if (initResponse?.status !== 'started' || initResponse.surface !== 'saved_gallery') {
+            isScraping = false;
+            isR2Backup = false;
+            await chrome.storage.local.set({ isScraping: false, isR2Backup: false });
+            if (initResponse?.status === 'invalid_context') return initResponse;
+            return {
+                status: 'error',
+                surface: initResponse?.surface || 'unsupported',
+                error: initResponse?.error || 'Content script returned no start response.'
+            };
+        }
+
+        currentTabId = tab.id;
+        isScraping = true;
+        isR2Backup = backup;
+        await chrome.storage.local.set({ isScraping: true, isR2Backup: backup });
+        return initResponse;
+    } catch (error) {
+        isScraping = false;
+        isR2Backup = false;
+        await chrome.storage.local.set({ isScraping: false, isR2Backup: false }).catch(() => {});
+        return { status: 'error', surface: 'unsupported', error: error.message || 'Failed to start.' };
+    } finally {
+        scrapeStartPending = false;
+    }
+}
+
+async function uploadDirectMediaData(request, finalPath, acceptanceSource = 'direct-upload') {
+    const config = await getCloudConfig();
+    if (!CloudSync.isCloudEnabled(config)) {
+        return { status: 'not_queued', error: 'Cloud sync is not enabled.' };
+    }
+
+    const response = await fetch(request.blobDataUrl);
+    const blob = await response.blob();
+    const contentType = blob.type || (request.isVideo ? 'video/mp4' : 'image/png');
+    const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
+    const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
+    const acceptance = request.acceptance || buildAcceptanceContextFromCloudConfig(config, acceptanceSource);
+    const result = await uploadBlobWithR2Dedupe(config, {
+        sourceUrl: request.url,
+        finalPath,
+        userId: activeUserId,
+        contentType,
+        promptText: request.promptText || '',
+        acceptance
+    }, blob);
+
+    return buildDirectBackupUploadResponse(result, request.url);
+}
+
 // Handle messages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'START_SCRAPE') {
         log('Background: Received START_SCRAPE.');
-        isScraping = true;
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0] && (tabs[0].url.includes('x.com') || tabs[0].url.includes('grok.com'))) {
-                currentTabId = tabs[0].id;
-
-                // Helper to send message with retry
-                const sendInit = () => {
-                    chrome.tabs.sendMessage(currentTabId, { action: 'INIT_SCRAPE' }, () => {
-                        if (chrome.runtime.lastError) {
-                            console.warn('Injecting Content Script...');
-                            chrome.scripting.executeScript({
-                                target: { tabId: currentTabId },
-                                files: ['content.js']
-                            }, () => {
-                                setTimeout(() => {
-                                    chrome.tabs.sendMessage(currentTabId, { action: 'INIT_SCRAPE' });
-                                    chrome.storage.local.set({ isScraping: true });
-                                }, 500);
-                            });
-                        } else {
-                            chrome.storage.local.set({ isScraping: true });
-                        }
-                    });
-                };
-                sendInit();
-                sendResponse({ status: 'started' });
-            } else {
-                sendResponse({ status: 'no_tab' });
-            }
-        });
+        initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' }).then(sendResponse);
         return true;
     }
 
     if (request.action === 'STOP_SCRAPE') {
+        scrapeStartEpoch++;
         isScraping = false;
         chrome.storage.local.set({ isScraping: false });
         if (currentTabId) chrome.tabs.sendMessage(currentTabId, { action: 'ABORT_SCRAPE' });
@@ -1525,40 +1688,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === 'START_R2_BACKUP') {
         if (isScraping) {
-            sendResponse({ status: 'busy', error: 'Scraper is already running.' });
+            sendResponse({ status: 'error', error: 'Scraper is already running.' });
             return false;
         }
         (async () => {
             const config = await getCloudConfig();
             const initMessage = buildR2BackupInitMessageForConfig(request, config);
             log(initMessage.mode === 'canary' ? 'Starting R2 Canary Backup...' : 'Starting Full R2 Media Backup...');
-            isR2Backup = true;
-            isScraping = true;
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0] && (tabs[0].url.includes('x.com') || tabs[0].url.includes('grok.com'))) {
-                    currentTabId = tabs[0].id;
-                    chrome.tabs.sendMessage(currentTabId, initMessage, () => {
-                        if (chrome.runtime.lastError) {
-                            chrome.scripting.executeScript({
-                                target: { tabId: currentTabId },
-                                files: ['content.js']
-                            }, () => {
-                                setTimeout(() => {
-                                    chrome.tabs.sendMessage(currentTabId, initMessage);
-                                    chrome.storage.local.set({ isScraping: true, isR2Backup: true });
-                                }, 500);
-                            });
-                        } else {
-                            chrome.storage.local.set({ isScraping: true, isR2Backup: true });
-                        }
-                    });
-                    sendResponse({ status: 'started' });
-                } else {
-                    isScraping = false;
-                    isR2Backup = false;
-                    sendResponse({ status: 'no_tab', error: 'Navigate to Grok Favorites first.' });
-                }
-            });
+            sendResponse(await initializeScrapeInActiveTab(initMessage, { backup: true }));
         })().catch((e) => {
             if (isR2Backup) isR2Backup = false;
             if (isScraping) isScraping = false;
@@ -1569,6 +1706,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'STOP_R2_BACKUP') {
+        scrapeStartEpoch++;
         isR2Backup = false;
         isScraping = false;
         chrome.storage.local.set({ isScraping: false, isR2Backup: false });
@@ -1584,32 +1722,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             // If content script provided blob data (fetched with cookies), upload directly
             if (request.blobDataUrl) {
-                const config = await getCloudConfig();
-                if (!CloudSync.isCloudEnabled(config)) {
-                    sendResponse({ status: 'not_queued', error: 'Cloud sync is not enabled.' });
-                    return;
-                }
-
                 try {
-                    // Convert data URL back to blob
-                    const resp = await fetch(request.blobDataUrl);
-                    const blob = await resp.blob();
-                    const contentType = blob.type || (extHint === 'mp4' ? 'video/mp4' : 'image/png');
-                    const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
-                    const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
-                    const acceptance = request.acceptance || buildAcceptanceContextFromCloudConfig(config, 'direct-upload');
-
-                    const result = await uploadBlobWithR2Dedupe(config, {
-                        sourceUrl: request.url,
-                        finalPath,
-                        userId: activeUserId,
-                        contentType,
-                        promptText: request.promptText || '',
-                        acceptance
-                    }, blob);
-
-                    console.log('[CloudQueue] Direct blob upload result:', result.status, result.objectKey, blob.size, 'bytes');
-                    sendResponse(buildDirectBackupUploadResponse(result, request.url));
+                    sendResponse(await uploadDirectMediaData(request, finalPath));
                 } catch (e) {
                     console.error('[CloudQueue] Direct blob upload failed:', e.message);
                     sendResponse({ status: 'error', error: e.message });
@@ -1703,17 +1817,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             if (allowLocalDownload) {
                 // This triggers onDeterminingFilename.
-                chrome.downloads.download({ url: request.url, conflictAction: 'overwrite' });
+                await queueChromeDownload({ url: request.url, conflictAction: 'overwrite' });
                 sendResponse({ status: 'queued' });
-            } else {
-                const finalPath = await generateFilename(request.url);
-                if (!finalPath) {
-                    sendResponse({ status: 'skipped_duplicate' });
-                    return;
-                }
-                await enqueueCloudMediaUpload(request.url, finalPath);
-                sendResponse({ status: 'cloud_queued' });
+                return;
             }
+
+            if (!request.blobDataUrl) {
+                sendResponse({ status: 'error', error: 'Authenticated media data is required in Cloud only mode.' });
+                return;
+            }
+
+            const extHint = request.isVideo ? 'mp4' : null;
+            const finalPath = await generateFilenameForBackup(request.url, extHint);
+            sendResponse(await uploadDirectMediaData(request, finalPath, 'direct-sync'));
         })().catch((e) => {
             sendResponse({ status: 'error', error: e.message });
         });
@@ -1931,7 +2047,10 @@ if (typeof module !== 'undefined') {
         fetchRecreateReferenceDataUrl,
         getR2BackupCompletionStatusLabel,
         getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
+        initializeScrapeInActiveTab,
+        isGrokSavedUrl,
         isR2BackupCompletionSuccessful,
+        queueChromeDownload,
         persistQueuedBackupProcessedId,
         persistQueuedBackupProcessedIdAfterSuccess,
         recreateWorkflowController,

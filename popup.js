@@ -126,7 +126,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response && response.status === 'started') {
                 setRunningState(true);
             } else {
-                addLog('Failed to start. Refresh page?', 'error');
+                setRunningState(false);
+                addLog(response?.error || 'Failed to start sync.', 'error');
             }
         });
     });

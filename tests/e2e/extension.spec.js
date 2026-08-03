@@ -205,7 +205,7 @@ test.describe('Grok Power Tools E2E', () => {
             body: '<!doctype html><html><head><title>Mock Provider</title></head><body></body></html>'
         }));
 
-        await gotoMockProviderPage(page, 'https://grok.com/imagine/favorites');
+        await gotoMockProviderPage(page, 'https://grok.com/imagine/saved');
     });
 
     test('Overlay should render on the page', async ({ page }) => {
