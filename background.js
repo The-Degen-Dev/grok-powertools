@@ -209,6 +209,8 @@ let isR2Backup = false;
 let currentTabId = null;
 let scrapeStartPending = false;
 let scrapeStartEpoch = 0;
+let activeScrapeRunToken = null;
+const ACTIVE_SCRAPE_RUN_TOKEN_KEY = 'activeScrapeRunToken';
 const MAX_LOGS = 100;
 const CLOUD_ALARM_NAME = 'gptCloudRetry';
 const CLOUD_METADATA_DEBOUNCE_MS = 2000;
@@ -1459,6 +1461,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
 
+    if (changes.isScraping?.newValue === false || changes.scraperState?.newValue === 'idle') {
+        isScraping = false;
+        isR2Backup = false;
+        setActiveScrapeRunToken(null).catch(() => {});
+    } else if (changes.isR2Backup?.newValue === false) {
+        isR2Backup = false;
+    }
+
     if (changes[CloudSync.STORAGE_KEYS.cloudConfig]) {
         const oldNormalized = CloudSync.normalizeCloudConfig(changes[CloudSync.STORAGE_KEYS.cloudConfig].oldValue);
         const newNormalized = CloudSync.normalizeCloudConfig(changes[CloudSync.STORAGE_KEYS.cloudConfig].newValue);
@@ -1581,6 +1591,31 @@ function queueChromeDownload(options) {
     });
 }
 
+async function setActiveScrapeRunToken(runToken) {
+    activeScrapeRunToken = runToken || null;
+    const session = chrome.storage?.session;
+    if (!session) return;
+    if (activeScrapeRunToken) {
+        await session.set({ [ACTIVE_SCRAPE_RUN_TOKEN_KEY]: activeScrapeRunToken });
+    } else if (typeof session.remove === 'function') {
+        await session.remove(ACTIVE_SCRAPE_RUN_TOKEN_KEY);
+    }
+}
+
+async function getActiveScrapeRunToken() {
+    if (activeScrapeRunToken) return activeScrapeRunToken;
+    const session = chrome.storage?.session;
+    if (!session || typeof session.get !== 'function') return null;
+    const stored = await session.get([ACTIVE_SCRAPE_RUN_TOKEN_KEY]);
+    activeScrapeRunToken = stored?.[ACTIVE_SCRAPE_RUN_TOKEN_KEY] || null;
+    return activeScrapeRunToken;
+}
+
+async function validateScrapeResume(runToken) {
+    const activeRunToken = await getActiveScrapeRunToken();
+    return Boolean(runToken && activeRunToken && runToken === activeRunToken);
+}
+
 async function sendScrapeInitWithInjection(tabId, initMessage) {
     try {
         return await sendMessageToTab(tabId, initMessage);
@@ -1598,6 +1633,7 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false } = {})
 
     scrapeStartPending = true;
     const startEpoch = scrapeStartEpoch;
+    let initializedTabId = null;
     try {
         const tab = await queryActiveTab();
         if (!tab || !isGrokSavedUrl(tab.url)) {
@@ -1612,6 +1648,7 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false } = {})
                     : 'Open Grok Imagine Saved before starting sync.'
             };
         }
+        initializedTabId = tab.id;
 
         const initResponse = await sendScrapeInitWithInjection(tab.id, initMessage);
         if (startEpoch !== scrapeStartEpoch) {
@@ -1630,14 +1667,26 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false } = {})
             };
         }
 
+        if (!initResponse.runToken) {
+            await sendMessageToTab(tab.id, { action: backup ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE' }).catch(() => {});
+            return { status: 'error', surface: 'saved_gallery', error: 'Content script returned no run token.' };
+        }
+
         currentTabId = tab.id;
+        await setActiveScrapeRunToken(initResponse.runToken);
         isScraping = true;
         isR2Backup = backup;
         await chrome.storage.local.set({ isScraping: true, isR2Backup: backup });
         return initResponse;
     } catch (error) {
+        if (initializedTabId) {
+            await sendMessageToTab(initializedTabId, {
+                action: backup ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE'
+            }).catch(() => {});
+        }
         isScraping = false;
         isR2Backup = false;
+        await setActiveScrapeRunToken(null).catch(() => {});
         await chrome.storage.local.set({ isScraping: false, isR2Backup: false }).catch(() => {});
         return { status: 'error', surface: 'unsupported', error: error.message || 'Failed to start.' };
     } finally {
@@ -1680,6 +1729,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'STOP_SCRAPE') {
         scrapeStartEpoch++;
         isScraping = false;
+        setActiveScrapeRunToken(null).catch(() => {});
         chrome.storage.local.set({ isScraping: false });
         if (currentTabId) chrome.tabs.sendMessage(currentTabId, { action: 'ABORT_SCRAPE' });
         sendResponse({ status: 'stopped' });
@@ -1709,6 +1759,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         scrapeStartEpoch++;
         isR2Backup = false;
         isScraping = false;
+        setActiveScrapeRunToken(null).catch(() => {});
         chrome.storage.local.set({ isScraping: false, isR2Backup: false });
         if (currentTabId) chrome.tabs.sendMessage(currentTabId, { action: 'ABORT_R2_BACKUP' });
         sendResponse({ status: 'stopped' });
@@ -1765,6 +1816,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'R2_BACKUP_COMPLETE') {
         isR2Backup = false;
         isScraping = false;
+        setActiveScrapeRunToken(null).catch(() => {});
         chrome.storage.local.set({ isScraping: false, isR2Backup: false });
         const stats = request.stats || {};
         const completed = isR2BackupCompletionSuccessful(stats);
@@ -1796,6 +1848,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ valid: true });
         })().catch((e) => {
             sendResponse({ valid: false, error: e.message });
+        });
+        return true;
+    }
+
+    if (request.action === 'VALIDATE_SCRAPE_RESUME') {
+        validateScrapeResume(request.runToken).then((valid) => sendResponse({ valid })).catch(() => {
+            sendResponse({ valid: false });
         });
         return true;
     }
@@ -2051,6 +2110,8 @@ if (typeof module !== 'undefined') {
         isGrokSavedUrl,
         isR2BackupCompletionSuccessful,
         queueChromeDownload,
+        setActiveScrapeRunToken,
+        validateScrapeResume,
         persistQueuedBackupProcessedId,
         persistQueuedBackupProcessedIdAfterSuccess,
         recreateWorkflowController,

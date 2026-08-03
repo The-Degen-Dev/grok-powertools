@@ -12,7 +12,9 @@ function mockContentChrome() {
     global.chrome = {
         runtime: {
             id: 'extension-id',
-            sendMessage: jest.fn(() => Promise.resolve())
+            sendMessage: jest.fn((message) => Promise.resolve(
+                message?.action === 'VALIDATE_SCRAPE_RESUME' ? { valid: true } : undefined
+            ))
         },
         storage: {
             local: {
@@ -146,7 +148,7 @@ describe('Grok scrape start preflight', () => {
 
         const response = await scraper.start();
 
-        expect(response).toEqual({ status: 'started', surface: SCRAPE_SURFACES.savedGallery });
+        expect(response).toEqual({ status: 'started', surface: SCRAPE_SURFACES.savedGallery, runToken: 'run-1' });
         expect(chrome.storage.local.set).toHaveBeenCalledWith({
             scraperState: 'running',
             currentIndex: 0,
@@ -627,8 +629,64 @@ describe('Grok backup resume state', () => {
         expect(scraper.backupOptions).toEqual(stored.scrapeBackupOptions);
         expect(scraper.backupStats).toMatchObject({ totalSeen: 7, uploaded: 5, alreadyPresent: 2 });
         expect(scraper.pendingNavigation).toEqual(stored.scrapeNavigation);
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            action: 'VALIDATE_SCRAPE_RESUME',
+            runToken: 'run-1'
+        });
         expect(scraper.determineModeAndExecute).toHaveBeenCalledWith('run-1');
         expect(scraper.setupListeners).toHaveBeenCalledTimes(1);
+    });
+
+    test('clears a persisted run when the current extension session does not own its token', async () => {
+        const stored = {
+            scraperState: 'running',
+            currentIndex: 2,
+            processedIds: ['existing-id'],
+            scrapeRunToken: 'stale-run',
+            scrapeNavigation: { runToken: 'stale-run', currentItemId: 'gallery-clean-id' },
+            isR2Backup: false
+        };
+        mockContentChrome();
+        chrome.storage.local.get.mockResolvedValue(stored);
+        chrome.runtime.sendMessage.mockResolvedValue({ valid: false });
+        const scraper = Object.create(GrokScraper.prototype);
+        scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
+        scraper.backupMode = false;
+        scraper.backupOptions = { mode: 'full', limit: null, options: {} };
+        scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        scraper.processedIds = new Set();
+        scraper.determineModeAndExecute = jest.fn();
+        scraper.setupListeners = jest.fn();
+        scraper.log = jest.fn();
+
+        await GrokScraper.prototype.init.call(scraper);
+
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
+        expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
+            scraperState: 'idle',
+            isScraping: false,
+            isR2Backup: false,
+            scrapeRunToken: null,
+            scrapeNavigation: null
+        }));
+        expect(scraper.processedIds).toEqual(new Set(['existing-id']));
+    });
+
+    test('normal stop persists every running flag as idle', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+
+        await GrokScraper.prototype.stop.call(scraper, 'complete');
+
+        expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
+            scraperState: 'idle',
+            isScraping: false,
+            isR2Backup: false,
+            scrapeRunToken: null
+        }));
     });
 });
 
@@ -667,7 +725,7 @@ describe('storage stop signals', () => {
 
 function createBackgroundChrome({
     url = 'https://grok.com/imagine/saved',
-    initResponse = { status: 'started', surface: 'saved_gallery' }
+    initResponse = { status: 'started', surface: 'saved_gallery', runToken: 'run-1' }
 } = {}) {
     return {
         alarms: {
@@ -701,6 +759,11 @@ function createBackgroundChrome({
             local: {
                 get: jest.fn(() => Promise.resolve({})),
                 set: jest.fn(() => Promise.resolve())
+            },
+            session: {
+                get: jest.fn(() => Promise.resolve({})),
+                set: jest.fn(() => Promise.resolve()),
+                remove: jest.fn(() => Promise.resolve())
             },
             onChanged: { addListener: jest.fn() }
         },
@@ -755,7 +818,8 @@ describe('background scrape start handshake', () => {
 
         const response = await initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' });
 
-        expect(response).toEqual({ status: 'started', surface: 'saved_gallery' });
+        expect(response).toEqual({ status: 'started', surface: 'saved_gallery', runToken: 'run-1' });
+        expect(chrome.storage.session.set).toHaveBeenCalledWith({ activeScrapeRunToken: 'run-1' });
         expect(chrome.storage.local.set).toHaveBeenCalledWith({ isScraping: true, isR2Backup: false });
     });
 
@@ -770,7 +834,7 @@ describe('background scrape start handshake', () => {
                 chrome.runtime.lastError = null;
                 return;
             }
-            callback({ status: 'started', surface: 'saved_gallery' });
+            callback({ status: 'started', surface: 'saved_gallery', runToken: 'run-1' });
         });
         const { initializeScrapeInActiveTab } = require('../../background.js');
 
@@ -779,6 +843,48 @@ describe('background scrape start handshake', () => {
         expect(response.status).toBe('started');
         expect(chrome.scripting.executeScript).toHaveBeenCalledTimes(1);
         expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(2);
+    });
+
+    test('validates navigation resumes against the extension session token', async () => {
+        global.chrome = createBackgroundChrome();
+        chrome.storage.session.get.mockResolvedValue({ activeScrapeRunToken: 'run-1' });
+        const { validateScrapeResume } = require('../../background.js');
+
+        await expect(validateScrapeResume('run-1')).resolves.toBe(true);
+        await expect(validateScrapeResume('another-run')).resolves.toBe(false);
+        expect(chrome.storage.session.get).toHaveBeenCalledWith(['activeScrapeRunToken']);
+    });
+
+    test('aborts content when background cannot persist the acknowledged run lease', async () => {
+        global.chrome = createBackgroundChrome();
+        chrome.storage.session.set.mockRejectedValue(new Error('Session storage unavailable'));
+        const { initializeScrapeInActiveTab } = require('../../background.js');
+
+        const response = await initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' });
+
+        expect(response).toEqual({
+            status: 'error',
+            surface: 'unsupported',
+            error: 'Session storage unavailable'
+        });
+        expect(chrome.tabs.sendMessage).toHaveBeenNthCalledWith(
+            2,
+            42,
+            { action: 'ABORT_SCRAPE' },
+            expect.any(Function)
+        );
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({ isScraping: false, isR2Backup: false });
+    });
+
+    test('clears the session token when local running state becomes idle', async () => {
+        global.chrome = createBackgroundChrome();
+        require('../../background.js');
+        const storageListener = chrome.storage.onChanged.addListener.mock.calls[0][0];
+
+        storageListener({ scraperState: { newValue: 'idle' } }, 'local');
+        await Promise.resolve();
+
+        expect(chrome.storage.session.remove).toHaveBeenCalledWith('activeScrapeRunToken');
     });
 });
 

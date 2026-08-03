@@ -3557,6 +3557,30 @@ class GrokScraper {
         return true;
     }
 
+    async clearStaleRunState(stopReason = 'stale_session') {
+        const backupState = this.backupMode
+            ? { r2BackupState: { isRunning: false, ...this.backupStats, stopReason } }
+            : {};
+        this._backupStartPending = false;
+        this.backupMode = false;
+        this.state.isRunning = false;
+        this.runToken = null;
+        this.pendingNavigation = null;
+        const result = await safeChromeStorageSet('local', {
+            scraperState: 'idle',
+            currentIndex: 0,
+            scrapeRunToken: null,
+            scrapeNavigation: null,
+            currentItemId: null,
+            scrapeBackupOptions: null,
+            isScraping: false,
+            isR2Backup: false,
+            scrapeStopReason: stopReason,
+            ...backupState
+        }, 'clear stale scrape session');
+        if (result.invalidated) this.handleExtensionContextInvalidated();
+    }
+
     async init() {
         const storedResult = await safeChromeStorageGet('local', [
             'scraperState',
@@ -3590,12 +3614,19 @@ class GrokScraper {
             };
         }
 
-        if (this.state.isRunning && !this.runToken) {
-            this.runToken = this.createRunToken();
-            const tokenResult = await safeChromeStorageSet('local', { scrapeRunToken: this.runToken }, 'repair scrape run token');
-            if (tokenResult.invalidated) {
+        if (this.state.isRunning) {
+            const validationResult = this.runToken
+                ? await safeChromeRuntimeSendMessage({
+                    action: 'VALIDATE_SCRAPE_RESUME',
+                    runToken: this.runToken
+                }, 'validate scrape resume')
+                : { invalidated: false, value: { valid: false } };
+            if (validationResult.invalidated) {
                 this.handleExtensionContextInvalidated();
                 return;
+            }
+            if (!validationResult.value?.valid) {
+                await this.clearStaleRunState('stale_session');
             }
         }
 
@@ -3774,7 +3805,7 @@ class GrokScraper {
         Promise.resolve(this.determineModeAndExecute(runToken)).catch((error) => {
             if (this.isRunActive(runToken)) this.failRun(error.message || 'Sync failed to start.', 'start_failed');
         });
-        return { status: 'started', surface };
+        return { status: 'started', surface, runToken };
     }
 
     async stop(stopReason = 'stopped') {
@@ -3788,6 +3819,7 @@ class GrokScraper {
             scrapeNavigation: null,
             currentItemId: null,
             scrapeBackupOptions: null,
+            isScraping: false,
             isR2Backup: false,
             scrapeStopReason: stopReason
         }, 'stop scrape');
@@ -3860,7 +3892,7 @@ class GrokScraper {
         Promise.resolve(this.determineModeAndExecute(runToken)).catch((error) => {
             if (this.isRunActive(runToken)) this.failRun(error.message || 'R2 Backup failed to start.', 'start_failed');
         });
-        return { status: 'started', surface };
+        return { status: 'started', surface, runToken };
     }
 
     async stopBackupMode(stopReason = 'stopped') {
@@ -3875,6 +3907,7 @@ class GrokScraper {
             scrapeNavigation: null,
             currentItemId: null,
             scrapeBackupOptions: null,
+            isScraping: false,
             isR2Backup: false,
             r2BackupState: { isRunning: false, ...finalStats }
         }, 'stop R2 backup');
