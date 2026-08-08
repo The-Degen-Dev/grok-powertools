@@ -16,6 +16,21 @@ function createSettingsManager(overrides = {}) {
     };
 }
 
+function makeVisible(element, rect = {}) {
+    jest.spyOn(element, 'getBoundingClientRect').mockReturnValue({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 40,
+        bottom: 40,
+        width: 40,
+        height: 40,
+        ...rect
+    });
+    return element;
+}
+
 describe('VideoRetryManager', () => {
     let retryManager;
     let mockOverlay;
@@ -166,6 +181,197 @@ describe('VideoRetryManager', () => {
 
         expect(detailSpy).toHaveBeenCalledWith('detail prompt', 6);
         expect(gallerySpy).not.toHaveBeenCalled();
+    });
+
+    test('selectMakeVideoMode opens the current Make Video menu and chooses Add Prompt', async () => {
+        const queryBar = document.createElement('div');
+        queryBar.className = 'query-bar';
+
+        const editSubmit = makeVisible(document.createElement('button'));
+        editSubmit.setAttribute('aria-label', 'Edit');
+        editSubmit.click = jest.fn();
+        queryBar.appendChild(editSubmit);
+
+        const makeVideoTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        makeVideoTrigger.setAttribute('aria-label', 'Make Video');
+        makeVideoTrigger.setAttribute('aria-haspopup', 'menu');
+        makeVideoTrigger.addEventListener('click', () => {
+            const addPromptItem = makeVisible(document.createElement('div'), { width: 120, right: 120 });
+            addPromptItem.setAttribute('role', 'menuitem');
+            addPromptItem.textContent = 'Add Prompt';
+            addPromptItem.addEventListener('click', () => {
+                editSubmit.remove();
+                const videoSubmit = makeVisible(document.createElement('button'));
+                videoSubmit.setAttribute('aria-label', 'Make video');
+                queryBar.appendChild(videoSubmit);
+                addPromptItem.remove();
+            });
+            document.body.appendChild(addPromptItem);
+        });
+
+        document.body.append(makeVideoTrigger, queryBar);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode()).resolves.toBe(true);
+
+        expect(retryManager.simulateClick).toHaveBeenCalledWith(makeVideoTrigger);
+        expect(retryManager.simulateClick).toHaveBeenCalledWith(expect.objectContaining({ textContent: 'Add Prompt' }));
+        expect(editSubmit.click).not.toHaveBeenCalled();
+    });
+
+    test('prompted video submit never falls back to the Precise Edit submit', () => {
+        const queryBar = document.createElement('div');
+        queryBar.className = 'query-bar';
+        const editSubmit = makeVisible(document.createElement('button'));
+        editSubmit.setAttribute('aria-label', 'Edit');
+        editSubmit.click = jest.fn();
+        queryBar.appendChild(editSubmit);
+        document.body.appendChild(queryBar);
+        retryManager.simulateClick = jest.fn();
+
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        expect(retryManager.simulateClick).not.toHaveBeenCalled();
+        expect(editSubmit.click).not.toHaveBeenCalled();
+    });
+
+    test('prompted detail batch stops before prompt injection when Add Prompt mode does not open', async () => {
+        window.history.pushState({}, '', '/imagine/post/current-ui');
+        retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(false);
+        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
+
+        await retryManager.startPromptedBatchFromDetail('slow camera push in', 1);
+
+        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
+        expect(mockOverlay.setStatus).toHaveBeenCalledWith(expect.stringContaining('Add Prompt'), 'warning');
+        expect(retryManager.goalCount).toBe(0);
+    });
+
+    test('prompted gallery batch returns without counting an item when Add Prompt mode does not open', async () => {
+        window.history.pushState({}, '', '/imagine/post/current-ui');
+        const container = document.createElement('div');
+        const image = document.createElement('img');
+        image.src = 'https://assets.grok.com/example.png';
+        image.scrollIntoView = jest.fn();
+        container.appendChild(image);
+        document.body.appendChild(container);
+
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchPrompt = 'slow camera push in';
+        retryManager.batchProcessedSrcs = new Set();
+        retryManager.goalCount = 0;
+        retryManager.batchIndex = 0;
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(false);
+        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.batchGoBack = jest.fn().mockResolvedValue(true);
+
+        await retryManager.processBatchItemPrompted({ container });
+
+        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.batchGoBack).toHaveBeenCalledTimes(1);
+        expect(retryManager.batchRunning).toBe(false);
+        expect(retryManager.goalCount).toBe(0);
+        expect(retryManager.batchIndex).toBe(0);
+    });
+
+    test('current prompted video completion detects a new ready generated video without retrying', async () => {
+        window.history.pushState({}, '', '/imagine/post/source-image');
+        const queryBar = document.createElement('div');
+        queryBar.className = 'query-bar';
+        const persistentSubmit = makeVisible(document.createElement('button'));
+        persistentSubmit.setAttribute('aria-label', 'Make video');
+        persistentSubmit.click = jest.fn();
+        queryBar.appendChild(persistentSubmit);
+        document.body.appendChild(queryBar);
+
+        const baseline = retryManager.capturePromptedVideoResultBaseline(document);
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.currentRetry = 0;
+        retryManager.preClickButtonCount = 0;
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (document.querySelector('video')) return;
+            window.history.pushState({}, '', '/imagine/post/generated-video');
+            const video = document.createElement('video');
+            video.src = 'https://assets.grok.com/users/example/generated/generated-video/generated_video.mp4';
+            Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+            Object.defineProperty(video, 'duration', { value: 10, configurable: true });
+            document.body.appendChild(video);
+        });
+
+        await expect(retryManager.awaitBatchItemCompletion(document, {
+            labelPrefix: 'Prompted Batch [detail]',
+            videoResultBaseline: baseline
+        })).resolves.toBe('success');
+
+        expect(retryManager.currentRetry).toBe(0);
+        expect(persistentSubmit.click).not.toHaveBeenCalled();
+    });
+
+    test('current prompted video completion never retries from the persistent Make video submit', async () => {
+        window.history.pushState({}, '', '/imagine/post/source-image');
+        const queryBar = document.createElement('div');
+        queryBar.className = 'query-bar';
+        const persistentSubmit = makeVisible(document.createElement('button'));
+        persistentSubmit.setAttribute('aria-label', 'Make video');
+        persistentSubmit.click = jest.fn();
+        queryBar.appendChild(persistentSubmit);
+        document.body.appendChild(queryBar);
+
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.currentRetry = 0;
+        retryManager.preClickButtonCount = 0;
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        jest.spyOn(Date, 'now')
+            .mockReturnValueOnce(0)
+            .mockReturnValue(121000);
+
+        await expect(retryManager.awaitBatchItemCompletion(document, {
+            labelPrefix: 'Prompted Batch [detail]',
+            videoResultBaseline: {
+                pageUrl: window.location.href,
+                postId: 'source-image',
+                completeCount: 0,
+                videoSources: []
+            }
+        })).resolves.toBe('failed');
+
+        expect(retryManager.currentRetry).toBe(0);
+        expect(persistentSubmit.click).not.toHaveBeenCalled();
+    });
+
+    test('prompted detail batch passes the current video result baseline to completion monitoring', async () => {
+        window.history.pushState({}, '', '/imagine/post/source-image');
+        const baseline = {
+            pageUrl: window.location.href,
+            postId: 'source-image',
+            completeCount: 0,
+            videoSources: []
+        };
+        retryManager.selectMakeVideoMode = jest.fn().mockImplementation(async () => {
+            retryManager.promptedVideoModeContract = 'current_menu';
+            return true;
+        });
+        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.capturePromptedVideoResultBaseline = jest.fn().mockReturnValue(baseline);
+        retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
+        retryManager.awaitBatchItemCompletion = jest.fn().mockResolvedValue('success');
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await retryManager.startPromptedBatchFromDetail('slow camera push in', 1);
+
+        expect(retryManager.capturePromptedVideoResultBaseline).toHaveBeenCalledWith(document);
+        expect(retryManager.awaitBatchItemCompletion).toHaveBeenCalledWith(document, {
+            allowRetry: true,
+            labelPrefix: 'Prompted Batch [detail]',
+            videoResultBaseline: baseline
+        });
+        expect(retryManager.goalCount).toBe(1);
     });
 
     test('updateCounters shows gallery label during prompted gallery batch', () => {

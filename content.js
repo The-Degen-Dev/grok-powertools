@@ -2467,12 +2467,78 @@ class VideoRetryManager {
         return img?.src || '';
     }
 
-    // Clicks the Settings dropdown and selects "Make Video" mode so the submit
-    // button sends the prompt with --mode=custom instead of --mode=normal
+    _isVisibleAutomationTarget(element, maxWidth = Infinity) {
+        if (!element || !element.isConnected) return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0 || rect.width > maxWidth) return false;
+        const style = window.getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+    }
+
+    _findPromptedVideoSubmitButton() {
+        const queryBars = Array.from(document.querySelectorAll('.query-bar'));
+        const roots = queryBars.length > 0 ? queryBars : [document];
+
+        for (const root of roots) {
+            for (const label of ['Make video', 'Submit']) {
+                const buttons = Array.from(root.querySelectorAll(`button[aria-label="${label}"]`));
+                const button = buttons.find((candidate) => this._isVisibleAutomationTarget(candidate, 72));
+                if (button) return button;
+            }
+        }
+
+        return null;
+    }
+
+    async _waitForPromptedVideoSubmitButton() {
+        for (let attempt = 0; attempt < 20; attempt++) {
+            const button = this._findPromptedVideoSubmitButton();
+            if (button) return button;
+            await this.sleep(100);
+        }
+        return null;
+    }
+
+    async _waitForAddPromptMenuItem() {
+        for (let attempt = 0; attempt < 20; attempt++) {
+            const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]'));
+            const addPromptItem = menuItems.find((item) =>
+                item.textContent.trim() === 'Add Prompt'
+                && this._isVisibleAutomationTarget(item)
+            );
+            if (addPromptItem) return addPromptItem;
+            await this.sleep(100);
+        }
+        return null;
+    }
+
+    // Opens Grok's custom video prompt mode. The current UI uses
+    // Make Video > Add Prompt; older post pages use a direct mode button.
     async selectMakeVideoMode() {
-        // Click the video camera icon to switch to video mode
-        // On image posts: aria-label="Video" (the mode toggle button)
-        // On some posts: aria-label="Settings" (opens video presets)
+        this.promptedVideoModeContract = null;
+        const currentTriggers = Array.from(document.querySelectorAll(
+            'button[aria-label="Make Video"][aria-haspopup="menu"]'
+        ));
+        const currentTrigger = currentTriggers.find((button) => this._isVisibleAutomationTarget(button));
+
+        if (currentTrigger) {
+            this.simulateClick(currentTrigger);
+            const addPromptItem = await this._waitForAddPromptMenuItem();
+            if (!addPromptItem) {
+                console.log('VideoRetryManager: Add Prompt option not found');
+                return false;
+            }
+
+            this.simulateClick(addPromptItem);
+            const submitButton = await this._waitForPromptedVideoSubmitButton();
+            if (!submitButton) {
+                console.log('VideoRetryManager: Video prompt composer did not open');
+                return false;
+            }
+            this.promptedVideoModeContract = 'current_menu';
+            return true;
+        }
+
         const videoBtn = document.querySelector('button[aria-label="Video"]')
             || document.querySelector('button[aria-label="Settings"]');
         if (!videoBtn) {
@@ -2481,29 +2547,61 @@ class VideoRetryManager {
         }
         this.simulateClick(videoBtn);
         await this.sleep(500);
+        this.promptedVideoModeContract = 'legacy';
         return true;
     }
 
-    // Clicks the submit arrow (↑) in the input bar — NOT the "Make video" action button on the image
-    clickSubmitButton() {
-        // Prefer Edit/Submit (the input bar submit arrow) over "Make video" (the image action button)
-        // "Make video" action button is wide (~134px), submit arrow is small (~40px)
-        for (const label of ['Edit', 'Submit', 'Make video']) {
-            const btns = document.querySelectorAll(`button[aria-label="${label}"]`);
-            for (const btn of btns) {
-                const rect = btn.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0 && rect.width < 60) {
-                    this.simulateClick(btn);
-                    return true;
-                }
-            }
+    // Clicks only a proven video query-bar submit. Never fall back to Edit.
+    clickPromptedVideoSubmitButton() {
+        const button = this._findPromptedVideoSubmitButton();
+        if (!button || button.disabled) return false;
+        this.simulateClick(button);
+        return true;
+    }
+
+    _getImaginePostId(url) {
+        try {
+            const pathname = new URL(url, window.location.origin).pathname;
+            return pathname.match(/^\/imagine\/post\/([^/]+)/)?.[1] || null;
+        } catch {
+            return null;
         }
-        // Fallback: any visible submit-like button
-        for (const label of ['Edit', 'Submit', 'Make video']) {
-            const btn = document.querySelector(`button[aria-label="${label}"]`);
-            if (btn) { const r = btn.getBoundingClientRect(); if (r.width > 0) { this.simulateClick(btn); return true; } }
-        }
-        return false;
+    }
+
+    _getReadyPromptedVideoSources(searchRoot) {
+        return Array.from(searchRoot.querySelectorAll('video'))
+            .filter((video) => video.readyState >= 2)
+            .map((video) => video.currentSrc || video.src || '')
+            .filter(Boolean);
+    }
+
+    capturePromptedVideoResultBaseline(searchRoot) {
+        return {
+            pageUrl: window.location.href,
+            postId: this._getImaginePostId(window.location.href),
+            completeCount: searchRoot.querySelectorAll('button[aria-label="Video Generation Complete"]').length,
+            videoSources: this._getReadyPromptedVideoSources(searchRoot)
+        };
+    }
+
+    _hasNewPromptedVideoResult(searchRoot, baseline) {
+        const baselineSources = new Set(baseline.videoSources || []);
+        const hasNewReadyVideo = this._getReadyPromptedVideoSources(searchRoot)
+            .some((source) => !baselineSources.has(source));
+        if (!hasNewReadyVideo) return false;
+
+        const currentUrl = window.location.href;
+        const currentPostId = this._getImaginePostId(currentUrl);
+        const navigatedToNewPost = !!currentPostId
+            && !!baseline.postId
+            && currentPostId !== baseline.postId;
+        const completionCount = searchRoot.querySelectorAll(
+            'button[aria-label="Video Generation Complete"]'
+        ).length;
+
+        return navigatedToNewPost
+            || currentUrl !== baseline.pageUrl
+            || completionCount > (baseline.completeCount || 0);
     }
 
     // --- Goal Mode ---
@@ -2587,6 +2685,7 @@ class VideoRetryManager {
         this.goalCount = 0;
         this.goalTotal = Math.max(1, galleryLimit);
         this.currentRetry = 0;
+        this.batchFailureMessage = null;
 
         this.batchQueue = this.buildBatchQueue();
         if (this.batchQueue.length === 0) {
@@ -2645,6 +2744,8 @@ class VideoRetryManager {
             this.safeStatus(`Prompted Batch [gallery]: Complete (${this.goalCount}/${this.goalTotal})`, 'success');
         } else if (wasAborted) {
             this.safeStatus(`Prompted Batch [gallery]: Stopped (${this.goalCount}/${this.goalTotal})`, 'neutral');
+        } else if (this.batchFailureMessage) {
+            this.safeStatus(this.batchFailureMessage, 'warning');
         } else {
             this.safeStatus(`Prompted Batch [gallery]: Queue exhausted (${this.goalCount}/${this.goalTotal})`, 'neutral');
         }
@@ -2663,6 +2764,7 @@ class VideoRetryManager {
         this.goalTotal = Math.max(1, videoGoal);
         this.currentRetry = 0;
         this.targetContext = this.findTargetContext();
+        this.batchFailureMessage = null;
 
         if (prompt && this.historyManager && typeof this.historyManager.add === 'function') {
             this.historyManager.add(prompt, 'video');
@@ -2673,16 +2775,30 @@ class VideoRetryManager {
         this.updateBatchButtons(true);
 
         while (this.batchRunning && !this.batchAborted && this.goalCount < this.goalTotal) {
+            let videoResultBaseline = null;
             if (this.batchPrompt) {
-                await this.selectMakeVideoMode();
-                this.injectPromptText(this.batchPrompt);
+                const modeReady = await this.selectMakeVideoMode();
+                if (!modeReady) {
+                    this.batchFailureMessage = 'Prompted Batch [detail]: Could not open Make Video > Add Prompt';
+                    this.safeStatus(this.batchFailureMessage, 'warning');
+                    break;
+                }
+                if (!this.injectPromptText(this.batchPrompt)) {
+                    this.batchFailureMessage = 'Prompted Batch [detail]: Video prompt field not found';
+                    this.safeStatus(this.batchFailureMessage, 'warning');
+                    break;
+                }
                 await this.sleep(500);
+                if (this.promptedVideoModeContract === 'current_menu') {
+                    videoResultBaseline = this.capturePromptedVideoResultBaseline(document);
+                }
             }
 
             this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
-            const submitted = this.clickSubmitButton();
+            const submitted = this.clickPromptedVideoSubmitButton();
             if (!submitted) {
-                this.safeStatus('Prompted Batch [detail]: Submit button not found', 'warning');
+                this.batchFailureMessage = 'Prompted Batch [detail]: Video submit button not ready';
+                this.safeStatus(this.batchFailureMessage, 'warning');
                 break;
             }
             this.lastClickTime = Date.now();
@@ -2690,7 +2806,8 @@ class VideoRetryManager {
 
             const result = await this.awaitBatchItemCompletion(document, {
                 allowRetry: true,
-                labelPrefix: 'Prompted Batch [detail]'
+                labelPrefix: 'Prompted Batch [detail]',
+                videoResultBaseline
             });
 
             if (result === 'success') {
@@ -2717,6 +2834,8 @@ class VideoRetryManager {
             this.safeStatus(`Prompted Batch [detail]: Complete (${this.goalCount}/${this.goalTotal})`, 'success');
         } else if (wasAborted) {
             this.safeStatus(`Prompted Batch [detail]: Stopped (${this.goalCount}/${this.goalTotal})`, 'neutral');
+        } else if (this.batchFailureMessage) {
+            this.safeStatus(this.batchFailureMessage, 'warning');
         } else {
             this.safeStatus(`Prompted Batch [detail]: Stopped (${this.goalCount}/${this.goalTotal})`, 'neutral');
         }
@@ -2844,22 +2963,42 @@ class VideoRetryManager {
 
         // Activate video mode and inject prompt text
         if (this.batchPrompt) {
-            await this.selectMakeVideoMode();
-            this.injectPromptText(this.batchPrompt);
+            const modeReady = await this.selectMakeVideoMode();
+            if (!modeReady) {
+                this.batchFailureMessage = 'Prompted Batch [gallery]: Could not open Make Video > Add Prompt';
+                this.safeStatus(this.batchFailureMessage, 'warning');
+                this.batchRunning = false;
+                await this.batchGoBack();
+                this.targetContext = null;
+                return false;
+            }
+            if (!this.injectPromptText(this.batchPrompt)) {
+                this.batchFailureMessage = 'Prompted Batch [gallery]: Video prompt field not found';
+                this.safeStatus(this.batchFailureMessage, 'warning');
+                this.batchRunning = false;
+                await this.batchGoBack();
+                this.targetContext = null;
+                return false;
+            }
             await this.sleep(500);
         }
 
         // Click the SUBMIT button (the visible up-arrow, not the image action button)
-        const submitted = this.clickSubmitButton();
+        const submitted = this.clickPromptedVideoSubmitButton();
         if (!submitted) {
-            console.log('Prompted Batch [gallery]: Submit button not found in detail view.');
-        } else {
-            this.lastClickTime = Date.now();
-            const submittedSrc = this._getCardImageSrc(item.container);
-            if (submittedSrc) this.batchProcessedSrcs?.add(submittedSrc);
-            console.log(`Prompted Batch [gallery]: Submitted video for item ${this.batchIndex + 1}.`);
-            await this.sleep(1200); // safety wait before navigating back
+            this.batchFailureMessage = 'Prompted Batch [gallery]: Video submit button not ready';
+            this.safeStatus(this.batchFailureMessage, 'warning');
+            this.batchRunning = false;
+            await this.batchGoBack();
+            this.targetContext = null;
+            return false;
         }
+
+        this.lastClickTime = Date.now();
+        const submittedSrc = this._getCardImageSrc(item.container);
+        if (submittedSrc) this.batchProcessedSrcs?.add(submittedSrc);
+        console.log(`Prompted Batch [gallery]: Submitted video for item ${this.batchIndex + 1}.`);
+        await this.sleep(1200); // safety wait before navigating back
 
         const didGoBack = await this.batchGoBack();
         if (!didGoBack) {
@@ -2872,6 +3011,7 @@ class VideoRetryManager {
         this.currentRetry = 0;
         this.updateCounters();
         await this.sleep(1500);
+        return true;
     }
 
     async batchGoBack() {
@@ -2910,6 +3050,19 @@ class VideoRetryManager {
             if (!this.batchRunning) return 'aborted';
 
             const elapsed = Date.now() - startTime;
+
+            if (options.videoResultBaseline) {
+                if (this._hasNewPromptedVideoResult(searchRoot, options.videoResultBaseline)) {
+                    return 'success';
+                }
+                this.safeStatus(`${labelPrefix}: Generating...`, 'info');
+                if (elapsed > TIMEOUT) {
+                    console.log(`${labelPrefix}: Timed out waiting for a new video result.`);
+                    this.safeStatus(`${labelPrefix}: Timed out`, 'warning');
+                    return 'failed';
+                }
+                continue;
+            }
 
             // Check if "Make video" button reappeared (generation done)
             const btnBack = searchRoot.querySelector(this.BUTTON_SELECTOR);
