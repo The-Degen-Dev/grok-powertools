@@ -2364,7 +2364,8 @@ class VideoRetryManager {
 
     // --- Fix 2: Find the card container closest to viewport center ---
     findTargetContext() {
-        const buttons = document.querySelectorAll(this.BUTTON_SELECTOR);
+        const buttons = Array.from(document.querySelectorAll(this.BUTTON_SELECTOR))
+            .filter((button) => findMediaCardRoot(button));
         if (buttons.length === 0) return null;
         if (buttons.length === 1) return findMediaCardRoot(buttons[0]);
 
@@ -2628,6 +2629,13 @@ class VideoRetryManager {
 
         // Scope to the card the user is looking at
         this.targetContext = this.findTargetContext();
+        if (!this.targetContext) {
+            this.goalRunning = false;
+            this.isVerifying = false;
+            this.safeStatus('No generated-image card found', 'warning');
+            this.updateCounters();
+            return;
+        }
 
         const root = this._queryRoot();
         this.baseCompletedCount = root.querySelectorAll(this.PROGRESS_SELECTOR).length;
