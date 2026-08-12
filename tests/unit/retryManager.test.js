@@ -33,6 +33,48 @@ function makeVisible(element, rect = {}) {
     return element;
 }
 
+let promptedVideoFixtureId = 0;
+
+function openLinkedMenu(trigger, menu) {
+    const fixtureId = ++promptedVideoFixtureId;
+    if (!trigger.id) trigger.id = `make-video-trigger-${fixtureId}`;
+    if (!menu.id) menu.id = `make-video-menu-${fixtureId}`;
+    trigger.setAttribute('aria-controls', menu.id);
+    trigger.setAttribute('aria-expanded', 'true');
+    trigger.setAttribute('data-state', 'open');
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-labelledby', trigger.id);
+    menu.setAttribute('data-state', 'open');
+    if (!menu.isConnected) document.body.appendChild(menu);
+    return menu;
+}
+
+function createMenuItem(label, onClick = null) {
+    const item = makeVisible(document.createElement('div'));
+    item.setAttribute('role', 'menuitem');
+    item.textContent = label;
+    if (onClick) item.addEventListener('click', onClick);
+    return item;
+}
+
+function mountFocusedPromptedVideoComposer({ root = null, onSubmit = null } = {}) {
+    const composer = root || document.createElement('div');
+    composer.className = 'query-bar';
+    composer.style.display = '';
+    const input = document.createElement('div');
+    input.setAttribute('contenteditable', 'true');
+    input.setAttribute('role', 'textbox');
+    input.setAttribute('aria-label', 'Ask Grok anything');
+    input.tabIndex = -1;
+    const submit = makeVisible(document.createElement('button'));
+    submit.setAttribute('aria-label', 'Make video');
+    if (onSubmit) submit.addEventListener('click', onSubmit);
+    composer.append(input, submit);
+    if (!composer.isConnected) document.body.appendChild(composer);
+    input.focus();
+    return { composer, input, submit };
+}
+
 function createSavedBatchCard(sourceUrl, onImageClick = null) {
     const card = document.createElement('div');
     card.setAttribute('role', 'listitem');
@@ -96,25 +138,14 @@ function renderAgentEditor({
         makeVideoButton.setAttribute('aria-haspopup', 'menu');
         makeVideoButton.addEventListener('click', () => {
             if (!addPrompt) return;
-            const menuItem = makeVisible(document.createElement('div'));
-            menuItem.setAttribute('role', 'menuitem');
-            menuItem.textContent = 'Add Prompt';
-            menuItem.addEventListener('click', () => {
+            const menu = makeVisible(document.createElement('div'));
+            const menuItem = createMenuItem('Add Prompt', () => {
                 if (!composer) return;
-                const queryBar = document.createElement('div');
-                queryBar.className = 'query-bar';
-                const input = document.createElement('div');
-                input.setAttribute('contenteditable', 'true');
-                input.setAttribute('role', 'textbox');
-                input.setAttribute('aria-label', 'Ask Grok anything');
-                const submit = makeVisible(document.createElement('button'));
-                submit.setAttribute('aria-label', 'Make video');
-                if (onSubmit) submit.addEventListener('click', onSubmit);
-                queryBar.append(input, submit);
-                document.body.appendChild(queryBar);
+                mountFocusedPromptedVideoComposer({ onSubmit });
                 menuItem.remove();
             });
-            document.body.appendChild(menuItem);
+            menu.appendChild(menuItem);
+            openLinkedMenu(makeVideoButton, menu);
         });
     }
     document.body.appendChild(back);
@@ -424,24 +455,13 @@ describe('VideoRetryManager', () => {
             makeVideo.setAttribute('aria-label', 'Make Video');
             makeVideo.setAttribute('aria-haspopup', 'menu');
             makeVideo.addEventListener('click', () => {
-                const addPrompt = makeVisible(document.createElement('div'));
-                addPrompt.setAttribute('role', 'menuitem');
-                addPrompt.textContent = 'Add Prompt';
-                addPrompt.addEventListener('click', () => {
-                    const composer = document.createElement('div');
-                    const input = document.createElement('div');
-                    input.setAttribute('contenteditable', 'true');
-                    input.setAttribute('role', 'textbox');
-                    input.setAttribute('aria-label', 'Ask Grok anything');
-                    const submit = makeVisible(document.createElement('button'));
-                    submit.setAttribute('aria-label', 'Make video');
-                    submit.addEventListener('click', () => { submitted++; });
-                    composer.className = 'query-bar';
-                    composer.append(input, submit);
-                    document.body.appendChild(composer);
+                const menu = makeVisible(document.createElement('div'));
+                const addPrompt = createMenuItem('Add Prompt', () => {
+                    mountFocusedPromptedVideoComposer({ onSubmit: () => { submitted++; } });
                     addPrompt.remove();
                 });
-                document.body.appendChild(addPrompt);
+                menu.appendChild(addPrompt);
+                openLinkedMenu(makeVideo, menu);
             });
             document.body.append(back, makeVideo);
         });
@@ -498,23 +518,12 @@ describe('VideoRetryManager', () => {
                 makeVideo.setAttribute('aria-label', 'Make Video');
                 makeVideo.setAttribute('aria-haspopup', 'menu');
                 makeVideo.addEventListener('click', () => {
-                    const addPrompt = makeVisible(document.createElement('div'));
-                    addPrompt.setAttribute('role', 'menuitem');
-                    addPrompt.textContent = 'Add Prompt';
-                    addPrompt.addEventListener('click', () => {
-                        const queryBar = document.createElement('div');
-                        queryBar.className = 'query-bar';
-                        const input = document.createElement('div');
-                        input.setAttribute('contenteditable', 'true');
-                        input.setAttribute('role', 'textbox');
-                        input.setAttribute('aria-label', 'Ask Grok anything');
-                        const submit = makeVisible(document.createElement('button'));
-                        submit.setAttribute('aria-label', 'Make video');
-                        submit.addEventListener('click', () => { submitted++; });
-                        queryBar.append(input, submit);
-                        document.body.appendChild(queryBar);
+                    const menu = makeVisible(document.createElement('div'));
+                    const addPrompt = createMenuItem('Add Prompt', () => {
+                        mountFocusedPromptedVideoComposer({ onSubmit: () => { submitted++; } });
                     });
-                    document.body.appendChild(addPrompt);
+                    menu.appendChild(addPrompt);
+                    openLinkedMenu(makeVideo, menu);
                 });
                 document.body.appendChild(makeVideo);
             }
@@ -782,16 +791,15 @@ describe('VideoRetryManager', () => {
             makeVideo.setAttribute('aria-label', 'Make Video');
             makeVideo.setAttribute('aria-haspopup', 'menu');
             makeVideo.addEventListener('click', () => {
-                const menuItem = makeVisible(document.createElement('div'));
-                menuItem.setAttribute('role', 'menuitem');
-                menuItem.textContent = 'Add Prompt';
-                menuItem.addEventListener('click', () => retryManager.stopBatch());
-                document.body.appendChild(menuItem);
+                const menu = makeVisible(document.createElement('div'));
+                menu.appendChild(createMenuItem('Add Prompt', () => retryManager.stopBatch()));
+                openLinkedMenu(makeVideo, menu);
             });
             document.body.appendChild(makeVideo);
         });
         const nextClick = addNextCardClickProbe();
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
+        retryManager.sleep = jest.fn().mockResolvedValue();
         retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
@@ -941,21 +949,14 @@ describe('VideoRetryManager', () => {
         makeVideoTrigger.setAttribute('aria-label', 'Make Video');
         makeVideoTrigger.setAttribute('aria-haspopup', 'menu');
         makeVideoTrigger.addEventListener('click', () => {
-            const addPromptItem = makeVisible(document.createElement('div'), { width: 120, right: 120 });
-            addPromptItem.setAttribute('role', 'menuitem');
-            addPromptItem.textContent = 'Add Prompt';
-            addPromptItem.addEventListener('click', () => {
+            const menu = makeVisible(document.createElement('div'));
+            const addPromptItem = createMenuItem('Add Prompt', () => {
                 editSubmit.remove();
-                const input = document.createElement('div');
-                input.setAttribute('contenteditable', 'true');
-                input.setAttribute('role', 'textbox');
-                input.setAttribute('aria-label', 'Ask Grok anything');
-                const videoSubmit = makeVisible(document.createElement('button'));
-                videoSubmit.setAttribute('aria-label', 'Make video');
-                queryBar.append(input, videoSubmit);
+                mountFocusedPromptedVideoComposer({ root: queryBar });
                 addPromptItem.remove();
             });
-            document.body.appendChild(addPromptItem);
+            menu.appendChild(addPromptItem);
+            openLinkedMenu(makeVideoTrigger, menu);
         });
 
         document.body.append(makeVideoTrigger, queryBar);
@@ -969,56 +970,64 @@ describe('VideoRetryManager', () => {
         expect(editSubmit.click).not.toHaveBeenCalled();
     });
 
-    test('selected Make Video trigger ignores retained decoy menu and composer', async () => {
-        const decoyAddPrompt = makeVisible(document.createElement('div'));
-        decoyAddPrompt.setAttribute('role', 'menuitem');
-        decoyAddPrompt.textContent = 'Add Prompt';
+    test('selected linked menu and focused composer ignore remounted retained decoys', async () => {
         let decoyMenuClicks = 0;
-        decoyAddPrompt.addEventListener('click', () => { decoyMenuClicks++; });
-
-        const decoyComposer = document.createElement('div');
-        decoyComposer.className = 'query-bar';
-        const decoyInput = document.createElement('div');
-        decoyInput.setAttribute('contenteditable', 'true');
-        decoyInput.setAttribute('role', 'textbox');
-        decoyInput.setAttribute('aria-label', 'Ask Grok anything');
-        const decoySubmit = makeVisible(document.createElement('button'));
-        decoySubmit.setAttribute('aria-label', 'Make video');
         let decoySubmitClicks = 0;
-        decoySubmit.addEventListener('click', () => { decoySubmitClicks++; });
-        decoyComposer.append(decoyInput, decoySubmit);
+        const decoyInputs = [];
+        let decoyMenu = null;
+        let decoyComposer = null;
+        const mountDecoyMenu = () => {
+            decoyMenu?.remove();
+            decoyMenu = makeVisible(document.createElement('div'));
+            decoyMenu.setAttribute('role', 'menu');
+            decoyMenu.appendChild(createMenuItem('Add Prompt', () => { decoyMenuClicks++; }));
+            document.body.appendChild(decoyMenu);
+        };
+        const mountDecoyComposer = () => {
+            decoyComposer?.remove();
+            decoyComposer = document.createElement('div');
+            decoyComposer.className = 'query-bar';
+            const input = document.createElement('div');
+            input.setAttribute('contenteditable', 'true');
+            input.setAttribute('role', 'textbox');
+            input.setAttribute('aria-label', 'Ask Grok anything');
+            const submit = makeVisible(document.createElement('button'));
+            submit.setAttribute('aria-label', 'Make video');
+            submit.addEventListener('click', () => { decoySubmitClicks++; });
+            decoyComposer.append(input, submit);
+            decoyInputs.push(input);
+            document.body.appendChild(decoyComposer);
+        };
+        mountDecoyMenu();
+        mountDecoyComposer();
 
         const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
         selectedTrigger.setAttribute('aria-label', 'Make Video');
         selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const selectedMenu = makeVisible(document.createElement('div'));
         let selectedTriggerClicks = 0;
         let selectedMenuClicks = 0;
         let selectedSubmitClicks = 0;
         let selectedInput = null;
         selectedTrigger.addEventListener('click', () => {
             selectedTriggerClicks++;
-            const selectedAddPrompt = makeVisible(document.createElement('div'));
-            selectedAddPrompt.setAttribute('role', 'menuitem');
-            selectedAddPrompt.textContent = 'Add Prompt';
-            selectedAddPrompt.addEventListener('click', () => {
-                selectedMenuClicks++;
-                const selectedComposer = document.createElement('div');
-                selectedComposer.className = 'query-bar';
-                selectedInput = document.createElement('div');
-                selectedInput.setAttribute('contenteditable', 'true');
-                selectedInput.setAttribute('role', 'textbox');
-                selectedInput.setAttribute('aria-label', 'Ask Grok anything');
-                const selectedSubmit = makeVisible(document.createElement('button'));
-                selectedSubmit.setAttribute('aria-label', 'Make video');
-                selectedSubmit.addEventListener('click', () => { selectedSubmitClicks++; });
-                selectedComposer.append(selectedInput, selectedSubmit);
-                document.body.appendChild(selectedComposer);
-            });
-            document.body.appendChild(selectedAddPrompt);
+            mountDecoyMenu();
+            openLinkedMenu(selectedTrigger, selectedMenu);
         });
 
-        document.body.append(decoyAddPrompt, decoyComposer, selectedTrigger);
-        retryManager.sleep = jest.fn().mockResolvedValue();
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (selectedMenu.querySelector('[role="menuitem"]')) return;
+            const selectedAddPrompt = createMenuItem('Add Prompt', () => {
+                selectedMenuClicks++;
+                mountDecoyComposer();
+                const selected = mountFocusedPromptedVideoComposer({
+                    onSubmit: () => { selectedSubmitClicks++; }
+                });
+                selectedInput = selected.input;
+            });
+            selectedMenu.appendChild(selectedAddPrompt);
+        });
         retryManager.simulateClick = jest.fn((element) => element.click());
 
         await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(true);
@@ -1026,7 +1035,7 @@ describe('VideoRetryManager', () => {
         expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
 
         expect(decoyMenuClicks).toBe(0);
-        expect(decoyInput.textContent).toBe('');
+        expect(decoyInputs.map((input) => input.textContent)).toEqual(['', '']);
         expect(decoySubmitClicks).toBe(0);
         expect(selectedTriggerClicks).toBe(1);
         expect(selectedMenuClicks).toBe(1);
@@ -1040,14 +1049,12 @@ describe('VideoRetryManager', () => {
         selectedTrigger.setAttribute('aria-haspopup', 'menu');
         const menuClicks = [0, 0];
         selectedTrigger.addEventListener('click', () => {
+            const menu = makeVisible(document.createElement('div'));
             const items = menuClicks.map((_, index) => {
-                const item = makeVisible(document.createElement('div'));
-                item.setAttribute('role', 'menuitem');
-                item.textContent = 'Add Prompt';
-                item.addEventListener('click', () => { menuClicks[index]++; });
-                return item;
+                return createMenuItem('Add Prompt', () => { menuClicks[index]++; });
             });
-            document.body.append(...items);
+            menu.append(...items);
+            openLinkedMenu(selectedTrigger, menu);
         });
         document.body.appendChild(selectedTrigger);
         retryManager.sleep = jest.fn().mockResolvedValue();
@@ -1059,32 +1066,80 @@ describe('VideoRetryManager', () => {
         expect(retryManager.promptedVideoComposerRoot).toBeNull();
     });
 
-    test('current menu mode fails closed when Add Prompt opens multiple new composers', async () => {
+    test('linked menu fails closed when a second exact Add Prompt arrives during confirmation', async () => {
         const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
         selectedTrigger.setAttribute('aria-label', 'Make Video');
         selectedTrigger.setAttribute('aria-haspopup', 'menu');
-        let menuClicks = 0;
+        const menu = makeVisible(document.createElement('div'));
+        const menuClicks = [0, 0];
         selectedTrigger.addEventListener('click', () => {
-            const addPrompt = makeVisible(document.createElement('div'));
-            addPrompt.setAttribute('role', 'menuitem');
-            addPrompt.textContent = 'Add Prompt';
-            addPrompt.addEventListener('click', () => {
-                menuClicks++;
-                const composers = [0, 1].map(() => {
-                    const composer = document.createElement('div');
-                    composer.className = 'query-bar';
-                    const input = document.createElement('div');
-                    input.setAttribute('contenteditable', 'true');
-                    input.setAttribute('role', 'textbox');
-                    input.setAttribute('aria-label', 'Ask Grok anything');
-                    const submit = makeVisible(document.createElement('button'));
-                    submit.setAttribute('aria-label', 'Make video');
-                    composer.append(input, submit);
-                    return composer;
-                });
-                document.body.append(...composers);
+            const first = createMenuItem('Add Prompt', () => {
+                menuClicks[0]++;
+                mountFocusedPromptedVideoComposer();
             });
-            document.body.appendChild(addPrompt);
+            menu.appendChild(first);
+            openLinkedMenu(selectedTrigger, menu);
+        });
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (menu.querySelectorAll('[role="menuitem"]').length > 1) return;
+            menu.appendChild(createMenuItem('Add Prompt', () => { menuClicks[1]++; }));
+        });
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(false);
+
+        expect(retryManager.sleep).toHaveBeenCalled();
+        expect(menuClicks).toEqual([0, 0]);
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+    });
+
+    test('linked menu accepts a pre-existing Add Prompt that becomes visible when opened', async () => {
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        menu.style.display = 'none';
+        let menuClicks = 0;
+        const addPrompt = createMenuItem('Add Prompt', () => {
+            menuClicks++;
+            mountFocusedPromptedVideoComposer();
+        });
+        addPrompt.style.display = 'none';
+        menu.appendChild(addPrompt);
+        document.body.append(menu, selectedTrigger);
+        selectedTrigger.addEventListener('click', () => {
+            menu.style.display = '';
+            addPrompt.style.display = '';
+            openLinkedMenu(selectedTrigger, menu);
+        });
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(true);
+
+        expect(menuClicks).toBe(1);
+        expect(retryManager.promptedVideoComposerRoot).not.toBeNull();
+    });
+
+    test.each([
+        ['missing aria-controls', (trigger) => trigger.removeAttribute('aria-controls')],
+        ['broken aria-controls', (trigger) => trigger.setAttribute('aria-controls', 'missing-menu')],
+        ['missing aria-labelledby', (_trigger, menu) => menu.removeAttribute('aria-labelledby')],
+        ['broken aria-labelledby', (_trigger, menu) => menu.setAttribute('aria-labelledby', 'other-trigger')]
+    ])('current menu mode fails closed for %s', async (_label, breakLink) => {
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let menuClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            menuClicks++;
+            mountFocusedPromptedVideoComposer();
+        }));
+        selectedTrigger.addEventListener('click', () => {
+            openLinkedMenu(selectedTrigger, menu);
+            breakLink(selectedTrigger, menu);
         });
         document.body.appendChild(selectedTrigger);
         retryManager.sleep = jest.fn().mockResolvedValue();
@@ -1092,7 +1147,117 @@ describe('VideoRetryManager', () => {
 
         await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(false);
 
+        expect(menuClicks).toBe(0);
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+    });
+
+    test('focused readiness accepts a pre-existing hidden unverified composer after it becomes ready', async () => {
+        const selectedComposer = document.createElement('div');
+        selectedComposer.className = 'query-bar';
+        selectedComposer.style.display = 'none';
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let menuClicks = 0;
+        let selectedInput = null;
+        let selectedSubmitClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            menuClicks++;
+            const selected = mountFocusedPromptedVideoComposer({
+                root: selectedComposer,
+                onSubmit: () => { selectedSubmitClicks++; }
+            });
+            selectedInput = selected.input;
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.append(selectedComposer, selectedTrigger);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(true);
+        expect(retryManager.injectPromptedVideoText('pre-existing composer prompt')).toBe(true);
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+
         expect(menuClicks).toBe(1);
+        expect(retryManager.promptedVideoComposerRoot).toBe(selectedComposer);
+        expect(selectedInput.textContent).toBe('pre-existing composer prompt');
+        expect(selectedSubmitClicks).toBe(1);
+    });
+
+    test('focused composer fails closed with multiple exact prompted-video inputs', async () => {
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let menuClicks = 0;
+        let submitClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            menuClicks++;
+            const composer = document.createElement('div');
+            composer.className = 'query-bar';
+            const inputs = [0, 1].map(() => {
+                const input = document.createElement('div');
+                input.setAttribute('contenteditable', 'true');
+                input.setAttribute('role', 'textbox');
+                input.setAttribute('aria-label', 'Ask Grok anything');
+                input.tabIndex = -1;
+                return input;
+            });
+            const submit = makeVisible(document.createElement('button'));
+            submit.setAttribute('aria-label', 'Make video');
+            submit.addEventListener('click', () => { submitClicks++; });
+            composer.append(...inputs, submit);
+            document.body.appendChild(composer);
+            inputs[0].focus();
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(false);
+
+        expect(menuClicks).toBe(1);
+        expect(submitClicks).toBe(0);
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+    });
+
+    test('focused composer fails closed with multiple actionable Make video submits', async () => {
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let menuClicks = 0;
+        let submitClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            menuClicks++;
+            const composer = document.createElement('div');
+            composer.className = 'query-bar';
+            const input = document.createElement('div');
+            input.setAttribute('contenteditable', 'true');
+            input.setAttribute('role', 'textbox');
+            input.setAttribute('aria-label', 'Ask Grok anything');
+            input.tabIndex = -1;
+            const submits = [0, 1].map(() => {
+                const submit = makeVisible(document.createElement('button'));
+                submit.setAttribute('aria-label', 'Make video');
+                submit.addEventListener('click', () => { submitClicks++; });
+                return submit;
+            });
+            composer.append(input, ...submits);
+            document.body.appendChild(composer);
+            input.focus();
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(false);
+
+        expect(menuClicks).toBe(1);
+        expect(submitClicks).toBe(0);
         expect(retryManager.promptedVideoComposerRoot).toBeNull();
     });
 
@@ -1117,17 +1282,10 @@ describe('VideoRetryManager', () => {
         let videoSubmitClicks = 0;
         let settingClicks = 0;
         makeVideoTrigger.addEventListener('click', () => {
-            const addPrompt = makeVisible(document.createElement('div'));
-            addPrompt.setAttribute('role', 'menuitem');
-            addPrompt.textContent = 'Add Prompt';
-            addPrompt.addEventListener('click', () => {
+            const menu = makeVisible(document.createElement('div'));
+            const addPrompt = createMenuItem('Add Prompt', () => {
                 menuClicks.addPrompt++;
                 const videoComposer = document.createElement('div');
-                videoComposer.className = 'query-bar';
-                videoEditor = document.createElement('div');
-                videoEditor.setAttribute('contenteditable', 'true');
-                videoEditor.setAttribute('role', 'textbox');
-                videoEditor.setAttribute('aria-label', 'Ask Grok anything');
                 const settings = ['480p', '720p', '1080p', '6s', '10s', '15s', 'Audio']
                     .map((label) => {
                         const setting = makeVisible(document.createElement('button'));
@@ -1135,23 +1293,19 @@ describe('VideoRetryManager', () => {
                         setting.addEventListener('click', () => { settingClicks++; });
                         return setting;
                     });
-                const submit = makeVisible(document.createElement('button'));
-                submit.setAttribute('aria-label', 'Make video');
-                submit.addEventListener('click', () => { videoSubmitClicks++; });
-                videoComposer.append(videoEditor, ...settings, submit);
-                document.body.appendChild(videoComposer);
+                const mounted = mountFocusedPromptedVideoComposer({
+                    root: videoComposer,
+                    onSubmit: () => { videoSubmitClicks++; }
+                });
+                videoEditor = mounted.input;
+                mounted.submit.before(...settings);
                 addPrompt.remove();
             });
 
-            const spicy = makeVisible(document.createElement('div'));
-            spicy.setAttribute('role', 'menuitem');
-            spicy.textContent = 'Spicy';
-            spicy.addEventListener('click', () => { menuClicks.spicy++; });
-            const quickAnimate = makeVisible(document.createElement('div'));
-            quickAnimate.setAttribute('role', 'menuitem');
-            quickAnimate.textContent = 'Quick Animate';
-            quickAnimate.addEventListener('click', () => { menuClicks.quickAnimate++; });
-            document.body.append(addPrompt, spicy, quickAnimate);
+            const spicy = createMenuItem('Spicy', () => { menuClicks.spicy++; });
+            const quickAnimate = createMenuItem('Quick Animate', () => { menuClicks.quickAnimate++; });
+            menu.append(addPrompt, spicy, quickAnimate);
+            openLinkedMenu(makeVideoTrigger, menu);
         });
         document.body.append(preciseEditComposer, makeVideoTrigger);
 
@@ -1260,7 +1414,7 @@ describe('VideoRetryManager', () => {
         document.body.append(disabledComposer, unrelatedSubmit, verifiedComposer);
         retryManager.sleep = jest.fn().mockResolvedValue();
 
-        await expect(retryManager._waitForPromptedVideoSubmitButton()).resolves.toBe(verifiedSubmit);
+        await expect(retryManager._waitForLegacyPromptedVideoSubmitButton()).resolves.toBe(verifiedSubmit);
         expect(retryManager.promptedVideoComposerRoot).toBe(verifiedComposer);
         expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
         expect(verifiedSubmitClicks).toBe(1);

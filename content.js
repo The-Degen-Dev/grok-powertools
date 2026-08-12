@@ -2557,14 +2557,18 @@ class VideoRetryManager {
     _getVerifiedPromptedVideoComposer(root) {
         if (!root?.isConnected || !root.matches('.query-bar')) return null;
 
-        const input = Array.from(root.querySelectorAll(
+        const inputs = Array.from(root.querySelectorAll(
             'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]'
-        )).find((candidate) => candidate.closest('.query-bar') === root) || null;
-        const submitButton = Array.from(root.querySelectorAll('button[aria-label="Make video"]'))
-            .find((candidate) => candidate.closest('.query-bar') === root
-                && this._isActionableAutomationTarget(candidate, 72)) || null;
+        )).filter((candidate) => candidate.closest('.query-bar') === root);
+        if (inputs.length !== 1) return null;
 
-        return input && submitButton ? { root, input, submitButton } : null;
+        const input = inputs[0];
+        const submitButtons = Array.from(root.querySelectorAll('button[aria-label="Make video"]'))
+            .filter((candidate) => candidate.closest('.query-bar') === root
+                && this._isActionableAutomationTarget(candidate, 72));
+        if (submitButtons.length !== 1) return null;
+
+        return { root, input, submitButton: submitButtons[0] };
     }
 
     _findPromptedVideoSubmitButton() {
@@ -2577,13 +2581,10 @@ class VideoRetryManager {
             .filter(Boolean);
     }
 
-    async _waitForPromptedVideoSubmitButton(runToken, existingRoots = null) {
+    async _waitForLegacyPromptedVideoSubmitButton(runToken) {
         for (let attempt = 0; attempt < 20; attempt++) {
             if (!this.isPromptedBatchTokenActive(runToken)) return null;
-            const composers = this._getVerifiedPromptedVideoComposers()
-                .filter((composer) => !existingRoots || !existingRoots.has(composer.root));
-            if (existingRoots && composers.length > 1) return null;
-            const composer = composers[0];
+            const composer = this._getVerifiedPromptedVideoComposers()[0];
             if (composer) {
                 this.promptedVideoComposerRoot = composer.root;
                 return composer.submitButton;
@@ -2593,26 +2594,69 @@ class VideoRetryManager {
         return null;
     }
 
-    async _waitForPromptedVideoComposer(runToken, existingRoots = null) {
-        const submitButton = await this._waitForPromptedVideoSubmitButton(runToken, existingRoots);
+    async _waitForLegacyPromptedVideoComposer(runToken) {
+        const submitButton = await this._waitForLegacyPromptedVideoSubmitButton(runToken);
         const composer = this._getVerifiedPromptedVideoComposer(this.promptedVideoComposerRoot);
         return submitButton && composer ? composer : null;
     }
 
-    _getVisibleAddPromptMenuItems() {
-        return Array.from(document.querySelectorAll('[role="menuitem"]'))
-            .filter((item) => item.textContent.trim() === 'Add Prompt'
+    _getOpenLinkedMakeVideoMenus(trigger) {
+        const triggerId = trigger?.id;
+        const menuId = trigger?.getAttribute('aria-controls');
+        if (!triggerId || !menuId
+            || trigger.getAttribute('aria-expanded') !== 'true'
+            || trigger.getAttribute('data-state') !== 'open') {
+            return [];
+        }
+
+        return Array.from(document.querySelectorAll('[role="menu"]'))
+            .filter((menu) => menu.id === menuId
+                && menu.getAttribute('aria-labelledby') === triggerId
+                && menu.getAttribute('data-state') === 'open'
+                && this._isVisibleAutomationTarget(menu));
+    }
+
+    _getExactAddPromptItems(menu) {
+        return Array.from(menu.querySelectorAll('[role="menuitem"]'))
+            .filter((item) => item.closest('[role="menu"]') === menu
+                && item.textContent.trim() === 'Add Prompt'
                 && this._isVisibleAutomationTarget(item));
     }
 
-    async _waitForAddPromptMenuItem(runToken, existingItems = null) {
+    async _waitForLinkedAddPromptMenuItem(trigger, runToken) {
         for (let attempt = 0; attempt < 20; attempt++) {
             if (!this.isPromptedBatchTokenActive(runToken)) return null;
-            const items = this._getVisibleAddPromptMenuItems()
-                .filter((item) => !existingItems || !existingItems.has(item));
-            if (existingItems && items.length > 1) return null;
+            const menus = this._getOpenLinkedMakeVideoMenus(trigger);
+            if (menus.length > 1) return null;
+            const items = menus.length === 1 ? this._getExactAddPromptItems(menus[0]) : [];
+            if (items.length > 1) return null;
             const addPromptItem = items[0];
-            if (addPromptItem) return addPromptItem;
+            if (addPromptItem) {
+                await this.sleep(100);
+                if (!this.isPromptedBatchTokenActive(runToken)) return null;
+                const confirmedMenus = this._getOpenLinkedMakeVideoMenus(trigger);
+                if (confirmedMenus.length !== 1) return null;
+                const confirmedItems = this._getExactAddPromptItems(confirmedMenus[0]);
+                return confirmedItems.length === 1 ? confirmedItems[0] : null;
+            }
+            await this.sleep(100);
+        }
+        return null;
+    }
+
+    async _waitForFocusedPromptedVideoComposer(runToken) {
+        for (let attempt = 0; attempt < 20; attempt++) {
+            if (!this.isPromptedBatchTokenActive(runToken)) return null;
+            const input = document.activeElement;
+            if (input?.matches(
+                'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]'
+            )) {
+                const composer = this._getVerifiedPromptedVideoComposer(input.closest('.query-bar'));
+                if (composer?.input === input) {
+                    this.promptedVideoComposerRoot = composer.root;
+                    return composer;
+                }
+            }
             await this.sleep(100);
         }
         return null;
@@ -2629,21 +2673,17 @@ class VideoRetryManager {
             : this._findCurrentMakeVideoTrigger();
 
         if (currentTrigger) {
-            const existingAddPromptItems = new Set(this._getVisibleAddPromptMenuItems());
             if (!this.isPromptedBatchTokenActive(runToken)) return false;
             this.simulateClick(currentTrigger);
-            const addPromptItem = await this._waitForAddPromptMenuItem(runToken, existingAddPromptItems);
+            const addPromptItem = await this._waitForLinkedAddPromptMenuItem(currentTrigger, runToken);
             if (!addPromptItem) {
                 console.log('VideoRetryManager: Add Prompt option not found');
                 return false;
             }
 
-            const existingComposerRoots = new Set(
-                this._getVerifiedPromptedVideoComposers().map((composer) => composer.root)
-            );
             if (!this.isPromptedBatchTokenActive(runToken)) return false;
             this.simulateClick(addPromptItem);
-            const composer = await this._waitForPromptedVideoComposer(runToken, existingComposerRoots);
+            const composer = await this._waitForFocusedPromptedVideoComposer(runToken);
             if (!composer) {
                 console.log('VideoRetryManager: Video prompt composer did not open');
                 return false;
@@ -2662,7 +2702,7 @@ class VideoRetryManager {
         }
         if (!this.isPromptedBatchTokenActive(runToken)) return false;
         this.simulateClick(videoBtn);
-        const composer = await this._waitForPromptedVideoComposer(runToken);
+        const composer = await this._waitForLegacyPromptedVideoComposer(runToken);
         if (!composer) {
             console.log('VideoRetryManager: Legacy video prompt composer did not open');
             return false;
