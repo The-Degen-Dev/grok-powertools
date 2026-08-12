@@ -158,6 +158,48 @@ describe('VideoRetryManager', () => {
         expect(retryManager.detectBatchContext()).toBe('gallery');
     });
 
+    test('targets a generated-image list item instead of an unrelated menu list item', () => {
+        const menuItem = document.createElement('div');
+        menuItem.setAttribute('role', 'listitem');
+        const menuImage = document.createElement('img');
+        menuImage.alt = 'Menu preview';
+        menuImage.src = 'https://assets.grok.com/menu-preview.jpg';
+        const menuMakeVideo = makeVisible(document.createElement('button'), { top: 40 });
+        menuMakeVideo.setAttribute('aria-label', 'Make video');
+        menuMakeVideo.click = jest.fn();
+        menuItem.append(menuImage, menuMakeVideo);
+
+        const card = document.createElement('div');
+        card.setAttribute('role', 'listitem');
+        const image = document.createElement('img');
+        image.alt = 'Generated image';
+        image.src = 'https://assets.grok.com/users/example/generated/media-1/image.jpg';
+        const makeVideo = makeVisible(document.createElement('button'), { top: 380 });
+        makeVideo.setAttribute('aria-label', 'Make video');
+        makeVideo.click = jest.fn();
+        const progress = document.createElement('button');
+        progress.setAttribute('aria-label', 'Video Options');
+        card.append(image, makeVideo, progress);
+        document.body.append(menuItem, card);
+
+        retryManager.targetContext = retryManager.findTargetContext();
+
+        expect(retryManager.targetContext).toBe(card);
+        expect(retryManager._queryRoot().querySelector('img')).toBe(image);
+        expect(retryManager._queryRoot().querySelector(retryManager.PROGRESS_SELECTOR)).toBe(progress);
+        retryManager.clickMakeVideo();
+        expect(makeVideo.click).toHaveBeenCalledTimes(1);
+        expect(menuMakeVideo.click).not.toHaveBeenCalled();
+
+        progress.remove();
+        expect(retryManager.buildBatchQueue()).toEqual([
+            expect.objectContaining({ button: makeVideo, container: card })
+        ]);
+
+        card.remove();
+        expect(retryManager.findTargetContext()).toBeNull();
+    });
+
     test('startBatch(prompted) routes to gallery flow on gallery context', async () => {
         const card = document.createElement('div');
         card.className = 'media-post-masonry-card';

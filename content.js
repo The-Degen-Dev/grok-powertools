@@ -400,6 +400,12 @@ function findMatchingAgentMedia(root = document, expectedIdentity = '') {
     return { status: 'missing', media: null, sourceUrl: '' };
 }
 
+function findMediaCardRoot(element) {
+    const listItem = element?.closest?.('[role="listitem"]');
+    if (listItem?.querySelector('img[alt="Generated image"]')) return listItem;
+    return element?.closest?.('[class*="media-post-masonry-card"]') || null;
+}
+
 function isSuccessfulMediaTransferStatus(status) {
     return status === 'queued'
         || status === 'cloud_queued'
@@ -2360,7 +2366,7 @@ class VideoRetryManager {
     findTargetContext() {
         const buttons = document.querySelectorAll(this.BUTTON_SELECTOR);
         if (buttons.length === 0) return null;
-        if (buttons.length === 1) return buttons[0].closest(this.CARD_SELECTOR) || buttons[0].parentElement;
+        if (buttons.length === 1) return findMediaCardRoot(buttons[0]);
 
         const viewportCenterY = window.innerHeight / 2;
         let bestBtn = null;
@@ -2373,7 +2379,7 @@ class VideoRetryManager {
                 bestBtn = btn;
             }
         }
-        return bestBtn.closest(this.CARD_SELECTOR) || bestBtn.parentElement;
+        return findMediaCardRoot(bestBtn);
     }
 
     // Scoped query helper: search within targetContext if available, else document
@@ -2864,10 +2870,11 @@ class VideoRetryManager {
     buildBatchQueue() {
         const buttons = Array.from(document.querySelectorAll(this.BUTTON_SELECTOR));
         const items = buttons.map(btn => {
-            const container = btn.closest(this.CARD_SELECTOR) || btn.parentElement;
+            const container = findMediaCardRoot(btn);
+            if (!container) return null;
             const rect = container.getBoundingClientRect();
             return { button: btn, container, top: rect.top + window.scrollY, left: rect.left + window.scrollX };
-        });
+        }).filter(Boolean);
         // Sort visually: top-to-bottom, left-to-right (20px row tolerance)
         items.sort((a, b) => {
             if (Math.abs(a.top - b.top) > 20) return a.top - b.top;
