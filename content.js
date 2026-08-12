@@ -2299,6 +2299,10 @@ class GrokOverlay {
     }
 }
 
+const PROMPTED_VIDEO_FOCUS_POLL_MS = 100;
+const PROMPTED_VIDEO_FOCUS_WAIT_ATTEMPTS = 20;
+const PROMPTED_VIDEO_FOCUS_QUIESCENCE_MS = 500;
+
 class VideoRetryManager {
     constructor(overlay, settingsManager, historyManager) {
         this.overlay = overlay;
@@ -2656,12 +2660,49 @@ class VideoRetryManager {
             || !input?.matches(
                 'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]'
             )) {
+            if (focusTransition.candidateRoot) focusTransition.focusLeftCandidate = true;
             return null;
         }
 
         const composer = this._getVerifiedPromptedVideoComposer(root);
-        if (composer?.input !== input) return null;
+        if (composer?.input !== input) {
+            if (focusTransition.candidateRoot) {
+                if (root === focusTransition.candidateRoot) {
+                    focusTransition.cardinalityDrifted = true;
+                } else {
+                    focusTransition.focusLeftCandidate = true;
+                }
+            }
+            return null;
+        }
         focusTransition.observedRoots.add(composer.root);
+        if (!focusTransition.candidateRoot) {
+            focusTransition.candidateRoot = composer.root;
+            focusTransition.candidateInput = composer.input;
+            focusTransition.observer = new MutationObserver(() => {
+                const verified = this._getVerifiedPromptedVideoComposer(
+                    focusTransition.candidateRoot
+                );
+                if (!verified || verified.input !== focusTransition.candidateInput) {
+                    focusTransition.cardinalityDrifted = true;
+                }
+            });
+            focusTransition.observer.observe(composer.root, {
+                attributes: true,
+                childList: true,
+                subtree: true,
+                attributeFilter: [
+                    'aria-disabled',
+                    'aria-label',
+                    'class',
+                    'contenteditable',
+                    'disabled',
+                    'hidden',
+                    'role',
+                    'style'
+                ]
+            });
+        }
         return composer;
     }
 
@@ -2672,45 +2713,89 @@ class VideoRetryManager {
             root: activeElement?.closest?.('.query-bar') || null,
             focusTransitioned: false,
             observedRoots: new Set(),
-            listener: null
+            candidateRoot: null,
+            candidateInput: null,
+            focusLeftCandidate: false,
+            cardinalityDrifted: false,
+            listener: null,
+            focusOutListener: null,
+            observer: null
         };
         focusTransition.listener = (event) => {
             this._recordPromptedVideoFocus(focusTransition, event.target);
         };
+        focusTransition.focusOutListener = (event) => {
+            if (focusTransition.candidateInput === event.target) {
+                focusTransition.focusLeftCandidate = true;
+            }
+        };
         document.addEventListener('focusin', focusTransition.listener, true);
+        document.addEventListener('focusout', focusTransition.focusOutListener, true);
         return focusTransition;
     }
 
     _stopPromptedVideoFocusTransition(focusTransition) {
         document.removeEventListener('focusin', focusTransition.listener, true);
+        document.removeEventListener('focusout', focusTransition.focusOutListener, true);
+        focusTransition.observer?.disconnect();
+    }
+
+    _isPromptedVideoFocusTransitionInvalid(focusTransition) {
+        return focusTransition.observedRoots.size !== 1
+            || focusTransition.focusLeftCandidate
+            || focusTransition.cardinalityDrifted;
     }
 
     async _waitForFocusedPromptedVideoComposer(runToken, focusTransition) {
-        let confirmationRoot = null;
-        for (let attempt = 0; attempt < 20; attempt++) {
+        for (let attempt = 0; attempt < PROMPTED_VIDEO_FOCUS_WAIT_ATTEMPTS; attempt++) {
             if (!this.isPromptedBatchTokenActive(runToken)) return null;
             const composer = this._recordPromptedVideoFocus(
                 focusTransition,
                 document.activeElement
             );
             if (focusTransition.observedRoots.size > 1) return null;
-
-            if (composer) {
-                if (confirmationRoot === composer.root) {
-                    const confirmed = this._getVerifiedPromptedVideoComposer(composer.root);
-                    if (focusTransition.observedRoots.size === 1
-                        && confirmed?.input === document.activeElement) {
-                        this.promptedVideoComposerRoot = confirmed.root;
-                        return confirmed;
-                    }
-                }
-                confirmationRoot = composer.root;
-            } else {
-                confirmationRoot = null;
+            if (focusTransition.candidateRoot
+                && this._isPromptedVideoFocusTransitionInvalid(focusTransition)) {
+                return null;
             }
-            await this.sleep(100);
+            if (composer?.root === focusTransition.candidateRoot) break;
+            await this.sleep(PROMPTED_VIDEO_FOCUS_POLL_MS);
         }
-        return null;
+
+        if (!focusTransition.candidateRoot
+            || this._isPromptedVideoFocusTransitionInvalid(focusTransition)) {
+            return null;
+        }
+
+        const quiescencePolls = Math.ceil(
+            PROMPTED_VIDEO_FOCUS_QUIESCENCE_MS / PROMPTED_VIDEO_FOCUS_POLL_MS
+        );
+        for (let poll = 0; poll < quiescencePolls; poll++) {
+            if (!this.isPromptedBatchTokenActive(runToken)) return null;
+            const composer = this._recordPromptedVideoFocus(
+                focusTransition,
+                document.activeElement
+            );
+            if (this._isPromptedVideoFocusTransitionInvalid(focusTransition)
+                || composer?.root !== focusTransition.candidateRoot) {
+                return null;
+            }
+            await this.sleep(PROMPTED_VIDEO_FOCUS_POLL_MS);
+        }
+
+        if (!this.isPromptedBatchTokenActive(runToken)) return null;
+        const confirmed = this._recordPromptedVideoFocus(
+            focusTransition,
+            document.activeElement
+        );
+        if (this._isPromptedVideoFocusTransitionInvalid(focusTransition)
+            || confirmed?.root !== focusTransition.candidateRoot
+            || confirmed.input !== document.activeElement) {
+            return null;
+        }
+
+        this.promptedVideoComposerRoot = confirmed.root;
+        return confirmed;
     }
 
     // Opens Grok's custom video prompt mode. The current UI uses

@@ -1138,6 +1138,68 @@ describe('VideoRetryManager', () => {
         expect(retryManager.promptedVideoComposerRoot).toBeNull();
     });
 
+    test('late competing focus during bounded quiescence fails closed without write or submit', async () => {
+        const lateDecoyComposer = document.createElement('div');
+        lateDecoyComposer.className = 'query-bar';
+        const lateDecoyInput = document.createElement('div');
+        lateDecoyInput.setAttribute('contenteditable', 'true');
+        lateDecoyInput.setAttribute('role', 'textbox');
+        lateDecoyInput.setAttribute('aria-label', 'Ask Grok anything');
+        lateDecoyInput.tabIndex = -1;
+        const lateDecoySubmit = makeVisible(document.createElement('button'));
+        lateDecoySubmit.setAttribute('aria-label', 'Make video');
+        let lateDecoySubmitClicks = 0;
+        lateDecoySubmit.addEventListener('click', () => { lateDecoySubmitClicks++; });
+        lateDecoyComposer.append(lateDecoyInput, lateDecoySubmit);
+
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let addPromptClicked = false;
+        let focusConfirmationSleeps = 0;
+        let selectedInput = null;
+        let selectedSubmitClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            addPromptClicked = true;
+            const selectedComposer = document.createElement('div');
+            selectedComposer.className = 'query-bar';
+            selectedInput = document.createElement('div');
+            selectedInput.setAttribute('contenteditable', 'true');
+            selectedInput.setAttribute('role', 'textbox');
+            selectedInput.setAttribute('aria-label', 'Ask Grok anything');
+            selectedInput.tabIndex = -1;
+            const selectedSubmit = makeVisible(document.createElement('button'));
+            selectedSubmit.setAttribute('aria-label', 'Make video');
+            selectedSubmit.addEventListener('click', () => { selectedSubmitClicks++; });
+            selectedComposer.append(selectedInput, selectedSubmit);
+            document.body.appendChild(selectedComposer);
+            selectedInput.focus();
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.append(lateDecoyComposer, selectedTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (!addPromptClicked) return;
+            focusConfirmationSleeps++;
+            if (focusConfirmationSleeps === 2) lateDecoyInput.focus();
+        });
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        const selected = await retryManager.selectMakeVideoMode(undefined, selectedTrigger);
+        if (selected) {
+            retryManager.injectPromptedVideoText('must not survive late focus');
+            retryManager.clickPromptedVideoSubmitButton();
+        }
+
+        expect(selected).toBe(false);
+        expect(focusConfirmationSleeps).toBeGreaterThanOrEqual(2);
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+        expect(selectedInput.textContent).toBe('');
+        expect(selectedSubmitClicks).toBe(0);
+        expect(lateDecoyInput.textContent).toBe('');
+        expect(lateDecoySubmitClicks).toBe(0);
+    });
+
     test('Stop during focus confirmation prevents retention, prompt write, and submit', async () => {
         window.history.pushState({}, '', '/imagine/agent/focus-stop?conversation=focus-stop');
         const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
@@ -1159,6 +1221,7 @@ describe('VideoRetryManager', () => {
         });
         const injectSpy = jest.spyOn(retryManager, 'injectPromptedVideoText');
         const submitSpy = jest.spyOn(retryManager, 'clickPromptedVideoSubmitButton');
+        const recordFocusSpy = jest.spyOn(retryManager, '_recordPromptedVideoFocus');
 
         await retryManager.startPromptedBatchFromDetail('cancel during focus confirmation', 1);
 
@@ -1167,6 +1230,18 @@ describe('VideoRetryManager', () => {
         expect(submitSpy).not.toHaveBeenCalled();
         expect(retryManager.promptedVideoComposerRoot).toBeNull();
         expect(retryManager.goalCount).toBe(0);
+
+        recordFocusSpy.mockClear();
+        let lateSubmitClicks = 0;
+        const lateComposer = mountFocusedPromptedVideoComposer({
+            onSubmit: () => { lateSubmitClicks++; }
+        });
+
+        expect(recordFocusSpy).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText('must remain blocked after Stop')).toBe(false);
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        expect(lateComposer.input.textContent).toBe('');
+        expect(lateSubmitClicks).toBe(0);
     });
 
     test('current menu mode fails closed when the selected trigger opens multiple new Add Prompt items', async () => {
