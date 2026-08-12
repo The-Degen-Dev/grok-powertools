@@ -363,11 +363,18 @@ function detectGrokScrapeSurface(root = document, locationValue = window.locatio
 }
 
 function getGrokMediaIdentity(value) {
-    const text = String(value || '');
-    const uuid = text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
-    if (uuid) return uuid[0].toLowerCase();
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+    const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    const bareUuid = text.match(new RegExp(`^${uuidPattern.source}$`, 'i'));
+    if (bareUuid) return bareUuid[0].toLowerCase();
     try {
         const url = new URL(text, 'https://grok.com');
+        const generatedSegment = url.pathname.match(/\/generated\/([^/]+)/i)?.[1] || '';
+        const generatedUuid = generatedSegment.match(uuidPattern);
+        if (generatedUuid) return generatedUuid[0].toLowerCase();
+        const pathnameUuids = url.pathname.match(new RegExp(uuidPattern.source, 'gi'));
+        if (pathnameUuids?.length) return pathnameUuids[pathnameUuids.length - 1].toLowerCase();
         return `${url.origin}${url.pathname}`;
     } catch {
         return text.split('?')[0];

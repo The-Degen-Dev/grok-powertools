@@ -70,6 +70,37 @@ describe('Grok scrape surface detection', () => {
     });
 });
 
+describe('Grok media identity', () => {
+    test('uses the generated media UUID instead of the account UUID', () => {
+        const accountId = '11111111-1111-4111-8111-111111111111';
+        const firstAssetId = '22222222-2222-4222-8222-222222222222';
+        const secondAssetId = '33333333-3333-4333-8333-333333333333';
+        const firstSavedUrl = `https://assets.grok.com/users/${accountId}/generated/${firstAssetId}/image.jpg?cache=1`;
+        const firstAgentUrl = `https://assets.grok.com/users/${accountId}/generated/${firstAssetId}/preview_image.jpg?cache=2`;
+        const secondAgentUrl = `https://assets.grok.com/users/${accountId}/generated/${secondAssetId}/preview_image.jpg`;
+
+        expect(getGrokMediaIdentity(firstSavedUrl)).toBe(firstAssetId);
+        expect(getGrokMediaIdentity(firstAgentUrl)).toBe(firstAssetId);
+        expect(getGrokMediaIdentity(secondAgentUrl)).toBe(secondAssetId);
+        expect(getGrokMediaIdentity(firstAgentUrl)).not.toBe(getGrokMediaIdentity(secondAgentUrl));
+    });
+
+    test('ignores query and hash UUIDs, preserves bare and legacy UUIDs, and normalizes UUID-free paths', () => {
+        const accountId = '11111111-1111-4111-8111-111111111111';
+        const firstAssetId = '22222222-2222-4222-8222-222222222222';
+
+        expect(getGrokMediaIdentity(
+            `https://assets.grok.com/users/${accountId}/generated/${firstAssetId}/image.jpg?media=33333333-3333-4333-8333-333333333333#cache=44444444-4444-4444-8444-444444444444`
+        )).toBe(firstAssetId);
+        expect(getGrokMediaIdentity(firstAssetId)).toBe(firstAssetId);
+        expect(getGrokMediaIdentity(`https://assets.grok.com/users/u/${firstAssetId}/content`)).toBe(firstAssetId);
+        expect(getGrokMediaIdentity(
+            'https://assets.grok.com/generated/image.jpg?media=33333333-3333-4333-8333-333333333333#cache=44444444-4444-4444-8444-444444444444'
+        )).toBe('https://assets.grok.com/generated/image.jpg');
+        expect(getGrokMediaIdentity('   ')).toBe('');
+    });
+});
+
 describe('Grok Agent Mode media matching', () => {
     afterEach(() => {
         document.body.textContent = '';
@@ -117,6 +148,36 @@ describe('Grok Agent Mode media matching', () => {
 
         expect(result.status).toBe('matched');
         expect(result.media).toBe(document.getElementById('video'));
+    });
+
+    test('matches only the Agent node with the selected generated media UUID', () => {
+        const accountId = '11111111-1111-4111-8111-111111111111';
+        const firstAssetId = '22222222-2222-4222-8222-222222222222';
+        const secondAssetId = '33333333-3333-4333-8333-333333333333';
+        const firstSavedUrl = `https://assets.grok.com/users/${accountId}/generated/${firstAssetId}/image.jpg?cache=1`;
+        const firstAgentUrl = `https://assets.grok.com/users/${accountId}/generated/${firstAssetId}/preview_image.jpg?cache=2`;
+        const secondAgentUrl = `https://assets.grok.com/users/${accountId}/generated/${secondAssetId}/preview_image.jpg`;
+        document.body.innerHTML = `
+            <div class="react-flow__node-asset"><img id="first" src="${firstAgentUrl}"></div>
+            <div class="react-flow__node-asset"><img id="second" src="${secondAgentUrl}"></div>
+        `;
+
+        const result = findMatchingAgentMedia(document, firstSavedUrl);
+
+        expect(result.status).toBe('matched');
+        expect(result.media).toBe(document.getElementById('first'));
+    });
+
+    test('fails closed when two Agent nodes share the same generated media UUID', () => {
+        const accountId = '11111111-1111-4111-8111-111111111111';
+        const firstAssetId = '22222222-2222-4222-8222-222222222222';
+        const firstAgentUrl = `https://assets.grok.com/users/${accountId}/generated/${firstAssetId}/preview_image.jpg?cache=2`;
+        document.body.innerHTML = `
+            <div class="react-flow__node-asset"><img src="${firstAgentUrl}"></div>
+            <div class="react-flow__node-asset"><img src="https://assets.grok.com/users/${accountId}/generated/${firstAssetId}/image.jpg"></div>
+        `;
+
+        expect(findMatchingAgentMedia(document, firstAgentUrl).status).toBe('ambiguous');
     });
 });
 
