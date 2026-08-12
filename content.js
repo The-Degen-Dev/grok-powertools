@@ -2307,7 +2307,6 @@ class VideoRetryManager {
         this.historyManager = historyManager;
         this.BUTTON_SELECTOR = 'button[aria-label="Make video"]';
         this.PROGRESS_SELECTOR = 'button[aria-label="Video Options"]';
-        this.CARD_SELECTOR = '[class*="media-post-masonry-card"]';
         this.currentRetry = 0;
         this.lastClickTime = 0;
         this.goalRunning = false;
@@ -2335,6 +2334,7 @@ class VideoRetryManager {
         this.batchPrompt = null;     // Prompt text for prompted mode
         this.scrollAttempts = 0;
         this.batchContext = null;    // 'gallery' or 'detail'
+        this.batchRunToken = null;
 
         // Quality Repeat state
         this.qualityRepeatRunning = false;
@@ -2389,22 +2389,25 @@ class VideoRetryManager {
     }
 
     detectBatchContext() {
-        if (/\/imagine\/post\//.test(window.location.pathname)) {
-            return 'detail';
-        }
+        const surface = detectGrokScrapeSurface(document, window.location);
+        if (surface === SCRAPE_SURFACES.savedGallery) return 'gallery';
+        if (surface === SCRAPE_SURFACES.agentMedia || surface === SCRAPE_SURFACES.legacyDetail) return 'detail';
+        return 'unsupported';
+    }
 
-        const galleryCard = document.querySelector(this.CARD_SELECTOR)
-            || document.querySelector('[data-testid*="media-post"]');
-        if (galleryCard) return 'gallery';
+    createBatchRunToken() {
+        return `batch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
 
-        const backControl = document.querySelector('[aria-label="Back"]') || document.querySelector('.lucide-arrow-left');
-        if (backControl) return 'detail';
+    isBatchRunActive(runToken = this.batchRunToken) {
+        return !!runToken
+            && this.batchRunning
+            && !this.batchAborted
+            && this.batchRunToken === runToken;
+    }
 
-        const makeVideoButtons = document.querySelectorAll(this.BUTTON_SELECTOR);
-        if (makeVideoButtons.length > 1) return 'gallery';
-        if (makeVideoButtons.length === 1) return 'detail';
-
-        return 'detail';
+    isPromptedBatchTokenActive(runToken) {
+        return !runToken || this.isBatchRunActive(runToken);
     }
 
     injectPromptText(text) {
@@ -2481,6 +2484,11 @@ class VideoRetryManager {
         return img?.src || '';
     }
 
+    _getCardSourceId(container) {
+        const sourceUrl = this._getCardImageSrc(container);
+        return getGrokMediaIdentity(sourceUrl) || sourceUrl;
+    }
+
     _isVisibleAutomationTarget(element, maxWidth = Infinity) {
         if (!element || !element.isConnected) return false;
         const rect = element.getBoundingClientRect();
@@ -2504,8 +2512,9 @@ class VideoRetryManager {
         return null;
     }
 
-    async _waitForPromptedVideoSubmitButton() {
+    async _waitForPromptedVideoSubmitButton(runToken) {
         for (let attempt = 0; attempt < 20; attempt++) {
+            if (!this.isPromptedBatchTokenActive(runToken)) return null;
             const button = this._findPromptedVideoSubmitButton();
             if (button) return button;
             await this.sleep(100);
@@ -2513,8 +2522,9 @@ class VideoRetryManager {
         return null;
     }
 
-    async _waitForAddPromptMenuItem() {
+    async _waitForAddPromptMenuItem(runToken) {
         for (let attempt = 0; attempt < 20; attempt++) {
+            if (!this.isPromptedBatchTokenActive(runToken)) return null;
             const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]'));
             const addPromptItem = menuItems.find((item) =>
                 item.textContent.trim() === 'Add Prompt'
@@ -2528,7 +2538,8 @@ class VideoRetryManager {
 
     // Opens Grok's custom video prompt mode. The current UI uses
     // Make Video > Add Prompt; older post pages use a direct mode button.
-    async selectMakeVideoMode() {
+    async selectMakeVideoMode(runToken) {
+        if (!this.isPromptedBatchTokenActive(runToken)) return false;
         this.promptedVideoModeContract = null;
         const currentTriggers = Array.from(document.querySelectorAll(
             'button[aria-label="Make Video"][aria-haspopup="menu"]'
@@ -2536,15 +2547,17 @@ class VideoRetryManager {
         const currentTrigger = currentTriggers.find((button) => this._isVisibleAutomationTarget(button));
 
         if (currentTrigger) {
+            if (!this.isPromptedBatchTokenActive(runToken)) return false;
             this.simulateClick(currentTrigger);
-            const addPromptItem = await this._waitForAddPromptMenuItem();
+            const addPromptItem = await this._waitForAddPromptMenuItem(runToken);
             if (!addPromptItem) {
                 console.log('VideoRetryManager: Add Prompt option not found');
                 return false;
             }
 
+            if (!this.isPromptedBatchTokenActive(runToken)) return false;
             this.simulateClick(addPromptItem);
-            const submitButton = await this._waitForPromptedVideoSubmitButton();
+            const submitButton = await this._waitForPromptedVideoSubmitButton(runToken);
             if (!submitButton) {
                 console.log('VideoRetryManager: Video prompt composer did not open');
                 return false;
@@ -2559,16 +2572,19 @@ class VideoRetryManager {
             console.log('VideoRetryManager: Video mode button not found');
             return false;
         }
+        if (!this.isPromptedBatchTokenActive(runToken)) return false;
         this.simulateClick(videoBtn);
-        await this.sleep(500);
+        if (!this.isPromptedBatchTokenActive(runToken)) return false;
         this.promptedVideoModeContract = 'legacy';
         return true;
     }
 
     // Clicks only a proven video query-bar submit. Never fall back to Edit.
-    clickPromptedVideoSubmitButton() {
+    clickPromptedVideoSubmitButton(runToken) {
+        if (!this.isPromptedBatchTokenActive(runToken)) return false;
         const button = this._findPromptedVideoSubmitButton();
         if (!button || button.disabled) return false;
+        if (!this.isPromptedBatchTokenActive(runToken)) return false;
         this.simulateClick(button);
         return true;
     }
@@ -2651,13 +2667,18 @@ class VideoRetryManager {
         const normalizedMode = mode === 'prompted' ? 'prompted' : 'quick';
 
         if (normalizedMode === 'prompted') {
+            const runToken = this.createBatchRunToken();
+            this.batchRunToken = runToken;
             const detectedContext = this.detectBatchContext();
             if (detectedContext === 'detail') {
                 const videoGoal = Math.max(1, parseInt(options.videoGoal, 10) || this.settingsManager.get('videoGoal') || 1);
-                await this.startPromptedBatchFromDetail(prompt, videoGoal);
-            } else {
+                await this.startPromptedBatchFromDetail(prompt, videoGoal, runToken);
+            } else if (detectedContext === 'gallery') {
                 const galleryLimit = Math.max(1, parseInt(options.galleryLimit, 10) || this.settingsManager.get('galleryBatchLimit') || 1);
-                await this.startPromptedBatchFromGallery(prompt, galleryLimit);
+                await this.startPromptedBatchFromGallery(prompt, galleryLimit, runToken);
+            } else {
+                this.batchRunToken = null;
+                this.safeStatus('Prompted Batch: Open Saved or a supported image detail first', 'warning');
             }
             return;
         }
@@ -2669,6 +2690,7 @@ class VideoRetryManager {
         this.batchMode = 'quick';
         this.batchContext = 'gallery';
         this.batchPrompt = null;
+        this.batchRunToken = this.createBatchRunToken();
         this.scrollAttempts = 0;
         this.goalCount = 0;
         this.currentRetry = 0;
@@ -2692,10 +2714,11 @@ class VideoRetryManager {
         await this.processBatchNext();
     }
 
-    async startPromptedBatchFromGallery(prompt, galleryLimit) {
+    async startPromptedBatchFromGallery(prompt, galleryLimit, runToken = this.createBatchRunToken()) {
         this.batchRunning = true;
         this.goalRunning = false;
         this.batchAborted = false;
+        this.batchRunToken = runToken;
         this.batchIndex = 0;
         this.batchMode = 'prompted';
         this.batchContext = 'gallery';
@@ -2721,9 +2744,10 @@ class VideoRetryManager {
         this.updateCounters();
         this.updateBatchButtons(true);
 
-        while (this.batchRunning && !this.batchAborted && this.goalCount < this.goalTotal) {
+        while (this.isBatchRunActive(runToken) && this.goalCount < this.goalTotal) {
             if (this.batchIndex >= this.batchQueue.length) {
-                const foundMore = await this.scrollForMore();
+                const foundMore = await this.scrollForMore(runToken);
+                if (!this.isBatchRunActive(runToken)) break;
                 if (!foundMore) break;
             }
 
@@ -2739,26 +2763,29 @@ class VideoRetryManager {
             }
 
             // Skip already-processed or censored images
-            const itemSrc = this._getCardImageSrc(item.container);
-            if (itemSrc && this.batchProcessedSrcs?.has(itemSrc)) {
+            const itemSourceId = this._getCardSourceId(item.container);
+            if (itemSourceId && this.batchProcessedSrcs?.has(itemSourceId)) {
                 this.batchIndex++;
                 continue;
             }
             if (this.isCensoredCard(item.container)) {
                 console.log(`Prompted Batch [gallery]: Item ${this.batchIndex + 1} is censored, skipping.`);
-                if (itemSrc) this.batchProcessedSrcs?.add(itemSrc);
+                if (itemSourceId) this.batchProcessedSrcs?.add(itemSourceId);
                 this.batchIndex++;
                 continue;
             }
 
+            if (!this.isBatchRunActive(runToken)) break;
             this.safeStatus(`Prompted Batch [gallery]: ${this.goalCount + 1}/${this.goalTotal}`, 'info');
-            await this.processBatchItemPrompted(item);
+            await this.processBatchItemPrompted(item, runToken);
         }
 
+        if (this.batchRunToken !== runToken) return;
         const hitLimit = this.goalCount >= this.goalTotal;
         const wasAborted = this.batchAborted;
         this.batchRunning = false;
         this.batchAborted = false;
+        this.batchRunToken = null;
         this.updateBatchButtons(false);
         this.updateCounters();
         if (hitLimit) {
@@ -2772,10 +2799,11 @@ class VideoRetryManager {
         }
     }
 
-    async startPromptedBatchFromDetail(prompt, videoGoal) {
+    async startPromptedBatchFromDetail(prompt, videoGoal, runToken = this.createBatchRunToken()) {
         this.batchRunning = true;
         this.goalRunning = false;
         this.batchAborted = false;
+        this.batchRunToken = runToken;
         this.batchIndex = 0;
         this.batchMode = 'prompted';
         this.batchContext = 'detail';
@@ -2795,10 +2823,11 @@ class VideoRetryManager {
         this.updateCounters();
         this.updateBatchButtons(true);
 
-        while (this.batchRunning && !this.batchAborted && this.goalCount < this.goalTotal) {
+        while (this.isBatchRunActive(runToken) && this.goalCount < this.goalTotal) {
             let videoResultBaseline = null;
             if (this.batchPrompt) {
-                const modeReady = await this.selectMakeVideoMode();
+                const modeReady = await this.selectMakeVideoMode(runToken);
+                if (!this.isBatchRunActive(runToken)) break;
                 if (!modeReady) {
                     this.batchFailureMessage = 'Prompted Batch [detail]: Could not open Make Video > Add Prompt';
                     this.safeStatus(this.batchFailureMessage, 'warning');
@@ -2809,14 +2838,15 @@ class VideoRetryManager {
                     this.safeStatus(this.batchFailureMessage, 'warning');
                     break;
                 }
-                await this.sleep(500);
+                if (!this.isBatchRunActive(runToken)) break;
                 if (this.promptedVideoModeContract === 'current_menu') {
                     videoResultBaseline = this.capturePromptedVideoResultBaseline(document);
                 }
             }
 
+            if (!this.isBatchRunActive(runToken)) break;
             this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
-            const submitted = this.clickPromptedVideoSubmitButton();
+            const submitted = this.clickPromptedVideoSubmitButton(runToken);
             if (!submitted) {
                 this.batchFailureMessage = 'Prompted Batch [detail]: Video submit button not ready';
                 this.safeStatus(this.batchFailureMessage, 'warning');
@@ -2828,9 +2858,11 @@ class VideoRetryManager {
             const result = await this.awaitBatchItemCompletion(document, {
                 allowRetry: true,
                 labelPrefix: 'Prompted Batch [detail]',
-                videoResultBaseline
+                videoResultBaseline,
+                runToken
             });
 
+            if (!this.isBatchRunActive(runToken)) break;
             if (result === 'success') {
                 this.goalCount++;
                 this.currentRetry = 0;
@@ -2845,10 +2877,12 @@ class VideoRetryManager {
             break;
         }
 
+        if (this.batchRunToken !== runToken) return;
         const hitGoal = this.goalCount >= this.goalTotal;
         const wasAborted = this.batchAborted;
         this.batchRunning = false;
         this.batchAborted = false;
+        this.batchRunToken = null;
         this.updateBatchButtons(false);
         this.updateCounters();
         if (hitGoal) {
@@ -2865,6 +2899,7 @@ class VideoRetryManager {
     stopBatch() {
         this.batchRunning = false;
         this.batchAborted = true;
+        this.batchRunToken = null;
         this.goalRunning = false;
         this.isVerifying = false;
         this.targetContext = null;
@@ -2892,7 +2927,7 @@ class VideoRetryManager {
         return items.filter(item =>
             !item.container.querySelector(this.PROGRESS_SELECTOR)
             && !this.isCensoredCard(item.container)
-            && !this.batchProcessedSrcs?.has(this._getCardImageSrc(item.container))
+            && !this.batchProcessedSrcs?.has(this._getCardSourceId(item.container))
         );
     }
 
@@ -2954,109 +2989,194 @@ class VideoRetryManager {
         if (this.batchRunning && !this.batchAborted) await this.processBatchNext();
     }
 
-    // Mode B: Prompted batch — click into image, inject prompt, make video, go back
-    async processBatchItemPrompted(item) {
-        // Click the image (not the button) to enter detail view
-        const img = item.container.querySelector('img');
-        if (!img) {
-            console.log(`Prompted Batch [gallery]: No image found for item ${this.batchIndex + 1}, skipping.`);
-            this.batchIndex++;
-            return;
+    createPromptedBatchNavigationSnapshot(item) {
+        const sourceUrl = this._getCardImageSrc(item.container);
+        return {
+            galleryUrl: this.batchGalleryUrl || window.location.href,
+            sourceId: getGrokMediaIdentity(sourceUrl) || sourceUrl,
+            scrollY: Math.round(window.scrollY || document.documentElement.scrollTop || 0)
+        };
+    }
+
+    async waitForPromptedBatchEditorSurface(runToken, timeoutMs = 10000) {
+        const startedAt = Date.now();
+        while (this.isBatchRunActive(runToken) && Date.now() - startedAt < timeoutMs) {
+            const surface = detectGrokScrapeSurface(document, window.location);
+            if (surface === SCRAPE_SURFACES.agentMedia || surface === SCRAPE_SURFACES.legacyDetail) return surface;
+            if (surface === SCRAPE_SURFACES.unsupported) return surface;
+            await this.sleep(200);
         }
+        return null;
+    }
 
-        img.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await this.sleep(500);
-        img.click();
-        await this.sleep(2000); // Wait for detail view to load
-
-        // Verify we actually reached detail view (censored images redirect to homepage)
-        const isDetail = /\/imagine\/post\//.test(window.location.pathname);
-        if (!isDetail) {
-            const failedSrc = this._getCardImageSrc(item.container);
-            if (failedSrc) this.batchProcessedSrcs?.add(failedSrc);
-            console.log(`Prompted Batch [gallery]: Navigation failed for item ${this.batchIndex + 1} (likely censored), skipping.`);
-            // Always rebuild queue after navigation — DOM may have been re-rendered by React
-            await this.sleep(1000);
-            this.batchQueue = this.buildBatchQueue();
-            this.batchIndex = 0;
-            this.updateCounters();
-            return;
+    async waitForPromptedBatchSavedSurface(runToken, timeoutMs = 10000) {
+        const startedAt = Date.now();
+        while (this.isBatchRunActive(runToken) && Date.now() - startedAt < timeoutMs) {
+            if (detectGrokScrapeSurface(document, window.location) === SCRAPE_SURFACES.savedGallery) return true;
+            await this.sleep(200);
         }
+        return false;
+    }
 
-        // Activate video mode and inject prompt text
-        if (this.batchPrompt) {
-            const modeReady = await this.selectMakeVideoMode();
-            if (!modeReady) {
-                this.batchFailureMessage = 'Prompted Batch [gallery]: Could not open Make Video > Add Prompt';
-                this.safeStatus(this.batchFailureMessage, 'warning');
-                this.batchRunning = false;
-                await this.batchGoBack();
-                this.targetContext = null;
-                return false;
-            }
-            if (!this.injectPromptText(this.batchPrompt)) {
-                this.batchFailureMessage = 'Prompted Batch [gallery]: Video prompt field not found';
-                this.safeStatus(this.batchFailureMessage, 'warning');
-                this.batchRunning = false;
-                await this.batchGoBack();
-                this.targetContext = null;
-                return false;
-            }
-            await this.sleep(500);
-        }
-
-        // Click the SUBMIT button (the visible up-arrow, not the image action button)
-        const submitted = this.clickPromptedVideoSubmitButton();
-        if (!submitted) {
-            this.batchFailureMessage = 'Prompted Batch [gallery]: Video submit button not ready';
-            this.safeStatus(this.batchFailureMessage, 'warning');
-            this.batchRunning = false;
-            await this.batchGoBack();
-            this.targetContext = null;
-            return false;
-        }
-
-        this.lastClickTime = Date.now();
-        const submittedSrc = this._getCardImageSrc(item.container);
-        if (submittedSrc) this.batchProcessedSrcs?.add(submittedSrc);
-        console.log(`Prompted Batch [gallery]: Submitted video for item ${this.batchIndex + 1}.`);
-        await this.sleep(1200); // safety wait before navigating back
-
-        const didGoBack = await this.batchGoBack();
-        if (!didGoBack) {
-            console.log(`Prompted Batch [gallery]: Back navigation failed for item ${this.batchIndex + 1}, skipping.`);
-        }
-
-        this.goalCount++;
-        this.batchIndex++;
+    restorePromptedBatchSavedState(snapshot, runToken) {
+        if (!this.isBatchRunActive(runToken)) return false;
+        window.scrollTo(0, snapshot.scrollY);
+        if (!this.isBatchRunActive(runToken)) return false;
+        this.batchQueue = this.buildBatchQueue();
+        this.batchIndex = 0;
         this.targetContext = null;
-        this.currentRetry = 0;
-        this.updateCounters();
-        await this.sleep(1500);
         return true;
     }
 
-    async batchGoBack() {
-        const previousUrl = window.location.href;
-        const backBtn = document.querySelector('[aria-label="Back"]') || document.querySelector('.lucide-arrow-left');
+    navigateToPromptedBatchGallery(galleryUrl) {
+        window.location.assign(galleryUrl);
+    }
+
+    recoverPromptedBatchToGallery(snapshot, runToken) {
+        if (!this.isBatchRunActive(runToken)) return false;
+        this.stopBatch();
+        this.safeStatus('Prompted Batch: could not return to Saved. Returning you to Saved. Restart the batch after the page reloads.', 'warning');
+        this.navigateToPromptedBatchGallery(snapshot.galleryUrl);
+        return false;
+    }
+
+    async stopPromptedBatchItem(message, snapshot, runToken) {
+        if (!this.isBatchRunActive(runToken)) return false;
+        this.batchFailureMessage = message;
+        this.safeStatus(message, 'warning');
+        if (detectGrokScrapeSurface(document, window.location) !== SCRAPE_SURFACES.savedGallery) {
+            const returnStatus = await this.batchGoBack(snapshot, runToken);
+            if (returnStatus === 'failed') return this.recoverPromptedBatchToGallery(snapshot, runToken);
+        }
+        if (!this.isBatchRunActive(runToken)) return false;
+        this.batchRunning = false;
+        this.batchRunToken = null;
+        this.targetContext = null;
+        this.updateCounters();
+        this.updateBatchButtons(false);
+        return false;
+    }
+
+    // Mode B: Prompted batch — enter a supported editor, submit once, then restore Saved.
+    async processBatchItemPrompted(item, runToken = this.batchRunToken) {
+        if (!this.isBatchRunActive(runToken)) return false;
+        const img = item.container.querySelector('img[alt="Generated image"]') || item.container.querySelector('img');
+        if (!img) {
+            return this.stopPromptedBatchItem(
+                'Prompted Batch [gallery]: Generated image was not found',
+                this.createPromptedBatchNavigationSnapshot(item),
+                runToken
+            );
+        }
+
+        const snapshot = this.createPromptedBatchNavigationSnapshot(item);
+        if (!snapshot.sourceId || detectGrokScrapeSurface(document, window.location) !== SCRAPE_SURFACES.savedGallery) {
+            return this.stopPromptedBatchItem(
+                'Prompted Batch [gallery]: Saved source changed before navigation',
+                snapshot,
+                runToken
+            );
+        }
+
+        img.scrollIntoView({ behavior: 'instant', block: 'center' });
+        if (!this.isBatchRunActive(runToken)) return false;
+        img.click();
+
+        const editorSurface = await this.waitForPromptedBatchEditorSurface(runToken);
+        if (!this.isBatchRunActive(runToken)) return false;
+        if (editorSurface === SCRAPE_SURFACES.unsupported) {
+            return this.stopPromptedBatchItem(
+                'Prompted Batch [gallery]: Selected image opened an unsupported route',
+                snapshot,
+                runToken
+            );
+        }
+        if (!editorSurface) {
+            return this.stopPromptedBatchItem(
+                'Prompted Batch [gallery]: Selected image did not open an editor',
+                snapshot,
+                runToken
+            );
+        }
+
+        if (editorSurface === SCRAPE_SURFACES.agentMedia) {
+            const match = findMatchingAgentMedia(document, snapshot.sourceId);
+            if (match.status !== 'matched') {
+                return this.stopPromptedBatchItem(
+                    'Prompted Batch [gallery]: Agent Mode did not expose the selected Saved image',
+                    snapshot,
+                    runToken
+                );
+            }
+        }
+
+        if (!this.isBatchRunActive(runToken)) return false;
+        const modeReady = await this.selectMakeVideoMode(runToken);
+        if (!this.isBatchRunActive(runToken)) return false;
+        if (!modeReady) {
+            return this.stopPromptedBatchItem(
+                'Prompted Batch [gallery]: Could not open Make Video > Add Prompt',
+                snapshot,
+                runToken
+            );
+        }
+
+        if (!this.isBatchRunActive(runToken)) return false;
+        if (!this.injectPromptText(this.batchPrompt)) {
+            return this.stopPromptedBatchItem(
+                'Prompted Batch [gallery]: Video prompt field not found',
+                snapshot,
+                runToken
+            );
+        }
+
+        if (!this.isBatchRunActive(runToken)) return false;
+        const submitted = this.clickPromptedVideoSubmitButton(runToken);
+        if (!submitted) {
+            return this.stopPromptedBatchItem(
+                'Prompted Batch [gallery]: Video submit button not ready',
+                snapshot,
+                runToken
+            );
+        }
+
+        if (!this.isBatchRunActive(runToken)) return false;
+        this.lastClickTime = Date.now();
+        this.batchProcessedSrcs?.add(snapshot.sourceId);
+        console.log(`Prompted Batch [gallery]: Submitted video for item ${this.batchIndex + 1}.`);
+
+        const returnStatus = await this.batchGoBack(snapshot, runToken);
+        if (returnStatus === 'failed') return this.recoverPromptedBatchToGallery(snapshot, runToken);
+        if (returnStatus !== 'returned' || !this.isBatchRunActive(runToken)) return false;
+
+        this.goalCount++;
+        this.targetContext = null;
+        this.currentRetry = 0;
+        this.updateCounters();
+        return true;
+    }
+
+    async batchGoBack(snapshot, runToken = this.batchRunToken) {
+        if (!this.isBatchRunActive(runToken)) return 'cancelled';
+        const backBtn = document.querySelector('[aria-label="Back"]');
         if (backBtn) {
             const clickTarget = backBtn.closest('button') || backBtn.closest('a') || backBtn;
+            if (!this.isBatchRunActive(runToken)) return 'cancelled';
             clickTarget.click();
-            await this.sleep(2000);
-            if (this.detectBatchContext() === 'gallery' || window.location.href !== previousUrl) {
-                return true;
-            }
+            const returned = await this.waitForPromptedBatchSavedSurface(runToken);
+            if (!this.isBatchRunActive(runToken)) return 'cancelled';
+            if (returned) return this.restorePromptedBatchSavedState(snapshot, runToken) ? 'returned' : 'cancelled';
         }
 
+        if (!this.isBatchRunActive(runToken)) return 'cancelled';
         if (window.history.length > 1) {
             window.history.back();
-            await this.sleep(2200);
-            if (this.detectBatchContext() === 'gallery' || window.location.href !== previousUrl) {
-                return true;
-            }
+            const returned = await this.waitForPromptedBatchSavedSurface(runToken);
+            if (!this.isBatchRunActive(runToken)) return 'cancelled';
+            if (returned) return this.restorePromptedBatchSavedState(snapshot, runToken) ? 'returned' : 'cancelled';
         }
 
-        return false;
+        return this.isBatchRunActive(runToken) ? 'failed' : 'cancelled';
     }
 
     async awaitBatchItemCompletion(searchRoot, options = {}) {
@@ -3066,10 +3186,11 @@ class VideoRetryManager {
         const s = this.settingsManager.settings;
         const allowRetry = options.allowRetry !== false;
         const labelPrefix = options.labelPrefix || 'Batch';
+        const runToken = options.runToken;
 
-        while (this.batchRunning && !this.batchAborted) {
+        while (this.isPromptedBatchTokenActive(runToken) && this.batchRunning && !this.batchAborted) {
             await this.sleep(POLL_INTERVAL);
-            if (!this.batchRunning) return 'aborted';
+            if (!this.isPromptedBatchTokenActive(runToken) || !this.batchRunning) return 'aborted';
 
             const elapsed = Date.now() - startTime;
 
@@ -3120,10 +3241,10 @@ class VideoRetryManager {
                 this.updateCounters();
 
                 await this.sleep(s.retryCooldown);
-                if (!this.batchRunning) return 'aborted';
+                if (!this.isPromptedBatchTokenActive(runToken) || !this.batchRunning) return 'aborted';
 
                 const retryBtn = searchRoot.querySelector(this.BUTTON_SELECTOR);
-                if (retryBtn) {
+                if (retryBtn && this.isPromptedBatchTokenActive(runToken)) {
                     this.lastClickTime = Date.now();
                     retryBtn.click();
                 }
@@ -3133,7 +3254,14 @@ class VideoRetryManager {
         return this.batchAborted ? 'aborted' : 'failed';
     }
 
-    async scrollForMore() {
+    async scrollForMore(runToken) {
+        if (runToken && !this.isBatchRunActive(runToken)) return false;
+        if (runToken
+            && this.batchMode === 'prompted'
+            && this.batchContext === 'gallery'
+            && detectGrokScrapeSurface(document, window.location) !== SCRAPE_SURFACES.savedGallery) {
+            return false;
+        }
         if (this.scrollAttempts >= 3) return false;
         this.scrollAttempts++;
 
@@ -3146,6 +3274,7 @@ class VideoRetryManager {
             window.scrollTo(0, document.body.scrollHeight);
         }
         await this.sleep(2500); // Wait for lazy load
+        if (runToken && !this.isBatchRunActive(runToken)) return false;
 
         const newQueue = this.buildBatchQueue();
         // Only add genuinely new items (not already in queue)
