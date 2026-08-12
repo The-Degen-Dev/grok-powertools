@@ -9,6 +9,7 @@ const providerRunLedgerJsPath = path.join(__dirname, '../../providerRunLedger.js
 const chatGptImagesContentJsPath = path.join(__dirname, '../../chatgptImagesContent.js');
 const utilsJsPath = path.join(__dirname, '../../recreateWorkflowUtils.js');
 const contentActionsJsPath = path.join(__dirname, '../../recreateWorkflowContent.js');
+const bridgeJsPath = path.join(__dirname, '../../bridge.js');
 const contentJsPath = path.join(__dirname, '../../content.js');
 const styleCssPath = path.join(__dirname, '../../overlay.css');
 const providerRegistryJs = fs.readFileSync(providerRegistryJsPath, 'utf8');
@@ -16,6 +17,7 @@ const providerRunLedgerJs = fs.readFileSync(providerRunLedgerJsPath, 'utf8');
 const chatGptImagesContentJs = fs.readFileSync(chatGptImagesContentJsPath, 'utf8');
 const utilsJs = fs.readFileSync(utilsJsPath, 'utf8');
 const contentActionsJs = fs.readFileSync(contentActionsJsPath, 'utf8');
+const bridgeJs = fs.readFileSync(bridgeJsPath, 'utf8');
 const contentJs = fs.readFileSync(contentJsPath, 'utf8');
 const styleCss = fs.readFileSync(styleCssPath, 'utf8');
 const { MAX_REFERENCE_BYTES } = require('../../recreateWorkflowUtils.js');
@@ -26,7 +28,10 @@ async function evaluateExtensionContent(page) {
     await page.evaluate(chatGptImagesContentJs);
     await page.evaluate(utilsJs);
     await page.evaluate(contentActionsJs);
-    await page.evaluate(contentJs);
+    await page.evaluate(contentJs.replace(
+        '        scraper.setOverlay(overlay);',
+        '        scraper.setOverlay(overlay);\n        window.__gptE2e = { scraper, retry, overlay };'
+    ));
 }
 
 async function evaluateExtensionContentWithMockedRecreateActions(page) {
@@ -96,6 +101,227 @@ async function gotoMockProviderPage(page, url) {
     await page.addStyleTag({ content: styleCss });
 }
 
+async function setupMockSavedAgentSync(page, {
+    accountUuid,
+    mediaUuids,
+    responseByAction,
+    runToken,
+    agentMedia = true,
+    bridgeResponse = null
+}) {
+    await page.evaluate(({
+        accountUuid,
+        mediaUuids,
+        responseByAction,
+        runToken,
+        agentMedia,
+        bridgeResponse
+    }) => {
+        window.__chromeRuntimeResponseByAction = responseByAction;
+
+        const { scraper } = window.__gptE2e;
+        scraper.Config = { actionWait: 0, navWait: 0, surfaceWait: 100, historyWait: 100 };
+        scraper.sleep = () => Promise.resolve();
+        scraper.createRunToken = () => runToken;
+
+        const savedUrl = 'https://grok.com/imagine/saved';
+        const buildImage = (mediaUuid, id) => {
+            const image = document.createElement('img');
+            image.id = id;
+            image.alt = 'Generated image';
+            image.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/image.jpg`;
+            Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 1024 });
+            Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 1024 });
+            return image;
+        };
+
+        const renderAgent = (mediaUuid) => {
+            window.history.pushState({}, '', `/imagine/agent/mock-agent?conversation=${mediaUuid}`);
+            document.body.innerHTML = agentMedia ? `
+                    <div class="react-flow__node-asset">
+                        <img alt="Agent media" src="https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg">
+                    </div>
+                ` : '';
+        };
+
+        const renderSaved = () => {
+            document.body.innerHTML = '';
+            const scroller = document.createElement('div');
+            scroller.className = 'overflow-scroll';
+            scroller.id = 'saved-gallery-scroller';
+            scroller.scrollTop = 360;
+            scroller.scrollBy = (...args) => window.__galleryScrollCalls.push(args);
+            const list = document.createElement('div');
+            list.setAttribute('role', 'list');
+            mediaUuids.forEach((mediaUuid, index) => {
+                const card = document.createElement('article');
+                card.setAttribute('role', 'listitem');
+                const image = buildImage(mediaUuid, `${index === 0 ? 'first' : 'second'}-saved-image`);
+                image.addEventListener('click', () => renderAgent(mediaUuid));
+                card.appendChild(image);
+                list.appendChild(card);
+            });
+            scroller.appendChild(list);
+            document.body.appendChild(scroller);
+        };
+
+        window.__galleryScrollCalls = [];
+        window.__historyBackCalls = 0;
+        Object.defineProperty(window.history, 'back', {
+            configurable: true,
+            value: () => {
+                window.__historyBackCalls++;
+                window.history.replaceState({}, '', savedUrl);
+                window.dispatchEvent(new PopStateEvent('popstate'));
+            }
+        });
+        window.addEventListener('popstate', () => {
+            renderSaved();
+            void (scraper.backupMode
+                ? scraper.stopBackupMode('e2e_after_first_transfer')
+                : scraper.stop('e2e_after_first_transfer'));
+        }, { once: true });
+        if (bridgeResponse) {
+            document.addEventListener('__gpt_fetch_media', (event) => {
+                document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+                    detail: { requestId: event.detail.requestId, ...bridgeResponse }
+                }));
+            });
+        }
+        window.history.replaceState({}, '', savedUrl);
+        renderSaved();
+    }, { accountUuid, mediaUuids, responseByAction, runToken, agentMedia, bridgeResponse });
+}
+
+async function setupMockPromptedBatch(page, {
+    accountUuid,
+    mediaUuid,
+    secondMediaUuid = null,
+    stopAfterAddPrompt = false
+}) {
+    await page.evaluate(({ accountUuid, mediaUuid, secondMediaUuid, stopAfterAddPrompt }) => {
+        const { retry } = window.__gptE2e;
+        const savedUrl = 'https://grok.com/imagine/saved';
+        const makeVisible = (element, width = 100) => {
+            element.getBoundingClientRect = () => ({
+                x: 20,
+                y: 20,
+                top: 20,
+                left: 20,
+                right: 20 + width,
+                bottom: 60,
+                width,
+                height: 40
+            });
+            return element;
+        };
+
+        retry.sleep = () => Promise.resolve();
+        retry.createBatchRunToken = () => 'e2e-prompted-batch';
+        window.__promptedBatchEvents = {
+            savedClicks: [],
+            menuChoices: [],
+            promptWrites: [],
+            promptWriteResults: [],
+            promptAtSubmit: null,
+            submitCount: 0,
+            editCount: 0,
+            backCount: 0,
+            scrollToCalls: []
+        };
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 480 });
+        window.scrollTo = (...args) => window.__promptedBatchEvents.scrollToCalls.push(args);
+        document.addEventListener('__gpt_set_prompted_video_content', (event) => {
+            window.__promptedBatchEvents.promptWrites.push(event.detail.text);
+        });
+        document.addEventListener('__gpt_set_prompted_video_content_result', (event) => {
+            window.__promptedBatchEvents.promptWriteResults.push(event.detail.ok);
+        });
+
+        const renderSaved = () => {
+            document.body.innerHTML = '';
+            const list = document.createElement('div');
+            list.setAttribute('role', 'list');
+            [mediaUuid, secondMediaUuid].filter(Boolean).forEach((savedMediaUuid) => {
+                const card = document.createElement('article');
+                card.setAttribute('role', 'listitem');
+                const image = document.createElement('img');
+                image.alt = 'Generated image';
+                image.src = `https://assets.grok.com/users/${accountUuid}/generated/${savedMediaUuid}/image.jpg`;
+                Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 1024 });
+                Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 1024 });
+                image.scrollIntoView = () => {};
+                image.addEventListener('click', () => {
+                    window.__promptedBatchEvents.savedClicks.push(savedMediaUuid);
+                    renderAgent();
+                });
+                const makeVideo = document.createElement('button');
+                makeVideo.setAttribute('aria-label', 'Make video');
+                card.append(image, makeVideo);
+                list.appendChild(card);
+            });
+            document.body.appendChild(list);
+        };
+
+        const renderAgent = () => {
+            window.history.pushState({}, '', `/imagine/agent/mock-agent?conversation=${mediaUuid}`);
+            document.body.innerHTML = '';
+            const asset = document.createElement('div');
+            asset.className = 'react-flow__node-asset';
+            const assetImage = document.createElement('img');
+            assetImage.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`;
+            asset.appendChild(assetImage);
+
+            const preciseEdit = makeVisible(document.createElement('button'));
+            preciseEdit.setAttribute('aria-label', 'Edit');
+            preciseEdit.addEventListener('click', () => {
+                window.__promptedBatchEvents.editCount++;
+            });
+
+            const makeVideo = makeVisible(document.createElement('button'));
+            makeVideo.setAttribute('aria-label', 'Make Video');
+            makeVideo.setAttribute('aria-haspopup', 'menu');
+            makeVideo.addEventListener('click', () => {
+                const addPrompt = makeVisible(document.createElement('div'));
+                addPrompt.setAttribute('role', 'menuitem');
+                addPrompt.textContent = 'Add Prompt';
+                addPrompt.addEventListener('click', () => {
+                    window.__promptedBatchEvents.menuChoices.push('Add Prompt');
+                    const queryBar = document.createElement('div');
+                    queryBar.className = 'query-bar';
+                    const input = makeVisible(document.createElement('div'));
+                    input.setAttribute('contenteditable', 'true');
+                    input.setAttribute('role', 'textbox');
+                    input.setAttribute('aria-label', 'Ask Grok anything');
+                    const submit = makeVisible(document.createElement('button'), 48);
+                    submit.setAttribute('aria-label', 'Make video');
+                    submit.addEventListener('click', () => {
+                        window.__promptedBatchEvents.promptAtSubmit = input.textContent;
+                        window.__promptedBatchEvents.submitCount++;
+                    });
+                    queryBar.append(input, submit);
+                    document.body.appendChild(queryBar);
+                    addPrompt.remove();
+                    if (stopAfterAddPrompt) retry.stopBatch();
+                });
+                document.body.appendChild(addPrompt);
+            });
+
+            const back = makeVisible(document.createElement('button'));
+            back.setAttribute('aria-label', 'Back');
+            back.addEventListener('click', () => {
+                window.__promptedBatchEvents.backCount++;
+                window.history.replaceState({}, '', savedUrl);
+                renderSaved();
+            });
+            document.body.append(asset, preciseEdit, makeVideo, back);
+        };
+
+        window.history.replaceState({}, '', savedUrl);
+        renderSaved();
+    }, { accountUuid, mediaUuid, secondMediaUuid, stopAfterAddPrompt });
+}
+
 async function dispatchRuntimeMessage(page, message) {
     return page.evaluate(async (runtimeMessage) => {
         const responses = [];
@@ -129,6 +355,16 @@ test.describe('Grok Power Tools E2E', () => {
         await page.addInitScript(() => {
             const localState = {};
             const syncState = {};
+            const clone = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+            const record = (type, detail) => {
+                const event = {
+                    sequence: window.__chromeEventSequence++,
+                    type,
+                    ...detail
+                };
+                window.__chromeEvents.push(event);
+                return event;
+            };
             const readStorage = (state, keys) => {
                 if (keys === null || typeof keys === 'undefined') return { ...state };
                 if (Array.isArray(keys)) {
@@ -147,18 +383,37 @@ test.describe('Grok Power Tools E2E', () => {
                 return {};
             };
             window.__chromeRuntimeMessages = [];
+            window.__chromeRuntimeResponseByAction = {};
             window.__chromeMessageListeners = [];
+            window.__chromeEvents = [];
+            window.__chromeEventSequence = 0;
             window.__chromeStorageLocalState = localState;
             window.__chromeStorageSyncState = syncState;
+            const getRuntimeResponse = (message) => {
+                const responseByAction = window.__chromeRuntimeResponseByAction || {};
+                const action = message?.action;
+                if (Object.prototype.hasOwnProperty.call(responseByAction, action)) {
+                    const configured = responseByAction[action];
+                    return typeof configured === 'function' ? configured(message) : configured;
+                }
+                if (action === 'VALIDATE_CLOUD_CONFIG') return { valid: true };
+                if (action === 'VALIDATE_SCRAPE_RESUME') return { valid: true };
+                return { ok: true };
+            };
             window.chrome = {
                 runtime: {
                     getURL: (resourcePath) => resourcePath,
                     sendMessage: (message, callback) => {
-                        window.__chromeRuntimeMessages.push(message);
-                        if (message?.action === 'VALIDATE_CLOUD_CONFIG' && callback) {
-                            callback({ valid: true });
-                        }
-                        return Promise.resolve({ ok: true });
+                        const copiedMessage = clone(message);
+                        window.__chromeRuntimeMessages.push(copiedMessage);
+                        record('runtime_message', { message: copiedMessage });
+                        const response = getRuntimeResponse(message);
+                        return Promise.resolve(response).then((value) => {
+                            const copiedResponse = clone(value);
+                            record('runtime_response', { action: message?.action, response: copiedResponse });
+                            if (callback) callback(copiedResponse);
+                            return copiedResponse;
+                        });
                     },
                     onMessage: {
                         addListener: (listener) => {
@@ -178,6 +433,7 @@ test.describe('Grok Power Tools E2E', () => {
                             return Promise.resolve(result);
                         },
                         set: (data, cb) => {
+                            record('storage_set', { area: 'local', values: clone(data || {}) });
                             Object.assign(localState, data || {});
                             if (cb) cb();
                             return Promise.resolve();
@@ -190,6 +446,7 @@ test.describe('Grok Power Tools E2E', () => {
                             return Promise.resolve(result);
                         },
                         set: (data, cb) => {
+                            record('storage_set', { area: 'sync', values: clone(data || {}) });
                             Object.assign(syncState, data || {});
                             if (cb) cb();
                             return Promise.resolve();
@@ -275,6 +532,318 @@ test.describe('Grok Power Tools E2E', () => {
         expect(runtimeMessages).toContainEqual(expect.objectContaining({
             action: 'VALIDATE_CLOUD_CONFIG'
         }));
+    });
+
+    test('Start Sync transfers the exact Saved media through Agent Mode', async ({ page }) => {
+        const accountUuid = '11111111-1111-4111-8111-111111111111';
+        const firstMediaUuid = '22222222-2222-4222-8222-222222222222';
+        const secondMediaUuid = '33333333-3333-4333-8333-333333333333';
+        const firstSavedUrl = `https://assets.grok.com/users/${accountUuid}/generated/${firstMediaUuid}/image.jpg`;
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [firstMediaUuid, secondMediaUuid],
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'local_only' } },
+                DOWNLOAD_MEDIA: { status: 'queued' }
+            },
+            runToken: 'e2e-start-sync'
+        });
+
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start())).toEqual({
+            status: 'started',
+            surface: 'saved_gallery',
+            runToken: 'e2e-start-sync'
+        });
+
+        await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([firstSavedUrl]);
+
+        const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
+        expect(runtimeMessages).toContainEqual({
+            action: 'DOWNLOAD_MEDIA',
+            url: `https://assets.grok.com/users/${accountUuid}/generated/${firstMediaUuid}/preview.jpg`,
+            isVideo: false,
+            promptText: '',
+            blobDataUrl: null
+        });
+        expect(runtimeMessages).not.toContainEqual(expect.objectContaining({
+            url: expect.stringContaining(secondMediaUuid)
+        }));
+        await expect(page.locator('#second-saved-image')).toHaveCount(1);
+        await expect.poll(async () => page.evaluate(() => window.__galleryScrollCalls)).toEqual([]);
+        await expect.poll(async () => page.evaluate(() => window.__historyBackCalls)).toBe(1);
+
+        const transferEvents = await page.evaluate(() => window.__chromeEvents);
+        const queuedResponseIndex = transferEvents.findIndex((event) =>
+            event.type === 'runtime_response'
+            && event.action === 'DOWNLOAD_MEDIA'
+            && event.response?.status === 'queued'
+        );
+        const processedIdIndex = transferEvents.findIndex((event) =>
+            event.type === 'storage_set'
+            && event.area === 'local'
+            && event.values.processedIds?.some((id) => id.includes(firstMediaUuid))
+        );
+        expect(queuedResponseIndex).toBeGreaterThanOrEqual(0);
+        expect(processedIdIndex).toBeGreaterThan(queuedResponseIndex);
+    });
+
+    test('Cloud-only Start Sync sends bridge media before persisting the upload', async ({ page }) => {
+        const accountUuid = '44444444-4444-4444-8444-444444444444';
+        const mediaUuid = '55555555-5555-4555-8555-555555555555';
+        const savedUrl = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/image.jpg`;
+        const agentUrl = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`;
+        const blobDataUrl = 'data:image/jpeg;base64,Y2xvdWQtb25seS1maXh0dXJl';
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [mediaUuid],
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'cloud_only' } },
+                DOWNLOAD_MEDIA: { status: 'uploaded' }
+            },
+            runToken: 'e2e-cloud-only',
+            bridgeResponse: { dataUrl: blobDataUrl, size: 18, type: 'image/jpeg' }
+        });
+
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start())).toEqual({
+            status: 'started',
+            surface: 'saved_gallery',
+            runToken: 'e2e-cloud-only'
+        });
+
+        await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([savedUrl]);
+        const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
+        expect(runtimeMessages).toContainEqual({ action: 'GET_CLOUD_CONFIG' });
+        expect(runtimeMessages).toContainEqual({
+            action: 'DOWNLOAD_MEDIA',
+            url: agentUrl,
+            isVideo: false,
+            promptText: '',
+            blobDataUrl
+        });
+
+        const transferEvents = await page.evaluate(() => window.__chromeEvents);
+        const uploadedResponseIndex = transferEvents.findIndex((event) =>
+            event.type === 'runtime_response'
+            && event.action === 'DOWNLOAD_MEDIA'
+            && event.response?.status === 'uploaded'
+        );
+        const processedIdIndex = transferEvents.findIndex((event) =>
+            event.type === 'storage_set'
+            && event.area === 'local'
+            && event.values.processedIds?.includes(savedUrl)
+        );
+        expect(uploadedResponseIndex).toBeGreaterThanOrEqual(0);
+        expect(processedIdIndex).toBeGreaterThan(uploadedResponseIndex);
+    });
+
+    test('Cloud-only bridge failure never marks Saved media as processed', async ({ page }) => {
+        const accountUuid = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+        const mediaUuid = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [mediaUuid],
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'cloud_only' } },
+                DOWNLOAD_MEDIA: { status: 'uploaded' }
+            },
+            runToken: 'e2e-cloud-bridge-failure',
+            bridgeResponse: { error: 'authenticated fetch denied' }
+        });
+
+        await page.evaluate(() => window.__gptE2e.scraper.start());
+        await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.scraperState)).toBe('idle');
+        expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
+        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).not.toContainEqual(
+            expect.objectContaining({ action: 'DOWNLOAD_MEDIA' })
+        );
+    });
+
+    test('Cloud-only upload failure never marks Saved media as processed', async ({ page }) => {
+        const accountUuid = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+        const mediaUuid = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+        const blobDataUrl = 'data:image/jpeg;base64,dXBsb2FkLWZhaWx1cmU=';
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [mediaUuid],
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'cloud_only' } },
+                DOWNLOAD_MEDIA: { status: 'error', error: 'R2 upload rejected' }
+            },
+            runToken: 'e2e-cloud-upload-failure',
+            bridgeResponse: { dataUrl: blobDataUrl, size: 15, type: 'image/jpeg' }
+        });
+
+        await page.evaluate(() => window.__gptE2e.scraper.start());
+        await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.scraperState)).toBe('idle');
+        expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
+        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual(expect.objectContaining({
+            action: 'DOWNLOAD_MEDIA',
+            blobDataUrl
+        }));
+    });
+
+    test('R2 backup persists only after the R2 action acknowledges the Agent media', async ({ page }) => {
+        const accountUuid = '01234567-89ab-4cde-8fab-0123456789ab';
+        const mediaUuid = 'fedcba98-7654-4cba-8fed-cba987654321';
+        const blobDataUrl = 'data:image/jpeg;base64,ci0yLWZpeHR1cmU=';
+        const backupProcessedId = 'r2/agent-media/fedcba98-7654-4cba-8fed-cba987654321';
+        const acceptance = { runId: 'e2e-r2-run', correlationId: 'e2e-r2-correlation' };
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [mediaUuid],
+            responseByAction: {
+                VALIDATE_CLOUD_CONFIG: { valid: true },
+                R2_BACKUP_UPLOAD: { status: 'already_present', backupProcessedId }
+            },
+            runToken: 'e2e-r2-backup',
+            bridgeResponse: { dataUrl: blobDataUrl, size: 12, type: 'image/jpeg' }
+        });
+
+        await expect(page.evaluate((acceptance) => window.__gptE2e.scraper.startBackupMode({
+            mode: 'full',
+            acceptance
+        }), acceptance)).resolves.toEqual({
+            status: 'started',
+            surface: 'saved_gallery',
+            runToken: 'e2e-r2-backup'
+        });
+        await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toContain(backupProcessedId);
+
+        const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
+        expect(runtimeMessages).toContainEqual({ action: 'VALIDATE_CLOUD_CONFIG' });
+        expect(runtimeMessages).toContainEqual({
+            action: 'R2_BACKUP_UPLOAD',
+            url: `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`,
+            isVideo: false,
+            promptText: '',
+            blobDataUrl,
+            skipLocalDownload: false,
+            acceptance
+        });
+
+        const backupEvents = await page.evaluate(() => window.__chromeEvents);
+        const acknowledgementIndex = backupEvents.findIndex((event) =>
+            event.type === 'runtime_response'
+            && event.action === 'R2_BACKUP_UPLOAD'
+            && event.response?.status === 'already_present'
+        );
+        const processedIdIndex = backupEvents.findIndex((event) =>
+            event.type === 'storage_set'
+            && event.area === 'local'
+            && event.values.processedIds?.includes(backupProcessedId)
+        );
+        expect(acknowledgementIndex).toBeGreaterThanOrEqual(0);
+        expect(processedIdIndex).toBeGreaterThan(acknowledgementIndex);
+    });
+
+    test('Prompted Batch routes Saved media through Add Prompt and Make video', async ({ page }) => {
+        const accountUuid = '66666666-6666-4666-8666-666666666666';
+        const mediaUuid = '77777777-7777-4777-8777-777777777777';
+        const secondMediaUuid = '88888888-8888-4888-8888-888888888888';
+
+        await evaluateExtensionContent(page);
+        await page.evaluate(bridgeJs);
+        await setupMockPromptedBatch(page, { accountUuid, mediaUuid, secondMediaUuid });
+
+        await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
+            'prompted',
+            'slow orbit around the generated sculpture',
+            { videoGoal: 1, galleryLimit: 1 }
+        ))).resolves.toBe(true);
+
+        const events = await page.evaluate(() => window.__promptedBatchEvents);
+        expect(events.savedClicks).toEqual([mediaUuid]);
+        expect(events.menuChoices).toEqual(['Add Prompt']);
+        expect(events.promptWrites).toEqual(['slow orbit around the generated sculpture']);
+        expect(events.promptWriteResults).toEqual([true]);
+        expect(events.promptAtSubmit).toBe('slow orbit around the generated sculpture');
+        expect(events.submitCount).toBe(1);
+        expect(events.editCount).toBe(0);
+        expect(events.backCount).toBe(1);
+        expect(events.scrollToCalls).toContainEqual([0, 480]);
+        await expect(page.locator('img[alt="Generated image"]')).toHaveCount(2);
+        await expect(page.locator('.query-bar')).toHaveCount(0);
+        await expect(page.evaluate(() => ({
+            goalCount: window.__gptE2e.retry.goalCount,
+            batchIndex: window.__gptE2e.retry.batchIndex,
+            batchQueueLength: window.__gptE2e.retry.batchQueue.length,
+            batchRunning: window.__gptE2e.retry.batchRunning
+        }))).resolves.toEqual({
+            goalCount: 1,
+            batchIndex: 0,
+            batchQueueLength: 1,
+            batchRunning: false
+        });
+    });
+
+    test('Stop during the Agent-media wait prevents a transfer', async ({ page }) => {
+        const accountUuid = '88888888-8888-4888-8888-888888888888';
+        const mediaUuid = '99999999-9999-4999-8999-999999999999';
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [mediaUuid],
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'local_only' } },
+                DOWNLOAD_MEDIA: { status: 'queued' }
+            },
+            runToken: 'e2e-stop-agent-wait',
+            agentMedia: false
+        });
+        await page.evaluate(() => {
+            const { scraper } = window.__gptE2e;
+            scraper.sleep = async () => {
+                if (window.location.pathname.startsWith('/imagine/agent')) {
+                    await scraper.stop('e2e_stop_while_waiting_for_agent_media');
+                }
+            };
+        });
+
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start())).toEqual({
+            status: 'started',
+            surface: 'saved_gallery',
+            runToken: 'e2e-stop-agent-wait'
+        });
+        await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.scraperState)).toBe('idle');
+
+        const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
+        expect(runtimeMessages).not.toContainEqual(expect.objectContaining({ action: 'DOWNLOAD_MEDIA' }));
+        expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
+        expect(await page.evaluate(() => window.__galleryScrollCalls)).toEqual([]);
+    });
+
+    test('Stop after Add Prompt prevents scoped injection and Make video submission', async ({ page }) => {
+        const accountUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const mediaUuid = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+        await evaluateExtensionContent(page);
+        await page.evaluate(bridgeJs);
+        await setupMockPromptedBatch(page, { accountUuid, mediaUuid, stopAfterAddPrompt: true });
+
+        await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
+            'prompted',
+            'this prompt must not reach the video composer',
+            { videoGoal: 1, galleryLimit: 1 }
+        ))).resolves.toBe(true);
+
+        const events = await page.evaluate(() => window.__promptedBatchEvents);
+        expect(events.savedClicks).toEqual([mediaUuid]);
+        expect(events.menuChoices).toEqual(['Add Prompt']);
+        expect(events.promptWrites).toEqual([]);
+        expect(events.promptWriteResults).toEqual([]);
+        expect(events.submitCount).toBe(0);
+        expect(events.editCount).toBe(0);
     });
 
     test('Provider and recreate helper globals should be available before content script', async ({ page }) => {
