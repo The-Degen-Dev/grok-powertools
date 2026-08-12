@@ -68,6 +68,20 @@ describe('Grok scrape surface detection', () => {
         expect(detectGrokScrapeSurface(document, 'https://grok.com/'))
             .toBe(SCRAPE_SURFACES.unsupported);
     });
+
+    test('rejects unsupported Imagine routes even when incidental download controls exist', () => {
+        document.body.innerHTML = `
+            <button aria-label="Download"></button>
+            <svg class="lucide-download"></svg>
+        `;
+
+        expect(detectGrokScrapeSurface(document, 'https://grok.com/imagine'))
+            .toBe(SCRAPE_SURFACES.unsupported);
+        expect(detectGrokScrapeSurface(document, 'https://grok.com/imagine/liked'))
+            .toBe(SCRAPE_SURFACES.unsupported);
+        expect(detectGrokScrapeSurface(document, 'https://grok.com/imagine/post/post-1'))
+            .toBe(SCRAPE_SURFACES.legacyDetail);
+    });
 });
 
 describe('Grok media identity', () => {
