@@ -113,33 +113,39 @@ function findMarkedPromptedVideoEditor(marker) {
         }) || null;
 }
 
-document.addEventListener('__gpt_set_prompted_video_content', function(e) {
-    var detail = e.detail || {};
-    var marker = String(detail.marker || '');
-    var text = String(detail.text || '');
-    var editor = findMarkedPromptedVideoEditor(marker);
-    var ok = false;
-    var error = null;
+var promptedVideoBridgeState = window.__gptPromptedVideoBridgeState
+    || (window.__gptPromptedVideoBridgeState = {});
 
-    try {
-        if (!editor) throw new Error('Marked prompted video editor not found');
+if (!promptedVideoBridgeState.setContentHandler) {
+    promptedVideoBridgeState.setContentHandler = function(e) {
+        var detail = e.detail || {};
+        var marker = String(detail.marker || '');
+        var text = String(detail.text || '');
+        var editor = findMarkedPromptedVideoEditor(marker);
+        var ok = false;
+        var error = null;
 
-        if (editor.editor && editor.editor.commands) {
-            editor.editor.commands.clearContent();
-            editor.editor.commands.insertContent(text);
-        } else {
-            replaceContentEditableText(editor, text);
+        try {
+            if (!editor) throw new Error('Marked prompted video editor not found');
+
+            if (editor.editor && editor.editor.commands) {
+                editor.editor.commands.clearContent();
+                editor.editor.commands.insertContent(text);
+            } else {
+                replaceContentEditableText(editor, text);
+            }
+            ok = true;
+        } catch (err) {
+            error = err && err.message ? err.message : 'Failed to set prompted video content';
+        } finally {
+            if (editor) editor.removeAttribute('data-gpt-prompt-target');
+            document.dispatchEvent(new CustomEvent('__gpt_set_prompted_video_content_result', {
+                detail: { marker: marker, ok: ok, error: error }
+            }));
         }
-        ok = true;
-    } catch (err) {
-        error = err && err.message ? err.message : 'Failed to set prompted video content';
-    } finally {
-        if (editor) editor.removeAttribute('data-gpt-prompt-target');
-        document.dispatchEvent(new CustomEvent('__gpt_set_prompted_video_content_result', {
-            detail: { marker: marker, ok: ok, error: error }
-        }));
-    }
-});
+    };
+    document.addEventListener('__gpt_set_prompted_video_content', promptedVideoBridgeState.setContentHandler);
+}
 
 // Fetch media with page cookies for R2 backup (content script can't include page cookies)
 document.addEventListener('__gpt_fetch_media', function(e) {

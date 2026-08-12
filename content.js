@@ -2448,9 +2448,12 @@ class VideoRetryManager {
 
         const marker = `gpt_prompted_video_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         let injected = false;
+        let settled = false;
         const handleResult = (event) => {
             const detail = event.detail || {};
-            if (detail.marker === marker) injected = detail.ok === true;
+            if (detail.marker !== marker || settled) return;
+            settled = true;
+            injected = detail.ok === true;
         };
 
         input.setAttribute('data-gpt-prompt-target', marker);
@@ -2671,10 +2674,26 @@ class VideoRetryManager {
         }
     }
 
+    _getPromptedVideoSource(video) {
+        return video.currentSrc || video.src || video.querySelector('source[src]')?.src || '';
+    }
+
+    _getPromptedVideoSourceIdentity(video) {
+        const source = this._getPromptedVideoSource(video);
+        return getGrokMediaIdentity(source) || source;
+    }
+
+    _getPromptedVideoSourceIdentities(searchRoot, selector = 'video', readyOnly = false) {
+        return Array.from(searchRoot.querySelectorAll(selector))
+            .filter((video) => !readyOnly || video.readyState >= 2)
+            .map((video) => this._getPromptedVideoSourceIdentity(video))
+            .filter(Boolean);
+    }
+
     _getReadyPromptedVideoSources(searchRoot) {
         return Array.from(searchRoot.querySelectorAll('video'))
             .filter((video) => video.readyState >= 2)
-            .map((video) => video.currentSrc || video.src || video.querySelector('source[src]')?.src || '')
+            .map((video) => this._getPromptedVideoSource(video))
             .filter(Boolean);
     }
 
@@ -2688,8 +2707,16 @@ class VideoRetryManager {
     _getReadyAgentAssetVideoSources(searchRoot) {
         return Array.from(searchRoot.querySelectorAll('.react-flow__node-asset video'))
             .filter((video) => video.readyState >= 2)
-            .map((video) => video.currentSrc || video.src || video.querySelector('source[src]')?.src || '')
+            .map((video) => this._getPromptedVideoSource(video))
             .filter(Boolean);
+    }
+
+    _getAgentAssetVideoSourceIdentities(searchRoot, readyOnly = false) {
+        return this._getPromptedVideoSourceIdentities(
+            searchRoot,
+            '.react-flow__node-asset video',
+            readyOnly
+        );
     }
 
     capturePromptedVideoResultBaseline(searchRoot) {
@@ -2699,19 +2726,24 @@ class VideoRetryManager {
             surface: detectGrokScrapeSurface(document, window.location),
             completeCount: searchRoot.querySelectorAll('button[aria-label="Video Generation Complete"]').length,
             videoSources: this._getReadyPromptedVideoSources(searchRoot),
+            videoSourceIdentities: this._getPromptedVideoSourceIdentities(searchRoot),
             agentAssetSources: this._getAgentAssetSources(searchRoot),
-            agentAssetVideoSources: this._getReadyAgentAssetVideoSources(searchRoot)
+            agentAssetVideoSources: this._getReadyAgentAssetVideoSources(searchRoot),
+            agentAssetVideoSourceIdentities: this._getAgentAssetVideoSourceIdentities(searchRoot)
         };
     }
 
     _hasNewPromptedVideoResult(searchRoot, baseline) {
         const currentSurface = detectGrokScrapeSurface(document, window.location);
-        const baselineSources = new Set(baseline.videoSources || []);
-        const hasNewReadyVideo = this._getReadyPromptedVideoSources(searchRoot)
-            .some((source) => !baselineSources.has(source));
-        const baselineAgentVideoSources = new Set(baseline.agentAssetVideoSources || []);
-        const hasNewReadyAgentVideo = this._getReadyAgentAssetVideoSources(searchRoot)
-            .some((source) => !baselineAgentVideoSources.has(source));
+        const baselineVideoIdentities = new Set(
+            baseline.videoSourceIdentities
+            || (baseline.videoSources || []).map((source) => getGrokMediaIdentity(source) || source)
+        );
+        const hasNewReadyVideo = this._getPromptedVideoSourceIdentities(searchRoot, 'video', true)
+            .some((identity) => !baselineVideoIdentities.has(identity));
+        const baselineAgentVideoIdentities = new Set(baseline.agentAssetVideoSourceIdentities || []);
+        const hasNewReadyAgentVideo = this._getAgentAssetVideoSourceIdentities(searchRoot, true)
+            .some((identity) => !baselineAgentVideoIdentities.has(identity));
         if (baseline.surface === SCRAPE_SURFACES.agentMedia
             && currentSurface === SCRAPE_SURFACES.agentMedia
             && hasNewReadyAgentVideo) return true;

@@ -1235,6 +1235,21 @@ describe('VideoRetryManager', () => {
         expect(persistentSubmit.click).not.toHaveBeenCalled();
     });
 
+    test('current-page completion does not accept a pre-existing unready source that becomes ready', () => {
+        window.history.pushState({}, '', '/imagine/post/source-image');
+        const video = document.createElement('video');
+        video.src = 'https://assets.grok.com/users/example/generated/66666666-7777-4888-8999-aaaaaaaaaaaa/generated_video.mp4?token=before';
+        Object.defineProperty(video, 'readyState', { value: 0, configurable: true });
+        document.body.appendChild(video);
+
+        const baseline = retryManager.capturePromptedVideoResultBaseline(document);
+        window.history.pushState({}, '', '/imagine/post/generated-video');
+        video.src = 'https://assets.grok.com/users/example/generated/66666666-7777-4888-8999-aaaaaaaaaaaa/generated_video.mp4?token=after';
+        Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+
+        expect(retryManager._hasNewPromptedVideoResult(document, baseline)).toBe(false);
+    });
+
     test('Agent completion accepts only a new ready video source in an asset node without a URL change', () => {
         window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
         const asset = document.createElement('div');
@@ -1255,6 +1270,23 @@ describe('VideoRetryManager', () => {
         asset.appendChild(video);
 
         expect(retryManager._hasNewPromptedVideoResult(document, baseline)).toBe(true);
+    });
+
+    test('Agent completion does not accept a pre-existing unready source that becomes ready', () => {
+        window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
+        const asset = document.createElement('div');
+        asset.className = 'react-flow__node-asset';
+        const video = document.createElement('video');
+        video.src = 'https://assets.grok.com/users/example/generated/11111111-2222-4333-8444-555555555555/generated_video.mp4?token=before';
+        Object.defineProperty(video, 'readyState', { value: 0, configurable: true });
+        asset.appendChild(video);
+        document.body.appendChild(asset);
+
+        const baseline = retryManager.capturePromptedVideoResultBaseline(document);
+        video.src = 'https://assets.grok.com/users/example/generated/11111111-2222-4333-8444-555555555555/generated_video.mp4?token=after';
+        Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+
+        expect(retryManager._hasNewPromptedVideoResult(document, baseline)).toBe(false);
     });
 
     test('Agent completion ignores unchanged sources and persistent video or Precise Edit controls', () => {
