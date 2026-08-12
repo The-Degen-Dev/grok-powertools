@@ -1200,6 +1200,164 @@ describe('VideoRetryManager', () => {
         expect(lateDecoySubmitClicks).toBe(0);
     });
 
+    test('transient duplicate prompted-video input during quiescence fails closed without write or submit', async () => {
+        retryManager.generateMoreObserver.disconnect();
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let addPromptClicked = false;
+        let transientDuplicateMounted = false;
+        let selectedComposer = null;
+        let selectedSubmitClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            addPromptClicked = true;
+            selectedComposer = mountFocusedPromptedVideoComposer({
+                onSubmit: () => { selectedSubmitClicks++; }
+            });
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (!addPromptClicked || transientDuplicateMounted) return;
+            transientDuplicateMounted = true;
+            await new Promise((resolve) => {
+                const deliveryObserver = new MutationObserver(() => {
+                    deliveryObserver.disconnect();
+                    resolve();
+                });
+                deliveryObserver.observe(selectedComposer.composer, { childList: true });
+                const duplicateInput = document.createElement('div');
+                duplicateInput.setAttribute('contenteditable', 'true');
+                duplicateInput.setAttribute('role', 'textbox');
+                duplicateInput.setAttribute('aria-label', 'Ask Grok anything');
+                selectedComposer.composer.appendChild(duplicateInput);
+                duplicateInput.remove();
+            });
+        });
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        const selected = await retryManager.selectMakeVideoMode(undefined, selectedTrigger);
+        if (selected) {
+            retryManager.injectPromptedVideoText('must not survive transient duplicate input');
+            retryManager.clickPromptedVideoSubmitButton();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        expect(transientDuplicateMounted).toBe(true);
+        expect(selected).toBe(false);
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+        expect(selectedComposer.input.textContent).toBe('');
+        expect(selectedSubmitClicks).toBe(0);
+    });
+
+    test('transient duplicate actionable Make video submit during quiescence fails closed without write or submit', async () => {
+        retryManager.generateMoreObserver.disconnect();
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let addPromptClicked = false;
+        let transientDuplicateMounted = false;
+        let selectedComposer = null;
+        let selectedSubmitClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            addPromptClicked = true;
+            selectedComposer = mountFocusedPromptedVideoComposer({
+                onSubmit: () => { selectedSubmitClicks++; }
+            });
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (!addPromptClicked || transientDuplicateMounted) return;
+            transientDuplicateMounted = true;
+            await new Promise((resolve) => {
+                const deliveryObserver = new MutationObserver(() => {
+                    deliveryObserver.disconnect();
+                    resolve();
+                });
+                deliveryObserver.observe(selectedComposer.composer, { childList: true });
+                const duplicateSubmit = makeVisible(document.createElement('button'));
+                duplicateSubmit.setAttribute('aria-label', 'Make video');
+                selectedComposer.composer.appendChild(duplicateSubmit);
+                duplicateSubmit.remove();
+            });
+        });
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        const selected = await retryManager.selectMakeVideoMode(undefined, selectedTrigger);
+        if (selected) {
+            retryManager.injectPromptedVideoText('must not survive transient duplicate submit');
+            retryManager.clickPromptedVideoSubmitButton();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        expect(transientDuplicateMounted).toBe(true);
+        expect(selected).toBe(false);
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+        expect(selectedComposer.input.textContent).toBe('');
+        expect(selectedSubmitClicks).toBe(0);
+    });
+
+    test('irrelevant mutations and text writes do not poison prompted-video quiescence', async () => {
+        retryManager.generateMoreObserver.disconnect();
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let addPromptClicked = false;
+        let mutationsDelivered = false;
+        let quiescenceSleeps = 0;
+        let selectedComposer = null;
+        let selectedSubmitClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            addPromptClicked = true;
+            selectedComposer = mountFocusedPromptedVideoComposer({
+                onSubmit: () => { selectedSubmitClicks++; }
+            });
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (!addPromptClicked) return;
+            quiescenceSleeps++;
+            if (mutationsDelivered) return;
+            mutationsDelivered = true;
+            await new Promise((resolve) => {
+                const deliveryObserver = new MutationObserver(() => {
+                    deliveryObserver.disconnect();
+                    resolve();
+                });
+                deliveryObserver.observe(selectedComposer.composer, {
+                    childList: true,
+                    subtree: true
+                });
+                const irrelevant = document.createElement('span');
+                irrelevant.textContent = 'loading';
+                const disabledSubmit = document.createElement('button');
+                disabledSubmit.setAttribute('aria-label', 'Make video');
+                disabledSubmit.disabled = true;
+                selectedComposer.composer.append(irrelevant, disabledSubmit);
+                irrelevant.remove();
+                disabledSubmit.remove();
+                selectedComposer.input.textContent = 'draft';
+                selectedComposer.input.textContent = '';
+            });
+        });
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(true);
+        expect(retryManager.injectPromptedVideoText('accepted after irrelevant mutations')).toBe(true);
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+
+        expect(mutationsDelivered).toBe(true);
+        expect(quiescenceSleeps).toBe(5);
+        expect(retryManager.promptedVideoComposerRoot).toBe(selectedComposer.composer);
+        expect(selectedComposer.input.textContent).toBe('accepted after irrelevant mutations');
+        expect(selectedSubmitClicks).toBe(1);
+    });
+
     test('Stop during focus confirmation prevents retention, prompt write, and submit', async () => {
         window.history.pushState({}, '', '/imagine/agent/focus-stop?conversation=focus-stop');
         const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });

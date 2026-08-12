@@ -2302,6 +2302,9 @@ class GrokOverlay {
 const PROMPTED_VIDEO_FOCUS_POLL_MS = 100;
 const PROMPTED_VIDEO_FOCUS_WAIT_ATTEMPTS = 20;
 const PROMPTED_VIDEO_FOCUS_QUIESCENCE_MS = 500;
+const PROMPTED_VIDEO_INPUT_SELECTOR =
+    'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]';
+const PROMPTED_VIDEO_SUBMIT_SELECTOR = 'button[aria-label="Make video"]';
 
 class VideoRetryManager {
     constructor(overlay, settingsManager, historyManager) {
@@ -2561,13 +2564,12 @@ class VideoRetryManager {
     _getVerifiedPromptedVideoComposer(root) {
         if (!root?.isConnected || !root.matches('.query-bar')) return null;
 
-        const inputs = Array.from(root.querySelectorAll(
-            'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]'
-        )).filter((candidate) => candidate.closest('.query-bar') === root);
+        const inputs = Array.from(root.querySelectorAll(PROMPTED_VIDEO_INPUT_SELECTOR))
+            .filter((candidate) => candidate.closest('.query-bar') === root);
         if (inputs.length !== 1) return null;
 
         const input = inputs[0];
-        const submitButtons = Array.from(root.querySelectorAll('button[aria-label="Make video"]'))
+        const submitButtons = Array.from(root.querySelectorAll(PROMPTED_VIDEO_SUBMIT_SELECTOR))
             .filter((candidate) => candidate.closest('.query-bar') === root
                 && this._isActionableAutomationTarget(candidate, 72));
         if (submitButtons.length !== 1) return null;
@@ -2648,6 +2650,41 @@ class VideoRetryManager {
         return null;
     }
 
+    _isRecordedActionablePromptedVideoSubmit(button) {
+        if (!button.matches(PROMPTED_VIDEO_SUBMIT_SELECTOR)
+            || button.disabled
+            || button.hidden
+            || button.getAttribute('aria-disabled') === 'true') {
+            return false;
+        }
+        const style = window.getComputedStyle(button);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const rect = button.getBoundingClientRect();
+        return rect.width <= 72
+            && (!button.isConnected || (rect.width > 0 && rect.height > 0));
+    }
+
+    _mutationNodeContainsPromptedVideoContractMember(node, candidateRoot) {
+        if (node?.nodeType !== 1) return false;
+        const inputs = node.matches(PROMPTED_VIDEO_INPUT_SELECTOR) ? [node] : [];
+        inputs.push(...node.querySelectorAll(PROMPTED_VIDEO_INPUT_SELECTOR));
+        const submitButtons = node.matches(PROMPTED_VIDEO_SUBMIT_SELECTOR) ? [node] : [];
+        submitButtons.push(...node.querySelectorAll(PROMPTED_VIDEO_SUBMIT_SELECTOR));
+        return [...inputs, ...submitButtons].some((candidate) => {
+            const root = candidate.closest('.query-bar');
+            if (root && root !== candidateRoot) return false;
+            return candidate.matches(PROMPTED_VIDEO_INPUT_SELECTOR)
+                || this._isRecordedActionablePromptedVideoSubmit(candidate);
+        });
+    }
+
+    _didPromptedVideoContractMembershipChange(records, candidateRoot) {
+        return records.some((record) => record.type === 'childList'
+            && [...record.addedNodes, ...record.removedNodes].some((node) => (
+                this._mutationNodeContainsPromptedVideoContractMember(node, candidateRoot)
+            )));
+    }
+
     _recordPromptedVideoFocus(focusTransition, input) {
         const root = input?.closest?.('.query-bar') || null;
         if (!focusTransition.focusTransitioned) {
@@ -2657,9 +2694,7 @@ class VideoRetryManager {
         }
         if (!focusTransition.focusTransitioned
             || (focusTransition.root && root === focusTransition.root)
-            || !input?.matches(
-                'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]'
-            )) {
+            || !input?.matches(PROMPTED_VIDEO_INPUT_SELECTOR)) {
             if (focusTransition.candidateRoot) focusTransition.focusLeftCandidate = true;
             return null;
         }
@@ -2679,7 +2714,14 @@ class VideoRetryManager {
         if (!focusTransition.candidateRoot) {
             focusTransition.candidateRoot = composer.root;
             focusTransition.candidateInput = composer.input;
-            focusTransition.observer = new MutationObserver(() => {
+            focusTransition.observer = new MutationObserver((records) => {
+                if (this._didPromptedVideoContractMembershipChange(
+                    records,
+                    focusTransition.candidateRoot
+                )) {
+                    focusTransition.cardinalityDrifted = true;
+                    return;
+                }
                 const verified = this._getVerifiedPromptedVideoComposer(
                     focusTransition.candidateRoot
                 );
