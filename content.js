@@ -2571,12 +2571,19 @@ class VideoRetryManager {
         return this._getVerifiedPromptedVideoComposer(this.promptedVideoComposerRoot)?.submitButton || null;
     }
 
-    async _waitForPromptedVideoSubmitButton(runToken) {
+    _getVerifiedPromptedVideoComposers() {
+        return Array.from(document.querySelectorAll('.query-bar'))
+            .map((root) => this._getVerifiedPromptedVideoComposer(root))
+            .filter(Boolean);
+    }
+
+    async _waitForPromptedVideoSubmitButton(runToken, existingRoots = null) {
         for (let attempt = 0; attempt < 20; attempt++) {
             if (!this.isPromptedBatchTokenActive(runToken)) return null;
-            const composer = Array.from(document.querySelectorAll('.query-bar'))
-                .map((root) => this._getVerifiedPromptedVideoComposer(root))
-                .find(Boolean);
+            const composers = this._getVerifiedPromptedVideoComposers()
+                .filter((composer) => !existingRoots || !existingRoots.has(composer.root));
+            if (existingRoots && composers.length > 1) return null;
+            const composer = composers[0];
             if (composer) {
                 this.promptedVideoComposerRoot = composer.root;
                 return composer.submitButton;
@@ -2586,20 +2593,25 @@ class VideoRetryManager {
         return null;
     }
 
-    async _waitForPromptedVideoComposer(runToken) {
-        const submitButton = await this._waitForPromptedVideoSubmitButton(runToken);
+    async _waitForPromptedVideoComposer(runToken, existingRoots = null) {
+        const submitButton = await this._waitForPromptedVideoSubmitButton(runToken, existingRoots);
         const composer = this._getVerifiedPromptedVideoComposer(this.promptedVideoComposerRoot);
         return submitButton && composer ? composer : null;
     }
 
-    async _waitForAddPromptMenuItem(runToken) {
+    _getVisibleAddPromptMenuItems() {
+        return Array.from(document.querySelectorAll('[role="menuitem"]'))
+            .filter((item) => item.textContent.trim() === 'Add Prompt'
+                && this._isVisibleAutomationTarget(item));
+    }
+
+    async _waitForAddPromptMenuItem(runToken, existingItems = null) {
         for (let attempt = 0; attempt < 20; attempt++) {
             if (!this.isPromptedBatchTokenActive(runToken)) return null;
-            const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]'));
-            const addPromptItem = menuItems.find((item) =>
-                item.textContent.trim() === 'Add Prompt'
-                && this._isVisibleAutomationTarget(item)
-            );
+            const items = this._getVisibleAddPromptMenuItems()
+                .filter((item) => !existingItems || !existingItems.has(item));
+            if (existingItems && items.length > 1) return null;
+            const addPromptItem = items[0];
             if (addPromptItem) return addPromptItem;
             await this.sleep(100);
         }
@@ -2617,17 +2629,21 @@ class VideoRetryManager {
             : this._findCurrentMakeVideoTrigger();
 
         if (currentTrigger) {
+            const existingAddPromptItems = new Set(this._getVisibleAddPromptMenuItems());
             if (!this.isPromptedBatchTokenActive(runToken)) return false;
             this.simulateClick(currentTrigger);
-            const addPromptItem = await this._waitForAddPromptMenuItem(runToken);
+            const addPromptItem = await this._waitForAddPromptMenuItem(runToken, existingAddPromptItems);
             if (!addPromptItem) {
                 console.log('VideoRetryManager: Add Prompt option not found');
                 return false;
             }
 
+            const existingComposerRoots = new Set(
+                this._getVerifiedPromptedVideoComposers().map((composer) => composer.root)
+            );
             if (!this.isPromptedBatchTokenActive(runToken)) return false;
             this.simulateClick(addPromptItem);
-            const composer = await this._waitForPromptedVideoComposer(runToken);
+            const composer = await this._waitForPromptedVideoComposer(runToken, existingComposerRoots);
             if (!composer) {
                 console.log('VideoRetryManager: Video prompt composer did not open');
                 return false;
