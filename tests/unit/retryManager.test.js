@@ -1043,6 +1043,132 @@ describe('VideoRetryManager', () => {
         expect(selectedSubmitClicks).toBe(1);
     });
 
+    test('delayed selected focus wins over a verified decoy focused before Add Prompt', async () => {
+        let decoySubmitClicks = 0;
+        const decoy = mountFocusedPromptedVideoComposer({
+            onSubmit: () => { decoySubmitClicks++; }
+        });
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let addPromptClicked = false;
+        let selectedInput = null;
+        let selectedSubmitClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            addPromptClicked = true;
+            const composer = document.createElement('div');
+            composer.className = 'query-bar';
+            selectedInput = document.createElement('div');
+            selectedInput.setAttribute('contenteditable', 'true');
+            selectedInput.setAttribute('role', 'textbox');
+            selectedInput.setAttribute('aria-label', 'Ask Grok anything');
+            selectedInput.tabIndex = -1;
+            const submit = makeVisible(document.createElement('button'));
+            submit.setAttribute('aria-label', 'Make video');
+            submit.addEventListener('click', () => { selectedSubmitClicks++; });
+            composer.append(selectedInput, submit);
+            document.body.appendChild(composer);
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (addPromptClicked && document.activeElement !== selectedInput) selectedInput.focus();
+        });
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(true);
+        expect(retryManager.injectPromptedVideoText('selected after delayed focus')).toBe(true);
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+
+        expect(decoy.input.textContent).toBe('');
+        expect(decoySubmitClicks).toBe(0);
+        expect(selectedInput.textContent).toBe('selected after delayed focus');
+        expect(selectedSubmitClicks).toBe(1);
+    });
+
+    test('multiple distinct post-click focused composers fail closed without write or submit', async () => {
+        const originalDecoy = mountFocusedPromptedVideoComposer();
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let addPromptClicked = false;
+        let remountedDecoy = null;
+        let decoySubmitClicks = 0;
+        let selectedInput = null;
+        let selectedSubmitClicks = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            addPromptClicked = true;
+            originalDecoy.composer.remove();
+            remountedDecoy = mountFocusedPromptedVideoComposer({
+                onSubmit: () => { decoySubmitClicks++; }
+            });
+            const selectedComposer = document.createElement('div');
+            selectedComposer.className = 'query-bar';
+            selectedInput = document.createElement('div');
+            selectedInput.setAttribute('contenteditable', 'true');
+            selectedInput.setAttribute('role', 'textbox');
+            selectedInput.setAttribute('aria-label', 'Ask Grok anything');
+            selectedInput.tabIndex = -1;
+            const selectedSubmit = makeVisible(document.createElement('button'));
+            selectedSubmit.setAttribute('aria-label', 'Make video');
+            selectedSubmit.addEventListener('click', () => { selectedSubmitClicks++; });
+            selectedComposer.append(selectedInput, selectedSubmit);
+            document.body.appendChild(selectedComposer);
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (addPromptClicked && document.activeElement !== selectedInput) selectedInput.focus();
+        });
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        const selected = await retryManager.selectMakeVideoMode(undefined, selectedTrigger);
+        if (selected) {
+            retryManager.injectPromptedVideoText('must not be written');
+            retryManager.clickPromptedVideoSubmitButton();
+        }
+
+        expect(selected).toBe(false);
+        expect(remountedDecoy.input.textContent).toBe('');
+        expect(decoySubmitClicks).toBe(0);
+        expect(selectedInput.textContent).toBe('');
+        expect(selectedSubmitClicks).toBe(0);
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+    });
+
+    test('Stop during focus confirmation prevents retention, prompt write, and submit', async () => {
+        window.history.pushState({}, '', '/imagine/agent/focus-stop?conversation=focus-stop');
+        const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        selectedTrigger.setAttribute('aria-label', 'Make Video');
+        selectedTrigger.setAttribute('aria-haspopup', 'menu');
+        const menu = makeVisible(document.createElement('div'));
+        let addPromptClicked = false;
+        let focusConfirmationSleeps = 0;
+        menu.appendChild(createMenuItem('Add Prompt', () => {
+            addPromptClicked = true;
+            mountFocusedPromptedVideoComposer();
+        }));
+        selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
+        document.body.appendChild(selectedTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (!addPromptClicked) return;
+            focusConfirmationSleeps++;
+            retryManager.stopBatch();
+        });
+        const injectSpy = jest.spyOn(retryManager, 'injectPromptedVideoText');
+        const submitSpy = jest.spyOn(retryManager, 'clickPromptedVideoSubmitButton');
+
+        await retryManager.startPromptedBatchFromDetail('cancel during focus confirmation', 1);
+
+        expect(focusConfirmationSleeps).toBe(1);
+        expect(injectSpy).not.toHaveBeenCalled();
+        expect(submitSpy).not.toHaveBeenCalled();
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+        expect(retryManager.goalCount).toBe(0);
+    });
+
     test('current menu mode fails closed when the selected trigger opens multiple new Add Prompt items', async () => {
         const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
         selectedTrigger.setAttribute('aria-label', 'Make Video');

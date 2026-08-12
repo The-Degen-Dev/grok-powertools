@@ -2644,18 +2644,69 @@ class VideoRetryManager {
         return null;
     }
 
-    async _waitForFocusedPromptedVideoComposer(runToken) {
-        for (let attempt = 0; attempt < 20; attempt++) {
-            if (!this.isPromptedBatchTokenActive(runToken)) return null;
-            const input = document.activeElement;
-            if (input?.matches(
+    _recordPromptedVideoFocus(focusTransition, input) {
+        const root = input?.closest?.('.query-bar') || null;
+        if (!focusTransition.focusTransitioned) {
+            const leftActiveElement = input !== focusTransition.activeElement;
+            const leftActiveRoot = !focusTransition.root || root !== focusTransition.root;
+            focusTransition.focusTransitioned = leftActiveElement && leftActiveRoot;
+        }
+        if (!focusTransition.focusTransitioned
+            || (focusTransition.root && root === focusTransition.root)
+            || !input?.matches(
                 'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]'
             )) {
-                const composer = this._getVerifiedPromptedVideoComposer(input.closest('.query-bar'));
-                if (composer?.input === input) {
-                    this.promptedVideoComposerRoot = composer.root;
-                    return composer;
+            return null;
+        }
+
+        const composer = this._getVerifiedPromptedVideoComposer(root);
+        if (composer?.input !== input) return null;
+        focusTransition.observedRoots.add(composer.root);
+        return composer;
+    }
+
+    _startPromptedVideoFocusTransition() {
+        const activeElement = document.activeElement;
+        const focusTransition = {
+            activeElement,
+            root: activeElement?.closest?.('.query-bar') || null,
+            focusTransitioned: false,
+            observedRoots: new Set(),
+            listener: null
+        };
+        focusTransition.listener = (event) => {
+            this._recordPromptedVideoFocus(focusTransition, event.target);
+        };
+        document.addEventListener('focusin', focusTransition.listener, true);
+        return focusTransition;
+    }
+
+    _stopPromptedVideoFocusTransition(focusTransition) {
+        document.removeEventListener('focusin', focusTransition.listener, true);
+    }
+
+    async _waitForFocusedPromptedVideoComposer(runToken, focusTransition) {
+        let confirmationRoot = null;
+        for (let attempt = 0; attempt < 20; attempt++) {
+            if (!this.isPromptedBatchTokenActive(runToken)) return null;
+            const composer = this._recordPromptedVideoFocus(
+                focusTransition,
+                document.activeElement
+            );
+            if (focusTransition.observedRoots.size > 1) return null;
+
+            if (composer) {
+                if (confirmationRoot === composer.root) {
+                    const confirmed = this._getVerifiedPromptedVideoComposer(composer.root);
+                    if (focusTransition.observedRoots.size === 1
+                        && confirmed?.input === document.activeElement) {
+                        this.promptedVideoComposerRoot = confirmed.root;
+                        return confirmed;
+                    }
                 }
+                confirmationRoot = composer.root;
+            } else {
+                confirmationRoot = null;
             }
             await this.sleep(100);
         }
@@ -2682,8 +2733,14 @@ class VideoRetryManager {
             }
 
             if (!this.isPromptedBatchTokenActive(runToken)) return false;
-            this.simulateClick(addPromptItem);
-            const composer = await this._waitForFocusedPromptedVideoComposer(runToken);
+            const focusTransition = this._startPromptedVideoFocusTransition();
+            let composer;
+            try {
+                this.simulateClick(addPromptItem);
+                composer = await this._waitForFocusedPromptedVideoComposer(runToken, focusTransition);
+            } finally {
+                this._stopPromptedVideoFocusTransition(focusTransition);
+            }
             if (!composer) {
                 console.log('VideoRetryManager: Video prompt composer did not open');
                 return false;
