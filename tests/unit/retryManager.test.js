@@ -105,6 +105,8 @@ function renderAgentEditor({
                 queryBar.className = 'query-bar';
                 const input = document.createElement('div');
                 input.setAttribute('contenteditable', 'true');
+                input.setAttribute('role', 'textbox');
+                input.setAttribute('aria-label', 'Ask Grok anything');
                 const submit = makeVisible(document.createElement('button'));
                 submit.setAttribute('aria-label', 'Make video');
                 if (onSubmit) submit.addEventListener('click', onSubmit);
@@ -126,6 +128,7 @@ describe('VideoRetryManager', () => {
     let settingsManager;
     let historyManager;
     let setIntervalSpy;
+    let promptedVideoBridgeHandler;
 
     beforeEach(() => {
         if (!global.PointerEvent) global.PointerEvent = MouseEvent;
@@ -150,11 +153,21 @@ describe('VideoRetryManager', () => {
         document.body.innerHTML = '';
         window.history.pushState({}, '', '/');
 
+        promptedVideoBridgeHandler = (event) => {
+            const target = document.querySelector(`[data-gpt-prompt-target="${event.detail.marker}"]`);
+            if (target) target.textContent = event.detail.text;
+            document.dispatchEvent(new CustomEvent('__gpt_set_prompted_video_content_result', {
+                detail: { marker: event.detail.marker, ok: !!target }
+            }));
+        };
+        document.addEventListener('__gpt_set_prompted_video_content', promptedVideoBridgeHandler);
+
         setIntervalSpy = jest.spyOn(global, 'setInterval').mockImplementation(() => 1);
         retryManager = new VideoRetryManager(mockOverlay, settingsManager, historyManager);
     });
 
     afterEach(() => {
+        document.removeEventListener('__gpt_set_prompted_video_content', promptedVideoBridgeHandler);
         jest.restoreAllMocks();
     });
 
@@ -416,12 +429,15 @@ describe('VideoRetryManager', () => {
                 addPrompt.textContent = 'Add Prompt';
                 addPrompt.addEventListener('click', () => {
                     const composer = document.createElement('div');
-                    composer.setAttribute('contenteditable', 'true');
+                    const input = document.createElement('div');
+                    input.setAttribute('contenteditable', 'true');
+                    input.setAttribute('role', 'textbox');
+                    input.setAttribute('aria-label', 'Ask Grok anything');
                     const submit = makeVisible(document.createElement('button'));
                     submit.setAttribute('aria-label', 'Make video');
                     submit.addEventListener('click', () => { submitted++; });
                     composer.className = 'query-bar';
-                    composer.appendChild(submit);
+                    composer.append(input, submit);
                     document.body.appendChild(composer);
                     addPrompt.remove();
                 });
@@ -490,6 +506,8 @@ describe('VideoRetryManager', () => {
                         queryBar.className = 'query-bar';
                         const input = document.createElement('div');
                         input.setAttribute('contenteditable', 'true');
+                        input.setAttribute('role', 'textbox');
+                        input.setAttribute('aria-label', 'Ask Grok anything');
                         const submit = makeVisible(document.createElement('button'));
                         submit.setAttribute('aria-label', 'Make video');
                         submit.addEventListener('click', () => { submitted++; });
@@ -582,12 +600,12 @@ describe('VideoRetryManager', () => {
             status: 'timeout',
             surface: 'saved_gallery'
         });
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
 
-        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText).not.toHaveBeenCalled();
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(nextClick).not.toHaveBeenCalled();
@@ -611,12 +629,12 @@ describe('VideoRetryManager', () => {
         const nextClick = addNextCardClickProbe();
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
         retryManager.sleep = jest.fn().mockResolvedValue();
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
 
-        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText).not.toHaveBeenCalled();
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(retryManager.batchRunning).toBe(false);
@@ -641,12 +659,12 @@ describe('VideoRetryManager', () => {
         const nextClick = addNextCardClickProbe();
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
         retryManager.sleep = jest.fn().mockResolvedValue();
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
 
-        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText).not.toHaveBeenCalled();
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(retryManager.batchRunning).toBe(false);
@@ -671,12 +689,12 @@ describe('VideoRetryManager', () => {
         const nextClick = addNextCardClickProbe();
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
         retryManager.sleep = jest.fn().mockResolvedValue();
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
 
-        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText).not.toHaveBeenCalled();
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(retryManager.batchRunning).toBe(false);
@@ -700,12 +718,12 @@ describe('VideoRetryManager', () => {
         });
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
         retryManager.sleep = jest.fn().mockResolvedValue();
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
 
-        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText).not.toHaveBeenCalled();
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(retryManager.batchRunning).toBe(false);
@@ -722,13 +740,13 @@ describe('VideoRetryManager', () => {
         next.image.addEventListener('click', nextClick);
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
         retryManager.stopBatch();
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, 'batch-test-token');
 
         expect(firstClick).not.toHaveBeenCalled();
-        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText).not.toHaveBeenCalled();
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(nextClick).not.toHaveBeenCalled();
@@ -743,12 +761,12 @@ describe('VideoRetryManager', () => {
         next.image.addEventListener('click', nextClick);
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
         retryManager.sleep = jest.fn().mockImplementation(async () => retryManager.stopBatch());
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
 
-        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText).not.toHaveBeenCalled();
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(nextClick).not.toHaveBeenCalled();
@@ -774,12 +792,12 @@ describe('VideoRetryManager', () => {
         });
         const nextClick = addNextCardClickProbe();
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
 
-        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText).not.toHaveBeenCalled();
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(nextClick).not.toHaveBeenCalled();
@@ -794,7 +812,7 @@ describe('VideoRetryManager', () => {
         });
         const nextClick = addNextCardClickProbe();
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
-        retryManager.injectPromptText = jest.fn(() => {
+        retryManager.injectPromptedVideoText = jest.fn(() => {
             retryManager.stopBatch();
             return true;
         });
@@ -802,7 +820,7 @@ describe('VideoRetryManager', () => {
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
 
-        expect(retryManager.injectPromptText).toHaveBeenCalledWith('slow camera push in');
+        expect(retryManager.injectPromptedVideoText).toHaveBeenCalledWith('slow camera push in');
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(nextClick).not.toHaveBeenCalled();
@@ -846,7 +864,7 @@ describe('VideoRetryManager', () => {
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
         retryManager.waitForPromptedBatchSavedSurface = jest.fn().mockResolvedValue(false);
         jest.spyOn(window.history, 'back').mockImplementation(() => {});
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
         const recoverSpy = jest.spyOn(retryManager, 'navigateToPromptedBatchGallery').mockImplementation(() => {});
 
@@ -930,6 +948,8 @@ describe('VideoRetryManager', () => {
                 editSubmit.remove();
                 const input = document.createElement('div');
                 input.setAttribute('contenteditable', 'true');
+                input.setAttribute('role', 'textbox');
+                input.setAttribute('aria-label', 'Ask Grok anything');
                 const videoSubmit = makeVisible(document.createElement('button'));
                 videoSubmit.setAttribute('aria-label', 'Make video');
                 queryBar.append(input, videoSubmit);
@@ -949,25 +969,123 @@ describe('VideoRetryManager', () => {
         expect(editSubmit.click).not.toHaveBeenCalled();
     });
 
-    test('waits for a delayed legacy composer before injecting and submitting', async () => {
+    test('prompted detail batch writes and submits only the Add Prompt video composer', async () => {
+        window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
+        const preciseEditComposer = document.createElement('div');
+        const preciseEditor = document.createElement('div');
+        preciseEditor.setAttribute('contenteditable', 'true');
+        preciseEditor.setAttribute('role', 'textbox');
+        preciseEditor.setAttribute('aria-label', 'Ask Grok anything');
+        const preciseEditSubmit = makeVisible(document.createElement('button'));
+        preciseEditSubmit.setAttribute('aria-label', 'Edit');
+        let preciseEditClicks = 0;
+        preciseEditSubmit.addEventListener('click', () => { preciseEditClicks++; });
+        preciseEditComposer.append(preciseEditor, preciseEditSubmit);
+
+        const makeVideoTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        makeVideoTrigger.setAttribute('aria-label', 'Make Video');
+        makeVideoTrigger.setAttribute('aria-haspopup', 'menu');
+        const menuClicks = { addPrompt: 0, spicy: 0, quickAnimate: 0 };
+        let videoEditor;
+        let videoSubmitClicks = 0;
+        let settingClicks = 0;
+        makeVideoTrigger.addEventListener('click', () => {
+            const addPrompt = makeVisible(document.createElement('div'));
+            addPrompt.setAttribute('role', 'menuitem');
+            addPrompt.textContent = 'Add Prompt';
+            addPrompt.addEventListener('click', () => {
+                menuClicks.addPrompt++;
+                const videoComposer = document.createElement('div');
+                videoComposer.className = 'query-bar';
+                videoEditor = document.createElement('div');
+                videoEditor.setAttribute('contenteditable', 'true');
+                videoEditor.setAttribute('role', 'textbox');
+                videoEditor.setAttribute('aria-label', 'Ask Grok anything');
+                const settings = ['480p', '720p', '1080p', '6s', '10s', '15s', 'Audio']
+                    .map((label) => {
+                        const setting = makeVisible(document.createElement('button'));
+                        setting.textContent = label;
+                        setting.addEventListener('click', () => { settingClicks++; });
+                        return setting;
+                    });
+                const submit = makeVisible(document.createElement('button'));
+                submit.setAttribute('aria-label', 'Make video');
+                submit.addEventListener('click', () => { videoSubmitClicks++; });
+                videoComposer.append(videoEditor, ...settings, submit);
+                document.body.appendChild(videoComposer);
+                addPrompt.remove();
+            });
+
+            const spicy = makeVisible(document.createElement('div'));
+            spicy.setAttribute('role', 'menuitem');
+            spicy.textContent = 'Spicy';
+            spicy.addEventListener('click', () => { menuClicks.spicy++; });
+            const quickAnimate = makeVisible(document.createElement('div'));
+            quickAnimate.setAttribute('role', 'menuitem');
+            quickAnimate.textContent = 'Quick Animate';
+            quickAnimate.addEventListener('click', () => { menuClicks.quickAnimate++; });
+            document.body.append(addPrompt, spicy, quickAnimate);
+        });
+        document.body.append(preciseEditComposer, makeVideoTrigger);
+
+        const bridgeHandler = (event) => {
+            const target = event.type === '__gpt_set_prompted_video_content'
+                ? document.querySelector(`[data-gpt-prompt-target="${event.detail.marker}"]`)
+                : document.querySelector('[contenteditable="true"]');
+            if (target) target.textContent = event.detail.text;
+            if (event.type === '__gpt_set_prompted_video_content') {
+                document.dispatchEvent(new CustomEvent('__gpt_set_prompted_video_content_result', {
+                    detail: { marker: event.detail.marker, ok: !!target }
+                }));
+            }
+        };
+        document.addEventListener('__gpt_set_editor_content', bridgeHandler);
+        document.addEventListener('__gpt_set_prompted_video_content', bridgeHandler);
+        retryManager.awaitBatchItemCompletion = jest.fn().mockResolvedValue('success');
+
+        try {
+            await retryManager.startPromptedBatchFromDetail('scoped video prompt', 1);
+        } finally {
+            document.removeEventListener('__gpt_set_editor_content', bridgeHandler);
+            document.removeEventListener('__gpt_set_prompted_video_content', bridgeHandler);
+        }
+
+        expect(menuClicks).toEqual({ addPrompt: 1, spicy: 0, quickAnimate: 0 });
+        expect(preciseEditor.textContent).toBe('');
+        expect(videoEditor.textContent).toBe('scoped video prompt');
+        expect(preciseEditClicks).toBe(0);
+        expect(videoSubmitClicks).toBe(1);
+        expect(settingClicks).toBe(0);
+        expect(videoEditor.hasAttribute('data-gpt-prompt-target')).toBe(false);
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+    });
+
+    test.each(['Video', 'Settings'])('waits for a delayed legacy %s composer before injecting and submitting', async (modeLabel) => {
         let promptedText = null;
         let submitted = 0;
         window.history.pushState({}, '', '/imagine/post/legacy-delayed-composer');
         const videoMode = makeVisible(document.createElement('button'));
-        videoMode.setAttribute('aria-label', 'Video');
+        videoMode.setAttribute('aria-label', modeLabel);
         const videoModeClick = jest.fn();
         videoMode.addEventListener('click', videoModeClick);
         document.body.appendChild(videoMode);
         const promptListener = (event) => {
             promptedText = event.detail.text;
+            const input = document.querySelector(`[data-gpt-prompt-target="${event.detail.marker}"]`);
+            if (input) input.textContent = event.detail.text;
+            document.dispatchEvent(new CustomEvent('__gpt_set_prompted_video_content_result', {
+                detail: { marker: event.detail.marker, ok: !!input }
+            }));
         };
-        document.addEventListener('__gpt_set_editor_content', promptListener);
+        document.addEventListener('__gpt_set_prompted_video_content', promptListener);
         retryManager.sleep = jest.fn().mockImplementation(async () => {
             if (document.querySelector('[contenteditable="true"]')) return;
             const queryBar = document.createElement('div');
             queryBar.className = 'query-bar';
             const input = document.createElement('div');
             input.setAttribute('contenteditable', 'true');
+            input.setAttribute('role', 'textbox');
+            input.setAttribute('aria-label', 'Ask Grok anything');
             const submit = makeVisible(document.createElement('button'));
             submit.setAttribute('aria-label', 'Make video');
             submit.addEventListener('click', () => { submitted++; });
@@ -977,13 +1095,48 @@ describe('VideoRetryManager', () => {
         retryManager.awaitBatchItemCompletion = jest.fn().mockResolvedValue('success');
 
         await retryManager.startPromptedBatchFromDetail('legacy prompt', 1);
-        document.removeEventListener('__gpt_set_editor_content', promptListener);
+        document.removeEventListener('__gpt_set_prompted_video_content', promptListener);
 
         expect(videoModeClick).toHaveBeenCalledTimes(1);
         expect(retryManager.sleep).toHaveBeenCalled();
         expect(promptedText).toBe('legacy prompt');
         expect(submitted).toBe(1);
         expect(retryManager.goalCount).toBe(1);
+    });
+
+    test('submits only the retained visible enabled Make video button in a verified composer', async () => {
+        const disabledComposer = document.createElement('div');
+        disabledComposer.className = 'query-bar';
+        const disabledInput = document.createElement('div');
+        disabledInput.setAttribute('contenteditable', 'true');
+        disabledInput.setAttribute('role', 'textbox');
+        disabledInput.setAttribute('aria-label', 'Ask Grok anything');
+        const disabledSubmit = makeVisible(document.createElement('button'));
+        disabledSubmit.setAttribute('aria-label', 'Make video');
+        disabledSubmit.disabled = true;
+        disabledComposer.append(disabledInput, disabledSubmit);
+
+        const verifiedComposer = document.createElement('div');
+        verifiedComposer.className = 'query-bar';
+        const verifiedInput = document.createElement('div');
+        verifiedInput.setAttribute('contenteditable', 'true');
+        verifiedInput.setAttribute('role', 'textbox');
+        verifiedInput.setAttribute('aria-label', 'Ask Grok anything');
+        const verifiedSubmit = makeVisible(document.createElement('button'));
+        verifiedSubmit.setAttribute('aria-label', 'Make video');
+        let verifiedSubmitClicks = 0;
+        verifiedSubmit.addEventListener('click', () => { verifiedSubmitClicks++; });
+        verifiedComposer.append(verifiedInput, verifiedSubmit);
+
+        const unrelatedSubmit = makeVisible(document.createElement('button'));
+        unrelatedSubmit.setAttribute('aria-label', 'Make video');
+        document.body.append(disabledComposer, unrelatedSubmit, verifiedComposer);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager._waitForPromptedVideoSubmitButton()).resolves.toBe(verifiedSubmit);
+        expect(retryManager.promptedVideoComposerRoot).toBe(verifiedComposer);
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+        expect(verifiedSubmitClicks).toBe(1);
     });
 
     test('prompted video submit never falls back to the Precise Edit submit', () => {
@@ -1004,12 +1157,12 @@ describe('VideoRetryManager', () => {
     test('prompted detail batch stops before prompt injection when Add Prompt mode does not open', async () => {
         window.history.pushState({}, '', '/imagine/post/current-ui');
         retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(false);
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
 
         await retryManager.startPromptedBatchFromDetail('slow camera push in', 1);
 
-        expect(retryManager.injectPromptText).not.toHaveBeenCalled();
+        expect(retryManager.injectPromptedVideoText).not.toHaveBeenCalled();
         expect(retryManager.clickPromptedVideoSubmitButton).not.toHaveBeenCalled();
         expect(mockOverlay.setStatus).toHaveBeenCalledWith(expect.stringContaining('Add Prompt'), 'warning');
         expect(retryManager.goalCount).toBe(0);
@@ -1082,6 +1235,50 @@ describe('VideoRetryManager', () => {
         expect(persistentSubmit.click).not.toHaveBeenCalled();
     });
 
+    test('Agent completion accepts only a new ready video source in an asset node without a URL change', () => {
+        window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
+        const asset = document.createElement('div');
+        asset.className = 'react-flow__node-asset';
+        const image = document.createElement('img');
+        image.src = 'https://assets.grok.com/users/example/generated/source/image.jpg';
+        asset.appendChild(image);
+        document.body.appendChild(asset);
+
+        const baseline = retryManager.capturePromptedVideoResultBaseline(document);
+        expect(baseline.surface).toBe('agent_media');
+        expect(baseline.agentAssetSources).toEqual([image.src]);
+        expect(retryManager._hasNewPromptedVideoResult(document, baseline)).toBe(false);
+
+        const video = document.createElement('video');
+        video.src = 'https://assets.grok.com/users/example/generated/new-video/generated_video.mp4';
+        Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+        asset.appendChild(video);
+
+        expect(retryManager._hasNewPromptedVideoResult(document, baseline)).toBe(true);
+    });
+
+    test('Agent completion ignores unchanged sources and persistent video or Precise Edit controls', () => {
+        window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
+        const asset = document.createElement('div');
+        asset.className = 'react-flow__node-asset';
+        const video = document.createElement('video');
+        video.src = 'https://assets.grok.com/users/example/generated/existing-video/generated_video.mp4';
+        Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+        asset.appendChild(video);
+        const controls = document.createElement('div');
+        controls.className = 'query-bar';
+        const makeVideo = makeVisible(document.createElement('button'));
+        makeVideo.setAttribute('aria-label', 'Make video');
+        const edit = makeVisible(document.createElement('button'));
+        edit.setAttribute('aria-label', 'Edit');
+        controls.append(makeVideo, edit);
+        document.body.append(asset, controls);
+
+        const baseline = retryManager.capturePromptedVideoResultBaseline(document);
+
+        expect(retryManager._hasNewPromptedVideoResult(document, baseline)).toBe(false);
+    });
+
     test('prompted detail batch passes the current video result baseline to completion monitoring', async () => {
         window.history.pushState({}, '', '/imagine/post/source-image');
         const baseline = {
@@ -1094,7 +1291,7 @@ describe('VideoRetryManager', () => {
             retryManager.promptedVideoModeContract = 'current_menu';
             return true;
         });
-        retryManager.injectPromptText = jest.fn().mockReturnValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.capturePromptedVideoResultBaseline = jest.fn().mockReturnValue(baseline);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
         retryManager.awaitBatchItemCompletion = jest.fn().mockResolvedValue('success');

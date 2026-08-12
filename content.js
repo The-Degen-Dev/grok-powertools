@@ -2335,6 +2335,7 @@ class VideoRetryManager {
         this.batchContext = null;    // 'gallery' or 'detail'
         this.batchRunToken = null;
         this.batchStartPending = false;
+        this.promptedVideoComposerRoot = null;
 
         // Quality Repeat state
         this.qualityRepeatRunning = false;
@@ -2438,6 +2439,36 @@ class VideoRetryManager {
         return true;
     }
 
+    injectPromptedVideoText(text) {
+        if (!text) return false;
+
+        const composer = this._getVerifiedPromptedVideoComposer(this.promptedVideoComposerRoot);
+        const input = composer?.input;
+        if (!input) return false;
+
+        const marker = `gpt_prompted_video_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        let injected = false;
+        const handleResult = (event) => {
+            const detail = event.detail || {};
+            if (detail.marker === marker) injected = detail.ok === true;
+        };
+
+        input.setAttribute('data-gpt-prompt-target', marker);
+        document.addEventListener('__gpt_set_prompted_video_content_result', handleResult);
+        try {
+            document.dispatchEvent(new CustomEvent('__gpt_set_prompted_video_content', {
+                detail: { marker, text }
+            }));
+        } catch {
+            injected = false;
+        } finally {
+            document.removeEventListener('__gpt_set_prompted_video_content_result', handleResult);
+            input.removeAttribute('data-gpt-prompt-target');
+        }
+
+        return injected;
+    }
+
     // --- Prompted Batch Helpers ---
 
     // Dispatches a full pointer event sequence that works with Radix UI dropdowns
@@ -2516,30 +2547,46 @@ class VideoRetryManager {
             || document.querySelector('[contenteditable="true"]');
     }
 
+    _clearPromptedVideoComposerRoot() {
+        this.promptedVideoComposerRoot = null;
+    }
+
+    _getVerifiedPromptedVideoComposer(root) {
+        if (!root?.isConnected || !root.matches('.query-bar')) return null;
+
+        const input = Array.from(root.querySelectorAll(
+            'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]'
+        )).find((candidate) => candidate.closest('.query-bar') === root) || null;
+        const submitButton = Array.from(root.querySelectorAll('button[aria-label="Make video"]'))
+            .find((candidate) => candidate.closest('.query-bar') === root
+                && this._isActionableAutomationTarget(candidate, 72)) || null;
+
+        return input && submitButton ? { root, input, submitButton } : null;
+    }
+
     _findPromptedVideoSubmitButton() {
-        const queryBars = Array.from(document.querySelectorAll('.query-bar'));
-        const roots = queryBars.length > 0 ? queryBars : [document];
+        return this._getVerifiedPromptedVideoComposer(this.promptedVideoComposerRoot)?.submitButton || null;
+    }
 
-        for (const root of roots) {
-            for (const label of ['Make video', 'Submit']) {
-                const buttons = Array.from(root.querySelectorAll(`button[aria-label="${label}"]`));
-                const button = buttons.find((candidate) => this._isActionableAutomationTarget(candidate, 72));
-                if (button) return button;
+    async _waitForPromptedVideoSubmitButton(runToken) {
+        for (let attempt = 0; attempt < 20; attempt++) {
+            if (!this.isPromptedBatchTokenActive(runToken)) return null;
+            const composer = Array.from(document.querySelectorAll('.query-bar'))
+                .map((root) => this._getVerifiedPromptedVideoComposer(root))
+                .find(Boolean);
+            if (composer) {
+                this.promptedVideoComposerRoot = composer.root;
+                return composer.submitButton;
             }
+            await this.sleep(100);
         }
-
         return null;
     }
 
     async _waitForPromptedVideoComposer(runToken) {
-        for (let attempt = 0; attempt < 20; attempt++) {
-            if (!this.isPromptedBatchTokenActive(runToken)) return null;
-            const input = this._findPromptedVideoInput();
-            const submitButton = this._findPromptedVideoSubmitButton();
-            if (input && submitButton) return { input, submitButton };
-            await this.sleep(100);
-        }
-        return null;
+        const submitButton = await this._waitForPromptedVideoSubmitButton(runToken);
+        const composer = this._getVerifiedPromptedVideoComposer(this.promptedVideoComposerRoot);
+        return submitButton && composer ? composer : null;
     }
 
     async _waitForAddPromptMenuItem(runToken) {
@@ -2561,6 +2608,7 @@ class VideoRetryManager {
     async selectMakeVideoMode(runToken, readyMakeVideoTrigger = null) {
         if (!this.isPromptedBatchTokenActive(runToken)) return false;
         this.promptedVideoModeContract = null;
+        this._clearPromptedVideoComposerRoot();
         const currentTrigger = this._isActionableAutomationTarget(readyMakeVideoTrigger)
             ? readyMakeVideoTrigger
             : this._findCurrentMakeVideoTrigger();
@@ -2626,7 +2674,21 @@ class VideoRetryManager {
     _getReadyPromptedVideoSources(searchRoot) {
         return Array.from(searchRoot.querySelectorAll('video'))
             .filter((video) => video.readyState >= 2)
-            .map((video) => video.currentSrc || video.src || '')
+            .map((video) => video.currentSrc || video.src || video.querySelector('source[src]')?.src || '')
+            .filter(Boolean);
+    }
+
+    _getAgentAssetSources(searchRoot) {
+        return Array.from(searchRoot.querySelectorAll('.react-flow__node-asset'))
+            .flatMap((asset) => Array.from(asset.querySelectorAll('img[src], video[src], source[src]')))
+            .map((media) => media.currentSrc || media.src || '')
+            .filter(Boolean);
+    }
+
+    _getReadyAgentAssetVideoSources(searchRoot) {
+        return Array.from(searchRoot.querySelectorAll('.react-flow__node-asset video'))
+            .filter((video) => video.readyState >= 2)
+            .map((video) => video.currentSrc || video.src || video.querySelector('source[src]')?.src || '')
             .filter(Boolean);
     }
 
@@ -2634,15 +2696,25 @@ class VideoRetryManager {
         return {
             pageUrl: window.location.href,
             postId: this._getImaginePostId(window.location.href),
+            surface: detectGrokScrapeSurface(document, window.location),
             completeCount: searchRoot.querySelectorAll('button[aria-label="Video Generation Complete"]').length,
-            videoSources: this._getReadyPromptedVideoSources(searchRoot)
+            videoSources: this._getReadyPromptedVideoSources(searchRoot),
+            agentAssetSources: this._getAgentAssetSources(searchRoot),
+            agentAssetVideoSources: this._getReadyAgentAssetVideoSources(searchRoot)
         };
     }
 
     _hasNewPromptedVideoResult(searchRoot, baseline) {
+        const currentSurface = detectGrokScrapeSurface(document, window.location);
         const baselineSources = new Set(baseline.videoSources || []);
         const hasNewReadyVideo = this._getReadyPromptedVideoSources(searchRoot)
             .some((source) => !baselineSources.has(source));
+        const baselineAgentVideoSources = new Set(baseline.agentAssetVideoSources || []);
+        const hasNewReadyAgentVideo = this._getReadyAgentAssetVideoSources(searchRoot)
+            .some((source) => !baselineAgentVideoSources.has(source));
+        if (baseline.surface === SCRAPE_SURFACES.agentMedia
+            && currentSurface === SCRAPE_SURFACES.agentMedia
+            && hasNewReadyAgentVideo) return true;
         if (!hasNewReadyVideo) return false;
 
         const currentUrl = window.location.href;
@@ -2755,6 +2827,7 @@ class VideoRetryManager {
     }
 
     async startPromptedBatchFromGallery(prompt, galleryLimit, runToken = this.createBatchRunToken()) {
+        this._clearPromptedVideoComposerRoot();
         this.batchRunning = true;
         this.goalRunning = false;
         this.batchAborted = false;
@@ -2823,6 +2896,7 @@ class VideoRetryManager {
         if (this.batchRunToken !== runToken) return;
         const hitLimit = this.goalCount >= this.goalTotal;
         const wasAborted = this.batchAborted;
+        this._clearPromptedVideoComposerRoot();
         this.batchRunning = false;
         this.batchAborted = false;
         this.batchRunToken = null;
@@ -2840,6 +2914,7 @@ class VideoRetryManager {
     }
 
     async startPromptedBatchFromDetail(prompt, videoGoal, runToken = this.createBatchRunToken()) {
+        this._clearPromptedVideoComposerRoot();
         this.batchRunning = true;
         this.goalRunning = false;
         this.batchAborted = false;
@@ -2873,7 +2948,7 @@ class VideoRetryManager {
                     this.safeStatus(this.batchFailureMessage, 'warning');
                     break;
                 }
-                if (!this.injectPromptText(this.batchPrompt)) {
+                if (!this.injectPromptedVideoText(this.batchPrompt)) {
                     this.batchFailureMessage = 'Prompted Batch [detail]: Video prompt field not found';
                     this.safeStatus(this.batchFailureMessage, 'warning');
                     break;
@@ -2920,6 +2995,7 @@ class VideoRetryManager {
         if (this.batchRunToken !== runToken) return;
         const hitGoal = this.goalCount >= this.goalTotal;
         const wasAborted = this.batchAborted;
+        this._clearPromptedVideoComposerRoot();
         this.batchRunning = false;
         this.batchAborted = false;
         this.batchRunToken = null;
@@ -2937,6 +3013,7 @@ class VideoRetryManager {
     }
 
     stopBatch() {
+        this._clearPromptedVideoComposerRoot();
         this.batchRunning = false;
         this.batchAborted = true;
         this.batchRunToken = null;
@@ -3107,6 +3184,7 @@ class VideoRetryManager {
         this.batchQueue = this.buildBatchQueue();
         this.batchIndex = 0;
         this.targetContext = null;
+        this._clearPromptedVideoComposerRoot();
         return true;
     }
 
@@ -3126,6 +3204,7 @@ class VideoRetryManager {
         if (!this.isBatchRunActive(runToken)) return false;
         this.batchFailureMessage = message;
         this.safeStatus(message, 'warning');
+        this._clearPromptedVideoComposerRoot();
         if (detectGrokScrapeSurface(document, window.location) !== SCRAPE_SURFACES.savedGallery) {
             const returnStatus = await this.batchGoBack(snapshot, runToken);
             if (returnStatus === 'failed') return this.recoverPromptedBatchToGallery(snapshot, runToken);
@@ -3199,7 +3278,7 @@ class VideoRetryManager {
         }
 
         if (!this.isBatchRunActive(runToken)) return false;
-        if (!this.injectPromptText(this.batchPrompt)) {
+        if (!this.injectPromptedVideoText(this.batchPrompt)) {
             return this.stopPromptedBatchItem(
                 'Prompted Batch [gallery]: Video prompt field not found',
                 snapshot,
