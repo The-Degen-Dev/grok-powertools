@@ -270,10 +270,10 @@ document.addEventListener('__gpt_fetch_media_data_url', function(e) {
                                 detail: { imageUrl: data.fileMetadata.url }
                             }));
                         }
-                    });
+                    }).catch(function() {});
                 }
             } catch {}
-        });
+        }).catch(function() {});
         return resp;
     };
 })();

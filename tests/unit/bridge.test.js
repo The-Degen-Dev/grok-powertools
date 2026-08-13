@@ -22,6 +22,29 @@ function evaluateContentBridgeBootstrap() {
 }
 
 describe('bridge prompted video editor targeting', () => {
+    test('observing Grok uploads handles rejected fetches without replacing the original rejection', async () => {
+        const originalFetch = window.fetch;
+        const observerCatch = jest.fn();
+        const originalRejection = new Error('network unavailable');
+        const originalResponse = {
+            then: jest.fn(() => ({ catch: observerCatch }))
+        };
+        window.fetch = jest.fn(() => originalResponse);
+
+        try {
+            eval(bridgeSource);
+
+            const returned = window.fetch('/rest/app-chat/upload-file');
+
+            expect(returned).toBe(originalResponse);
+            expect(originalResponse.then).toHaveBeenCalledTimes(1);
+            expect(observerCatch).toHaveBeenCalledWith(expect.any(Function));
+            expect(() => observerCatch.mock.calls[0][0](originalRejection)).not.toThrow();
+        } finally {
+            window.fetch = originalFetch;
+        }
+    });
+
     test('double evaluation writes once, settles once, succeeds, and cleans the marker', async () => {
         const preciseEditor = document.createElement('div');
         preciseEditor.setAttribute('contenteditable', 'true');
