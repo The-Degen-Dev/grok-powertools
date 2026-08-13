@@ -306,14 +306,52 @@ async function setupMockPromptedBatch(page, {
             backCount: 0,
             scrollToCalls: [],
             sleepDurations: [],
-            focusedQuiescenceMs: 0
+            focusedQuiescenceMs: 0,
+            focusedQuiescenceRequests: [],
+            focusedQuiescenceReleases: []
         };
-        retry.sleep = async (ms) => {
+        const quiescence = {
+            requested: 0,
+            released: 0,
+            pending: []
+        };
+        window.__getPromptedBatchQuiescence = () => ({
+            requested: quiescence.requested,
+            released: quiescence.released,
+            pending: quiescence.pending.map(({ index, ms, mediaUuid }) => ({
+                index,
+                ms,
+                mediaUuid
+            }))
+        });
+        window.__releaseNextPromptedBatchQuiescence = () => {
+            const deferred = quiescence.pending.shift();
+            if (!deferred) return null;
+            quiescence.released++;
+            window.__promptedBatchEvents.focusedQuiescenceMs += deferred.ms;
+            const released = {
+                index: deferred.index,
+                ms: deferred.ms,
+                mediaUuid: deferred.mediaUuid
+            };
+            window.__promptedBatchEvents.focusedQuiescenceReleases.push(released);
+            deferred.resolve();
+            return released;
+        };
+        retry.sleep = (ms) => {
             window.__promptedBatchEvents.sleepDurations.push(ms);
-            if (document.activeElement?.hasAttribute('data-selected-prompt-media')) {
-                window.__promptedBatchEvents.focusedQuiescenceMs += ms;
-            }
-            await Promise.resolve();
+            const selectedMediaUuid = document.activeElement?.getAttribute?.('data-selected-prompt-media');
+            if (!selectedMediaUuid) return Promise.resolve();
+
+            const request = {
+                index: ++quiescence.requested,
+                ms,
+                mediaUuid: selectedMediaUuid
+            };
+            window.__promptedBatchEvents.focusedQuiescenceRequests.push(request);
+            return new Promise((resolve) => {
+                quiescence.pending.push({ ...request, resolve });
+            });
         };
         Object.defineProperty(window, 'scrollY', { configurable: true, value: 480 });
         window.scrollTo = (...args) => window.__promptedBatchEvents.scrollToCalls.push(args);
@@ -1067,11 +1105,77 @@ test.describe('Grok Power Tools E2E', () => {
             stopAfterAddPrompt: secondMediaUuid
         });
 
-        await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
+        const batchPromise = page.evaluate(() => window.__gptE2e.retry.startBatch(
             'prompted',
             'slow orbit around the generated sculpture',
             { videoGoal: 2, galleryLimit: 2 }
-        ))).resolves.toBe(true);
+        ));
+        let batchOutcome = { status: 'pending' };
+        void batchPromise.then(
+            (value) => {
+                batchOutcome = { status: 'fulfilled', value };
+            },
+            (error) => {
+                batchOutcome = { status: 'rejected', message: error.message };
+            }
+        );
+
+        const firstSelectedInputId = `selected-prompt-input-${mediaUuid}`;
+        const readQuiescenceState = () => page.evaluate((selectedInputId) => {
+            const events = window.__promptedBatchEvents;
+            return {
+                gate: window.__getPromptedBatchQuiescence(),
+                promptWrites: events.promptWrites,
+                promptWriteResults: events.promptWriteResults,
+                selectedPromptText: document.getElementById(selectedInputId)?.textContent ?? null,
+                promptAtSubmit: events.promptAtSubmit,
+                submitCount: events.submitCount,
+                editCount: events.editCount,
+                decoyAddPromptCount: events.decoyAddPromptCount,
+                decoyPromptText: document.getElementById('decoy-prompt-input')?.textContent ?? null,
+                decoyPromptAtSubmit: events.decoyPromptAtSubmit,
+                decoySubmitCount: events.decoySubmitCount
+            };
+        }, firstSelectedInputId);
+
+        for (let poll = 1; poll <= 5; poll++) {
+            const expectedGate = {
+                requested: poll,
+                released: poll - 1,
+                pending: [{ index: poll, ms: 100, mediaUuid }]
+            };
+            await expect.poll(
+                async () => (await readQuiescenceState()).gate,
+                { timeout: 1000, intervals: [10, 20, 50] }
+            ).toEqual(expectedGate);
+
+            expect(await readQuiescenceState()).toEqual({
+                gate: expectedGate,
+                promptWrites: [],
+                promptWriteResults: [],
+                selectedPromptText: '',
+                promptAtSubmit: null,
+                submitCount: 0,
+                editCount: 0,
+                decoyAddPromptCount: 0,
+                decoyPromptText: '',
+                decoyPromptAtSubmit: null,
+                decoySubmitCount: 0
+            });
+            await expect(page.evaluate(() => (
+                window.__releaseNextPromptedBatchQuiescence()
+            ))).resolves.toEqual({ index: poll, ms: 100, mediaUuid });
+        }
+
+        await expect.poll(
+            () => batchOutcome,
+            { timeout: 2000, intervals: [10, 20, 50] }
+        ).toEqual({ status: 'fulfilled', value: true });
+        expect(await page.evaluate(() => window.__getPromptedBatchQuiescence())).toEqual({
+            requested: 5,
+            released: 5,
+            pending: []
+        });
 
         const events = await page.evaluate(() => window.__promptedBatchEvents);
         expect(events.savedClicks).toEqual([mediaUuid, secondMediaUuid]);
@@ -1104,6 +1208,12 @@ test.describe('Grok Power Tools E2E', () => {
         expect(events.backCount).toBe(1);
         expect(events.scrollToCalls).toContainEqual([0, 480]);
         expect(events.focusedQuiescenceMs).toBe(500);
+        expect(events.focusedQuiescenceRequests).toEqual(Array.from({ length: 5 }, (_, index) => ({
+            index: index + 1,
+            ms: 100,
+            mediaUuid
+        })));
+        expect(events.focusedQuiescenceReleases).toEqual(events.focusedQuiescenceRequests);
         const selectedTriggerId = `selected-make-video-${secondMediaUuid}`;
         const selectedMenuId = `selected-video-menu-${secondMediaUuid}`;
         await expect(page.locator(`#${selectedTriggerId}`)).toHaveAttribute('aria-controls', selectedMenuId);
