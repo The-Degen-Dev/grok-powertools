@@ -572,6 +572,7 @@ test.describe('Grok Power Tools E2E', () => {
             window.__chromeEvents = [];
             window.__chromeEventSequence = 0;
             window.__chromeStorageSetObservers = [];
+            window.__chromeStorageChangeListeners = [];
             window.__chromeStorageLocalState = localState;
             window.__chromeStorageSyncState = syncState;
             window.__recordChromeEvent = record;
@@ -609,8 +610,11 @@ test.describe('Grok Power Tools E2E', () => {
                 },
                 storage: {
                     onChanged: {
-                        addListener: () => { },
-                        removeListener: () => { }
+                        addListener: (listener) => window.__chromeStorageChangeListeners.push(listener),
+                        removeListener: (listener) => {
+                            window.__chromeStorageChangeListeners = window.__chromeStorageChangeListeners
+                                .filter((candidate) => candidate !== listener);
+                        }
                     },
                     local: {
                         get: (keys, cb) => {
@@ -620,8 +624,13 @@ test.describe('Grok Power Tools E2E', () => {
                         },
                         set: (data, cb) => {
                             record('storage_set', { area: 'local', values: clone(data || {}) });
+                            const changes = Object.fromEntries(Object.entries(data || {}).map(([key, value]) => [
+                                key,
+                                { oldValue: clone(localState[key]), newValue: clone(value) }
+                            ]));
                             Object.assign(localState, data || {});
                             window.__chromeStorageSetObservers.forEach((observer) => observer(clone(data || {})));
+                            window.__chromeStorageChangeListeners.forEach((listener) => listener(changes, 'local'));
                             if (cb) cb();
                             return Promise.resolve();
                         }
@@ -721,7 +730,7 @@ test.describe('Grok Power Tools E2E', () => {
         }));
     });
 
-    test('Start Sync transfers the exact Saved media through Agent Mode', async ({ page }) => {
+    test('Start Sync queues the exact Saved media without content-side persistence', async ({ page }) => {
         const accountUuid = '11111111-1111-4111-8111-111111111111';
         const firstMediaUuid = '22222222-2222-4222-8222-222222222222';
         const secondMediaUuid = '33333333-3333-4333-8333-333333333333';
@@ -744,7 +753,15 @@ test.describe('Grok Power Tools E2E', () => {
             runToken: 'e2e-start-sync'
         });
 
-        await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([firstSavedUrl]);
+        await expect.poll(async () => page.evaluate(() => ({
+            currentItemId: window.__chromeStorageLocalState.currentItemId,
+            scrapeNavigation: window.__chromeStorageLocalState.scrapeNavigation,
+            scraperState: window.__chromeStorageLocalState.scraperState
+        }))).toEqual({
+            currentItemId: null,
+            scrapeNavigation: null,
+            scraperState: 'idle'
+        });
 
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).toContainEqual({
@@ -808,8 +825,8 @@ test.describe('Grok Power Tools E2E', () => {
         expect(navigationSetIndex).toBeGreaterThanOrEqual(0);
         expect(downloadMessageIndex).toBeGreaterThan(navigationSetIndex);
         expect(queuedResponseIndex).toBeGreaterThan(downloadMessageIndex);
-        expect(processedIdIndex).toBeGreaterThan(queuedResponseIndex);
-        expect(scrollRestoreIndex).toBeGreaterThan(processedIdIndex);
+        expect(processedIdIndex).toBe(-1);
+        expect(scrollRestoreIndex).toBeGreaterThan(queuedResponseIndex);
         expect(navigationClearIndex).toBeGreaterThan(scrollRestoreIndex);
         expect(await page.evaluate(() => ({
             currentItemId: window.__chromeStorageLocalState.currentItemId,
@@ -818,7 +835,7 @@ test.describe('Grok Power Tools E2E', () => {
         }))).toEqual({
             currentItemId: null,
             scrapeNavigation: null,
-            processedIds: [firstSavedUrl]
+            processedIds: undefined
         });
     });
 

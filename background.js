@@ -12,6 +12,29 @@ if (typeof importScripts === 'function') {
     }
 }
 
+function extractGrokMediaIdFallback(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    const bareUuid = text.match(new RegExp(`^${uuidPattern.source}$`, 'i'));
+    if (bareUuid) return bareUuid[0].toLowerCase();
+
+    let pathname;
+    try {
+        pathname = new URL(text, 'https://grok.com').pathname;
+    } catch {
+        pathname = text.split('#')[0].split('?')[0];
+    }
+    const segments = pathname.split('/').filter(Boolean);
+    for (let index = 0; index < segments.length - 1; index++) {
+        if (segments[index].toLowerCase() !== 'generated') continue;
+        const generatedUuid = segments[index + 1].match(uuidPattern);
+        if (generatedUuid) return generatedUuid[0].toLowerCase();
+    }
+    const pathnameUuids = pathname.match(new RegExp(uuidPattern.source, 'gi'));
+    return pathnameUuids?.length ? pathnameUuids[pathnameUuids.length - 1].toLowerCase() : '';
+}
+
 const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
     ? self.CloudSyncUtils
     : {
@@ -132,6 +155,7 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             }
             return `url_${(hash >>> 0).toString(16).padStart(8, '0')}`;
         },
+        extractGrokMediaId: extractGrokMediaIdFallback,
         resolveMediaExtension(params) {
             const contentType = String((params && params.contentType) || '').toLowerCase();
             if (contentType.includes('mp4')) return 'mp4';
@@ -143,14 +167,16 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
         },
         resolveMediaAssetIdentity(params) {
             const sourceUrlHash = this.buildSourceUrlHash(params && params.sourceUrl);
-            const source = `${(params && params.sourceUrl) || ''}/${(params && params.finalPath) || ''}`;
-            const uuidMatch = source.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+            const sourceUrl = (params && params.sourceUrl) || '';
+            const finalPath = (params && params.finalPath) || '';
+            const source = `${sourceUrl}/${finalPath}`;
+            const stableMediaId = this.extractGrokMediaId(sourceUrl) || this.extractGrokMediaId(finalPath);
             const contentSha256 = String((params && params.contentSha256) || '').toLowerCase();
-            const assetId = uuidMatch
-                ? `media_${uuidMatch[0].toLowerCase()}`
+            const assetId = stableMediaId
+                ? `media_${stableMediaId}`
                 : (/^[a-f0-9]{64}$/.test(contentSha256) ? `sha256_${contentSha256}` : sourceUrlHash);
             return {
-                kind: uuidMatch ? 'stable_media_id' : (/^[a-f0-9]{64}$/.test(contentSha256) ? 'content_hash' : 'source_url_hash'),
+                kind: stableMediaId ? 'stable_media_id' : (/^[a-f0-9]{64}$/.test(contentSha256) ? 'content_hash' : 'source_url_hash'),
                 assetId,
                 sourceUrlHash,
                 mediaType: this.detectContentTypeFromUrl(source).startsWith('video/') ? 'video' : 'image'
@@ -259,12 +285,24 @@ function log(msg, type = 'info') {
     });
 }
 
-function saveHistory() {
-    chrome.storage.local.set({ processedIds: Array.from(processedUUIDs) });
-}
-
 function shouldPersistBackupProcessedId(status) {
     return status === 'uploaded' || status === 'already_present' || status === 'conflict_uploaded';
+}
+
+function formatRedactedMediaLog(status, identityValue, details = {}) {
+    const mediaId = CloudSync.extractGrokMediaId(identityValue);
+    const fields = [
+        `media=${mediaId ? `...${mediaId.slice(-8)}` : 'unknown'}`,
+        `status=${String(status || 'unknown').replace(/[^a-z0-9_-]/gi, '_')}`
+    ];
+    if (Number.isFinite(details.count)) fields.push(`count=${details.count}`);
+    if (Number.isFinite(details.bytes)) fields.push(`bytes=${details.bytes}`);
+    if (details.stage) fields.push(`stage=${String(details.stage).replace(/[^a-z0-9_-]/gi, '_')}`);
+    return fields.join(' ');
+}
+
+function getUploadFailureStage(error) {
+    return String(error?.message || '').match(/^\[([^\]]+)\]/)?.[1] || 'runtime';
 }
 
 function applyBackupProcessedIdPersistence(processedIds, id, status, persist) {
@@ -301,7 +339,7 @@ function buildDirectBackupUploadResponse(result, sourceUrl) {
         status: result.status,
         objectKey: result.objectKey,
         assetId: result.assetId,
-        backupProcessedId: parseFilenameInfo(sourceUrl).uuid
+        backupProcessedId: CloudSync.extractGrokMediaId(sourceUrl) || null
     };
 }
 
@@ -594,7 +632,7 @@ async function enqueueCloudItem(queueItem, dedupeKey) {
     await persistCloudState();
 }
 
-async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', acceptance = null) {
+async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', acceptance = null, processOptions = {}) {
     const config = await getCloudConfig();
     if (!CloudSync.isCloudEnabled(config)) return false;
     const acceptanceContext = acceptance || buildAcceptanceContextFromCloudConfig(config, 'queue-media');
@@ -626,7 +664,7 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', ac
         assetIdentityKind: identity.kind,
         contentType: CloudSync.detectContentTypeFromUrl(sourceUrl),
         promptText: promptText || '',
-        backupProcessedId: parseFilenameInfo(sourceUrl).uuid,
+        backupProcessedId: CloudSync.extractGrokMediaId(sourceUrl) || null,
         acceptance: acceptanceContext
     };
 
@@ -637,9 +675,13 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', ac
         contentType: queueItem.contentType
     }));
     try {
-        await processCloudQueue('media-enqueued');
+        await processCloudQueue('media-enqueued', processOptions);
     } catch (e) {
-        console.error('[CloudQueue] processCloudQueue error after media enqueue:', e);
+        console.error('[CloudQueue]', formatRedactedMediaLog(
+            'enqueue_processing_failed',
+            queueItem.backupProcessedId || queueItem.assetId,
+            { stage: getUploadFailureStage(e) }
+        ));
         updateCloudError(e.message);
         await persistCloudState().catch(() => { });
     }
@@ -979,15 +1021,16 @@ async function uploadPromptSidecar(config, descriptor) {
                 'sidecar-kind': 'prompt'
             })
         };
-        const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, new Blob([sidecar]).size);
+        const sidecarBytes = new Blob([sidecar]).size;
+        const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, sidecarBytes);
         await fetch(sidecarPresigned.uploadUrl, {
             method: 'PUT',
             headers: { ...(sidecarPresigned.headers || {}), 'Content-Type': 'application/json' },
             body: sidecar
         });
-        console.log('[CloudQueue] Prompt sidecar uploaded:', sidecarKey);
-    } catch (e) {
-        console.warn('[CloudQueue] Sidecar prompt upload failed (non-fatal):', e.message);
+        console.log('[CloudQueue]', formatRedactedMediaLog('sidecar_uploaded', descriptor.assetId, { bytes: sidecarBytes }));
+    } catch {
+        console.warn('[CloudQueue]', formatRedactedMediaLog('sidecar_failed', descriptor.assetId));
     }
 }
 
@@ -1015,7 +1058,7 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
         cloudSyncState.r2BytesVerifiedExisting += blob.size;
         cloudSyncState.r2DuplicateUploadsSkipped += 1;
         await persistCloudState();
-        log(`Cloud upload skipped, already present: ${descriptor.objectKey}`, 'success');
+        log(`Cloud upload ${formatRedactedMediaLog('already_present', descriptor.assetId, { bytes: blob.size })}`, 'success');
         return {
             status: 'already_present',
             objectKey: descriptor.objectKey,
@@ -1038,7 +1081,7 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
         };
         cloudSyncState.r2ConflictsDetected += 1;
         await persistCloudState();
-        log(`R2 canonical object conflict detected; writing conflict object for ${canonicalKey}`, 'warning');
+        log(`Cloud upload ${formatRedactedMediaLog('conflict_detected', descriptor.assetId, { bytes: blob.size })}`, 'warning');
     }
 
     let presigned;
@@ -1097,7 +1140,7 @@ async function uploadMediaQueueItem(config, queueItem) {
     let contentType;
 
     try {
-        console.log('[CloudQueue] Fetching media blob from:', queueItem.sourceUrl.slice(0, 100));
+        console.log('[CloudQueue]', formatRedactedMediaLog('fetching', queueItem.backupProcessedId || queueItem.assetId));
         const fetchOpts = { method: 'GET' };
 
         if (queueItem.sourceUrl.includes('assets.grok.com')) {
@@ -1106,10 +1149,17 @@ async function uploadMediaQueueItem(config, queueItem) {
                 if (cookies.length > 0) {
                     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
                     fetchOpts.headers = { 'Cookie': cookieHeader };
-                    console.log('[CloudQueue] Attached', cookies.length, 'cookies for assets.grok.com');
+                    console.log('[CloudQueue]', formatRedactedMediaLog(
+                        'cookies_attached',
+                        queueItem.backupProcessedId || queueItem.assetId,
+                        { count: cookies.length }
+                    ));
                 }
-            } catch (cookieErr) {
-                console.warn('[CloudQueue] Failed to get cookies:', cookieErr.message);
+            } catch {
+                console.warn('[CloudQueue]', formatRedactedMediaLog(
+                    'cookies_unavailable',
+                    queueItem.backupProcessedId || queueItem.assetId
+                ));
             }
         }
 
@@ -1122,7 +1172,7 @@ async function uploadMediaQueueItem(config, queueItem) {
         queueItem.contentType = contentType;
     } catch (e) {
         const hint = !CloudSync.isValidMediaSourceUrl(queueItem.sourceUrl)
-            ? ` (source host not in known media hosts: ${queueItem.sourceUrl})`
+            ? ' (source host not in known media hosts)'
             : '';
         throw new Error(`[${CloudSync.UPLOAD_STAGES.mediaFetch}] ${e.message}${hint}`);
     }
@@ -1179,6 +1229,7 @@ async function processCloudQueue(reason = 'auto', options = {}) {
     await persistCloudState();
 
     const force = !!options.force;
+    const uploadMedia = options.uploadMediaQueueItem || uploadMediaQueueItem;
     const remaining = [];
 
     try {
@@ -1186,7 +1237,10 @@ async function processCloudQueue(reason = 'auto', options = {}) {
             const attempts = item.attempts || 0;
             if (!force && attempts >= CloudSync.MAX_RETRY_ATTEMPTS) {
                 if (!item._permanentFailLogged) {
-                    log(`Cloud sync permanently failed (${item.type}): ${item.objectKey || item.kind} after ${attempts} attempts — ${item.lastError || 'unknown error'}`, 'error');
+                    const message = item.type === 'media'
+                        ? `Cloud sync ${formatRedactedMediaLog('permanently_failed', item.backupProcessedId || item.assetId, { count: attempts })}`
+                        : `Cloud sync permanently failed (${item.type}): ${item.kind} after ${attempts} attempts`;
+                    log(message, 'error');
                     item._permanentFailLogged = true;
                 }
                 remaining.push(item);
@@ -1195,14 +1249,14 @@ async function processCloudQueue(reason = 'auto', options = {}) {
 
             try {
                 if (item.type === 'media') {
-                    console.log('[CloudQueue] Processing media item:', item.objectKey, '| sourceUrl:', item.sourceUrl?.slice(0, 80));
-                    const result = await uploadMediaQueueItem(config, item);
+                    const mediaIdentity = item.backupProcessedId || item.assetId;
+                    console.log('[CloudQueue]', formatRedactedMediaLog('processing', mediaIdentity));
+                    const result = await uploadMedia(config, item);
                     await persistQueuedBackupProcessedIdAfterSuccess(item, result);
-                    if (result.status === 'already_present') {
-                        log(`Cloud upload already present: ${result.objectKey}`, 'success');
-                    } else {
-                        log(`Cloud upload complete: ${result.objectKey}`, result.status === 'conflict_uploaded' ? 'warning' : 'success');
-                    }
+                    log(
+                        `Cloud upload ${formatRedactedMediaLog(result.status, mediaIdentity, { bytes: result.bytes })}`,
+                        result.status === 'conflict_uploaded' ? 'warning' : 'success'
+                    );
                 } else if (item.type === 'metadata') {
                     const result = await uploadMetadataQueueItem(config, item);
                     if (result && result.skipped) {
@@ -1218,13 +1272,28 @@ async function processCloudQueue(reason = 'auto', options = {}) {
                 clearCloudError();
                 cloudSyncState.lastSyncAt = new Date().toISOString();
             } catch (e) {
-                console.error('[CloudQueue] Upload FAILED:', item.type, item.objectKey || item.kind, '|', e.message);
+                if (item.type === 'media') {
+                    console.error('[CloudQueue]', formatRedactedMediaLog(
+                        'failed',
+                        item.backupProcessedId || item.assetId,
+                        { stage: getUploadFailureStage(e) }
+                    ));
+                } else {
+                    console.error('[CloudQueue] Metadata upload failed:', item.kind);
+                }
                 item.attempts = attempts + 1;
                 item.lastError = e.message;
                 item.lastAttemptAt = Date.now();
                 remaining.push(item);
                 updateCloudError(e.message);
-                log(`Cloud sync failed (${item.type}): ${e.message}`, 'warning');
+                const message = item.type === 'media'
+                    ? `Cloud sync ${formatRedactedMediaLog(
+                        'failed',
+                        item.backupProcessedId || item.assetId,
+                        { count: item.attempts, stage: getUploadFailureStage(e) }
+                    )}`
+                    : `Cloud sync failed (${item.type})`;
+                log(message, 'warning');
             }
         }
     } finally {
@@ -1323,10 +1392,14 @@ function parseFilenameInfo(url, suggestedFilename) {
     let uuid = null;
 
     try {
-        // Typical URL: .../images/UUID.png?cache...
-        const parts = url.split('/');
-        const lastPart = parts[parts.length - 1];
-        const cleanName = lastPart.split('?')[0];
+        let pathname;
+        try {
+            pathname = new URL(String(url || ''), 'https://grok.com').pathname;
+        } catch {
+            pathname = String(url || '').split('#')[0].split('?')[0];
+        }
+        const parts = pathname.split('/').filter(Boolean);
+        const cleanName = parts[parts.length - 1] || 'unknown';
 
         if (cleanName.includes('.')) {
             filename = cleanName.split('.')[0];
@@ -1334,16 +1407,14 @@ function parseFilenameInfo(url, suggestedFilename) {
             filename = cleanName;
         }
 
-        // Match the LAST UUID in the URL — for assets.grok.com/users/{USER_ID}/generated/{VIDEO_ID}/...
-        // the first UUID is the user ID, the last is the actual media UUID
-        const allUuids = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) || [];
-        const uuidMatch = allUuids.length ? [allUuids[allUuids.length - 1]] : null;
-        if (uuidMatch) {
-            uuid = uuidMatch[0];
+        uuid = CloudSync.extractGrokMediaId(url) || null;
+        if (uuid) {
             filename = uuid; // Enforce UUID as filename
+        } else if (CloudSync.normalizeSourceUrlForIdentity(url)) {
+            filename = CloudSync.buildSourceUrlHash(url);
         } else if (suggestedFilename) {
-            // Fallback to suggested if provided and no UUID found in URL
-            filename = suggestedFilename.split('.')[0];
+            const suggestedBase = String(suggestedFilename).split('/').pop() || 'unknown';
+            filename = suggestedBase.split('.')[0];
         }
 
         // Generic filenames (e.g. "generated_video") get a timestamp to prevent overwrites
@@ -1386,13 +1457,7 @@ async function generateFilename(url, suggestedFilename, extHint) {
         return null; // Signal cancel
     }
 
-    // 3. Mark as processed (Optimistic)
-    if (parsed.uuid) {
-        processedUUIDs.add(parsed.uuid);
-        saveHistory();
-    }
-
-    // 4. Build Path
+    // 3. Build Path
     const dateStr = new Date().toISOString().split('T')[0];
     const ext = await detectExtension(url, extHint);
 
@@ -1776,7 +1841,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 try {
                     sendResponse(await uploadDirectMediaData(request, finalPath));
                 } catch (e) {
-                    console.error('[CloudQueue] Direct blob upload failed:', e.message);
+                    console.error('[CloudQueue]', formatRedactedMediaLog(
+                        'direct_upload_failed',
+                        request.url,
+                        { stage: getUploadFailureStage(e) }
+                    ));
                     sendResponse({ status: 'error', error: e.message });
                 }
                 return;
@@ -2063,7 +2132,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     if (changeInfo.url) {
         const url = changeInfo.url;
         if (url.includes('imagine-public.x.ai') || url.match(/\.(png|jpg|jpeg|mp4|webp)(\?|$)/i)) {
-            console.log('Background: Intercepted media tab. Processing:', url);
+            console.log('Background:', formatRedactedMediaLog('media_tab_intercepted', url));
 
             // Generate Filename (Forces GrokVault path + Dedupe)
             const finalPath = await generateFilename(url);
@@ -2095,84 +2164,119 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     }
 });
 
-if (typeof module !== 'undefined') {
-    module.exports = {
-        applyBackupProcessedIdPersistence,
-        buildAcceptanceContextFromCloudConfig,
-        buildDirectBackupUploadResponse,
-        buildR2BackupInitMessage,
-        buildR2BackupInitMessageForConfig,
-        dispatchNativeClick,
-        fetchRecreateReferenceDataUrl,
-        getR2BackupCompletionStatusLabel,
-        getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
-        initializeScrapeInActiveTab,
-        isGrokSavedUrl,
-        isR2BackupCompletionSuccessful,
-        queueChromeDownload,
-        setActiveScrapeRunToken,
-        validateScrapeResume,
-        persistQueuedBackupProcessedId,
-        persistQueuedBackupProcessedIdAfterSuccess,
-        recreateWorkflowController,
-        RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS,
-        requestPresignedUrl,
-        setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); },
-        testCloudConnection,
-        uploadMetadataQueueItem,
-        verifyR2Object
-    };
+const _pendingR2Downloads = new Map();
+const _pendingDownloadIdentities = new Map();
+const _reservedDownloadIdentities = new Map();
+
+function reserveDownloadIdentity(downloadId, mediaId) {
+    if (!mediaId) return true;
+    if (processedUUIDs.has(mediaId)) return false;
+    const existingDownloadId = _reservedDownloadIdentities.get(mediaId);
+    if (Number.isInteger(existingDownloadId) && existingDownloadId !== downloadId) return false;
+    _reservedDownloadIdentities.set(mediaId, downloadId);
+    _pendingDownloadIdentities.set(downloadId, mediaId);
+    return true;
 }
 
-// --- STANDARD DOWNLOAD LISTENER ---
-const _pendingR2Downloads = new Map();
+function releaseDownloadIdentity(downloadId) {
+    const mediaId = _pendingDownloadIdentities.get(downloadId);
+    _pendingDownloadIdentities.delete(downloadId);
+    if (mediaId && _reservedDownloadIdentities.get(mediaId) === downloadId) {
+        _reservedDownloadIdentities.delete(mediaId);
+    }
+    return mediaId || null;
+}
 
-chrome.downloads.onDeterminingFilename.addListener(async (item, suggest) => {
+async function persistCompletedDownloadIdentity(downloadId) {
+    const mediaId = releaseDownloadIdentity(downloadId);
+    if (!mediaId) return false;
+
+    const stored = await chrome.storage.local.get(['processedIds']);
+    const merged = new Set(Array.isArray(stored.processedIds) ? stored.processedIds : []);
+    for (const processedId of processedUUIDs) {
+        if (processedId) merged.add(processedId);
+    }
+    const alreadyPersisted = merged.has(mediaId);
+    merged.add(mediaId);
+    processedUUIDs = merged;
+    if (!alreadyPersisted) {
+        await chrome.storage.local.set({ processedIds: Array.from(processedUUIDs) });
+    }
+    return true;
+}
+
+async function handleDownloadFilename(item, suggest) {
     if (!isScraping && !item.url.includes('imagine-public') && !item.url.includes('assets.grok.com')) return;
 
-    const finalPath = await generateFilename(item.url, item.filename);
-    const config = await getCloudConfig();
-    const cloudEnabled = CloudSync.isCloudEnabled(config);
-    const allowLocal = CloudSync.isLocalDownloadEnabled(config);
-    const isAuthUrl = item.url.includes('assets.grok.com');
-
-    if (!finalPath) {
+    const mediaId = CloudSync.extractGrokMediaId(item.url);
+    if (!reserveDownloadIdentity(item.id, mediaId)) {
         chrome.downloads.cancel(item.id);
         return;
     }
 
-    // Always allow download to complete — we need the file for R2 upload
-    suggest({ filename: finalPath, conflictAction: 'overwrite' });
+    try {
+        const finalPath = await generateFilename(item.url, item.filename);
+        const config = await getCloudConfig();
+        const cloudEnabled = CloudSync.isCloudEnabled(config);
+        const allowLocal = CloudSync.isLocalDownloadEnabled(config);
+        const isAuthUrl = item.url.includes('assets.grok.com');
 
-    if (cloudEnabled) {
-        if (isAuthUrl) {
-            // Auth URL: can't re-fetch from service worker. Track for post-download R2 upload.
-            _pendingR2Downloads.set(item.id, { finalPath, url: item.url, deleteAfter: !allowLocal });
-            console.log('[CloudQueue] Tracking auth download for R2:', item.id, finalPath.slice(-30));
-        } else {
-            // Public URL: service worker can fetch directly
-            enqueueCloudMediaUpload(item.url, finalPath).catch((e) => {
-                updateCloudError(e.message);
-                persistCloudState().catch(() => {});
-            });
-            // If Cloud Only, delete local file after queue (public URLs don't need it)
-            if (!allowLocal) {
-                _pendingR2Downloads.set(item.id, { finalPath, url: item.url, deleteAfter: true, skipUpload: true });
+        if (!finalPath) {
+            releaseDownloadIdentity(item.id);
+            chrome.downloads.cancel(item.id);
+            return;
+        }
+
+        suggest({ filename: finalPath, conflictAction: 'overwrite' });
+
+        if (cloudEnabled) {
+            if (isAuthUrl) {
+                _pendingR2Downloads.set(item.id, {
+                    finalPath,
+                    url: item.url,
+                    deleteAfter: !allowLocal,
+                    mediaId
+                });
+                console.log('[CloudQueue]', formatRedactedMediaLog('download_tracked', mediaId));
+            } else {
+                enqueueCloudMediaUpload(item.url, finalPath).catch((e) => {
+                    updateCloudError(e.message);
+                    persistCloudState().catch(() => {});
+                });
+                if (!allowLocal) {
+                    _pendingR2Downloads.set(item.id, {
+                        finalPath,
+                        url: item.url,
+                        deleteAfter: true,
+                        skipUpload: true,
+                        mediaId
+                    });
+                }
             }
         }
+    } catch (error) {
+        releaseDownloadIdentity(item.id);
+        chrome.downloads.cancel(item.id);
+        throw error;
     }
-});
+}
 
-// --- POST-DOWNLOAD R2 UPLOAD (for auth URLs like assets.grok.com) ---
-chrome.downloads.onChanged.addListener(async (delta) => {
-    if (!delta.state || delta.state.current !== 'complete') return;
-    console.log('[CloudQueue] Download state changed to complete:', delta.id, 'pending:', _pendingR2Downloads.has(delta.id));
+async function handleDownloadChanged(delta) {
+    const state = delta.state?.current;
+    if (state === 'interrupted' || (delta.error && state !== 'complete')) {
+        const mediaId = releaseDownloadIdentity(delta.id);
+        _pendingR2Downloads.delete(delta.id);
+        console.warn('[CloudQueue]', formatRedactedMediaLog('download_interrupted', mediaId));
+        return;
+    }
+    if (state !== 'complete') return;
+
+    await persistCompletedDownloadIdentity(delta.id);
     const pending = _pendingR2Downloads.get(delta.id);
     if (!pending) return;
     _pendingR2Downloads.delete(delta.id);
 
     if (pending.skipUpload) {
-        // Just clean up local file
         if (pending.deleteAfter) {
             chrome.downloads.removeFile(delta.id, () => {
                 chrome.downloads.erase({ id: delta.id });
@@ -2185,9 +2289,8 @@ chrome.downloads.onChanged.addListener(async (delta) => {
         const [dlItem] = await chrome.downloads.search({ id: delta.id });
         if (!dlItem || !dlItem.filename) throw new Error('Download item not found');
 
-        console.log('[CloudQueue] Download complete, reading file for R2:', dlItem.filename.slice(-50));
+        console.log('[CloudQueue]', formatRedactedMediaLog('download_complete', pending.mediaId));
 
-        // Create offscreen document to read the file
         try {
             await chrome.offscreen.createDocument({
                 url: 'offscreen.html',
@@ -2195,11 +2298,9 @@ chrome.downloads.onChanged.addListener(async (delta) => {
                 justification: 'Read downloaded file for R2 cloud backup upload'
             });
         } catch (e) {
-            // Already exists — that's fine
             if (!e.message.includes('already exists') && !e.message.includes('Only a single offscreen')) throw e;
         }
 
-        // Read file via offscreen document
         const fileData = await chrome.runtime.sendMessage({
             action: 'READ_FILE_FOR_UPLOAD',
             filePath: dlItem.filename,
@@ -2208,12 +2309,11 @@ chrome.downloads.onChanged.addListener(async (delta) => {
 
         if (!fileData || !fileData.ok) throw new Error(fileData?.error || 'Failed to read file');
 
-        console.log('[CloudQueue] File read:', fileData.size, 'bytes, uploading to R2...');
+        console.log('[CloudQueue]', formatRedactedMediaLog('file_read', pending.mediaId, { bytes: fileData.size }));
 
         const config = await getCloudConfig();
         const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
 
-        // Convert base64 back to blob
         const binaryStr = atob(fileData.base64);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
@@ -2227,23 +2327,79 @@ chrome.downloads.onChanged.addListener(async (delta) => {
             acceptance: buildAcceptanceContextFromCloudConfig(config, 'download-upload')
         }, blob);
 
-        log(`Cloud upload ${result.status === 'already_present' ? 'already present' : 'complete'}: ${result.objectKey}`, result.status === 'conflict_uploaded' ? 'warning' : 'success');
+        log(
+            `Cloud upload ${formatRedactedMediaLog(result.status, pending.mediaId, { bytes: result.bytes })}`,
+            result.status === 'conflict_uploaded' ? 'warning' : 'success'
+        );
 
         if (pending.deleteAfter && result.status === 'already_present') {
-            console.log('[CloudQueue] Existing R2 object verified before local cleanup:', result.objectKey);
+            console.log('[CloudQueue]', formatRedactedMediaLog('verified_before_cleanup', pending.mediaId));
         }
 
-        // Delete local file if Cloud Only mode
         if (pending.deleteAfter) {
             chrome.downloads.removeFile(delta.id, () => {
                 chrome.downloads.erase({ id: delta.id });
-                console.log('[CloudQueue] Local file deleted (Cloud Only mode)');
+                console.log('[CloudQueue]', formatRedactedMediaLog('local_file_deleted', pending.mediaId));
             });
         }
     } catch (e) {
-        console.error('[CloudQueue] Post-download R2 upload failed:', e.message);
-        log(`Cloud upload failed: ${e.message}`, 'warning');
+        console.error('[CloudQueue]', formatRedactedMediaLog(
+            'post_download_upload_failed',
+            pending.mediaId,
+            { stage: getUploadFailureStage(e) }
+        ));
+        log(`Cloud upload ${formatRedactedMediaLog(
+            'failed',
+            pending.mediaId,
+            { stage: getUploadFailureStage(e) }
+        )}`, 'warning');
         updateCloudError(e.message);
         persistCloudState().catch(() => {});
     }
-});
+}
+
+if (typeof module !== 'undefined') {
+    module.exports = {
+        applyBackupProcessedIdPersistence,
+        buildAcceptanceContextFromCloudConfig,
+        buildDirectBackupUploadResponse,
+        buildR2BackupInitMessage,
+        buildR2BackupInitMessageForConfig,
+        dispatchNativeClick,
+        enqueueCloudMediaUpload,
+        extractGrokMediaIdFallback,
+        fetchRecreateReferenceDataUrl,
+        getR2BackupCompletionStatusLabel,
+        getCloudSyncForTest: () => CloudSync,
+        getCloudSyncQueueForTest: () => cloudSyncQueue.map((item) => ({ ...item })),
+        getPendingDownloadIdentitiesForTest: () => Array.from(_pendingDownloadIdentities.entries()),
+        getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
+        generateFilename,
+        handleDownloadChanged,
+        handleDownloadFilename,
+        initializeScrapeInActiveTab,
+        isGrokSavedUrl,
+        isR2BackupCompletionSuccessful,
+        queueChromeDownload,
+        setActiveScrapeRunToken,
+        validateScrapeResume,
+        persistQueuedBackupProcessedId,
+        persistQueuedBackupProcessedIdAfterSuccess,
+        recreateWorkflowController,
+        RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS,
+        requestPresignedUrl,
+        parseFilenameInfo,
+        processCloudQueue,
+        setCloudSyncQueueForTest: (items) => { cloudSyncQueue = items.map((item) => ({ ...item })); },
+        setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); },
+        testCloudConnection,
+        uploadMetadataQueueItem,
+        verifyR2Object
+    };
+}
+
+// --- STANDARD DOWNLOAD LISTENER ---
+chrome.downloads.onDeterminingFilename.addListener(handleDownloadFilename);
+
+// --- POST-DOWNLOAD R2 UPLOAD (for auth URLs like assets.grok.com) ---
+chrome.downloads.onChanged.addListener(handleDownloadChanged);

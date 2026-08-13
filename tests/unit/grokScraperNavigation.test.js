@@ -7,20 +7,24 @@ const {
     isSuccessfulMediaTransferStatus,
     shouldStopScraperForStorageChanges
 } = require('../../content.js');
+const CloudSyncUtils = require('../../cloudSyncUtils.js');
 
 function mockContentChrome() {
     global.chrome = {
         runtime: {
             id: 'extension-id',
+            lastError: null,
             sendMessage: jest.fn((message) => Promise.resolve(
                 message?.action === 'VALIDATE_SCRAPE_RESUME' ? { valid: true } : undefined
-            ))
+            )),
+            onMessage: { addListener: jest.fn() }
         },
         storage: {
             local: {
                 get: jest.fn(() => Promise.resolve({})),
                 set: jest.fn(() => Promise.resolve())
-            }
+            },
+            onChanged: { addListener: jest.fn() }
         }
     };
 }
@@ -31,6 +35,7 @@ function createScraper(surface = SCRAPE_SURFACES.savedGallery) {
     scraper.backupMode = false;
     scraper.processedIds = new Set();
     scraper._backupVisited = new Set();
+    scraper._runVisited = new Set();
     scraper.Config = { actionWait: 0, navWait: 0, surfaceWait: 50 };
     scraper.getCurrentSurface = jest.fn(() => surface);
     scraper.createRunToken = jest.fn(() => 'run-1');
@@ -112,6 +117,21 @@ describe('Grok media identity', () => {
             'https://assets.grok.com/generated/image.jpg?media=33333333-3333-4333-8333-333333333333#cache=44444444-4444-4444-8444-444444444444'
         )).toBe('https://assets.grok.com/generated/image.jpg');
         expect(getGrokMediaIdentity('   ')).toBe('');
+    });
+
+    test('matches the authoritative CloudSync helper for stable Grok identities', () => {
+        const accountId = '11111111-1111-4111-8111-111111111111';
+        const mediaId = '22222222-2222-4222-8222-222222222222';
+        const queryId = '33333333-3333-4333-8333-333333333333';
+        const values = [
+            mediaId,
+            `https://assets.grok.com/users/${accountId}/generated/${mediaId}/image.jpg?request=${queryId}`,
+            `https://assets.grok.com/users/${accountId}/legacy/${mediaId}/image.jpg#${queryId}`
+        ];
+
+        for (const value of values) {
+            expect(getGrokMediaIdentity(value)).toBe(CloudSyncUtils.extractGrokMediaId(value));
+        }
     });
 });
 
@@ -372,6 +392,31 @@ describe('Grok scrape surface transitions', () => {
         expect(scraper.failRun).not.toHaveBeenCalled();
     });
 
+    test.each(['queued', 'cloud_queued'])(
+        'advances after %s without persisting the Saved current item',
+        async (status) => {
+            const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
+            const media = document.createElement('img');
+            scraper.state.isRunning = true;
+            scraper.runToken = 'run-1';
+            scraper.pendingNavigation = {
+                runToken: 'run-1',
+                expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
+                currentItemId: 'gallery-clean-id'
+            };
+            scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'matched', media }));
+            scraper.performDownload = jest.fn(() => Promise.resolve({ status }));
+            scraper.persistProcessedId = jest.fn(() => Promise.resolve());
+            scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
+
+            await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
+
+            expect(scraper.persistProcessedId).not.toHaveBeenCalled();
+            expect(scraper._runVisited).toContain('gallery-clean-id');
+            expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
+        }
+    );
+
     test('runs the Saved-to-Agent transfer path in R2 Backup mode', async () => {
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
         const media = document.createElement('video');
@@ -604,6 +649,39 @@ describe('Grok scrape surface transitions', () => {
         expect(scraper.persistBackupProgress).not.toHaveBeenCalled();
     });
 
+    test('counts queued backup acceptance without persisting content-side processed IDs', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {};
+        scraper.backupStats = { totalSeen: 1, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
+        const media = document.createElement('img');
+        media.src = 'https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/22222222-2222-4222-8222-222222222222/image.jpg?request=33333333-3333-4333-8333-333333333333';
+        document.addEventListener('__gpt_fetch_media', (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+                detail: { requestId: event.detail.requestId, dataUrl: 'data:image/png;base64,AA==', size: 1 }
+            }));
+        }, { once: true });
+        chrome.runtime.sendMessage.mockResolvedValue({ status: 'queued' });
+
+        await expect(GrokScraper.prototype.performBackupUpload.call(
+            scraper,
+            media,
+            'saved-media-url',
+            'run-1'
+        )).resolves.toEqual({ status: 'queued' });
+
+        expect(scraper.backupStats).toMatchObject({ queued: 1, errors: 0 });
+        expect(scraper.processedIds).toEqual(new Set());
+        expect(chrome.storage.local.get).not.toHaveBeenCalled();
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
+            processedIds: expect.any(Array)
+        }));
+    });
+
     test('sends authenticated media data for Cloud only Agent transfers', async () => {
         mockContentChrome();
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
@@ -795,6 +873,22 @@ describe('storage stop signals', () => {
         const changes = { scraperState: { newValue: 'idle' } };
         expect(shouldStopScraperForStorageChanges(changes, false)).toBe(true);
         expect(shouldStopScraperForStorageChanges(changes, true)).toBe(true);
+    });
+
+    test('refreshes scraper processed IDs when background completion updates storage', () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        scraper.setupListeners();
+        const storageListener = chrome.storage.onChanged.addListener.mock.calls[0][0];
+        const mediaId = '22222222-2222-4222-8222-222222222222';
+
+        storageListener({ processedIds: { newValue: [mediaId] } }, 'local');
+
+        expect(scraper.processedIds).toEqual(new Set([mediaId]));
+        expect(scraper.isMediaProcessed(
+            `https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/${mediaId}/image.jpg?request=33333333-3333-4333-8333-333333333333`
+        )).toBe(true);
+        delete global.chrome;
     });
 });
 

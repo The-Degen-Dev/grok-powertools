@@ -12,6 +12,9 @@ const {
     formatR2BackupDetails,
     getR2BackupDoneStatusLabel
 } = require('../../popup.js');
+const CloudSyncUtils = require('../../cloudSyncUtils.js');
+const fs = require('fs');
+const path = require('path');
 
 function setElementBox(el, { width, height, top = 0, left = 0, naturalWidth = width }) {
     Object.defineProperty(el, 'naturalWidth', {
@@ -227,20 +230,34 @@ describe('Grok backup background processed ID persistence', () => {
     });
 
     test('builds direct upload responses with parsed backup processed ID', () => {
-        const { buildDirectBackupUploadResponse } = loadBackgroundForTest();
+        const {
+            buildDirectBackupUploadResponse,
+            extractGrokMediaIdFallback,
+            getCloudSyncForTest,
+            parseFilenameInfo
+        } = loadBackgroundForTest();
         const result = {
             status: 'uploaded',
             objectKey: 'grok/users/user-1/media.mp4',
             assetId: 'asset-1'
         };
-        const sourceUrl = 'https://assets.grok.com/videos/11111111-2222-4333-8444-555555555555/generated_video.mp4';
+        const accountId = '11111111-1111-4111-8111-111111111111';
+        const mediaId = '22222222-2222-4222-8222-222222222222';
+        const queryId = '33333333-3333-4333-8333-333333333333';
+        const hashId = '44444444-4444-4444-8444-444444444444';
+        const sourceUrl = `https://assets.grok.com/users/${accountId}/generated/${mediaId}/generated_video.mp4?request=${queryId}#${hashId}`;
 
         expect(buildDirectBackupUploadResponse(result, sourceUrl)).toEqual({
             status: 'uploaded',
             objectKey: 'grok/users/user-1/media.mp4',
             assetId: 'asset-1',
-            backupProcessedId: '11111111-2222-4333-8444-555555555555'
+            backupProcessedId: mediaId
         });
+        expect(parseFilenameInfo(sourceUrl).uuid).toBe(mediaId);
+        expect(getCloudSyncForTest().extractGrokMediaId(sourceUrl))
+            .toBe(CloudSyncUtils.extractGrokMediaId(sourceUrl));
+        expect(extractGrokMediaIdFallback(sourceUrl))
+            .toBe(CloudSyncUtils.extractGrokMediaId(sourceUrl));
     });
 
     test('awaits queued backup persistence while preserving latest storage and background IDs', async () => {
@@ -283,6 +300,52 @@ describe('Grok backup background processed ID persistence', () => {
         expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
             processedIds: expect.any(Array)
         }));
+    });
+
+    test('keeps a failed queued upload unprocessed until a later R2-present result', async () => {
+        const mediaId = '22222222-2222-4222-8222-222222222222';
+        const sourceUrl = `https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/${mediaId}/image.jpg`;
+        const background = loadBackgroundForTest();
+        chrome.storage.local.get.mockImplementation(async (keys) => {
+            if (Array.isArray(keys) && keys.includes('cloudConfig')) {
+                return {
+                    cloudConfig: {
+                        mode: 'cloud_only',
+                        workerUrl: 'https://example-worker.workers.dev',
+                        apiKey: 'test-only-value'
+                    }
+                };
+            }
+            if (Array.isArray(keys) && keys.includes('processedIds')) return { processedIds: [] };
+            return {};
+        });
+        background.setProcessedUUIDsForTest([]);
+
+        await expect(background.enqueueCloudMediaUpload(
+            sourceUrl,
+            `GrokVault/u/2026-08-12_Auto/${mediaId}.jpg`,
+            '',
+            null,
+            {
+                uploadMediaQueueItem: jest.fn().mockRejectedValue(new Error('[media-fetch] unavailable'))
+            }
+        )).resolves.toBe(true);
+
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+        expect(background.getCloudSyncQueueForTest()).toHaveLength(1);
+        expect(background.getCloudSyncQueueForTest()[0].backupProcessedId).toBe(mediaId);
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
+            processedIds: expect.any(Array)
+        }));
+
+        await background.processCloudQueue('test-success', {
+            force: true,
+            uploadMediaQueueItem: jest.fn().mockResolvedValue({ status: 'uploaded', bytes: 123 })
+        });
+
+        expect(background.getProcessedUUIDsForTest()).toEqual([mediaId]);
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({ processedIds: [mediaId] });
     });
 
     test('builds full backup init options by default', () => {
@@ -524,6 +587,132 @@ describe('Grok backup background processed ID persistence', () => {
     });
 });
 
+describe('native download processed ID lifecycle', () => {
+    const accountId = '11111111-1111-4111-8111-111111111111';
+    const mediaId = '22222222-2222-4222-8222-222222222222';
+    const queryId = '33333333-3333-4333-8333-333333333333';
+    const mediaUrl = `https://assets.grok.com/users/${accountId}/generated/${mediaId}/image.jpg?request=${queryId}`;
+
+    function configureDownloadStorage() {
+        chrome.storage.local.get.mockImplementation(async (keys) => {
+            if (Array.isArray(keys) && keys.includes('processedIds')) return { processedIds: [] };
+            if (Array.isArray(keys) && keys.includes('downloadPath')) {
+                return { downloadPath: 'GrokVault', activeGrokUserId: 'user-1' };
+            }
+            if (Array.isArray(keys) && keys.includes('cloudConfig')) {
+                return { cloudConfig: { mode: 'local_only' } };
+            }
+            return {};
+        });
+    }
+
+    afterEach(() => {
+        delete global.chrome;
+        jest.resetModules();
+    });
+
+    test('reserves an accepted stable media download without persisting before completion', async () => {
+        const background = loadBackgroundForTest();
+        configureDownloadStorage();
+        background.setProcessedUUIDsForTest([]);
+        const suggest = jest.fn();
+
+        await background.handleDownloadFilename({ id: 41, url: mediaUrl, filename: 'image.jpg' }, suggest);
+
+        expect(suggest).toHaveBeenCalledWith(expect.objectContaining({ conflictAction: 'overwrite' }));
+        expect(background.getPendingDownloadIdentitiesForTest()).toEqual([[41, mediaId]]);
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
+            processedIds: expect.any(Array)
+        }));
+    });
+
+    test('persists exactly the stable media ID when the download completes', async () => {
+        const background = loadBackgroundForTest();
+        configureDownloadStorage();
+        background.setProcessedUUIDsForTest([]);
+
+        await background.handleDownloadFilename({ id: 42, url: mediaUrl, filename: 'image.jpg' }, jest.fn());
+        await background.handleDownloadChanged({ id: 42, state: { current: 'complete' } });
+
+        expect(background.getPendingDownloadIdentitiesForTest()).toEqual([]);
+        expect(background.getProcessedUUIDsForTest()).toEqual([mediaId]);
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({ processedIds: [mediaId] });
+    });
+
+    test('releases an interrupted download without persisting it', async () => {
+        const background = loadBackgroundForTest();
+        configureDownloadStorage();
+        background.setProcessedUUIDsForTest([]);
+
+        await background.handleDownloadFilename({ id: 43, url: mediaUrl, filename: 'image.jpg' }, jest.fn());
+        await background.handleDownloadChanged({
+            id: 43,
+            state: { current: 'interrupted' },
+            error: { current: 'USER_CANCELED' }
+        });
+
+        expect(background.getPendingDownloadIdentitiesForTest()).toEqual([]);
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
+            processedIds: expect.any(Array)
+        }));
+    });
+
+    test('rejects a concurrent duplicate reservation without cancelling the first download', async () => {
+        const background = loadBackgroundForTest();
+        configureDownloadStorage();
+        background.setProcessedUUIDsForTest([]);
+        const firstSuggest = jest.fn();
+        const secondSuggest = jest.fn();
+
+        await background.generateFilename(mediaUrl, 'image.jpg');
+        await background.handleDownloadFilename({ id: 44, url: mediaUrl, filename: 'image.jpg' }, firstSuggest);
+        await background.handleDownloadFilename({ id: 45, url: mediaUrl, filename: 'image.jpg' }, secondSuggest);
+
+        expect(firstSuggest).toHaveBeenCalledTimes(1);
+        expect(secondSuggest).not.toHaveBeenCalled();
+        expect(chrome.downloads.cancel).toHaveBeenCalledWith(45);
+        expect(chrome.downloads.cancel).not.toHaveBeenCalledWith(44);
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+    });
+
+    test('never treats a query UUID as stable identity when the pathname has none', async () => {
+        const background = loadBackgroundForTest();
+        configureDownloadStorage();
+        background.setProcessedUUIDsForTest([]);
+        const queryOnlyUrl = `https://assets.grok.com/generated/image.jpg?request=${queryId}`;
+        const suggest = jest.fn();
+
+        await background.handleDownloadFilename({ id: 46, url: queryOnlyUrl, filename: 'image.jpg' }, suggest);
+        await background.handleDownloadChanged({ id: 46, state: { current: 'complete' } });
+
+        expect(suggest).toHaveBeenCalledTimes(1);
+        expect(background.getPendingDownloadIdentitiesForTest()).toEqual([]);
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+        expect(suggest.mock.calls[0][0].filename).toMatch(/\/url_[a-f0-9]{8}\.jpg$/);
+        expect(suggest.mock.calls[0][0].filename).not.toContain(queryId);
+    });
+});
+
+describe('backup and queue logging safety', () => {
+    test('does not log raw media URLs, prompts, or object keys in reviewed paths', () => {
+        const contentSource = fs.readFileSync(path.join(__dirname, '../../content.js'), 'utf8');
+        const backgroundSource = fs.readFileSync(path.join(__dirname, '../../background.js'), 'utf8');
+        const taggedBackupLogs = contentSource.split('\n')
+            .filter((line) => line.includes('[BackupUpload]'))
+            .join('\n');
+        const taggedQueueLogs = backgroundSource.split('\n')
+            .filter((line) => line.includes('[CloudQueue]'))
+            .join('\n');
+
+        expect(taggedBackupLogs).not.toMatch(/Prompt:|promptText|src\.slice|src:/);
+        expect(contentSource).not.toContain('...${src.slice(-20)}');
+        expect(taggedQueueLogs).not.toMatch(/sourceUrl|objectKey|finalPath|e\.message|sidecarKey/);
+        expect(backgroundSource).not.toMatch(/\blog\(`[^`\n]*\$\{(?:descriptor|result|item)\.objectKey/);
+    });
+});
+
 describe('Grok backup scan exhaustion', () => {
     test('does not exhaust while the gallery scroll position is still advancing', () => {
         const result = resolveBackupScrollAttempt({
@@ -584,11 +773,12 @@ describe('Grok backup upload stats', () => {
         });
     });
 
-    test('persists processed IDs once a durable queue accepts the upload', () => {
+    test('persists processed IDs only after R2 presence is durable', () => {
         expect(shouldPersistBackupProcessedId('uploaded')).toBe(true);
         expect(shouldPersistBackupProcessedId('already_present')).toBe(true);
         expect(shouldPersistBackupProcessedId('conflict_uploaded')).toBe(true);
-        expect(shouldPersistBackupProcessedId('queued')).toBe(true);
+        expect(shouldPersistBackupProcessedId('queued')).toBe(false);
+        expect(shouldPersistBackupProcessedId('cloud_queued')).toBe(false);
     });
 
     test('preserves background-persisted processed IDs when content records backup success', () => {

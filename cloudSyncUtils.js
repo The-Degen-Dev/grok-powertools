@@ -6,15 +6,6 @@
     const WORKERS_DEV_LABEL_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
     const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
     const UUID_GLOBAL_REGEX = new RegExp(UUID_REGEX.source, 'gi');
-    const GENERIC_MEDIA_STEMS = new Set([
-        'generated',
-        'generated_image',
-        'generated_video',
-        'image',
-        'video',
-        'download',
-        'file'
-    ]);
     const CLOUD_MODES = {
         localOnly: 'local_only',
         cloudOnly: 'cloud_only',
@@ -247,21 +238,25 @@
         return 'png';
     }
 
-    function extractStableMediaId(value) {
-        const segments = getPathSegments(value);
+    function extractGrokMediaId(value) {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        const bareUuid = text.match(new RegExp(`^${UUID_REGEX.source}$`, 'i'));
+        if (bareUuid) return bareUuid[0].toLowerCase();
+
+        const segments = getPathSegments(text);
+        for (let index = 0; index < segments.length - 1; index++) {
+            if (segments[index].toLowerCase() !== 'generated') continue;
+            const generatedUuid = segments[index + 1].match(UUID_REGEX);
+            if (generatedUuid) return generatedUuid[0].toLowerCase();
+        }
+
         const matches = [];
         for (const segment of segments) {
             const segmentMatches = segment.match(UUID_GLOBAL_REGEX);
             if (segmentMatches) matches.push(...segmentMatches);
         }
         if (matches.length > 0) return matches[matches.length - 1].toLowerCase();
-
-        const { stem } = getFilePartsFromPath(value);
-        const safeStem = sanitizeFileStem(stem || '');
-        if (safeStem && safeStem.length >= 10 && !GENERIC_MEDIA_STEMS.has(safeStem.toLowerCase())) {
-            return safeStem;
-        }
-
         return '';
     }
 
@@ -282,7 +277,7 @@
             };
         }
 
-        const stableMediaId = extractStableMediaId(sourceUrl) || extractStableMediaId(finalPath);
+        const stableMediaId = extractGrokMediaId(sourceUrl) || extractGrokMediaId(finalPath);
         if (stableMediaId) {
             return {
                 kind: 'stable_media_id',
@@ -466,7 +461,7 @@
         buildMetadataObjectKey,
         normalizeSourceUrlForIdentity,
         buildSourceUrlHash,
-        extractStableMediaId,
+        extractGrokMediaId,
         resolveMediaAssetIdentity,
         resolveMediaExtension,
         detectMediaType,

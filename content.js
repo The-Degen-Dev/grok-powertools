@@ -553,7 +553,18 @@ function recordBackupUploadStatus(stats, status) {
 }
 
 function shouldPersistBackupProcessedId(status) {
-    return status === 'queued' || status === 'uploaded' || status === 'already_present' || status === 'conflict_uploaded';
+    return status === 'uploaded' || status === 'already_present' || status === 'conflict_uploaded';
+}
+
+function formatBackupMediaLog(status, value, details = {}) {
+    const mediaId = getGrokMediaIdentity(value);
+    const stableId = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(mediaId) ? mediaId : '';
+    const fields = [
+        `media=${stableId ? `...${stableId.slice(-8)}` : 'unknown'}`,
+        `status=${String(status || 'unknown').replace(/[^a-z0-9_-]/gi, '_')}`
+    ];
+    if (Number.isFinite(details.bytes)) fields.push(`bytes=${details.bytes}`);
+    return fields.join(' ');
 }
 
 function getR2BackupCanaryStopReason(options = {}, stats = {}) {
@@ -4272,6 +4283,7 @@ class GrokScraper {
         this.backupOptions = { mode: 'full', limit: null, options: {} };
         this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
         this._backupVisited = new Set();
+        this._runVisited = new Set();
         this.runToken = null;
         this.pendingNavigation = null;
         this.Config = { actionWait: 600, navWait: 800, surfaceWait: 10000, historyWait: 1500 };
@@ -4426,6 +4438,9 @@ class GrokScraper {
         // context, so this catches stops the direct-message path misses.
         safeChromeAddListener(() => chrome.storage.onChanged, (changes, area) => {
             if (area !== 'local') return;
+            if (Array.isArray(changes.processedIds?.newValue)) {
+                this.processedIds = new Set(changes.processedIds.newValue);
+            }
             const stopSignal = shouldStopScraperForStorageChanges(changes, this.backupMode);
             if (stopSignal && this.state.isRunning) {
                 console.log('GrokScraper: stop signal received via storage.onChanged');
@@ -4466,6 +4481,15 @@ class GrokScraper {
     }
 
     getCleanId(url) { if (!url) return null; try { return url.split('?')[0]; } catch { return url; } }
+
+    isMediaProcessed(value) {
+        const cleanId = this.getCleanId(value);
+        const stableId = getGrokMediaIdentity(value);
+        return Boolean(
+            (cleanId && this.processedIds.has(cleanId))
+            || (stableId && this.processedIds.has(stableId))
+        );
+    }
 
     getCurrentSurface() {
         return detectGrokScrapeSurface(document, window.location);
@@ -4534,6 +4558,7 @@ class GrokScraper {
         this.state.currentIndex = 0;
         this.runToken = runToken;
         this.pendingNavigation = null;
+        this._runVisited = new Set();
         Promise.resolve(this.determineModeAndExecute(runToken)).catch((error) => {
             if (this.isRunActive(runToken)) this.failRun(error.message || 'Sync failed to start.', 'start_failed');
         });
@@ -4604,6 +4629,7 @@ class GrokScraper {
         };
         this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0, startedAt: Date.now() };
         this._backupVisited = new Set();
+        this._runVisited = new Set();
         const runToken = this.createRunToken();
         this.state.isRunning = true;
         this.state.currentIndex = 0;
@@ -4789,7 +4815,9 @@ class GrokScraper {
             for (let i = 0; i < visualItems.length; i++) {
                 const itemObj = visualItems[i];
                 const cleanId = this.getCleanId(itemObj.src);
-                const alreadyDone = this.processedIds.has(cleanId) || (this.backupMode && this._backupVisited.has(cleanId));
+                const alreadyDone = this.isMediaProcessed(itemObj.src)
+                    || this._runVisited.has(cleanId)
+                    || (this.backupMode && this._backupVisited.has(cleanId));
                 if (cleanId && !alreadyDone) {
                     targetItem = itemObj.element;
                     this.log(`new item: ...${cleanId.slice(-6)}`, 'success');
@@ -4953,7 +4981,10 @@ class GrokScraper {
             return;
         }
 
-        if (!this.backupMode) await this.persistProcessedId(pending.currentItemId, runToken);
+        this._runVisited.add(pending.currentItemId);
+        if (!this.backupMode && shouldPersistBackupProcessedId(response.status)) {
+            await this.persistProcessedId(pending.currentItemId, runToken);
+        }
         if (!this.isRunActive(runToken)) return;
 
         const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
@@ -5033,6 +5064,7 @@ class GrokScraper {
             .map(img => img.closest('button'))
             .filter(btn => btn);
         let normalTransferSucceeded = !this.backupMode;
+        let normalTransferDurable = !this.backupMode;
 
         if (thumbnailButtons.length > 0) {
             console.log(`Multi-Video Detected: ${thumbnailButtons.length} versions.`);
@@ -5066,6 +5098,9 @@ class GrokScraper {
                     await this.failRun(response?.error || 'Legacy media download failed.', 'media_transfer_failed');
                     return;
                 }
+                if (!this.backupMode && !shouldPersistBackupProcessedId(response?.status)) {
+                    normalTransferDurable = false;
+                }
                 const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
                 if (this.backupMode && canaryStopReason) {
                     await this.stopBackupMode(canaryStopReason);
@@ -5082,6 +5117,9 @@ class GrokScraper {
                 await this.failRun(response?.error || 'Legacy media download failed.', 'media_transfer_failed');
                 return;
             }
+            if (!this.backupMode && !shouldPersistBackupProcessedId(response?.status)) {
+                normalTransferDurable = false;
+            }
             const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
             if (this.backupMode && canaryStopReason) {
                 await this.stopBackupMode(canaryStopReason);
@@ -5090,7 +5128,10 @@ class GrokScraper {
         }
 
         if (!this.isRunActive(runToken)) return;
-        if (normalTransferSucceeded && currentId) await this.persistProcessedId(currentId, runToken);
+        if (normalTransferSucceeded && currentId) this._runVisited.add(currentId);
+        if (normalTransferSucceeded && normalTransferDurable && currentId) {
+            await this.persistProcessedId(currentId, runToken);
+        }
         if (!this.isRunActive(runToken)) return;
 
         // Back Button
@@ -5123,7 +5164,7 @@ class GrokScraper {
         const src = getBackupMediaElementSrc(mediaEl);
         const isVideo = mediaEl?.tagName?.toLowerCase() === 'video';
 
-        console.log('[BackupUpload]', isVideo ? 'VIDEO' : 'IMAGE', 'src:', (src || 'NONE').slice(0, 80));
+        console.log('[BackupUpload]', isVideo ? 'VIDEO' : 'IMAGE', formatBackupMediaLog('preparing', src));
 
         if (!src) {
             this.backupStats.errors++;
@@ -5131,18 +5172,17 @@ class GrokScraper {
             return { status: 'error', error: 'No media element found for backup.' };
         }
 
-        const alreadyLocal = this.processedIds.has(this.getCleanId(src)) || this.processedIds.has(currentItemId);
+        const alreadyLocal = this.isMediaProcessed(src) || this.isMediaProcessed(currentItemId);
         const promptText = this.overlay?.readCurrentPromptInput?.() || '';
-        if (promptText) console.log('[BackupUpload] Prompt:', promptText.slice(0, 60));
 
         try {
             let blobData = null;
             try {
                 const result = await fetchMediaDataUrlViaBridge(src);
                 blobData = result.dataUrl;
-                console.log('[BackupUpload] Bridge fetched blob:', result.size, 'bytes, type:', result.type);
-            } catch (fetchErr) {
-                console.warn('[BackupUpload] Bridge fetch failed, background will retry:', fetchErr.message);
+                console.log('[BackupUpload]', formatBackupMediaLog('bridge_fetched', src, { bytes: result.size }));
+            } catch {
+                console.warn('[BackupUpload]', formatBackupMediaLog('bridge_retry', src));
             }
 
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
@@ -5166,7 +5206,10 @@ class GrokScraper {
                 const actionLabel = response.status === 'queued'
                     ? 'Queued for R2'
                     : (response.status === 'already_present' ? 'Already in R2' : 'Uploaded to R2');
-                this.log(`${actionLabel}: ...${src.slice(-20)}`, response.status === 'conflict_uploaded' ? 'warning' : 'success');
+                this.log(
+                    `${actionLabel}: ${formatBackupMediaLog(response.status, src)}`,
+                    response.status === 'conflict_uploaded' ? 'warning' : 'success'
+                );
                 // Mark as processed only after R2 says the asset is present.
                 const cleanId = this.getCleanId(src);
                 if (cleanId && shouldPersistBackupProcessedId(response.status)) {
@@ -5193,7 +5236,7 @@ class GrokScraper {
                 }
             } else {
                 this.backupStats.errors++;
-                this.log(`Backup error: ${response?.error || 'unknown'}`, 'error');
+                this.log(`Backup failed: ${formatBackupMediaLog(response?.status || 'error', src)}`, 'error');
             }
             await this.persistBackupProgress(runToken);
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
