@@ -620,8 +620,14 @@ async function clearCloudUiStatus() {
 
 async function scheduleCloudRetryAlarm() {
     const retryableItems = cloudSyncQueue.filter((item) => (item.attempts || 0) < CloudSync.MAX_RETRY_ATTEMPTS);
+    const queueOwnedDownloadIds = new Set(cloudSyncQueue
+        .filter((item) => item.type === 'media' && Number.isInteger(item.cleanupDownloadId))
+        .map((item) => item.cleanupDownloadId));
     const retryableDownloads = Array.from(pendingDownloadOperations.values()).filter((operation) => (
         operation.cloudRequired
+        && !(operation.strategy === 'public_queue'
+            && operation.r2State === 'pending'
+            && queueOwnedDownloadIds.has(operation.downloadId))
         && (
             operation.r2State === 'pending'
             || (!operation.allowLocal && operation.downloadState === 'complete' && operation.r2State === 'present')
@@ -1573,6 +1579,8 @@ async function initializeBackgroundState() {
     }
 
     pendingDownloadOperations = deserializeDownloadOperations(stored[PENDING_DOWNLOAD_OPERATIONS_KEY]);
+    const startupDownloadOperations = Array.from(pendingDownloadOperations.values())
+        .map((operation) => ({ ...operation }));
 
     cloudSyncQueue = Array.isArray(stored[CloudSync.STORAGE_KEYS.cloudSyncQueue])
         ? stored[CloudSync.STORAGE_KEYS.cloudSyncQueue].map((item) => {
@@ -1591,6 +1599,9 @@ async function initializeBackgroundState() {
     cloudSyncState = {
         ...cloudSyncState,
         ...(stored[CloudSync.STORAGE_KEYS.cloudSyncState] || {}),
+        lastError: isRedactedMediaError(stored[CloudSync.STORAGE_KEYS.cloudSyncState]?.lastError)
+            ? stored[CloudSync.STORAGE_KEYS.cloudSyncState].lastError
+            : null,
         unsyncedCount: cloudSyncQueue.length,
         processing: false
     };
@@ -1600,7 +1611,7 @@ async function initializeBackgroundState() {
     await ensureCloudConfigExists();
     await persistCloudState();
     await scheduleCloudRetryAlarm();
-    await reconcilePendingDownloadOperations();
+    await reconcilePendingDownloadOperations(startupDownloadOperations);
 }
 
 initializeBackgroundState().catch((e) => {
@@ -2393,41 +2404,70 @@ function cancelDownload(downloadId) {
     }
 }
 
-function removeDownloadedFile(downloadId) {
+function isMissingDownloadArtifactError(error) {
+    return /(?:not found|does not exist|doesn't exist|no such file|invalid download|already (?:deleted|removed|erased))/i
+        .test(String(error?.message || error || ''));
+}
+
+function runDownloadMutation(invoke, errorCode, { allowMissing = false } = {}) {
     return new Promise((resolve, reject) => {
         let settled = false;
-        const finish = () => {
+        const fail = (error) => {
             if (settled) return;
             settled = true;
+            if (allowMissing && isMissingDownloadArtifactError(error)) resolve();
+            else reject(new Error(errorCode));
+        };
+        const finish = (value) => {
+            if (settled) return;
             const error = chrome.runtime.lastError;
-            if (error) reject(new Error('download_cleanup_failed'));
-            else resolve();
+            if (error) {
+                fail(error);
+                return;
+            }
+            settled = true;
+            resolve(value);
         };
         try {
-            const result = chrome.downloads.removeFile(downloadId, finish);
-            if (result && typeof result.then === 'function') result.then(finish, reject);
+            const result = invoke(finish);
+            if (result && typeof result.then === 'function') result.then(finish, fail);
         } catch (error) {
-            reject(error);
+            fail(error);
         }
-    }).then(async () => {
-        await chrome.downloads.erase({ id: downloadId });
     });
 }
 
-async function finalizeDownloadOperation(downloadId) {
+async function removeDownloadedFile(downloadId) {
+    await runDownloadMutation(
+        (callback) => chrome.downloads.removeFile(downloadId, callback),
+        'download_cleanup_failed',
+        { allowMissing: true }
+    );
+    await runDownloadMutation(
+        (callback) => chrome.downloads.erase({ id: downloadId }, callback),
+        'download_history_cleanup_failed',
+        { allowMissing: true }
+    );
+}
+
+async function finalizeDownloadOperation(downloadId, { historyMissing = false } = {}) {
     const operation = await getDownloadOperation(downloadId);
     if (!operation || operation.downloadState !== 'complete') return false;
     if (operation.cloudRequired && !operation.allowLocal && operation.r2State !== 'present') return false;
 
-    if (operation.mediaId) await mutateProcessedIds({ ids: [operation.mediaId] });
+    if (operation.mediaId && (!operation.allowLocal || !operation.localIdentityPersisted)) {
+        await mutateProcessedIds({ ids: [operation.mediaId] });
+    }
     if (!operation.allowLocal) {
-        try {
-            await removeDownloadedFile(downloadId);
-        } catch (error) {
-            await recordDownloadOperationError(downloadId, error, 'download_cleanup_failed');
-            return false;
+        if (!historyMissing) {
+            try {
+                await removeDownloadedFile(downloadId);
+            } catch (error) {
+                await recordDownloadOperationError(downloadId, error, 'download_cleanup_failed');
+                return false;
+            }
+            console.log('[CloudQueue]', formatRedactedMediaLog('local_file_deleted', operation.mediaId));
         }
-        console.log('[CloudQueue]', formatRedactedMediaLog('local_file_deleted', operation.mediaId));
     }
     await removeDownloadOperation(downloadId);
     return true;
@@ -2469,6 +2509,10 @@ async function recordDownloadOperationError(downloadId, error, code) {
 async function ensurePublicDownloadQueued(operation, downloadItem) {
     if (!operation?.cloudRequired || operation.strategy !== 'public_queue') return;
     if (activeDownloadOperations.has(operation.downloadId)) return;
+    if (Number.isInteger(operation.cleanupDownloadId) && cloudSyncQueue.some((item) => (
+        item.type === 'media'
+        && item.cleanupDownloadId === operation.cleanupDownloadId
+    ))) return;
     const sourceUrl = downloadItem?.finalUrl || downloadItem?.url;
     if (!sourceUrl) {
         await recordDownloadOperationError(
@@ -2556,7 +2600,7 @@ async function processCompletedDownloadOperation(downloadId, downloadItem = null
     if (!operation) return;
     const item = downloadItem || (await chrome.downloads.search({ id: downloadId }))[0];
 
-    if (operation.allowLocal && operation.mediaId) {
+    if (operation.allowLocal && operation.mediaId && !operation.localIdentityPersisted) {
         await mutateProcessedIds({ ids: [operation.mediaId] });
         operation = await updateDownloadOperation(downloadId, { localIdentityPersisted: true });
         if (!operation) return;
@@ -2576,11 +2620,43 @@ async function processCompletedDownloadOperation(downloadId, downloadItem = null
     await uploadAuthenticatedDownload(operation, item);
 }
 
-async function reconcilePendingDownloadOperations() {
-    const operations = Array.from((await hydrateDownloadOperations()).values()).map((operation) => ({ ...operation }));
+async function reconcileMissingDownloadOperation(operation) {
+    if (operation.strategy === 'public_queue' && operation.r2State !== 'present') {
+        let queueChanged = false;
+        cloudSyncQueue.forEach((item) => {
+            if (item.type === 'media' && item.cleanupDownloadId === operation.downloadId) {
+                item.cleanupDownloadId = null;
+                queueChanged = true;
+            }
+        });
+        if (queueChanged) await persistCloudState();
+        await removeDownloadOperation(operation.downloadId);
+        return;
+    }
+
+    if (operation.downloadState === 'complete') {
+        if (!operation.allowLocal && operation.r2State === 'present') {
+            await finalizeDownloadOperation(operation.downloadId, { historyMissing: true });
+            return;
+        }
+        if (operation.allowLocal && operation.mediaId && !operation.localIdentityPersisted) {
+            await mutateProcessedIds({ ids: [operation.mediaId] });
+        }
+    }
+
+    await removeDownloadOperation(operation.downloadId);
+}
+
+async function reconcilePendingDownloadOperations(startupOperations = null) {
+    const operations = Array.isArray(startupOperations)
+        ? startupOperations
+        : Array.from((await hydrateDownloadOperations()).values()).map((operation) => ({ ...operation }));
     for (const operation of operations) {
         const [downloadItem] = await chrome.downloads.search({ id: operation.downloadId });
-        if (!downloadItem) continue;
+        if (!downloadItem) {
+            await reconcileMissingDownloadOperation(operation);
+            continue;
+        }
         if (downloadItem.state === 'interrupted') {
             await removeDownloadOperation(operation.downloadId);
             continue;

@@ -621,16 +621,6 @@ function getR2BackupPageCommandOptions(detail = {}) {
     };
 }
 
-function mergeBackupProcessedIdsForStorage(existingIds, inMemoryIds, nextId, responseBackupProcessedId = null) {
-    const merged = new Set(Array.isArray(existingIds) ? existingIds : []);
-    for (const id of (inMemoryIds || [])) {
-        if (id) merged.add(id);
-    }
-    if (nextId) merged.add(nextId);
-    if (responseBackupProcessedId) merged.add(responseBackupProcessedId);
-    return Array.from(merged);
-}
-
 // --- UTILS ---
 class ToastManager {
     constructor() {
@@ -1638,7 +1628,7 @@ class GrokOverlay {
         }
         try {
             return await this.providerRunLedger.appendProviderRunLedgerEntry(entry);
-        } catch {
+        } catch (error) {
             if (isExtensionContextInvalidatedError(error)) {
                 showExtensionContextRefreshed(this);
                 return null;
@@ -5416,7 +5406,6 @@ if (typeof module === 'undefined') {
         recordBackupUploadStatus,
         resolveBackupScrollAttempt,
         selectBackupMediaElement,
-        mergeBackupProcessedIdsForStorage,
         getR2BackupCanaryStopReason,
         getR2BackupPageCommandOptions,
         shouldPersistBackupProcessedId,

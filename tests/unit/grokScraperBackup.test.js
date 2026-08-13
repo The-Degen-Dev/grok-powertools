@@ -1,5 +1,4 @@
 const {
-    mergeBackupProcessedIdsForStorage,
     recordBackupUploadStatus,
     resolveBackupScrollAttempt,
     getR2BackupCanaryStopReason,
@@ -215,11 +214,15 @@ function createDurableBackgroundHarness(initialStorage = {}, initialDownloads = 
         return item ? [cloneJson(item)] : [];
     });
     chromeApi.downloads.removeFile.mockImplementation((id, callback) => {
-        downloads.delete(id);
+        const item = downloads.get(id);
+        if (item) downloads.set(id, { ...item, exists: false });
         if (callback) callback();
     });
     chromeApi.downloads.erase.mockImplementation((query, callback) => {
-        if (callback) callback([query.id]);
+        const erased = downloads.has(query.id) ? [query.id] : [];
+        downloads.delete(query.id);
+        if (callback) callback(erased);
+        return Promise.resolve(erased);
     });
 
     return {
@@ -235,6 +238,9 @@ function createDurableBackgroundHarness(initialStorage = {}, initialDownloads = 
         },
         getDownloadChangedListener() {
             return chromeApi.downloads.onChanged.addListener.mock.calls.at(-1)[0];
+        },
+        getAlarmListener() {
+            return chromeApi.alarms.onAlarm.addListener.mock.calls.at(-1)[0];
         },
         getFilenameListener() {
             return chromeApi.downloads.onDeterminingFilename.addListener.mock.calls.at(-1)[0];
@@ -514,6 +520,27 @@ describe('Grok backup background processed ID persistence', () => {
         expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
             processedIds: expect.any(Array)
         }));
+    });
+
+    test('clears a legacy raw cloud status error when no queue item can sanitize it', async () => {
+        const mediaId = '22222222-2222-4222-8222-222222222222';
+        const signedUrl = `https://imagine-public.x.ai/media/${mediaId}.jpg?token=private-token`;
+        const harness = createDurableBackgroundHarness({
+            cloudSyncQueue: [],
+            cloudSyncState: {
+                lastError: `source=${signedUrl} key=test/v1/private/${mediaId}.jpg prompt=private words`,
+                processing: false,
+                unsyncedCount: 0
+            }
+        });
+        const background = await harness.load();
+
+        await background.initializeBackgroundState();
+
+        expect(harness.storageState.cloudSyncState.lastError).toBeNull();
+        expect(JSON.stringify(harness.storageState.cloudSyncState)).not.toContain(signedUrl);
+        expect(JSON.stringify(harness.storageState.cloudSyncState)).not.toContain(mediaId);
+        expect(JSON.stringify(harness.storageState.cloudSyncState)).not.toContain('private words');
     });
 
     test('builds full backup init options by default', () => {
@@ -1083,6 +1110,33 @@ describe('native download processed ID lifecycle', () => {
         await waitForAssertion(() => expect(harness.storageState.pendingDownloadOperations).toEqual({}));
         expect(harness.storageState.processedIds).toEqual([]);
     });
+
+    test('releases an in-progress reservation when download history is absent after restart', async () => {
+        const harness = createDurableBackgroundHarness({
+            processedIds: [],
+            cloudConfig: { mode: 'local_only' },
+            pendingDownloadOperations: {
+                50: {
+                    downloadId: 50,
+                    mediaId,
+                    reservationKey: mediaId,
+                    finalPath: `GrokVault/user-1/2026-08-12_Auto/${mediaId}.jpg`,
+                    allowLocal: true,
+                    cloudRequired: false,
+                    strategy: 'local',
+                    downloadState: 'in_progress',
+                    r2State: 'not_required',
+                    localIdentityPersisted: false
+                }
+            }
+        });
+        const background = await harness.load();
+
+        await background.initializeBackgroundState();
+
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.storageState.processedIds).toEqual([]);
+    });
 });
 
 describe('cloud-only download proof and cleanup ordering', () => {
@@ -1119,6 +1173,132 @@ describe('cloud-only download proof and cleanup ordering', () => {
                 keyPrefix: 'test/v1'
             }
         };
+    }
+
+    function installAuthenticatedUploadFailure(harness) {
+        global.fetch = jest.fn(async (url) => {
+            if (String(url).endsWith('/v1/objects/verify')) {
+                return { ok: false, status: 503, text: async () => 'temporary verify failure' };
+            }
+            throw new Error(`Unexpected test fetch: ${String(url)}`);
+        });
+        harness.chromeApi.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'READ_FILE_FOR_UPLOAD') {
+                return {
+                    ok: true,
+                    base64: Buffer.from([1, 2, 3, 4]).toString('base64'),
+                    type: 'image/jpeg',
+                    size: 4
+                };
+            }
+            return undefined;
+        });
+    }
+
+    function dualWritePendingStorage(downloadId) {
+        const storage = cloudOnlyStorage();
+        storage.processedIds = [mediaId];
+        storage.cloudConfig.mode = 'dual_write';
+        storage.pendingDownloadOperations = {
+            [downloadId]: {
+                downloadId,
+                mediaId,
+                reservationKey: mediaId,
+                finalPath: `GrokVault/user-1/2026-08-12_Auto/${mediaId}.jpg`,
+                allowLocal: true,
+                cloudRequired: true,
+                strategy: 'auth_file',
+                cleanupDownloadId: null,
+                downloadState: 'complete',
+                r2State: 'pending',
+                attempts: 1,
+                lastError: `stage=presign code=auth_upload_failed media=...${mediaId.slice(-8)}`,
+                localIdentityPersisted: true
+            }
+        };
+        return storage;
+    }
+
+    function publicRetryStorage(downloadId, attempts) {
+        const storage = cloudOnlyStorage();
+        const finalPath = `GrokVault/user-1/2026-08-12_Auto/${mediaId}.jpg`;
+        const contentType = 'image/jpeg';
+        const identity = CloudSyncUtils.resolveMediaAssetIdentity({
+            sourceUrl: publicUrl,
+            finalPath,
+            contentType
+        });
+        const lastError = `stage=media-fetch code=queue_upload_failed media=...${mediaId.slice(-8)}`;
+        storage.cloudSyncQueue = [{
+            id: 'public-cleanup-retry',
+            type: 'media',
+            sourceUrl: publicUrl,
+            finalPath,
+            objectKey: CloudSyncUtils.buildMediaObjectKeyForUpload({
+                keyPrefix: storage.cloudConfig.keyPrefix,
+                fallbackUserId: storage.activeGrokUserId,
+                sourceUrl: publicUrl,
+                finalPath,
+                contentType
+            }),
+            assetId: identity.assetId,
+            sourceUrlHash: identity.sourceUrlHash,
+            assetIdentityKind: identity.kind,
+            contentType,
+            promptText: '',
+            backupProcessedId: mediaId,
+            cleanupDownloadId: downloadId,
+            dedupeKey: CloudSyncUtils.buildMediaDedupeKey({
+                fallbackUserId: storage.activeGrokUserId,
+                sourceUrl: publicUrl,
+                finalPath,
+                contentType
+            }),
+            attempts,
+            lastError
+        }];
+        storage.cloudSyncState = { lastError, processing: false, unsyncedCount: 1 };
+        storage.pendingDownloadOperations = {
+            [downloadId]: {
+                downloadId,
+                mediaId,
+                reservationKey: mediaId,
+                finalPath,
+                allowLocal: false,
+                cloudRequired: true,
+                strategy: 'public_queue',
+                cleanupDownloadId: downloadId,
+                downloadState: 'in_progress',
+                r2State: 'pending',
+                attempts: 0,
+                lastError: null,
+                localIdentityPersisted: false
+            }
+        };
+        return storage;
+    }
+
+    function completedCloudOnlyOperation(downloadId) {
+        const storage = cloudOnlyStorage();
+        storage.pendingDownloadOperations = {
+            [downloadId]: {
+                downloadId,
+                mediaId,
+                reservationKey: mediaId,
+                finalPath: `GrokVault/user-1/2026-08-12_Auto/${mediaId}.jpg`,
+                allowLocal: false,
+                cloudRequired: true,
+                strategy: 'public_queue',
+                cleanupDownloadId: downloadId,
+                downloadState: 'complete',
+                r2State: 'present',
+                r2Status: 'already_present',
+                attempts: 0,
+                lastError: null,
+                localIdentityPersisted: false
+            }
+        };
+        return storage;
     }
 
     test('waits for download completion when public R2 proof arrives first', async () => {
@@ -1184,6 +1364,64 @@ describe('cloud-only download proof and cleanup ordering', () => {
         await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
         expect(harness.chromeApi.downloads.removeFile).toHaveBeenCalledWith(52, expect.any(Function));
         expect(harness.storageState.pendingDownloadOperations).toEqual({});
+    });
+
+    test('preserves public cleanup retry attempts on startup and advances exactly once on alarm', async () => {
+        const downloadId = 55;
+        const storage = publicRetryStorage(downloadId, 5);
+        global.fetch = jest.fn(() => Promise.reject(new Error('[media-fetch] temporary failure')));
+        const harness = createDurableBackgroundHarness(storage, {
+            [downloadId]: {
+                id: downloadId,
+                url: publicUrl,
+                filename: '/Downloads/public-retry.jpg',
+                mime: 'image/jpeg',
+                state: 'in_progress'
+            }
+        });
+        const background = await harness.load();
+
+        await background.initializeBackgroundState();
+
+        expect(harness.storageState.cloudSyncQueue).toHaveLength(1);
+        expect(harness.storageState.cloudSyncQueue[0]).toEqual(expect.objectContaining({
+            cleanupDownloadId: downloadId,
+            attempts: 5,
+            lastError: storage.cloudSyncQueue[0].lastError
+        }));
+        expect(global.fetch).not.toHaveBeenCalled();
+
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue[0].attempts).toBe(6));
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(harness.storageState.cloudSyncQueue).toHaveLength(1);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].attempts).toBe(0);
+    });
+
+    test('does not retry a capped public cleanup queue through its operation state', async () => {
+        const downloadId = 56;
+        const storage = publicRetryStorage(downloadId, CloudSyncUtils.MAX_RETRY_ATTEMPTS);
+        global.fetch = jest.fn(() => Promise.reject(new Error('[media-fetch] should not run')));
+        const harness = createDurableBackgroundHarness(storage, {
+            [downloadId]: {
+                id: downloadId,
+                url: publicUrl,
+                filename: '/Downloads/public-capped.jpg',
+                mime: 'image/jpeg',
+                state: 'in_progress'
+            }
+        });
+        const background = await harness.load();
+
+        await background.initializeBackgroundState();
+        harness.chromeApi.alarms.create.mockClear();
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(harness.storageState.cloudSyncQueue[0].attempts).toBe(CloudSyncUtils.MAX_RETRY_ATTEMPTS);
+        expect(harness.chromeApi.alarms.create).not.toHaveBeenCalled();
     });
 
     test('retains failed authenticated cloud-only work and retries it after restart', async () => {
@@ -1287,6 +1525,134 @@ describe('cloud-only download proof and cleanup ordering', () => {
         }));
     });
 
+    test('does not resurrect a reset dual-write identity during an alarm retry', async () => {
+        const downloadId = 57;
+        const harness = createDurableBackgroundHarness(dualWritePendingStorage(downloadId), {
+            [downloadId]: {
+                id: downloadId,
+                url: authUrl,
+                filename: '/Downloads/auth-dual-alarm.jpg',
+                mime: 'image/jpeg',
+                state: 'complete'
+            }
+        });
+        installAuthenticatedUploadFailure(harness);
+        await harness.load();
+        await waitForAssertion(() => expect(
+            harness.storageState.pendingDownloadOperations[String(downloadId)].attempts
+        ).toBeGreaterThan(1));
+
+        const reset = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'PROCESSED_IDS_RESET' });
+        await reset.response;
+        expect(harness.storageState.processedIds).toEqual([]);
+        const attemptsBeforeAlarm = harness.storageState.pendingDownloadOperations[String(downloadId)].attempts;
+
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(
+            harness.storageState.pendingDownloadOperations[String(downloadId)].attempts
+        ).toBeGreaterThan(attemptsBeforeAlarm));
+
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].localIdentityPersisted).toBe(true);
+    });
+
+    test('does not resurrect a reset dual-write identity during startup reconciliation', async () => {
+        const downloadId = 58;
+        const harness = createDurableBackgroundHarness(dualWritePendingStorage(downloadId), {
+            [downloadId]: {
+                id: downloadId,
+                url: authUrl,
+                filename: '/Downloads/auth-dual-restart.jpg',
+                mime: 'image/jpeg',
+                state: 'complete'
+            }
+        });
+        installAuthenticatedUploadFailure(harness);
+        await harness.load();
+        await waitForAssertion(() => expect(
+            harness.storageState.pendingDownloadOperations[String(downloadId)].attempts
+        ).toBeGreaterThan(1));
+
+        const reset = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'PROCESSED_IDS_RESET' });
+        await reset.response;
+        expect(harness.storageState.processedIds).toEqual([]);
+        const attemptsBeforeRestart = harness.storageState.pendingDownloadOperations[String(downloadId)].attempts;
+
+        await harness.load();
+        await waitForAssertion(() => expect(
+            harness.storageState.pendingDownloadOperations[String(downloadId)].attempts
+        ).toBeGreaterThan(attemptsBeforeRestart));
+
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].localIdentityPersisted).toBe(true);
+    });
+
+    test('finalizes an R2-present operation when download history was already erased', async () => {
+        const downloadId = 59;
+        const harness = createDurableBackgroundHarness(completedCloudOnlyOperation(downloadId));
+        const background = await harness.load();
+
+        await background.initializeBackgroundState();
+
+        expect(harness.storageState.processedIds).toEqual([mediaId]);
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+        expect(harness.chromeApi.downloads.erase).not.toHaveBeenCalled();
+    });
+
+    test('detaches missing public download history so queued R2 success can finalize identity', async () => {
+        const downloadId = 61;
+        installR2PresentFetch(publicUrl);
+        const harness = createDurableBackgroundHarness(publicRetryStorage(downloadId, 0));
+        const background = await harness.load();
+
+        await background.initializeBackgroundState();
+
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.storageState.cloudSyncQueue[0].cleanupDownloadId).toBeNull();
+        expect(harness.storageState.processedIds).toEqual([]);
+
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+
+        expect(harness.storageState.cloudSyncQueue).toEqual([]);
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+    });
+
+    test('continues cleanup when file bytes were removed before worker restart', async () => {
+        const downloadId = 60;
+        const harness = createDurableBackgroundHarness(completedCloudOnlyOperation(downloadId), {
+            [downloadId]: {
+                id: downloadId,
+                url: publicUrl,
+                filename: '/Downloads/already-removed.jpg',
+                mime: 'image/jpeg',
+                state: 'complete',
+                exists: false
+            }
+        });
+        harness.chromeApi.downloads.removeFile.mockImplementation((id, callback) => {
+            harness.chromeApi.runtime.lastError = { message: 'File not found' };
+            callback();
+            delete harness.chromeApi.runtime.lastError;
+        });
+        harness.chromeApi.downloads.erase.mockImplementation((query, callback) => {
+            harness.downloads.delete(query.id);
+            harness.chromeApi.runtime.lastError = { message: 'Invalid download id' };
+            callback();
+            delete harness.chromeApi.runtime.lastError;
+        });
+        const background = await harness.load();
+
+        await background.initializeBackgroundState();
+
+        expect(harness.chromeApi.downloads.removeFile).toHaveBeenCalledWith(downloadId, expect.any(Function));
+        expect(harness.chromeApi.downloads.erase).toHaveBeenCalledWith({ id: downloadId }, expect.any(Function));
+        expect(harness.downloads.has(downloadId)).toBe(false);
+        expect(harness.storageState.processedIds).toEqual([mediaId]);
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+    });
+
     test('redacts media failures returned through the runtime UI boundary', async () => {
         const rawFailure = `key=test/v1/private/${mediaId}.jpg source=${authUrl} prompt=private words`;
         global.fetch = jest.fn(async (url) => {
@@ -1349,6 +1715,7 @@ describe('backup and queue logging safety', () => {
         expect(contentSource).toContain("action: 'PROCESSED_IDS_ADD'");
         expect(contentSource).toContain("action: 'PROCESSED_IDS_RESET'");
         expect(popupSource).toContain("action: 'PROCESSED_IDS_RESET'");
+        expect(contentSource).not.toContain('mergeBackupProcessedIdsForStorage');
 
         const directBackgroundWrites = backgroundSource.match(
             /chrome\.storage\.local\.set\(\{\s*\[PROCESSED_IDS_KEY\]/g
@@ -1423,37 +1790,6 @@ describe('Grok backup upload stats', () => {
         expect(shouldPersistBackupProcessedId('conflict_uploaded')).toBe(true);
         expect(shouldPersistBackupProcessedId('queued')).toBe(false);
         expect(shouldPersistBackupProcessedId('cloud_queued')).toBe(false);
-    });
-
-    test('preserves background-persisted processed IDs when content records backup success', () => {
-        const statuses = ['uploaded', 'already_present', 'conflict_uploaded'];
-
-        for (const status of statuses) {
-            const inMemoryIds = new Set(['previous-clean-url-id']);
-            const existingIds = ['uuid-from-background'];
-            const nextId = 'clean-url-id';
-
-            expect(shouldPersistBackupProcessedId(status)).toBe(true);
-            expect(mergeBackupProcessedIdsForStorage(existingIds, inMemoryIds, nextId)).toEqual([
-                'uuid-from-background',
-                'previous-clean-url-id',
-                'clean-url-id'
-            ]);
-        }
-    });
-
-    test('merges response backup processed ID with clean URL ID during content persistence', () => {
-        expect(mergeBackupProcessedIdsForStorage(
-            ['uuid-from-background'],
-            new Set(['previous-clean-url-id']),
-            'clean-url-id',
-            'response-backup-uuid'
-        )).toEqual([
-            'uuid-from-background',
-            'previous-clean-url-id',
-            'clean-url-id',
-            'response-backup-uuid'
-        ]);
     });
 
     test('completes canary only after the first R2-present media status', () => {

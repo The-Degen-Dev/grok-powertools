@@ -146,4 +146,19 @@ describe('provider-aware overlay', () => {
         }));
         expect(overlay.el.querySelector('#gptStatusBadge').textContent).toBe('Generated image ready');
     });
+
+    test('preserves the original provider ledger rejection', async () => {
+        const ledgerError = new Error('ledger write failed');
+        const appendProviderRunLedgerEntry = jest.fn().mockRejectedValue(ledgerError);
+        const { overlay } = createOverlay('https://chatgpt.com/images/', {
+            providerRunLedger: { ...ProviderRunLedger, appendProviderRunLedgerEntry }
+        });
+
+        await expect(overlay.appendProviderRun({
+            providerId: 'chatgpt-images',
+            workflow: 'text-to-image',
+            status: 'submitted'
+        })).rejects.toBe(ledgerError);
+        expect(appendProviderRunLedgerEntry).toHaveBeenCalledTimes(1);
+    });
 });
