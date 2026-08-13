@@ -2733,8 +2733,7 @@ class VideoRetryManager {
                 const container = findMediaCardRoot(image);
                 if (!container || !image || seenCards.has(container)) return null;
                 seenCards.add(container);
-                const sourceUrl = image.currentSrc || image.src || '';
-                const sourceId = getGrokMediaIdentity(sourceUrl) || sourceUrl;
+                const sourceId = this._getResultsCardSourceId(container);
                 if (!sourceId) return null;
                 const rect = container.getBoundingClientRect();
                 return {
@@ -2901,6 +2900,18 @@ class VideoRetryManager {
     _getCardSourceId(container) {
         const sourceUrl = this._getCardImageSrc(container);
         return getGrokMediaIdentity(sourceUrl) || sourceUrl;
+    }
+
+    _getResultsCardSourceId(container) {
+        const postLinks = Array.from(container?.querySelectorAll?.('a[href*="/imagine/post/"]') || [])
+            .filter((link) => findMediaCardRoot(link) === container);
+        if (postLinks.length) {
+            const postIds = new Set(postLinks
+                .map((link) => getGrokMediaIdentity(link.href))
+                .filter(Boolean));
+            return postIds.size === 1 ? Array.from(postIds)[0] : '';
+        }
+        return this._getCardSourceId(container);
     }
 
     _isVisibleAutomationTarget(element, maxWidth = Infinity) {
@@ -3817,22 +3828,34 @@ class VideoRetryManager {
     }
 
     _hasOrderedResultsNeighborhood(entries, receipt) {
-        if (!receipt?.sourceId || receipt.sourceId === receipt.expectedNextId) return false;
+        if (!receipt?.sourceId
+            || !Number.isInteger(receipt.sourceIndex)
+            || !Array.isArray(receipt.orderedIds)
+            || receipt.orderedIds[receipt.sourceIndex] !== receipt.sourceId
+            || entries.length < receipt.orderedIds.length) {
+            return false;
+        }
         const identities = entries.map((entry) => entry.sourceId);
-        const sourceIndices = identities
-            .map((identity, index) => identity === receipt.sourceId ? index : -1)
-            .filter((index) => index >= 0);
-        if (sourceIndices.length !== 1) return false;
-        if (!receipt.expectedNextId) return true;
-        const nextIndices = identities
-            .map((identity, index) => identity === receipt.expectedNextId ? index : -1)
-            .filter((index) => index >= 0);
-        return nextIndices.length === 1 && nextIndices[0] > sourceIndices[0];
+        for (let index = 0; index < receipt.orderedIds.length; index++) {
+            if (index !== receipt.sourceIndex && identities[index] !== receipt.orderedIds[index]) {
+                return false;
+            }
+        }
+
+        const currentSourceId = identities[receipt.sourceIndex];
+        if (!currentSourceId) return false;
+        if (currentSourceId === receipt.sourceId) return true;
+
+        // Grok replaces the source result's media and post IDs after video generation.
+        // Accept that one in-place replacement only while the rest of the grid stays anchored.
+        if (receipt.orderedIds.length < 2 || receipt.orderedIds.includes(currentSourceId)) return false;
+        return identities.filter((identity) => identity === currentSourceId).length === 1
+            && !identities.includes(receipt.sourceId);
     }
 
     _captureResultsGalleryReceipt(item) {
         const context = this._getResultsGalleryContext();
-        const sourceId = this._getCardSourceId(item?.container);
+        const sourceId = this._getResultsCardSourceId(item?.container);
         if (!context || !sourceId || sourceId !== item?.sourceId) return null;
         const sourceIndices = context.entries
             .map((entry, index) => entry.sourceId === sourceId ? index : -1)
@@ -3845,6 +3868,8 @@ class VideoRetryManager {
         if (qualifiedSourceIndices.length !== 1) return null;
         const receipt = {
             sourceId,
+            sourceIndex: sourceIndices[0],
+            orderedIds: context.entries.map((entry) => entry.sourceId),
             expectedNextId: qualifiedItems[qualifiedSourceIndices[0] + 1]?.sourceId || null,
             scrollTop: getSavedScrollerSnapshot(context.scroller).scrollTop
         };

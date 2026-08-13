@@ -611,6 +611,7 @@ async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) 
             preciseEditClicks: 0,
             promptWrites: []
         };
+        window.__promptedResultsReplacements = {};
         document.addEventListener('__gpt_set_prompted_video_content', (event) => {
             window.__promptedResultsEvents.promptWrites.push(event.detail.text);
         });
@@ -680,6 +681,7 @@ async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) 
                             mediaUuid,
                             prompt: input.textContent
                         });
+                        window.__promptedResultsReplacements[mediaUuid] = `a${mediaUuid.slice(1)}`;
                         const video = document.createElement('video');
                         video.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/generated_video.mp4`;
                         Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
@@ -720,13 +722,15 @@ async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) 
             const list = document.createElement('div');
             list.setAttribute('role', 'list');
             mediaUuids.forEach((mediaUuid, index) => {
+                const currentMediaUuid = window.__promptedResultsReplacements[mediaUuid] || mediaUuid;
+                const wasConverted = currentMediaUuid !== mediaUuid;
                 const card = makeVisible(document.createElement('article'), index * 140, 20);
                 card.setAttribute('role', 'listitem');
                 const link = document.createElement('a');
-                link.href = `/imagine/post/${mediaUuid}`;
+                link.href = `/imagine/post/${currentMediaUuid}`;
                 const image = document.createElement('img');
                 image.alt = 'Generated image';
-                image.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/image.jpg`;
+                image.src = `https://assets.grok.com/users/${accountUuid}/generated/${currentMediaUuid}/image.jpg`;
                 image.scrollIntoView = () => {};
                 link.appendChild(image);
                 link.addEventListener('click', (event) => {
@@ -734,9 +738,10 @@ async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) 
                     window.__promptedResultsEvents.opened.push(mediaUuid);
                     renderDetail(mediaUuid);
                 });
-                const makeVideo = document.createElement('button');
-                makeVideo.setAttribute('aria-label', 'Make video');
-                card.append(link, makeVideo);
+                card.appendChild(link);
+                const action = document.createElement('button');
+                action.setAttribute('aria-label', wasConverted ? 'Video Options' : 'Make video');
+                card.appendChild(action);
                 list.appendChild(card);
             });
             document.body.append(nativePrompt, list);
@@ -1721,6 +1726,8 @@ test.describe('Grok Power Tools E2E', () => {
             batchRunning: window.__gptE2e.retry.batchRunning,
             pathname: window.location.pathname,
             status: window.__gptE2e.overlay.el.querySelector('#gptStatusBadge')?.textContent,
+            resultPostIds: Array.from(document.querySelectorAll('a[href*="/imagine/post/"]'))
+                .map((link) => link.href.split('/imagine/post/')[1]),
             events: window.__promptedResultsEvents
         }));
         expect(result).toEqual({
@@ -1730,6 +1737,7 @@ test.describe('Grok Power Tools E2E', () => {
             batchRunning: false,
             pathname: '/imagine',
             status: 'Prompted Batch [results]: Complete (2/2)',
+            resultPostIds: mediaUuids.map((mediaUuid) => `a${mediaUuid.slice(1)}`),
             events: {
                 opened: mediaUuids,
                 menuChoices: mediaUuids,

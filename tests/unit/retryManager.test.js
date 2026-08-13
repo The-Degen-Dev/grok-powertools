@@ -646,9 +646,124 @@ describe('VideoRetryManager', () => {
 
         await expect(retryManager._waitForPromptedBatchResultsSurface({
             sourceId: 'a1a1a1a1-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+            sourceIndex: 0,
+            orderedIds: ['a1a1a1a1-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
             expectedNextId: null,
             scrollTop: 0
         }, token, 200)).resolves.toBe(true);
+    });
+
+    test('results return accepts one in-place source replacement while preserving the anchored grid', async () => {
+        const sourcePostId = 'b253dd6b-aa00-4e93-a84d-89954d826d78';
+        const nextPostId = '495f114a-bb00-4e93-a84d-89954d826d78';
+        window.history.pushState({}, '', '/imagine');
+        window.scrollTo = jest.fn();
+        const source = createSavedBatchCard('data:image/jpeg;base64,source-before');
+        const next = createSavedBatchCard('data:image/jpeg;base64,next-before');
+        const sourceLink = document.createElement('a');
+        sourceLink.href = `/imagine/post/${sourcePostId}`;
+        source.card.insertBefore(sourceLink, source.image);
+        sourceLink.appendChild(source.image);
+        const nextLink = document.createElement('a');
+        nextLink.href = `/imagine/post/${nextPostId}`;
+        next.card.insertBefore(nextLink, next.image);
+        nextLink.appendChild(next.image);
+        makeVisible(source.card, { top: 0, left: 0 });
+        makeVisible(next.card, { top: 100, left: 0 });
+
+        const sourceItem = retryManager._getQualifiedResultsGalleryItems()[0];
+        const receipt = retryManager._captureResultsGalleryReceipt(sourceItem);
+
+        expect(receipt).toEqual(expect.objectContaining({
+            sourceId: sourcePostId,
+            expectedNextId: nextPostId
+        }));
+
+        source.image.src = `https://assets.grok.com/users/example/generated/${sourcePostId}/preview_image.jpg?cache=1`;
+        sourceLink.href = '/imagine/post/a9f0db00-cf12-402f-b0fe-eb3d6e364a2c?conversation=replacement';
+        source.makeVideo.remove();
+        const progress = document.createElement('button');
+        progress.setAttribute('aria-label', 'Video Options');
+        source.card.appendChild(progress);
+        const token = 'results-return-replaced-source';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager._waitForPromptedBatchResultsSurface(receipt, token, 200))
+            .resolves.toBe(true);
+    });
+
+    test('results return rejects a different grid when a non-source anchor changes', async () => {
+        const sourcePostId = 'b253dd6b-aa00-4e93-a84d-89954d826d78';
+        const nextPostId = '495f114a-bb00-4e93-a84d-89954d826d78';
+        window.history.pushState({}, '', '/imagine');
+        window.scrollTo = jest.fn();
+        const source = createSavedBatchCard('data:image/jpeg;base64,source-before');
+        const next = createSavedBatchCard('data:image/jpeg;base64,next-before');
+        const sourceLink = document.createElement('a');
+        sourceLink.href = `/imagine/post/${sourcePostId}`;
+        source.card.insertBefore(sourceLink, source.image);
+        sourceLink.appendChild(source.image);
+        const nextLink = document.createElement('a');
+        nextLink.href = `/imagine/post/${nextPostId}`;
+        next.card.insertBefore(nextLink, next.image);
+        nextLink.appendChild(next.image);
+        makeVisible(source.card, { top: 0, left: 0 });
+        makeVisible(next.card, { top: 100, left: 0 });
+        const receipt = retryManager._captureResultsGalleryReceipt(
+            retryManager._getQualifiedResultsGalleryItems()[0]
+        );
+
+        sourceLink.href = '/imagine/post/a9f0db00-cf12-402f-b0fe-eb3d6e364a2c';
+        nextLink.href = '/imagine/post/different-neighbor';
+        const token = 'results-return-different-grid';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager._waitForPromptedBatchResultsSurface(receipt, token, 200))
+            .resolves.toBe(false);
+    });
+
+    test('results batch stops with the active run token when video submission fails', async () => {
+        window.history.pushState({}, '', '/imagine');
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/c1c1c1c1-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/c2c2c2c2-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const token = 'results-submit-failed';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        retryManager.waitForPromptedBatchEditorReady = jest.fn().mockResolvedValue({
+            status: 'ready',
+            makeVideoTrigger: document.createElement('button'),
+            agentBinding: null
+        });
+        retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(true);
+        retryManager.capturePromptedVideoResultBaseline = jest.fn().mockReturnValue(new Set());
+        retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(false);
+        const stopSpy = jest.spyOn(retryManager, '_stopPromptedResultsItem').mockResolvedValue(false);
+
+        await retryManager._processPromptedResultsItem(item, token);
+
+        expect(stopSpy).toHaveBeenCalledWith(
+            'Prompted Batch [results]: Video submit button not ready',
+            expect.any(Object),
+            token
+        );
     });
 
     test('Stop during results-card targeting prevents navigation and submission', async () => {
