@@ -682,6 +682,50 @@ describe('Grok scrape surface transitions', () => {
         }));
     });
 
+    test('routes durable backup identities through the background writer', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {};
+        scraper.backupStats = { totalSeen: 1, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
+        const mediaId = '22222222-2222-4222-8222-222222222222';
+        const media = document.createElement('img');
+        media.src = `https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/${mediaId}/image.jpg?request=33333333-3333-4333-8333-333333333333`;
+        document.addEventListener('__gpt_fetch_media', (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+                detail: { requestId: event.detail.requestId, dataUrl: 'data:image/png;base64,AA==', size: 1 }
+            }));
+        }, { once: true });
+        chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'R2_BACKUP_UPLOAD') {
+                return { status: 'uploaded', backupProcessedId: mediaId };
+            }
+            if (message.action === 'PROCESSED_IDS_ADD') {
+                return { status: 'ok', processedIds: ['saved-media-url', media.src.split('?')[0], mediaId] };
+            }
+            return undefined;
+        });
+
+        await expect(GrokScraper.prototype.performBackupUpload.call(
+            scraper,
+            media,
+            'saved-media-url',
+            'run-1'
+        )).resolves.toEqual({ status: 'uploaded', backupProcessedId: mediaId });
+
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            action: 'PROCESSED_IDS_ADD',
+            ids: ['saved-media-url', media.src.split('?')[0], mediaId]
+        });
+        expect(scraper.processedIds).toEqual(new Set(['saved-media-url', media.src.split('?')[0], mediaId]));
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
+            processedIds: expect.any(Array)
+        }));
+    });
+
     test('sends authenticated media data for Cloud only Agent transfers', async () => {
         mockContentChrome();
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);

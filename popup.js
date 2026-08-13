@@ -275,15 +275,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('resetProcessedIdsBtn').addEventListener('click', () => {
         const btn = document.getElementById('resetProcessedIdsBtn');
         btn.disabled = true;
-        chrome.storage.local.set({ processedIds: [] }, () => {
-            // Also clear the in-memory Set in the content script
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0]) {
-                    chrome.tabs.sendMessage(tabs[0].id, { action: 'RESET_PROCESSED_IDS' }).catch(() => {});
-                }
-            });
-            addLog('Processed IDs cleared. Reload the Grok page or the scraper will re-read on next run.', 'success');
+        chrome.runtime.sendMessage({ action: 'PROCESSED_IDS_RESET' }, (response) => {
             btn.disabled = false;
+            if (chrome.runtime.lastError || response?.status !== 'ok') {
+                addLog('Failed to clear processed IDs.', 'error');
+                return;
+            }
+            addLog('Processed IDs cleared.', 'success');
         });
     });
 

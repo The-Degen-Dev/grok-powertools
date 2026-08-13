@@ -241,9 +241,15 @@ const MAX_LOGS = 100;
 const CLOUD_ALARM_NAME = 'gptCloudRetry';
 const CLOUD_METADATA_DEBOUNCE_MS = 2000;
 const CLOUD_SCHEMA_VERSION = 1;
+const PROCESSED_IDS_KEY = 'processedIds';
+const PENDING_DOWNLOAD_OPERATIONS_KEY = 'pendingDownloadOperations';
 
 // Global History Set
 let processedUUIDs = new Set();
+let processedIdsMutationQueue = Promise.resolve();
+let pendingDownloadOperations = new Map();
+let pendingDownloadOperationsMutationQueue = Promise.resolve();
+const activeDownloadOperations = new Set();
 
 let cloudSyncQueue = [];
 let cloudSyncState = {
@@ -305,6 +311,49 @@ function getUploadFailureStage(error) {
     return String(error?.message || '').match(/^\[([^\]]+)\]/)?.[1] || 'runtime';
 }
 
+function sanitizeErrorToken(value, fallback) {
+    const token = String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 40);
+    return token || fallback;
+}
+
+function formatRedactedMediaError(error, identityValue, code = 'media_failure') {
+    const mediaId = CloudSync.extractGrokMediaId(identityValue);
+    return [
+        `stage=${sanitizeErrorToken(getUploadFailureStage(error), 'runtime')}`,
+        `code=${sanitizeErrorToken(code, 'media_failure')}`,
+        `media=${mediaId ? `...${mediaId.slice(-8)}` : 'unknown'}`
+    ].join(' ');
+}
+
+function isRedactedMediaError(value) {
+    return /^stage=[a-z0-9_-]+ code=[a-z0-9_-]+ media=(?:unknown|\.\.\.[a-f0-9]{8})$/.test(String(value || ''));
+}
+
+function normalizeProcessedIds(values) {
+    return Array.from(new Set(
+        (Array.isArray(values) ? values : [])
+            .filter((value) => typeof value === 'string' && value)
+    ));
+}
+
+function mutateProcessedIds({ reset = false, ids = [] } = {}) {
+    const mutation = processedIdsMutationQueue.then(async () => {
+        const stored = await chrome.storage.local.get([PROCESSED_IDS_KEY]);
+        const next = reset ? new Set() : new Set(normalizeProcessedIds(stored[PROCESSED_IDS_KEY]));
+        if (!reset) normalizeProcessedIds(ids).forEach((id) => next.add(id));
+        const values = Array.from(next);
+        processedUUIDs = next;
+        await chrome.storage.local.set({ [PROCESSED_IDS_KEY]: values });
+        return values;
+    });
+    processedIdsMutationQueue = mutation.catch(() => {});
+    return mutation;
+}
+
 function applyBackupProcessedIdPersistence(processedIds, id, status, persist) {
     if (!id || !shouldPersistBackupProcessedId(status)) return false;
     if (!processedIds.has(id)) {
@@ -320,17 +369,15 @@ function persistQueuedBackupProcessedId(item, result, processedIds, persist) {
 
 async function persistQueuedBackupProcessedIdAfterSuccess(item, result) {
     const id = item?.backupProcessedId;
-    if (!id || !shouldPersistBackupProcessedId(result?.status)) return false;
+    if (!shouldPersistBackupProcessedId(result?.status)) return false;
 
-    const stored = await chrome.storage.local.get(['processedIds']);
-    const merged = new Set(Array.isArray(stored.processedIds) ? stored.processedIds : []);
-    for (const processedId of processedUUIDs) {
-        if (processedId) merged.add(processedId);
+    if (Number.isInteger(item.cleanupDownloadId)) {
+        const updated = await markDownloadOperationR2Present(item.cleanupDownloadId, result);
+        return !!updated;
     }
-    merged.add(id);
 
-    processedUUIDs = merged;
-    await chrome.storage.local.set({ processedIds: Array.from(processedUUIDs) });
+    if (!id) return false;
+    await mutateProcessedIds({ ids: [id] });
     return true;
 }
 
@@ -573,18 +620,31 @@ async function clearCloudUiStatus() {
 
 async function scheduleCloudRetryAlarm() {
     const retryableItems = cloudSyncQueue.filter((item) => (item.attempts || 0) < CloudSync.MAX_RETRY_ATTEMPTS);
+    const retryableDownloads = Array.from(pendingDownloadOperations.values()).filter((operation) => (
+        operation.cloudRequired
+        && (
+            operation.r2State === 'pending'
+            || (!operation.allowLocal && operation.downloadState === 'complete' && operation.r2State === 'present')
+        )
+        && (operation.attempts || 0) < CloudSync.MAX_RETRY_ATTEMPTS
+    ));
 
-    if (retryableItems.length === 0) {
+    if (retryableItems.length === 0 && retryableDownloads.length === 0) {
         await chrome.alarms.clear(CLOUD_ALARM_NAME);
         cloudSyncState.retryScheduledAt = null;
         await persistCloudState();
         return;
     }
 
-    const minAttempt = retryableItems.reduce((min, item) => {
+    const minQueueAttempt = retryableItems.reduce((min, item) => {
         const nextAttempt = (item.attempts || 0) + 1;
         return Math.min(min, nextAttempt);
     }, Number.MAX_SAFE_INTEGER);
+    const minDownloadAttempt = retryableDownloads.reduce((min, operation) => {
+        const nextAttempt = (operation.attempts || 0) + 1;
+        return Math.min(min, nextAttempt);
+    }, Number.MAX_SAFE_INTEGER);
+    const minAttempt = Math.min(minQueueAttempt, minDownloadAttempt);
 
     const delayInMinutes = CloudSync.getRetryDelayMinutes(minAttempt);
     await chrome.alarms.clear(CLOUD_ALARM_NAME);
@@ -616,6 +676,9 @@ async function enqueueCloudItem(queueItem, dedupeKey) {
             existing.contentType = queueItem.contentType || existing.contentType;
             existing.promptText = queueItem.promptText || existing.promptText || '';
             existing.backupProcessedId = queueItem.backupProcessedId || existing.backupProcessedId;
+            existing.cleanupDownloadId = Number.isInteger(queueItem.cleanupDownloadId)
+                ? queueItem.cleanupDownloadId
+                : existing.cleanupDownloadId;
             existing.updatedAt = Date.now();
             existing.attempts = 0;
             existing.lastError = null;
@@ -665,6 +728,9 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', ac
         contentType: CloudSync.detectContentTypeFromUrl(sourceUrl),
         promptText: promptText || '',
         backupProcessedId: CloudSync.extractGrokMediaId(sourceUrl) || null,
+        cleanupDownloadId: Number.isInteger(processOptions.cleanupDownloadId)
+            ? processOptions.cleanupDownloadId
+            : null,
         acceptance: acceptanceContext
     };
 
@@ -682,7 +748,11 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', ac
             queueItem.backupProcessedId || queueItem.assetId,
             { stage: getUploadFailureStage(e) }
         ));
-        updateCloudError(e.message);
+        updateCloudError(formatRedactedMediaError(
+            e,
+            queueItem.backupProcessedId || queueItem.assetId,
+            'queue_enqueue_failed'
+        ));
         await persistCloudState().catch(() => { });
     }
     return true;
@@ -1118,7 +1188,7 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
         contentType
     });
     if (!postUpload.exists || !postUpload.verified) {
-        throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] R2 post-upload verification failed for ${descriptor.objectKey}`);
+        throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] R2 post-upload verification failed`);
     }
 
     cloudSyncState.r2BytesUploadedNew += blob.size;
@@ -1282,10 +1352,17 @@ async function processCloudQueue(reason = 'auto', options = {}) {
                     console.error('[CloudQueue] Metadata upload failed:', item.kind);
                 }
                 item.attempts = attempts + 1;
-                item.lastError = e.message;
+                const redactedError = item.type === 'media'
+                    ? formatRedactedMediaError(
+                        e,
+                        item.backupProcessedId || item.assetId,
+                        'queue_upload_failed'
+                    )
+                    : e.message;
+                item.lastError = redactedError;
                 item.lastAttemptAt = Date.now();
                 remaining.push(item);
-                updateCloudError(e.message);
+                updateCloudError(redactedError);
                 const message = item.type === 'media'
                     ? `Cloud sync ${formatRedactedMediaLog(
                         'failed',
@@ -1453,7 +1530,7 @@ async function generateFilename(url, suggestedFilename, extHint) {
 
     // 2. Deduplication Check
     if (parsed.uuid && processedUUIDs.has(parsed.uuid)) {
-        console.log(`Skipping Duplicate: ${parsed.uuid}`);
+        console.log('Download', formatRedactedMediaLog('duplicate_skipped', parsed.uuid));
         return null; // Signal cancel
     }
 
@@ -1484,18 +1561,31 @@ async function generateFilenameForBackup(url, extHint) {
 
 async function initializeBackgroundState() {
     const stored = await chrome.storage.local.get([
-        'processedIds',
+        PROCESSED_IDS_KEY,
         CloudSync.STORAGE_KEYS.cloudSyncQueue,
-        CloudSync.STORAGE_KEYS.cloudSyncState
+        CloudSync.STORAGE_KEYS.cloudSyncState,
+        PENDING_DOWNLOAD_OPERATIONS_KEY
     ]);
 
-    if (stored.processedIds) {
-        processedUUIDs = new Set(stored.processedIds);
+    if (stored[PROCESSED_IDS_KEY]) {
+        processedUUIDs = new Set(normalizeProcessedIds(stored[PROCESSED_IDS_KEY]));
         console.log(`Loaded ${processedUUIDs.size} processed UUIDs.`);
     }
 
+    pendingDownloadOperations = deserializeDownloadOperations(stored[PENDING_DOWNLOAD_OPERATIONS_KEY]);
+
     cloudSyncQueue = Array.isArray(stored[CloudSync.STORAGE_KEYS.cloudSyncQueue])
-        ? stored[CloudSync.STORAGE_KEYS.cloudSyncQueue]
+        ? stored[CloudSync.STORAGE_KEYS.cloudSyncQueue].map((item) => {
+            if (item?.type !== 'media' || !item.lastError || isRedactedMediaError(item.lastError)) return item;
+            return {
+                ...item,
+                lastError: formatRedactedMediaError(
+                    new Error(item.lastError),
+                    item.backupProcessedId || item.assetId,
+                    'queue_upload_failed'
+                )
+            };
+        })
         : [];
 
     cloudSyncState = {
@@ -1504,10 +1594,13 @@ async function initializeBackgroundState() {
         unsyncedCount: cloudSyncQueue.length,
         processing: false
     };
+    const latestMediaError = cloudSyncQueue.find((item) => item.type === 'media' && item.lastError)?.lastError;
+    if (latestMediaError) cloudSyncState.lastError = latestMediaError;
 
     await ensureCloudConfigExists();
     await persistCloudState();
     await scheduleCloudRetryAlarm();
+    await reconcilePendingDownloadOperations();
 }
 
 initializeBackgroundState().catch((e) => {
@@ -1516,8 +1609,11 @@ initializeBackgroundState().catch((e) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === CLOUD_ALARM_NAME) {
-        processCloudQueue('alarm').catch((e) => {
-            updateCloudError(e.message);
+        (async () => {
+            await reconcilePendingDownloadOperations();
+            await processCloudQueue('alarm');
+        })().catch((e) => {
+            updateCloudError(sanitizeErrorToken(getUploadFailureStage(e), 'runtime'));
             persistCloudState().catch(() => { });
         });
     }
@@ -1525,6 +1621,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
+
+    if (changes[PROCESSED_IDS_KEY]) {
+        processedUUIDs = new Set(normalizeProcessedIds(changes[PROCESSED_IDS_KEY].newValue));
+    }
 
     if (changes.isScraping?.newValue === false || changes.scraperState?.newValue === 'idle') {
         isScraping = false;
@@ -1785,6 +1885,24 @@ async function uploadDirectMediaData(request, finalPath, acceptanceSource = 'dir
 
 // Handle messages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'PROCESSED_IDS_ADD') {
+        mutateProcessedIds({ ids: request.ids }).then((processedIds) => {
+            sendResponse({ status: 'ok', processedIds });
+        }).catch(() => {
+            sendResponse({ status: 'error', error: 'processed_ids_mutation_failed' });
+        });
+        return true;
+    }
+
+    if (request.action === 'PROCESSED_IDS_RESET') {
+        mutateProcessedIds({ reset: true }).then((processedIds) => {
+            sendResponse({ status: 'ok', processedIds });
+        }).catch(() => {
+            sendResponse({ status: 'error', error: 'processed_ids_mutation_failed' });
+        });
+        return true;
+    }
+
     if (request.action === 'START_SCRAPE') {
         log('Background: Received START_SCRAPE.');
         initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' }).then(sendResponse);
@@ -1846,7 +1964,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         request.url,
                         { stage: getUploadFailureStage(e) }
                     ));
-                    sendResponse({ status: 'error', error: e.message });
+                    sendResponse({
+                        status: 'error',
+                        error: formatRedactedMediaError(e, request.url, 'direct_upload_failed')
+                    });
                 }
                 return;
             }
@@ -1868,7 +1989,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ status: 'not_queued', error: 'Cloud sync is not enabled. Check Cloud R2 Settings.' });
             }
         })().catch((e) => {
-            sendResponse({ status: 'error', error: e.message });
+            sendResponse({
+                status: 'error',
+                error: formatRedactedMediaError(e, request.url, 'backup_upload_failed')
+            });
         });
         return true;
     }
@@ -1959,7 +2083,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const finalPath = await generateFilenameForBackup(request.url, extHint);
             sendResponse(await uploadDirectMediaData(request, finalPath, 'direct-sync'));
         })().catch((e) => {
-            sendResponse({ status: 'error', error: e.message });
+            sendResponse({
+                status: 'error',
+                error: formatRedactedMediaError(e, request.url, 'download_media_failed')
+            });
         });
         return true;
     }
@@ -2151,7 +2278,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
                 }
 
                 enqueueCloudMediaUpload(url, finalPath).catch((e) => {
-                    updateCloudError(e.message);
+                    updateCloudError(formatRedactedMediaError(e, url, 'tab_queue_failed'));
                     persistCloudState().catch(() => { });
                 });
 
@@ -2164,198 +2291,410 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     }
 });
 
-const _pendingR2Downloads = new Map();
-const _pendingDownloadIdentities = new Map();
-const _reservedDownloadIdentities = new Map();
+function deserializeDownloadOperations(value) {
+    const records = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const operations = new Map();
+    for (const [key, record] of Object.entries(records)) {
+        const downloadId = Number(record?.downloadId ?? key);
+        if (!Number.isInteger(downloadId) || !record || typeof record !== 'object') continue;
+        const operation = { ...record, downloadId };
+        if (operation.lastError && !isRedactedMediaError(operation.lastError)) {
+            operation.lastError = formatRedactedMediaError(
+                new Error(operation.lastError),
+                operation.mediaId,
+                'download_operation_failed'
+            );
+        }
+        operations.set(downloadId, operation);
+    }
+    return operations;
+}
 
-function reserveDownloadIdentity(downloadId, mediaId) {
-    if (!mediaId) return true;
-    if (processedUUIDs.has(mediaId)) return false;
-    const existingDownloadId = _reservedDownloadIdentities.get(mediaId);
-    if (Number.isInteger(existingDownloadId) && existingDownloadId !== downloadId) return false;
-    _reservedDownloadIdentities.set(mediaId, downloadId);
-    _pendingDownloadIdentities.set(downloadId, mediaId);
+function serializeDownloadOperations(operations) {
+    return Array.from(operations.entries()).reduce((records, [downloadId, operation]) => {
+        records[String(downloadId)] = { ...operation, downloadId };
+        return records;
+    }, {});
+}
+
+function mutatePendingDownloadOperations(mutator) {
+    const mutation = pendingDownloadOperationsMutationQueue.then(async () => {
+        const stored = await chrome.storage.local.get([
+            PENDING_DOWNLOAD_OPERATIONS_KEY,
+            PROCESSED_IDS_KEY
+        ]);
+        const operations = deserializeDownloadOperations(stored[PENDING_DOWNLOAD_OPERATIONS_KEY]);
+        processedUUIDs = new Set(normalizeProcessedIds(stored[PROCESSED_IDS_KEY]));
+        const result = await mutator(operations);
+        pendingDownloadOperations = operations;
+        await chrome.storage.local.set({
+            [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(operations)
+        });
+        return result;
+    });
+    pendingDownloadOperationsMutationQueue = mutation.catch(() => {});
+    return mutation;
+}
+
+function hydrateDownloadOperations() {
+    const hydration = pendingDownloadOperationsMutationQueue.then(async () => {
+        const stored = await chrome.storage.local.get([PENDING_DOWNLOAD_OPERATIONS_KEY]);
+        pendingDownloadOperations = deserializeDownloadOperations(stored[PENDING_DOWNLOAD_OPERATIONS_KEY]);
+        return pendingDownloadOperations;
+    });
+    pendingDownloadOperationsMutationQueue = hydration.catch(() => {});
+    return hydration;
+}
+
+async function getDownloadOperation(downloadId) {
+    await hydrateDownloadOperations();
+    const operation = pendingDownloadOperations.get(downloadId);
+    return operation ? { ...operation } : null;
+}
+
+function reserveDownloadOperation(operation) {
+    return mutatePendingDownloadOperations((operations) => {
+        if (operation.mediaId && processedUUIDs.has(operation.mediaId)) return false;
+        if (operation.reservationKey) {
+            const duplicate = Array.from(operations.values()).some((existing) => (
+                existing.reservationKey === operation.reservationKey
+                && existing.downloadId !== operation.downloadId
+            ));
+            if (duplicate) return false;
+        }
+        operations.set(operation.downloadId, { ...operation });
+        return true;
+    });
+}
+
+function updateDownloadOperation(downloadId, update) {
+    return mutatePendingDownloadOperations((operations) => {
+        const existing = operations.get(downloadId);
+        if (!existing) return null;
+        const next = typeof update === 'function' ? update({ ...existing }) : { ...existing, ...update };
+        operations.set(downloadId, next);
+        return { ...next };
+    });
+}
+
+function removeDownloadOperation(downloadId) {
+    return mutatePendingDownloadOperations((operations) => {
+        const existing = operations.get(downloadId) || null;
+        operations.delete(downloadId);
+        return existing ? { ...existing } : null;
+    });
+}
+
+function cancelDownload(downloadId) {
+    try {
+        chrome.downloads.cancel(downloadId);
+    } catch {
+        // The download may already have stopped.
+    }
+}
+
+function removeDownloadedFile(downloadId) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            const error = chrome.runtime.lastError;
+            if (error) reject(new Error('download_cleanup_failed'));
+            else resolve();
+        };
+        try {
+            const result = chrome.downloads.removeFile(downloadId, finish);
+            if (result && typeof result.then === 'function') result.then(finish, reject);
+        } catch (error) {
+            reject(error);
+        }
+    }).then(async () => {
+        await chrome.downloads.erase({ id: downloadId });
+    });
+}
+
+async function finalizeDownloadOperation(downloadId) {
+    const operation = await getDownloadOperation(downloadId);
+    if (!operation || operation.downloadState !== 'complete') return false;
+    if (operation.cloudRequired && !operation.allowLocal && operation.r2State !== 'present') return false;
+
+    if (operation.mediaId) await mutateProcessedIds({ ids: [operation.mediaId] });
+    if (!operation.allowLocal) {
+        try {
+            await removeDownloadedFile(downloadId);
+        } catch (error) {
+            await recordDownloadOperationError(downloadId, error, 'download_cleanup_failed');
+            return false;
+        }
+        console.log('[CloudQueue]', formatRedactedMediaLog('local_file_deleted', operation.mediaId));
+    }
+    await removeDownloadOperation(downloadId);
     return true;
 }
 
-function releaseDownloadIdentity(downloadId) {
-    const mediaId = _pendingDownloadIdentities.get(downloadId);
-    _pendingDownloadIdentities.delete(downloadId);
-    if (mediaId && _reservedDownloadIdentities.get(mediaId) === downloadId) {
-        _reservedDownloadIdentities.delete(mediaId);
-    }
-    return mediaId || null;
-}
+async function markDownloadOperationR2Present(downloadId, result) {
+    const operation = await updateDownloadOperation(downloadId, (existing) => ({
+        ...existing,
+        r2State: 'present',
+        r2Status: result.status,
+        attempts: 0,
+        lastError: null
+    }));
+    if (!operation) return false;
 
-async function persistCompletedDownloadIdentity(downloadId) {
-    const mediaId = releaseDownloadIdentity(downloadId);
-    if (!mediaId) return false;
-
-    const stored = await chrome.storage.local.get(['processedIds']);
-    const merged = new Set(Array.isArray(stored.processedIds) ? stored.processedIds : []);
-    for (const processedId of processedUUIDs) {
-        if (processedId) merged.add(processedId);
-    }
-    const alreadyPersisted = merged.has(mediaId);
-    merged.add(mediaId);
-    processedUUIDs = merged;
-    if (!alreadyPersisted) {
-        await chrome.storage.local.set({ processedIds: Array.from(processedUUIDs) });
+    if (operation.downloadState === 'complete') {
+        if (operation.allowLocal) await removeDownloadOperation(downloadId);
+        else await finalizeDownloadOperation(downloadId);
     }
     return true;
 }
 
-async function handleDownloadFilename(item, suggest) {
-    if (!isScraping && !item.url.includes('imagine-public') && !item.url.includes('assets.grok.com')) return;
+async function recordDownloadOperationError(downloadId, error, code) {
+    const operation = await getDownloadOperation(downloadId);
+    if (!operation) return null;
+    const lastError = formatRedactedMediaError(error, operation.mediaId, code);
+    await updateDownloadOperation(downloadId, (existing) => ({
+        ...existing,
+        attempts: (existing.attempts || 0) + 1,
+        lastAttemptAt: Date.now(),
+        lastError
+    }));
+    updateCloudError(lastError);
+    await persistCloudState().catch(() => {});
+    await scheduleCloudRetryAlarm().catch(() => {});
+    return lastError;
+}
 
-    const mediaId = CloudSync.extractGrokMediaId(item.url);
-    if (!reserveDownloadIdentity(item.id, mediaId)) {
-        chrome.downloads.cancel(item.id);
+async function ensurePublicDownloadQueued(operation, downloadItem) {
+    if (!operation?.cloudRequired || operation.strategy !== 'public_queue') return;
+    if (activeDownloadOperations.has(operation.downloadId)) return;
+    const sourceUrl = downloadItem?.finalUrl || downloadItem?.url;
+    if (!sourceUrl) {
+        await recordDownloadOperationError(
+            operation.downloadId,
+            new Error('[download-search] source unavailable'),
+            'public_source_missing'
+        );
         return;
     }
 
+    activeDownloadOperations.add(operation.downloadId);
     try {
-        const finalPath = await generateFilename(item.url, item.filename);
-        const config = await getCloudConfig();
-        const cloudEnabled = CloudSync.isCloudEnabled(config);
-        const allowLocal = CloudSync.isLocalDownloadEnabled(config);
-        const isAuthUrl = item.url.includes('assets.grok.com');
-
-        if (!finalPath) {
-            releaseDownloadIdentity(item.id);
-            chrome.downloads.cancel(item.id);
-            return;
-        }
-
-        suggest({ filename: finalPath, conflictAction: 'overwrite' });
-
-        if (cloudEnabled) {
-            if (isAuthUrl) {
-                _pendingR2Downloads.set(item.id, {
-                    finalPath,
-                    url: item.url,
-                    deleteAfter: !allowLocal,
-                    mediaId
-                });
-                console.log('[CloudQueue]', formatRedactedMediaLog('download_tracked', mediaId));
-            } else {
-                enqueueCloudMediaUpload(item.url, finalPath).catch((e) => {
-                    updateCloudError(e.message);
-                    persistCloudState().catch(() => {});
-                });
-                if (!allowLocal) {
-                    _pendingR2Downloads.set(item.id, {
-                        finalPath,
-                        url: item.url,
-                        deleteAfter: true,
-                        skipUpload: true,
-                        mediaId
-                    });
-                }
-            }
-        }
+        await enqueueCloudMediaUpload(sourceUrl, operation.finalPath, '', null, {
+            cleanupDownloadId: operation.cleanupDownloadId
+        });
     } catch (error) {
-        releaseDownloadIdentity(item.id);
-        chrome.downloads.cancel(item.id);
-        throw error;
+        await recordDownloadOperationError(operation.downloadId, error, 'public_queue_failed');
+    } finally {
+        activeDownloadOperations.delete(operation.downloadId);
     }
 }
 
-async function handleDownloadChanged(delta) {
-    const state = delta.state?.current;
-    if (state === 'interrupted' || (delta.error && state !== 'complete')) {
-        const mediaId = releaseDownloadIdentity(delta.id);
-        _pendingR2Downloads.delete(delta.id);
-        console.warn('[CloudQueue]', formatRedactedMediaLog('download_interrupted', mediaId));
-        return;
-    }
-    if (state !== 'complete') return;
-
-    await persistCompletedDownloadIdentity(delta.id);
-    const pending = _pendingR2Downloads.get(delta.id);
-    if (!pending) return;
-    _pendingR2Downloads.delete(delta.id);
-
-    if (pending.skipUpload) {
-        if (pending.deleteAfter) {
-            chrome.downloads.removeFile(delta.id, () => {
-                chrome.downloads.erase({ id: delta.id });
-            });
-        }
-        return;
-    }
-
+async function uploadAuthenticatedDownload(operation, downloadItem) {
+    if (activeDownloadOperations.has(operation.downloadId)) return;
+    activeDownloadOperations.add(operation.downloadId);
     try {
-        const [dlItem] = await chrome.downloads.search({ id: delta.id });
-        if (!dlItem || !dlItem.filename) throw new Error('Download item not found');
+        if (!downloadItem?.filename) throw new Error('[download-search] file unavailable');
+        const sourceUrl = downloadItem.finalUrl || downloadItem.url;
+        if (!sourceUrl) throw new Error('[download-search] source unavailable');
 
-        console.log('[CloudQueue]', formatRedactedMediaLog('download_complete', pending.mediaId));
-
+        console.log('[CloudQueue]', formatRedactedMediaLog('download_complete', operation.mediaId));
         try {
             await chrome.offscreen.createDocument({
                 url: 'offscreen.html',
                 reasons: ['BLOBS'],
                 justification: 'Read downloaded file for R2 cloud backup upload'
             });
-        } catch (e) {
-            if (!e.message.includes('already exists') && !e.message.includes('Only a single offscreen')) throw e;
+        } catch (error) {
+            if (!error.message.includes('already exists') && !error.message.includes('Only a single offscreen')) {
+                throw error;
+            }
         }
 
         const fileData = await chrome.runtime.sendMessage({
             action: 'READ_FILE_FOR_UPLOAD',
-            filePath: dlItem.filename,
-            contentType: dlItem.mime || 'application/octet-stream'
+            filePath: downloadItem.filename,
+            contentType: downloadItem.mime || 'application/octet-stream'
         });
-
-        if (!fileData || !fileData.ok) throw new Error(fileData?.error || 'Failed to read file');
-
-        console.log('[CloudQueue]', formatRedactedMediaLog('file_read', pending.mediaId, { bytes: fileData.size }));
+        if (!fileData || !fileData.ok) throw new Error('[file-read] unavailable');
+        console.log('[CloudQueue]', formatRedactedMediaLog('file_read', operation.mediaId, { bytes: fileData.size }));
 
         const config = await getCloudConfig();
         const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
-
         const binaryStr = atob(fileData.base64);
         const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+        for (let index = 0; index < binaryStr.length; index++) bytes[index] = binaryStr.charCodeAt(index);
         const blob = new Blob([bytes], { type: fileData.type });
-
         const result = await uploadBlobWithR2Dedupe(config, {
-            sourceUrl: pending.url,
-            finalPath: pending.finalPath,
+            sourceUrl,
+            finalPath: operation.finalPath,
             userId: userInfo.activeGrokUserId || 'Shared_Account',
             contentType: fileData.type,
             acceptance: buildAcceptanceContextFromCloudConfig(config, 'download-upload')
         }, blob);
 
         log(
-            `Cloud upload ${formatRedactedMediaLog(result.status, pending.mediaId, { bytes: result.bytes })}`,
+            `Cloud upload ${formatRedactedMediaLog(result.status, operation.mediaId, { bytes: result.bytes })}`,
             result.status === 'conflict_uploaded' ? 'warning' : 'success'
         );
-
-        if (pending.deleteAfter && result.status === 'already_present') {
-            console.log('[CloudQueue]', formatRedactedMediaLog('verified_before_cleanup', pending.mediaId));
-        }
-
-        if (pending.deleteAfter) {
-            chrome.downloads.removeFile(delta.id, () => {
-                chrome.downloads.erase({ id: delta.id });
-                console.log('[CloudQueue]', formatRedactedMediaLog('local_file_deleted', pending.mediaId));
-            });
-        }
-    } catch (e) {
+        await markDownloadOperationR2Present(operation.downloadId, result);
+    } catch (error) {
         console.error('[CloudQueue]', formatRedactedMediaLog(
             'post_download_upload_failed',
-            pending.mediaId,
-            { stage: getUploadFailureStage(e) }
+            operation.mediaId,
+            { stage: getUploadFailureStage(error) }
         ));
-        log(`Cloud upload ${formatRedactedMediaLog(
-            'failed',
-            pending.mediaId,
-            { stage: getUploadFailureStage(e) }
-        )}`, 'warning');
-        updateCloudError(e.message);
-        persistCloudState().catch(() => {});
+        await recordDownloadOperationError(operation.downloadId, error, 'auth_upload_failed');
+    } finally {
+        activeDownloadOperations.delete(operation.downloadId);
     }
+}
+
+async function processCompletedDownloadOperation(downloadId, downloadItem = null) {
+    let operation = await getDownloadOperation(downloadId);
+    if (!operation) return;
+    const item = downloadItem || (await chrome.downloads.search({ id: downloadId }))[0];
+
+    if (operation.allowLocal && operation.mediaId) {
+        await mutateProcessedIds({ ids: [operation.mediaId] });
+        operation = await updateDownloadOperation(downloadId, { localIdentityPersisted: true });
+        if (!operation) return;
+    }
+
+    if (!operation.cloudRequired) {
+        await removeDownloadOperation(downloadId);
+        return;
+    }
+
+    if (operation.strategy === 'public_queue') {
+        if (operation.allowLocal) await removeDownloadOperation(downloadId);
+        else await finalizeDownloadOperation(downloadId);
+        return;
+    }
+
+    await uploadAuthenticatedDownload(operation, item);
+}
+
+async function reconcilePendingDownloadOperations() {
+    const operations = Array.from((await hydrateDownloadOperations()).values()).map((operation) => ({ ...operation }));
+    for (const operation of operations) {
+        const [downloadItem] = await chrome.downloads.search({ id: operation.downloadId });
+        if (!downloadItem) continue;
+        if (downloadItem.state === 'interrupted') {
+            await removeDownloadOperation(operation.downloadId);
+            continue;
+        }
+
+        let current = operation;
+        if (downloadItem.state === 'complete' && operation.downloadState !== 'complete') {
+            current = await updateDownloadOperation(operation.downloadId, { downloadState: 'complete' });
+        }
+
+        if (current.strategy === 'public_queue' && current.r2State !== 'present') {
+            await ensurePublicDownloadQueued(current, downloadItem);
+            current = await getDownloadOperation(operation.downloadId);
+            if (!current) continue;
+        }
+
+        if (downloadItem.state === 'complete') {
+            await processCompletedDownloadOperation(operation.downloadId, downloadItem);
+        }
+    }
+    await scheduleCloudRetryAlarm();
+}
+
+async function handleDownloadFilename(item, suggestOnce) {
+    if (!isScraping && !item.url.includes('imagine-public') && !item.url.includes('assets.grok.com')) {
+        suggestOnce();
+        return;
+    }
+
+    let reserved = false;
+    const mediaId = CloudSync.extractGrokMediaId(item.url);
+    try {
+        const finalPath = await generateFilename(item.url, item.filename);
+        if (!finalPath) {
+            suggestOnce();
+            cancelDownload(item.id);
+            return;
+        }
+
+        const config = await getCloudConfig();
+        const cloudRequired = CloudSync.isCloudEnabled(config);
+        const allowLocal = CloudSync.isLocalDownloadEnabled(config);
+        const isAuthUrl = item.url.includes('assets.grok.com');
+        const strategy = !cloudRequired ? 'local' : (isAuthUrl ? 'auth_file' : 'public_queue');
+        const identity = CloudSync.resolveMediaAssetIdentity({ sourceUrl: item.url, finalPath });
+        const operation = {
+            downloadId: item.id,
+            mediaId,
+            reservationKey: mediaId || identity.assetId,
+            finalPath,
+            allowLocal,
+            cloudRequired,
+            strategy,
+            cleanupDownloadId: cloudRequired && !allowLocal ? item.id : null,
+            downloadState: 'in_progress',
+            r2State: cloudRequired ? 'pending' : 'not_required',
+            r2Status: null,
+            attempts: 0,
+            lastError: null,
+            createdAt: Date.now()
+        };
+
+        reserved = await reserveDownloadOperation(operation);
+        if (!reserved) {
+            suggestOnce();
+            cancelDownload(item.id);
+            return;
+        }
+
+        suggestOnce({ filename: finalPath, conflictAction: 'overwrite' });
+        if (cloudRequired && strategy === 'public_queue') {
+            await ensurePublicDownloadQueued(operation, item);
+        } else if (cloudRequired) {
+            console.log('[CloudQueue]', formatRedactedMediaLog('download_tracked', mediaId));
+        }
+    } catch (error) {
+        if (reserved) await removeDownloadOperation(item.id).catch(() => {});
+        suggestOnce();
+        cancelDownload(item.id);
+        console.error('[CloudQueue]', formatRedactedMediaLog(
+            'filename_rejected',
+            mediaId,
+            { stage: getUploadFailureStage(error) }
+        ));
+    }
+}
+
+function handleDownloadFilenameEvent(item, suggest) {
+    let suggested = false;
+    const suggestOnce = (suggestion) => {
+        if (suggested) return;
+        suggested = true;
+        if (typeof suggestion === 'undefined') suggest();
+        else suggest(suggestion);
+    };
+    Promise.resolve().then(() => handleDownloadFilename(item, suggestOnce)).catch(() => {
+        suggestOnce();
+        cancelDownload(item.id);
+    });
+    return true;
+}
+
+async function handleDownloadChanged(delta) {
+    const state = delta.state?.current;
+    if (state === 'interrupted' || (delta.error && state !== 'complete')) {
+        const operation = await removeDownloadOperation(delta.id);
+        console.warn('[CloudQueue]', formatRedactedMediaLog('download_interrupted', operation?.mediaId));
+        return;
+    }
+    if (state !== 'complete') return;
+
+    const operation = await updateDownloadOperation(delta.id, { downloadState: 'complete' });
+    if (!operation) return;
+    await processCompletedDownloadOperation(delta.id);
 }
 
 if (typeof module !== 'undefined') {
@@ -2372,11 +2711,12 @@ if (typeof module !== 'undefined') {
         getR2BackupCompletionStatusLabel,
         getCloudSyncForTest: () => CloudSync,
         getCloudSyncQueueForTest: () => cloudSyncQueue.map((item) => ({ ...item })),
-        getPendingDownloadIdentitiesForTest: () => Array.from(_pendingDownloadIdentities.entries()),
+        getPendingDownloadOperationsForTest: () => serializeDownloadOperations(pendingDownloadOperations),
         getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
         generateFilename,
         handleDownloadChanged,
         handleDownloadFilename,
+        initializeBackgroundState,
         initializeScrapeInActiveTab,
         isGrokSavedUrl,
         isR2BackupCompletionSuccessful,
@@ -2399,7 +2739,7 @@ if (typeof module !== 'undefined') {
 }
 
 // --- STANDARD DOWNLOAD LISTENER ---
-chrome.downloads.onDeterminingFilename.addListener(handleDownloadFilename);
+chrome.downloads.onDeterminingFilename.addListener(handleDownloadFilenameEvent);
 
 // --- POST-DOWNLOAD R2 UPLOAD (for auth URLs like assets.grok.com) ---
 chrome.downloads.onChanged.addListener(handleDownloadChanged);

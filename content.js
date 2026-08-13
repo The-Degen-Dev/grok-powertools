@@ -567,6 +567,21 @@ function formatBackupMediaLog(status, value, details = {}) {
     return fields.join(' ');
 }
 
+function formatBackupMediaError(stage, code, value) {
+    const mediaId = getGrokMediaIdentity(value);
+    const stableId = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(mediaId) ? mediaId : '';
+    const safeToken = (token, fallback) => String(token || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 40) || fallback;
+    return [
+        `stage=${safeToken(stage, 'runtime')}`,
+        `code=${safeToken(code, 'media_failure')}`,
+        `media=${stableId ? `...${stableId.slice(-8)}` : 'unknown'}`
+    ].join(' ');
+}
+
 function getR2BackupCanaryStopReason(options = {}, stats = {}) {
     if (options.mode !== 'canary') return null;
     const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : 1;
@@ -756,12 +771,13 @@ class SettingsManager {
 
             // 2. Processed IDs (History)
             if (parsed.processedIds && Array.isArray(parsed.processedIds)) {
-                safeChromeStorageGet('local', ['processedIds'], {}, 'load imported processed IDs').then((result) => {
+                safeChromeRuntimeSendMessage({
+                    action: 'PROCESSED_IDS_ADD',
+                    ids: parsed.processedIds
+                }, 'import processed IDs').then((result) => {
                     if (result.invalidated) return;
-                    const existing = new Set(result.value.processedIds || []);
-                    parsed.processedIds.forEach(id => existing.add(id));
-                    safeChromeStorageSet('local', { processedIds: Array.from(existing) }, 'save imported processed IDs').catch(() => {});
-                    console.log(`Imported ${parsed.processedIds.length} IDs. Total: ${existing.size}`);
+                    const total = Array.isArray(result.value?.processedIds) ? result.value.processedIds.length : 0;
+                    console.log(`Imported ${parsed.processedIds.length} IDs. Total: ${total}`);
                 }).catch(console.error);
             }
             return true;
@@ -1622,7 +1638,7 @@ class GrokOverlay {
         }
         try {
             return await this.providerRunLedger.appendProviderRunLedgerEntry(entry);
-        } catch (error) {
+        } catch {
             if (isExtensionContextInvalidatedError(error)) {
                 showExtensionContextRefreshed(this);
                 return null;
@@ -4473,9 +4489,7 @@ class GrokScraper {
             this.stop();
         } else if (action === 'RESET_PROCESSED_IDS') {
             this.processedIds = new Set();
-            safeChromeStorageSet('local', { processedIds: [] }, 'reset processed IDs').then((result) => {
-                if (result.invalidated) this.handleExtensionContextInvalidated();
-            }).catch(() => {});
+            safeChromeRuntimeSendMessageSoon({ action: 'PROCESSED_IDS_RESET' }, 'reset processed IDs');
             console.log('[GrokScraper] processedIds cleared via custom event');
         }
     }
@@ -4926,20 +4940,18 @@ class GrokScraper {
 
     async persistProcessedId(currentItemId, runToken = this.runToken) {
         if (!currentItemId || !this.isRunActive(runToken)) return false;
-        const latestResult = await safeChromeStorageGet('local', ['processedIds'], {}, 'load scrape processed IDs');
-        if (latestResult.invalidated) {
+        const mutationResult = await safeChromeRuntimeSendMessage({
+            action: 'PROCESSED_IDS_ADD',
+            ids: [currentItemId]
+        }, 'save scrape processed ID');
+        if (mutationResult.invalidated) {
             this.handleExtensionContextInvalidated();
             return false;
         }
         if (!this.isRunActive(runToken)) return false;
-        const merged = new Set(Array.isArray(latestResult.value.processedIds) ? latestResult.value.processedIds : []);
-        this.processedIds.forEach((id) => merged.add(id));
-        merged.add(currentItemId);
-        this.processedIds = merged;
-        const saveResult = await safeChromeStorageSet('local', { processedIds: Array.from(merged) }, 'save scrape processed IDs');
-        if (saveResult.invalidated) {
-            this.handleExtensionContextInvalidated();
-            return false;
+        if (mutationResult.value?.status !== 'ok') return false;
+        if (Array.isArray(mutationResult.value.processedIds)) {
+            this.processedIds = new Set(mutationResult.value.processedIds);
         }
         return true;
     }
@@ -5213,25 +5225,21 @@ class GrokScraper {
                 // Mark as processed only after R2 says the asset is present.
                 const cleanId = this.getCleanId(src);
                 if (cleanId && shouldPersistBackupProcessedId(response.status)) {
-                    const latestResult = await safeChromeStorageGet('local', ['processedIds'], {}, 'load backup processed IDs');
-                    if (latestResult.invalidated) {
+                    const ids = [currentItemId, cleanId, response.backupProcessedId].filter(Boolean);
+                    const mutationResult = await safeChromeRuntimeSendMessage({
+                        action: 'PROCESSED_IDS_ADD',
+                        ids
+                    }, 'save backup processed IDs');
+                    if (mutationResult.invalidated) {
                         this.handleExtensionContextInvalidated();
                         return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
                     }
                     if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
-                    const inMemoryIds = new Set(this.processedIds);
-                    if (currentItemId) inMemoryIds.add(currentItemId);
-                    const processedIds = mergeBackupProcessedIdsForStorage(
-                        latestResult.value.processedIds,
-                        inMemoryIds,
-                        cleanId,
-                        response.backupProcessedId
-                    );
-                    this.processedIds = new Set(processedIds);
-                    const saveResult = await safeChromeStorageSet('local', { processedIds }, 'save backup processed IDs');
-                    if (saveResult.invalidated) {
-                        this.handleExtensionContextInvalidated();
-                        return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
+                    if (mutationResult.value?.status !== 'ok') {
+                        return { status: 'error', error: 'processed_ids_mutation_failed' };
+                    }
+                    if (Array.isArray(mutationResult.value.processedIds)) {
+                        this.processedIds = new Set(mutationResult.value.processedIds);
                     }
                 }
             } else {
@@ -5242,9 +5250,12 @@ class GrokScraper {
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
             await this.sleep(this.Config.actionWait);
             return response || { status: 'error', error: 'R2 backup returned no response.' };
-        } catch (error) {
+        } catch {
             this.backupStats.errors++;
-            return { status: 'error', error: error.message || 'R2 backup failed.' };
+            return {
+                status: 'error',
+                error: formatBackupMediaError('backup_runtime', 'backup_failed', src)
+            };
         }
     }
 
@@ -5268,8 +5279,11 @@ class GrokScraper {
                 try {
                     const bridgeResult = await fetchMediaDataUrlViaBridge(src);
                     blobDataUrl = bridgeResult.dataUrl;
-                } catch (error) {
-                    return { status: 'error', error: `Authenticated media fetch failed: ${error.message}` };
+                } catch {
+                    return {
+                        status: 'error',
+                        error: formatBackupMediaError('bridge_fetch', 'authenticated_media_fetch_failed', src)
+                    };
                 }
             }
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };

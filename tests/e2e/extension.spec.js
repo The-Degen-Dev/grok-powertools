@@ -576,6 +576,16 @@ test.describe('Grok Power Tools E2E', () => {
             window.__chromeStorageLocalState = localState;
             window.__chromeStorageSyncState = syncState;
             window.__recordChromeEvent = record;
+            const setLocalStorage = (data) => {
+                record('storage_set', { area: 'local', values: clone(data || {}) });
+                const changes = Object.fromEntries(Object.entries(data || {}).map(([key, value]) => [
+                    key,
+                    { oldValue: clone(localState[key]), newValue: clone(value) }
+                ]));
+                Object.assign(localState, data || {});
+                window.__chromeStorageSetObservers.forEach((observer) => observer(clone(data || {})));
+                window.__chromeStorageChangeListeners.forEach((listener) => listener(changes, 'local'));
+            };
             const getRuntimeResponse = (message) => {
                 const responseByAction = window.__chromeRuntimeResponseByAction || {};
                 const action = message?.action;
@@ -585,6 +595,18 @@ test.describe('Grok Power Tools E2E', () => {
                 }
                 if (action === 'VALIDATE_CLOUD_CONFIG') return { valid: true };
                 if (action === 'VALIDATE_SCRAPE_RESUME') return { valid: true };
+                if (action === 'PROCESSED_IDS_ADD') {
+                    const processedIds = Array.from(new Set([
+                        ...(Array.isArray(localState.processedIds) ? localState.processedIds : []),
+                        ...(Array.isArray(message.ids) ? message.ids : [])
+                    ].filter(Boolean)));
+                    setLocalStorage({ processedIds });
+                    return { status: 'ok', processedIds };
+                }
+                if (action === 'PROCESSED_IDS_RESET') {
+                    setLocalStorage({ processedIds: [] });
+                    return { status: 'ok', processedIds: [] };
+                }
                 return { ok: true };
             };
             window.chrome = {
@@ -623,14 +645,7 @@ test.describe('Grok Power Tools E2E', () => {
                             return Promise.resolve(result);
                         },
                         set: (data, cb) => {
-                            record('storage_set', { area: 'local', values: clone(data || {}) });
-                            const changes = Object.fromEntries(Object.entries(data || {}).map(([key, value]) => [
-                                key,
-                                { oldValue: clone(localState[key]), newValue: clone(value) }
-                            ]));
-                            Object.assign(localState, data || {});
-                            window.__chromeStorageSetObservers.forEach((observer) => observer(clone(data || {})));
-                            window.__chromeStorageChangeListeners.forEach((listener) => listener(changes, 'local'));
+                            setLocalStorage(data);
                             if (cb) cb();
                             return Promise.resolve();
                         }

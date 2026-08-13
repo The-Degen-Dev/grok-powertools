@@ -5,6 +5,7 @@ const {
     getR2BackupCanaryStopReason,
     getR2BackupPageCommandOptions,
     GrokScraper,
+    SettingsManager,
     selectBackupMediaElement,
     shouldPersistBackupProcessedId
 } = require('../../content.js');
@@ -15,6 +16,8 @@ const {
 const CloudSyncUtils = require('../../cloudSyncUtils.js');
 const fs = require('fs');
 const path = require('path');
+const { Blob: NodeBlob } = require('buffer');
+const { webcrypto } = require('crypto');
 
 function setElementBox(el, { width, height, top = 0, left = 0, naturalWidth = width }) {
     Object.defineProperty(el, 'naturalWidth', {
@@ -173,6 +176,122 @@ function loadBackgroundForTest() {
     return require('../../background.js');
 }
 
+function cloneJson(value) {
+    return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function createDurableBackgroundHarness(initialStorage = {}, initialDownloads = {}) {
+    const storageState = cloneJson(initialStorage);
+    const downloads = new Map(Object.entries(initialDownloads).map(([id, item]) => [Number(id), cloneJson(item)]));
+    const storageListeners = [];
+
+    const chromeApi = mockChromeForBackground();
+    chromeApi.cookies = { getAll: jest.fn(() => Promise.resolve([])) };
+    chromeApi.runtime.getManifest = jest.fn(() => ({ version: 'test' }));
+    chromeApi.storage.local.get.mockImplementation(async (keys) => {
+        if (keys == null) return cloneJson(storageState);
+        const names = Array.isArray(keys) ? keys : [keys];
+        return names.reduce((result, key) => {
+            if (Object.prototype.hasOwnProperty.call(storageState, key)) {
+                result[key] = cloneJson(storageState[key]);
+            }
+            return result;
+        }, {});
+    });
+    chromeApi.storage.local.set.mockImplementation(async (values) => {
+        const changes = {};
+        for (const [key, value] of Object.entries(values)) {
+            changes[key] = {
+                oldValue: cloneJson(storageState[key]),
+                newValue: cloneJson(value)
+            };
+            storageState[key] = cloneJson(value);
+        }
+        storageListeners.forEach((listener) => listener(changes, 'local'));
+    });
+    chromeApi.storage.onChanged.addListener.mockImplementation((listener) => storageListeners.push(listener));
+    chromeApi.downloads.search.mockImplementation(async ({ id }) => {
+        const item = downloads.get(id);
+        return item ? [cloneJson(item)] : [];
+    });
+    chromeApi.downloads.removeFile.mockImplementation((id, callback) => {
+        downloads.delete(id);
+        if (callback) callback();
+    });
+    chromeApi.downloads.erase.mockImplementation((query, callback) => {
+        if (callback) callback([query.id]);
+    });
+
+    return {
+        chromeApi,
+        downloads,
+        storageState,
+        async load() {
+            jest.resetModules();
+            global.chrome = chromeApi;
+            const background = require('../../background.js');
+            await Promise.resolve();
+            return background;
+        },
+        getDownloadChangedListener() {
+            return chromeApi.downloads.onChanged.addListener.mock.calls.at(-1)[0];
+        },
+        getFilenameListener() {
+            return chromeApi.downloads.onDeterminingFilename.addListener.mock.calls.at(-1)[0];
+        },
+        getRuntimeListener() {
+            return chromeApi.runtime.onMessage.addListener.mock.calls.at(-1)[0];
+        }
+    };
+}
+
+async function waitForAssertion(assertion, attempts = 30) {
+    let lastError;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        try {
+            assertion();
+            return;
+        } catch (error) {
+            lastError = error;
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+    }
+    throw lastError;
+}
+
+function dispatchRuntimeMessage(listener, request) {
+    let returnValue;
+    const response = new Promise((resolve) => {
+        returnValue = listener(request, {}, resolve);
+    });
+    return { response, returnValue };
+}
+
+function mediaBlob(contentType = 'image/jpeg') {
+    return new NodeBlob([new Uint8Array([1, 2, 3, 4])], { type: contentType });
+}
+
+function installR2PresentFetch(sourceUrl, { sourcePromise = null } = {}) {
+    global.fetch = jest.fn(async (url) => {
+        const value = String(url);
+        if (value === sourceUrl) {
+            if (sourcePromise) return sourcePromise;
+            return {
+                ok: true,
+                headers: { get: () => 'image/jpeg' },
+                blob: async () => mediaBlob()
+            };
+        }
+        if (value.endsWith('/v1/objects/verify')) {
+            return {
+                ok: true,
+                json: async () => ({ exists: true, verified: true })
+            };
+        }
+        throw new Error(`Unexpected test fetch: ${value}`);
+    });
+}
+
 describe('Grok backup background processed ID persistence', () => {
     afterEach(() => {
         delete global.chrome;
@@ -266,7 +385,9 @@ describe('Grok backup background processed ID persistence', () => {
             persistQueuedBackupProcessedIdAfterSuccess,
             setProcessedUUIDsForTest
         } = loadBackgroundForTest();
-        chrome.storage.local.get.mockResolvedValue({ processedIds: ['direct-clean-id'] });
+        chrome.storage.local.get.mockResolvedValue({
+            processedIds: ['direct-clean-id', 'background-queued-id']
+        });
         chrome.storage.local.set.mockResolvedValue();
         setProcessedUUIDsForTest(['background-queued-id']);
 
@@ -327,13 +448,20 @@ describe('Grok backup background processed ID persistence', () => {
             '',
             null,
             {
-                uploadMediaQueueItem: jest.fn().mockRejectedValue(new Error('[media-fetch] unavailable'))
+                uploadMediaQueueItem: jest.fn().mockRejectedValue(new Error(
+                    `[media-fetch] key=test/v1/private/${mediaId}.jpg source=${sourceUrl} prompt=private words`
+                ))
             }
         )).resolves.toBe(true);
 
         expect(background.getProcessedUUIDsForTest()).toEqual([]);
         expect(background.getCloudSyncQueueForTest()).toHaveLength(1);
         expect(background.getCloudSyncQueueForTest()[0].backupProcessedId).toBe(mediaId);
+        expect(background.getCloudSyncQueueForTest()[0].lastError)
+            .toMatch(/stage=media-fetch code=queue_upload_failed media=\.\.\.[a-f0-9]{8}/);
+        expect(background.getCloudSyncQueueForTest()[0].lastError).not.toContain(mediaId);
+        expect(background.getCloudSyncQueueForTest()[0].lastError).not.toContain(sourceUrl);
+        expect(background.getCloudSyncQueueForTest()[0].lastError).not.toContain('private words');
         expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
             processedIds: expect.any(Array)
         }));
@@ -346,6 +474,46 @@ describe('Grok backup background processed ID persistence', () => {
         expect(background.getProcessedUUIDsForTest()).toEqual([mediaId]);
         expect(background.getCloudSyncQueueForTest()).toEqual([]);
         expect(chrome.storage.local.set).toHaveBeenCalledWith({ processedIds: [mediaId] });
+    });
+
+    test('drops a replayed successful cleanup queue item after its operation already finalized', async () => {
+        const mediaId = '22222222-2222-4222-8222-222222222222';
+        const background = loadBackgroundForTest();
+        chrome.storage.local.get.mockImplementation(async (keys) => {
+            if (Array.isArray(keys) && keys.includes('cloudConfig')) {
+                return {
+                    cloudConfig: {
+                        mode: 'cloud_only',
+                        workerUrl: 'https://example-worker.workers.dev',
+                        apiKey: 'test-only-value'
+                    }
+                };
+            }
+            if (Array.isArray(keys) && keys.includes('pendingDownloadOperations')) {
+                return { pendingDownloadOperations: {}, processedIds: [mediaId] };
+            }
+            return {};
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        background.setCloudSyncQueueForTest([{
+            id: 'cleanup-replay',
+            type: 'media',
+            backupProcessedId: mediaId,
+            cleanupDownloadId: 93,
+            attempts: 0
+        }]);
+        const uploadMediaQueueItem = jest.fn().mockResolvedValue({ status: 'already_present', bytes: 123 });
+
+        await background.processCloudQueue('cleanup-replay', {
+            force: true,
+            uploadMediaQueueItem
+        });
+
+        expect(uploadMediaQueueItem).toHaveBeenCalledTimes(1);
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
+            processedIds: expect.any(Array)
+        }));
     });
 
     test('builds full backup init options by default', () => {
@@ -587,111 +755,568 @@ describe('Grok backup background processed ID persistence', () => {
     });
 });
 
+describe('background-owned processed ID mutations', () => {
+    afterEach(() => {
+        delete global.chrome;
+        jest.resetModules();
+    });
+
+    test('serializes overlapping add messages and preserves their union', async () => {
+        const harness = createDurableBackgroundHarness({ processedIds: [] });
+        await harness.load();
+        const listener = harness.getRuntimeListener();
+        let releaseFirstRead;
+        let processedReadCount = 0;
+        const defaultGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (Array.isArray(keys) && keys.length === 1 && keys[0] === 'processedIds') {
+                processedReadCount += 1;
+                if (processedReadCount === 1) {
+                    return new Promise((resolve) => { releaseFirstRead = () => resolve({ processedIds: [] }); });
+                }
+            }
+            return defaultGet(keys);
+        });
+
+        const first = dispatchRuntimeMessage(listener, { action: 'PROCESSED_IDS_ADD', ids: ['media-a'] });
+        const second = dispatchRuntimeMessage(listener, { action: 'PROCESSED_IDS_ADD', ids: ['media-b'] });
+
+        expect(first.returnValue).toBe(true);
+        expect(second.returnValue).toBe(true);
+        await waitForAssertion(() => expect(processedReadCount).toBe(1));
+        releaseFirstRead();
+        await Promise.all([first.response, second.response]);
+
+        expect(harness.storageState.processedIds).toEqual(['media-a', 'media-b']);
+    });
+
+    test('orders reset after a pending add and leaves storage empty', async () => {
+        const harness = createDurableBackgroundHarness({ processedIds: [] });
+        await harness.load();
+        const listener = harness.getRuntimeListener();
+        let releaseFirstRead;
+        const defaultGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (!releaseFirstRead && Array.isArray(keys) && keys.length === 1 && keys[0] === 'processedIds') {
+                return new Promise((resolve) => { releaseFirstRead = () => resolve({ processedIds: [] }); });
+            }
+            return defaultGet(keys);
+        });
+
+        const add = dispatchRuntimeMessage(listener, { action: 'PROCESSED_IDS_ADD', ids: ['media-a'] });
+        const reset = dispatchRuntimeMessage(listener, { action: 'PROCESSED_IDS_RESET' });
+        await waitForAssertion(() => expect(releaseFirstRead).toEqual(expect.any(Function)));
+        releaseFirstRead();
+        await Promise.all([add.response, reset.response]);
+
+        expect(harness.storageState.processedIds).toEqual([]);
+    });
+
+    test('orders add after reset and keeps only the new identity', async () => {
+        const harness = createDurableBackgroundHarness({ processedIds: ['old-media'] });
+        await harness.load();
+        const listener = harness.getRuntimeListener();
+
+        const reset = dispatchRuntimeMessage(listener, { action: 'PROCESSED_IDS_RESET' });
+        const add = dispatchRuntimeMessage(listener, { action: 'PROCESSED_IDS_ADD', ids: ['new-media'] });
+        await Promise.all([reset.response, add.response]);
+
+        expect(harness.storageState.processedIds).toEqual(['new-media']);
+    });
+
+    test('refreshes the background cache on external processedIds changes without rewriting storage', async () => {
+        const harness = createDurableBackgroundHarness({ processedIds: ['old-media'] });
+        const background = await harness.load();
+        harness.chromeApi.storage.local.set.mockClear();
+        const storageListener = harness.chromeApi.storage.onChanged.addListener.mock.calls.at(-1)[0];
+
+        storageListener({ processedIds: { oldValue: ['old-media'], newValue: ['external-media'] } }, 'local');
+
+        expect(background.getProcessedUUIDsForTest()).toEqual(['external-media']);
+        expect(harness.chromeApi.storage.local.set).not.toHaveBeenCalled();
+    });
+});
+
+describe('content processed ID mutation messages', () => {
+    beforeEach(() => {
+        global.chrome = {
+            runtime: {
+                getURL: jest.fn((value) => value),
+                onMessage: { addListener: jest.fn() },
+                sendMessage: jest.fn(() => Promise.resolve())
+            },
+            storage: {
+                local: {
+                    get: jest.fn(() => Promise.resolve({})),
+                    set: jest.fn(() => Promise.resolve())
+                },
+                sync: {
+                    get: jest.fn(() => Promise.resolve({})),
+                    set: jest.fn(() => Promise.resolve())
+                },
+                onChanged: { addListener: jest.fn() }
+            }
+        };
+    });
+
+    afterEach(() => {
+        delete global.chrome;
+    });
+
+    test('routes settings imports through the background writer', async () => {
+        chrome.runtime.sendMessage.mockResolvedValue({ status: 'ok', processedIds: ['imported-media'] });
+        const manager = new SettingsManager();
+
+        expect(manager.import(JSON.stringify({ processedIds: ['imported-media'] }))).toBe(true);
+        await waitForAssertion(() => expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            action: 'PROCESSED_IDS_ADD',
+            ids: ['imported-media']
+        }));
+
+        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
+            processedIds: expect.any(Array)
+        }));
+    });
+
+    test('checks the active run token before and after a scrape add response', async () => {
+        let resolveMutation;
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'PROCESSED_IDS_ADD') {
+                return new Promise((resolve) => { resolveMutation = resolve; });
+            }
+            return Promise.resolve();
+        });
+        const scraper = Object.create(GrokScraper.prototype);
+        scraper.state = { isRunning: true };
+        scraper.runToken = 'run-1';
+        scraper.processedIds = new Set();
+        scraper.handleExtensionContextInvalidated = jest.fn();
+
+        const persistence = scraper.persistProcessedId('media-a', 'run-1');
+        await waitForAssertion(() => expect(resolveMutation).toEqual(expect.any(Function)));
+        scraper.runToken = 'run-2';
+        resolveMutation({ status: 'ok', processedIds: ['media-a'] });
+
+        await expect(persistence).resolves.toBe(false);
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            action: 'PROCESSED_IDS_ADD',
+            ids: ['media-a']
+        });
+        expect(scraper.processedIds).toEqual(new Set());
+    });
+});
+
 describe('native download processed ID lifecycle', () => {
     const accountId = '11111111-1111-4111-8111-111111111111';
     const mediaId = '22222222-2222-4222-8222-222222222222';
     const queryId = '33333333-3333-4333-8333-333333333333';
     const mediaUrl = `https://assets.grok.com/users/${accountId}/generated/${mediaId}/image.jpg?request=${queryId}`;
 
-    function configureDownloadStorage() {
-        chrome.storage.local.get.mockImplementation(async (keys) => {
-            if (Array.isArray(keys) && keys.includes('processedIds')) return { processedIds: [] };
-            if (Array.isArray(keys) && keys.includes('downloadPath')) {
-                return { downloadPath: 'GrokVault', activeGrokUserId: 'user-1' };
-            }
-            if (Array.isArray(keys) && keys.includes('cloudConfig')) {
-                return { cloudConfig: { mode: 'local_only' } };
-            }
-            return {};
-        });
-    }
-
     afterEach(() => {
         delete global.chrome;
+        delete global.fetch;
         jest.resetModules();
     });
 
-    test('reserves an accepted stable media download without persisting before completion', async () => {
-        const background = loadBackgroundForTest();
-        configureDownloadStorage();
-        background.setProcessedUUIDsForTest([]);
-        const suggest = jest.fn();
-
-        await background.handleDownloadFilename({ id: 41, url: mediaUrl, filename: 'image.jpg' }, suggest);
-
-        expect(suggest).toHaveBeenCalledWith(expect.objectContaining({ conflictAction: 'overwrite' }));
-        expect(background.getPendingDownloadIdentitiesForTest()).toEqual([[41, mediaId]]);
-        expect(background.getProcessedUUIDsForTest()).toEqual([]);
-        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
-            processedIds: expect.any(Array)
-        }));
-    });
-
-    test('persists exactly the stable media ID when the download completes', async () => {
-        const background = loadBackgroundForTest();
-        configureDownloadStorage();
-        background.setProcessedUUIDsForTest([]);
-
-        await background.handleDownloadFilename({ id: 42, url: mediaUrl, filename: 'image.jpg' }, jest.fn());
-        await background.handleDownloadChanged({ id: 42, state: { current: 'complete' } });
-
-        expect(background.getPendingDownloadIdentitiesForTest()).toEqual([]);
-        expect(background.getProcessedUUIDsForTest()).toEqual([mediaId]);
-        expect(chrome.storage.local.set).toHaveBeenCalledWith({ processedIds: [mediaId] });
-    });
-
-    test('releases an interrupted download without persisting it', async () => {
-        const background = loadBackgroundForTest();
-        configureDownloadStorage();
-        background.setProcessedUUIDsForTest([]);
-
-        await background.handleDownloadFilename({ id: 43, url: mediaUrl, filename: 'image.jpg' }, jest.fn());
-        await background.handleDownloadChanged({
-            id: 43,
-            state: { current: 'interrupted' },
-            error: { current: 'USER_CANCELED' }
+    test('registered filename listener returns literal true and defers exactly one suggestion', async () => {
+        const harness = createDurableBackgroundHarness({
+            processedIds: [],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: { mode: 'local_only' }
+        });
+        await harness.load();
+        const listener = harness.getFilenameListener();
+        const suggest = jest.fn(() => {
+            expect(harness.storageState.pendingDownloadOperations['41']).toBeDefined();
         });
 
-        expect(background.getPendingDownloadIdentitiesForTest()).toEqual([]);
-        expect(background.getProcessedUUIDsForTest()).toEqual([]);
-        expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
-            processedIds: expect.any(Array)
+        const returnValue = listener({ id: 41, url: mediaUrl, filename: 'image.jpg' }, suggest);
+
+        expect(returnValue).toBe(true);
+        expect(suggest).not.toHaveBeenCalled();
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+        expect(suggest).toHaveBeenCalledWith(expect.objectContaining({ conflictAction: 'overwrite' }));
+        expect(harness.storageState.pendingDownloadOperations['41']).toEqual(expect.objectContaining({
+            downloadId: 41,
+            mediaId,
+            finalPath: expect.stringContaining(mediaId),
+            allowLocal: true,
+            cloudRequired: false,
+            strategy: 'local',
+            downloadState: 'in_progress',
+            r2State: 'not_required'
         }));
+        expect(harness.storageState.pendingDownloadOperations['41']).not.toHaveProperty('url');
+        expect(harness.storageState.pendingDownloadOperations['41']).not.toHaveProperty('sourceUrl');
+        expect(JSON.stringify(harness.storageState.pendingDownloadOperations['41'])).not.toContain('?request=');
+        expect(harness.storageState.processedIds).toEqual([]);
     });
 
-    test('rejects a concurrent duplicate reservation without cancelling the first download', async () => {
-        const background = loadBackgroundForTest();
-        configureDownloadStorage();
-        background.setProcessedUUIDsForTest([]);
+    test('calls suggest exactly once for duplicate, ignored, and error branches', async () => {
+        const harness = createDurableBackgroundHarness({
+            processedIds: [mediaId],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: { mode: 'local_only' }
+        });
+        const background = await harness.load();
+        await background.initializeBackgroundState();
+        const listener = harness.getFilenameListener();
+        const duplicateSuggest = jest.fn();
+        const ignoredSuggest = jest.fn();
+        const errorSuggest = jest.fn();
+
+        expect(listener({ id: 42, url: mediaUrl, filename: 'image.jpg' }, duplicateSuggest)).toBe(true);
+        expect(listener({ id: 43, url: 'https://example.com/file.jpg', filename: 'file.jpg' }, ignoredSuggest)).toBe(true);
+        expect(duplicateSuggest).not.toHaveBeenCalled();
+        expect(ignoredSuggest).not.toHaveBeenCalled();
+        await waitForAssertion(() => expect(duplicateSuggest).toHaveBeenCalledTimes(1));
+        await waitForAssertion(() => expect(ignoredSuggest).toHaveBeenCalledTimes(1));
+
+        const defaultGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (Array.isArray(keys) && keys.includes('downloadPath')) return Promise.reject(new Error('storage unavailable'));
+            return defaultGet(keys);
+        });
+        expect(listener({ id: 44, url: mediaUrl.replace(mediaId, '55555555-5555-4555-8555-555555555555'), filename: 'image.jpg' }, errorSuggest)).toBe(true);
+        expect(errorSuggest).not.toHaveBeenCalled();
+        await waitForAssertion(() => expect(errorSuggest).toHaveBeenCalledTimes(1));
+
+        expect(harness.chromeApi.downloads.cancel).toHaveBeenCalledWith(42);
+        expect(harness.chromeApi.downloads.cancel).toHaveBeenCalledWith(44);
+        expect(duplicateSuggest).toHaveBeenCalledWith();
+        expect(ignoredSuggest).toHaveBeenCalledWith();
+        expect(errorSuggest).toHaveBeenCalledWith();
+    });
+
+    test('keeps a concurrent duplicate reserved across service-worker restart', async () => {
+        const harness = createDurableBackgroundHarness({
+            processedIds: [],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: { mode: 'local_only' }
+        });
+        await harness.load();
         const firstSuggest = jest.fn();
         const secondSuggest = jest.fn();
 
-        await background.generateFilename(mediaUrl, 'image.jpg');
-        await background.handleDownloadFilename({ id: 44, url: mediaUrl, filename: 'image.jpg' }, firstSuggest);
-        await background.handleDownloadFilename({ id: 45, url: mediaUrl, filename: 'image.jpg' }, secondSuggest);
+        expect(harness.getFilenameListener()({ id: 45, url: mediaUrl, filename: 'image.jpg' }, firstSuggest)).toBe(true);
+        await waitForAssertion(() => expect(firstSuggest).toHaveBeenCalledTimes(1));
+        harness.downloads.set(45, { id: 45, url: mediaUrl, filename: '/Downloads/first.jpg', state: 'in_progress' });
+
+        const restarted = await harness.load();
+        await restarted.initializeBackgroundState();
+        expect(harness.getFilenameListener()({ id: 46, url: mediaUrl, filename: 'image.jpg' }, secondSuggest)).toBe(true);
+        await waitForAssertion(() => expect(secondSuggest).toHaveBeenCalledTimes(1));
 
         expect(firstSuggest).toHaveBeenCalledTimes(1);
-        expect(secondSuggest).not.toHaveBeenCalled();
-        expect(chrome.downloads.cancel).toHaveBeenCalledWith(45);
-        expect(chrome.downloads.cancel).not.toHaveBeenCalledWith(44);
-        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+        expect(harness.chromeApi.downloads.cancel).toHaveBeenCalledWith(46);
+        expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalledWith(45);
+        expect(harness.storageState.processedIds).toEqual([]);
     });
 
-    test('never treats a query UUID as stable identity when the pathname has none', async () => {
-        const background = loadBackgroundForTest();
-        configureDownloadStorage();
-        background.setProcessedUUIDsForTest([]);
+    test('recovers local completion after service-worker restart', async () => {
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        const harness = createDurableBackgroundHarness({
+            processedIds: [],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: { mode: 'local_only' }
+        });
+        await harness.load();
         const queryOnlyUrl = `https://assets.grok.com/generated/image.jpg?request=${queryId}`;
+        const stableSuggest = jest.fn();
+        const queryOnlySuggest = jest.fn();
+
+        expect(harness.getFilenameListener()({ id: 47, url: mediaUrl, filename: 'image.jpg' }, stableSuggest)).toBe(true);
+        await waitForAssertion(() => expect(stableSuggest).toHaveBeenCalledTimes(1));
+        harness.downloads.set(47, {
+            id: 47,
+            url: mediaUrl,
+            filename: '/Downloads/stable.jpg',
+            mime: 'image/jpeg',
+            state: 'complete'
+        });
+
+        await harness.load();
+        await Promise.resolve(harness.getDownloadChangedListener()({ id: 47, state: { current: 'complete' } }));
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+
+        expect(harness.getFilenameListener()({ id: 48, url: queryOnlyUrl, filename: 'image.jpg' }, queryOnlySuggest)).toBe(true);
+        await waitForAssertion(() => expect(queryOnlySuggest).toHaveBeenCalledTimes(1));
+        harness.downloads.set(48, {
+            id: 48,
+            url: queryOnlyUrl,
+            filename: '/Downloads/query-only.jpg',
+            state: 'complete'
+        });
+        await Promise.resolve(harness.getDownloadChangedListener()({ id: 48, state: { current: 'complete' } }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(harness.storageState.processedIds).toEqual([mediaId]);
+        expect(queryOnlySuggest.mock.calls[0][0].filename).toMatch(/\/url_[a-f0-9]{8}\.jpg$/);
+        expect(queryOnlySuggest.mock.calls[0][0].filename).not.toContain(queryId);
+        expect(errorSpy).not.toHaveBeenCalledWith('Background initialization failed:', expect.anything());
+        errorSpy.mockRestore();
+    });
+
+    test('releases an interrupted durable operation without persisting its identity', async () => {
+        const harness = createDurableBackgroundHarness({
+            processedIds: [],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: { mode: 'local_only' }
+        });
+        await harness.load();
         const suggest = jest.fn();
 
-        await background.handleDownloadFilename({ id: 46, url: queryOnlyUrl, filename: 'image.jpg' }, suggest);
-        await background.handleDownloadChanged({ id: 46, state: { current: 'complete' } });
+        expect(harness.getFilenameListener()({ id: 49, url: mediaUrl, filename: 'image.jpg' }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+        await Promise.resolve(harness.getDownloadChangedListener()({
+            id: 49,
+            state: { current: 'interrupted' },
+            error: { current: 'USER_CANCELED' }
+        }));
 
-        expect(suggest).toHaveBeenCalledTimes(1);
-        expect(background.getPendingDownloadIdentitiesForTest()).toEqual([]);
-        expect(background.getProcessedUUIDsForTest()).toEqual([]);
-        expect(suggest.mock.calls[0][0].filename).toMatch(/\/url_[a-f0-9]{8}\.jpg$/);
-        expect(suggest.mock.calls[0][0].filename).not.toContain(queryId);
+        await waitForAssertion(() => expect(harness.storageState.pendingDownloadOperations).toEqual({}));
+        expect(harness.storageState.processedIds).toEqual([]);
+    });
+});
+
+describe('cloud-only download proof and cleanup ordering', () => {
+    const mediaId = '22222222-2222-4222-8222-222222222222';
+    const publicUrl = `https://imagine-public.x.ai/media/${mediaId}.jpg?token=private-query-value`;
+    const authUrl = `https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/${mediaId}/image.jpg?token=private-query-value`;
+    let originalBlob;
+    let originalCrypto;
+
+    beforeEach(() => {
+        originalBlob = global.Blob;
+        originalCrypto = global.crypto;
+        global.Blob = NodeBlob;
+        Object.defineProperty(global, 'crypto', { configurable: true, value: webcrypto });
+    });
+
+    afterEach(() => {
+        delete global.chrome;
+        delete global.fetch;
+        global.Blob = originalBlob;
+        Object.defineProperty(global, 'crypto', { configurable: true, value: originalCrypto });
+        jest.resetModules();
+    });
+
+    function cloudOnlyStorage() {
+        return {
+            processedIds: [],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: {
+                mode: 'cloud_only',
+                workerUrl: 'https://test-worker.example.workers.dev',
+                apiKey: 'unit-test-key',
+                keyPrefix: 'test/v1'
+            }
+        };
+    }
+
+    test('waits for download completion when public R2 proof arrives first', async () => {
+        installR2PresentFetch(publicUrl);
+        const harness = createDurableBackgroundHarness(cloudOnlyStorage());
+        await harness.load();
+        const suggest = jest.fn();
+
+        expect(harness.getFilenameListener()({ id: 51, url: publicUrl, filename: 'image.jpg' }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+        await waitForAssertion(() => expect(
+            harness.storageState.pendingDownloadOperations['51'].r2State
+        ).toBe('present'));
+
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+
+        harness.downloads.set(51, {
+            id: 51,
+            url: publicUrl,
+            filename: '/Downloads/public.jpg',
+            mime: 'image/jpeg',
+            state: 'complete'
+        });
+        await Promise.resolve(harness.getDownloadChangedListener()({ id: 51, state: { current: 'complete' } }));
+
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+        expect(harness.chromeApi.downloads.removeFile).toHaveBeenCalledWith(51, expect.any(Function));
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+    });
+
+    test('waits for public R2 proof when download completion arrives first', async () => {
+        let resolveSource;
+        const sourcePromise = new Promise((resolve) => { resolveSource = resolve; });
+        installR2PresentFetch(publicUrl, { sourcePromise });
+        const harness = createDurableBackgroundHarness(cloudOnlyStorage());
+        await harness.load();
+        const suggest = jest.fn();
+
+        expect(harness.getFilenameListener()({ id: 52, url: publicUrl, filename: 'image.jpg' }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue?.[0]).toEqual(expect.objectContaining({
+            cleanupDownloadId: 52,
+            backupProcessedId: mediaId
+        })));
+        harness.downloads.set(52, {
+            id: 52,
+            url: publicUrl,
+            filename: '/Downloads/public.jpg',
+            mime: 'image/jpeg',
+            state: 'complete'
+        });
+        await Promise.resolve(harness.getDownloadChangedListener()({ id: 52, state: { current: 'complete' } }));
+
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+
+        resolveSource({
+            ok: true,
+            headers: { get: () => 'image/jpeg' },
+            blob: async () => mediaBlob()
+        });
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+        expect(harness.chromeApi.downloads.removeFile).toHaveBeenCalledWith(52, expect.any(Function));
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+    });
+
+    test('retains failed authenticated cloud-only work and retries it after restart', async () => {
+        const rawFailure = `object test/v1/users/private/${mediaId}.jpg source=${authUrl} prompt=private words`;
+        global.fetch = jest.fn(async (url) => {
+            if (String(url).endsWith('/v1/objects/verify')) {
+                return { ok: false, status: 500, text: async () => rawFailure };
+            }
+            throw new Error(`Unexpected test fetch: ${String(url)}`);
+        });
+        const harness = createDurableBackgroundHarness(cloudOnlyStorage());
+        harness.chromeApi.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'READ_FILE_FOR_UPLOAD') {
+                return {
+                    ok: true,
+                    base64: Buffer.from([1, 2, 3, 4]).toString('base64'),
+                    type: 'image/jpeg',
+                    size: 4
+                };
+            }
+            return undefined;
+        });
+        await harness.load();
+        const suggest = jest.fn();
+        expect(harness.getFilenameListener()({ id: 53, url: authUrl, filename: 'image.jpg' }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+        harness.downloads.set(53, {
+            id: 53,
+            url: authUrl,
+            filename: '/Downloads/auth.jpg',
+            mime: 'image/jpeg',
+            state: 'complete'
+        });
+
+        await Promise.resolve(harness.getDownloadChangedListener()({ id: 53, state: { current: 'complete' } }));
+        await waitForAssertion(() => expect(
+            harness.storageState.pendingDownloadOperations['53'].lastError
+        ).toEqual(expect.any(String)));
+
+        const persistedError = harness.storageState.pendingDownloadOperations['53'].lastError;
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+        expect(persistedError).not.toContain(mediaId);
+        expect(persistedError).not.toContain(authUrl);
+        expect(persistedError).not.toContain('private words');
+        expect(persistedError).not.toContain('test/v1/users/private');
+        expect(persistedError).toMatch(/stage=[a-z0-9_-]+ code=[a-z0-9_-]+ media=\.\.\.[a-f0-9]{8}/);
+        expect(harness.chromeApi.alarms.create).toHaveBeenCalledWith(
+            'gptCloudRetry',
+            expect.objectContaining({ delayInMinutes: expect.any(Number) })
+        );
+
+        installR2PresentFetch(authUrl);
+        await harness.load();
+
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+        expect(harness.chromeApi.downloads.removeFile).toHaveBeenCalledWith(53, expect.any(Function));
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+    });
+
+    test('dual-write auth failure persists local completion but never deletes the file', async () => {
+        const storage = cloudOnlyStorage();
+        storage.cloudConfig.mode = 'dual_write';
+        global.fetch = jest.fn(async (url) => {
+            if (String(url).endsWith('/v1/objects/verify')) {
+                return { ok: false, status: 503, text: async () => `private/${mediaId}.jpg?secret=1` };
+            }
+            throw new Error(`Unexpected test fetch: ${String(url)}`);
+        });
+        const harness = createDurableBackgroundHarness(storage);
+        harness.chromeApi.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'READ_FILE_FOR_UPLOAD') {
+                return {
+                    ok: true,
+                    base64: Buffer.from([1, 2, 3, 4]).toString('base64'),
+                    type: 'image/jpeg',
+                    size: 4
+                };
+            }
+            return undefined;
+        });
+        await harness.load();
+        const suggest = jest.fn();
+        expect(harness.getFilenameListener()({ id: 54, url: authUrl, filename: 'image.jpg' }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+        harness.downloads.set(54, {
+            id: 54,
+            url: authUrl,
+            filename: '/Downloads/auth-dual.jpg',
+            mime: 'image/jpeg',
+            state: 'complete'
+        });
+
+        await Promise.resolve(harness.getDownloadChangedListener()({ id: 54, state: { current: 'complete' } }));
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+        expect(harness.storageState.pendingDownloadOperations['54']).toEqual(expect.objectContaining({
+            downloadState: 'complete',
+            r2State: 'pending'
+        }));
+    });
+
+    test('redacts media failures returned through the runtime UI boundary', async () => {
+        const rawFailure = `key=test/v1/private/${mediaId}.jpg source=${authUrl} prompt=private words`;
+        global.fetch = jest.fn(async (url) => {
+            if (String(url).startsWith('data:image/')) {
+                return { blob: async () => new NodeBlob([new Uint8Array([1, 2, 3, 4])], { type: 'image/jpeg' }) };
+            }
+            if (String(url).endsWith('/v1/objects/verify')) {
+                return { ok: false, status: 500, text: async () => rawFailure };
+            }
+            throw new Error(`Unexpected test fetch: ${String(url)}`);
+        });
+        const harness = createDurableBackgroundHarness(cloudOnlyStorage());
+        await harness.load();
+
+        const dispatched = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_UPLOAD',
+            url: authUrl,
+            isVideo: false,
+            promptText: 'private words',
+            blobDataUrl: 'data:image/jpeg;base64,AQIDBA=='
+        });
+
+        expect(dispatched.returnValue).toBe(true);
+        const response = await dispatched.response;
+        expect(response.status).toBe('error');
+        expect(response.error).toMatch(/stage=presign code=direct_upload_failed media=\.\.\.[a-f0-9]{8}/);
+        expect(response.error).not.toContain(mediaId);
+        expect(response.error).not.toContain(authUrl);
+        expect(response.error).not.toContain('private words');
+        expect(response.error).not.toContain('test/v1/private');
     });
 });
 
@@ -710,6 +1335,25 @@ describe('backup and queue logging safety', () => {
         expect(contentSource).not.toContain('...${src.slice(-20)}');
         expect(taggedQueueLogs).not.toMatch(/sourceUrl|objectKey|finalPath|e\.message|sidecarKey/);
         expect(backgroundSource).not.toMatch(/\blog\(`[^`\n]*\$\{(?:descriptor|result|item)\.objectKey/);
+        expect(backgroundSource).not.toContain('Skipping Duplicate: ${parsed.uuid}');
+        expect(backgroundSource).not.toContain('item.lastError = e.message');
+    });
+
+    test('keeps processedIds writes behind the one background serializer', () => {
+        const contentSource = fs.readFileSync(path.join(__dirname, '../../content.js'), 'utf8');
+        const popupSource = fs.readFileSync(path.join(__dirname, '../../popup.js'), 'utf8');
+        const backgroundSource = fs.readFileSync(path.join(__dirname, '../../background.js'), 'utf8');
+
+        expect(contentSource).not.toMatch(/safeChromeStorageSet\([^\n]*processedIds/);
+        expect(popupSource).not.toMatch(/chrome\.storage\.local\.set\(\{\s*processedIds/);
+        expect(contentSource).toContain("action: 'PROCESSED_IDS_ADD'");
+        expect(contentSource).toContain("action: 'PROCESSED_IDS_RESET'");
+        expect(popupSource).toContain("action: 'PROCESSED_IDS_RESET'");
+
+        const directBackgroundWrites = backgroundSource.match(
+            /chrome\.storage\.local\.set\(\{\s*\[PROCESSED_IDS_KEY\]/g
+        ) || [];
+        expect(directBackgroundWrites).toHaveLength(1);
     });
 });
 
