@@ -107,6 +107,8 @@ async function setupMockSavedAgentSync(page, {
     responseByAction,
     runToken,
     agentMedia = true,
+    agentMediaMode = 'exact_with_decoy',
+    stopAfterNavigationClear = true,
     bridgeResponse = null
 }) {
     await page.evaluate(({
@@ -115,6 +117,8 @@ async function setupMockSavedAgentSync(page, {
         responseByAction,
         runToken,
         agentMedia,
+        agentMediaMode,
+        stopAfterNavigationClear,
         bridgeResponse
     }) => {
         window.__chromeRuntimeResponseByAction = responseByAction;
@@ -137,20 +141,57 @@ async function setupMockSavedAgentSync(page, {
 
         const renderAgent = (mediaUuid) => {
             window.history.pushState({}, '', `/imagine/agent/mock-agent?conversation=${mediaUuid}`);
-            document.body.innerHTML = agentMedia ? `
-                    <div class="react-flow__node-asset">
-                        <img alt="Agent media" src="https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg">
-                    </div>
-                ` : '';
+            document.body.innerHTML = '';
+            const agentScroller = document.createElement('div');
+            agentScroller.className = 'overflow-scroll';
+            agentScroller.id = 'agent-gallery-scroller';
+            agentScroller.scrollBy = (...args) => window.__agentScrollCalls.push(args);
+            if (agentMedia) {
+                const wrongMediaUuid = mediaUuids.find((candidate) => candidate !== mediaUuid)
+                    || '00000000-0000-4000-8000-000000000000';
+                const appendAgentNode = (nodeMediaUuid, id, suffix = 'preview.jpg') => {
+                    const node = document.createElement('div');
+                    node.className = 'react-flow__node-asset';
+                    node.id = id;
+                    const image = document.createElement('img');
+                    image.alt = 'Agent media';
+                    image.src = `https://assets.grok.com/users/${accountUuid}/generated/${nodeMediaUuid}/${suffix}`;
+                    window.__agentRenderedMediaUrls.push(image.src);
+                    node.appendChild(image);
+                    agentScroller.appendChild(node);
+                };
+                appendAgentNode(wrongMediaUuid, 'wrong-agent-media');
+                appendAgentNode(mediaUuid, 'expected-agent-media');
+                if (agentMediaMode === 'ambiguous') {
+                    appendAgentNode(mediaUuid, 'duplicate-agent-media', 'preview_image.jpg');
+                }
+            }
+            document.body.appendChild(agentScroller);
         };
 
         const renderSaved = () => {
             document.body.innerHTML = '';
+            const phase = window.__savedRenderCount === 0 ? 'initial' : 'returned';
+            window.__savedRenderCount++;
             const scroller = document.createElement('div');
             scroller.className = 'overflow-scroll';
             scroller.id = 'saved-gallery-scroller';
-            scroller.scrollTop = 360;
-            scroller.scrollBy = (...args) => window.__galleryScrollCalls.push(args);
+            let scrollTop = phase === 'initial' ? 360 : 0;
+            Object.defineProperties(scroller, {
+                scrollTop: {
+                    configurable: true,
+                    get: () => scrollTop,
+                    set: (value) => {
+                        scrollTop = Number(value);
+                        const detail = { phase, value: scrollTop };
+                        window.__savedScrollWrites.push(detail);
+                        window.__recordChromeEvent('saved_scroll_set', detail);
+                    }
+                },
+                scrollHeight: { configurable: true, value: 2000 },
+                clientHeight: { configurable: true, value: 800 }
+            });
+            scroller.scrollBy = (...args) => window.__savedScrollByCalls.push({ phase, args });
             const list = document.createElement('div');
             list.setAttribute('role', 'list');
             mediaUuids.forEach((mediaUuid, index) => {
@@ -165,7 +206,11 @@ async function setupMockSavedAgentSync(page, {
             document.body.appendChild(scroller);
         };
 
-        window.__galleryScrollCalls = [];
+        window.__agentScrollCalls = [];
+        window.__agentRenderedMediaUrls = [];
+        window.__savedScrollByCalls = [];
+        window.__savedScrollWrites = [];
+        window.__savedRenderCount = 0;
         window.__historyBackCalls = 0;
         Object.defineProperty(window.history, 'back', {
             configurable: true,
@@ -177,10 +222,22 @@ async function setupMockSavedAgentSync(page, {
         });
         window.addEventListener('popstate', () => {
             renderSaved();
-            void (scraper.backupMode
-                ? scraper.stopBackupMode('e2e_after_first_transfer')
-                : scraper.stop('e2e_after_first_transfer'));
         }, { once: true });
+        if (stopAfterNavigationClear) {
+            let stopRequested = false;
+            window.__chromeStorageSetObservers.push((values) => {
+                if (stopRequested
+                    || values.scrapeNavigation !== null
+                    || values.currentItemId !== null
+                    || Object.keys(values).length !== 2) {
+                    return;
+                }
+                stopRequested = true;
+                void (scraper.backupMode
+                    ? scraper.stopBackupMode('e2e_after_navigation_restore')
+                    : scraper.stop('e2e_after_navigation_restore'));
+            });
+        }
         if (bridgeResponse) {
             document.addEventListener('__gpt_fetch_media', (event) => {
                 document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
@@ -190,16 +247,32 @@ async function setupMockSavedAgentSync(page, {
         }
         window.history.replaceState({}, '', savedUrl);
         renderSaved();
-    }, { accountUuid, mediaUuids, responseByAction, runToken, agentMedia, bridgeResponse });
+    }, {
+        accountUuid,
+        mediaUuids,
+        responseByAction,
+        runToken,
+        agentMedia,
+        agentMediaMode,
+        stopAfterNavigationClear,
+        bridgeResponse
+    });
 }
 
 async function setupMockPromptedBatch(page, {
     accountUuid,
     mediaUuid,
     secondMediaUuid = null,
+    includeDecoys = false,
     stopAfterAddPrompt = false
 }) {
-    await page.evaluate(({ accountUuid, mediaUuid, secondMediaUuid, stopAfterAddPrompt }) => {
+    await page.evaluate(({
+        accountUuid,
+        mediaUuid,
+        secondMediaUuid,
+        includeDecoys,
+        stopAfterAddPrompt
+    }) => {
         const { retry } = window.__gptE2e;
         const savedUrl = 'https://grok.com/imagine/saved';
         const makeVisible = (element, width = 100) => {
@@ -216,18 +289,31 @@ async function setupMockPromptedBatch(page, {
             return element;
         };
 
-        retry.sleep = () => Promise.resolve();
         retry.createBatchRunToken = () => 'e2e-prompted-batch';
         window.__promptedBatchEvents = {
             savedClicks: [],
+            savedTransitions: [],
             menuChoices: [],
+            menuMediaUuids: [],
             promptWrites: [],
             promptWriteResults: [],
             promptAtSubmit: null,
             submitCount: 0,
             editCount: 0,
+            decoyAddPromptCount: 0,
+            decoyPromptAtSubmit: null,
+            decoySubmitCount: 0,
             backCount: 0,
-            scrollToCalls: []
+            scrollToCalls: [],
+            sleepDurations: [],
+            focusedQuiescenceMs: 0
+        };
+        retry.sleep = async (ms) => {
+            window.__promptedBatchEvents.sleepDurations.push(ms);
+            if (document.activeElement?.hasAttribute('data-selected-prompt-media')) {
+                window.__promptedBatchEvents.focusedQuiescenceMs += ms;
+            }
+            await Promise.resolve();
         };
         Object.defineProperty(window, 'scrollY', { configurable: true, value: 480 });
         window.scrollTo = (...args) => window.__promptedBatchEvents.scrollToCalls.push(args);
@@ -253,7 +339,14 @@ async function setupMockPromptedBatch(page, {
                 image.scrollIntoView = () => {};
                 image.addEventListener('click', () => {
                     window.__promptedBatchEvents.savedClicks.push(savedMediaUuid);
-                    renderAgent();
+                    window.__promptedBatchEvents.savedTransitions.push({
+                        mediaUuid: savedMediaUuid,
+                        goalCount: retry.goalCount,
+                        batchRunning: retry.batchRunning,
+                        batchIndex: retry.batchIndex,
+                        batchQueueLength: retry.batchQueue.length
+                    });
+                    renderAgent(savedMediaUuid);
                 });
                 const makeVideo = document.createElement('button');
                 makeVideo.setAttribute('aria-label', 'Make video');
@@ -263,14 +356,46 @@ async function setupMockPromptedBatch(page, {
             document.body.appendChild(list);
         };
 
-        const renderAgent = () => {
-            window.history.pushState({}, '', `/imagine/agent/mock-agent?conversation=${mediaUuid}`);
+        const renderAgent = (selectedMediaUuid) => {
+            window.history.pushState({}, '', `/imagine/agent/mock-agent?conversation=${selectedMediaUuid}`);
             document.body.innerHTML = '';
             const asset = document.createElement('div');
             asset.className = 'react-flow__node-asset';
             const assetImage = document.createElement('img');
-            assetImage.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`;
+            assetImage.src = `https://assets.grok.com/users/${accountUuid}/generated/${selectedMediaUuid}/preview.jpg`;
             asset.appendChild(assetImage);
+
+            const decoys = [];
+            if (includeDecoys) {
+                const decoyMenu = makeVisible(document.createElement('div'));
+                decoyMenu.setAttribute('role', 'menu');
+                decoyMenu.id = 'decoy-video-menu';
+                decoyMenu.setAttribute('data-state', 'open');
+                const decoyAddPrompt = makeVisible(document.createElement('div'));
+                decoyAddPrompt.setAttribute('role', 'menuitem');
+                decoyAddPrompt.textContent = 'Add Prompt';
+                decoyAddPrompt.addEventListener('click', () => {
+                    window.__promptedBatchEvents.decoyAddPromptCount++;
+                });
+                decoyMenu.appendChild(decoyAddPrompt);
+
+                const decoyQueryBar = document.createElement('div');
+                decoyQueryBar.className = 'query-bar';
+                decoyQueryBar.id = 'decoy-query-bar';
+                const decoyInput = makeVisible(document.createElement('div'));
+                decoyInput.id = 'decoy-prompt-input';
+                decoyInput.setAttribute('contenteditable', 'true');
+                decoyInput.setAttribute('role', 'textbox');
+                decoyInput.setAttribute('aria-label', 'Ask Grok anything');
+                const decoySubmit = makeVisible(document.createElement('button'), 48);
+                decoySubmit.setAttribute('aria-label', 'Make video');
+                decoySubmit.addEventListener('click', () => {
+                    window.__promptedBatchEvents.decoyPromptAtSubmit = decoyInput.textContent;
+                    window.__promptedBatchEvents.decoySubmitCount++;
+                });
+                decoyQueryBar.append(decoyInput, decoySubmit);
+                decoys.push(decoyMenu, decoyQueryBar);
+            }
 
             const preciseEdit = makeVisible(document.createElement('button'));
             preciseEdit.setAttribute('aria-label', 'Edit');
@@ -279,20 +404,38 @@ async function setupMockPromptedBatch(page, {
             });
 
             const makeVideo = makeVisible(document.createElement('button'));
+            const triggerId = `selected-make-video-${selectedMediaUuid}`;
+            const menuId = `selected-video-menu-${selectedMediaUuid}`;
+            makeVideo.id = triggerId;
             makeVideo.setAttribute('aria-label', 'Make Video');
             makeVideo.setAttribute('aria-haspopup', 'menu');
+            makeVideo.setAttribute('aria-controls', menuId);
+            makeVideo.setAttribute('aria-expanded', 'false');
+            makeVideo.setAttribute('data-state', 'closed');
             makeVideo.addEventListener('click', () => {
+                makeVideo.setAttribute('aria-expanded', 'true');
+                makeVideo.setAttribute('data-state', 'open');
+                const menu = makeVisible(document.createElement('div'));
+                menu.id = menuId;
+                menu.setAttribute('role', 'menu');
+                menu.setAttribute('aria-labelledby', triggerId);
+                menu.setAttribute('data-state', 'open');
                 const addPrompt = makeVisible(document.createElement('div'));
                 addPrompt.setAttribute('role', 'menuitem');
                 addPrompt.textContent = 'Add Prompt';
                 addPrompt.addEventListener('click', () => {
                     window.__promptedBatchEvents.menuChoices.push('Add Prompt');
+                    window.__promptedBatchEvents.menuMediaUuids.push(selectedMediaUuid);
                     const queryBar = document.createElement('div');
                     queryBar.className = 'query-bar';
+                    queryBar.id = `selected-query-bar-${selectedMediaUuid}`;
                     const input = makeVisible(document.createElement('div'));
+                    input.id = `selected-prompt-input-${selectedMediaUuid}`;
                     input.setAttribute('contenteditable', 'true');
                     input.setAttribute('role', 'textbox');
                     input.setAttribute('aria-label', 'Ask Grok anything');
+                    input.setAttribute('data-selected-prompt-media', selectedMediaUuid);
+                    input.tabIndex = -1;
                     const submit = makeVisible(document.createElement('button'), 48);
                     submit.setAttribute('aria-label', 'Make video');
                     submit.addEventListener('click', () => {
@@ -301,10 +444,13 @@ async function setupMockPromptedBatch(page, {
                     });
                     queryBar.append(input, submit);
                     document.body.appendChild(queryBar);
-                    addPrompt.remove();
-                    if (stopAfterAddPrompt) retry.stopBatch();
+                    input.focus();
+                    const shouldStop = stopAfterAddPrompt === true
+                        || stopAfterAddPrompt === selectedMediaUuid;
+                    if (shouldStop) retry.stopBatch();
                 });
-                document.body.appendChild(addPrompt);
+                menu.appendChild(addPrompt);
+                document.body.appendChild(menu);
             });
 
             const back = makeVisible(document.createElement('button'));
@@ -314,12 +460,12 @@ async function setupMockPromptedBatch(page, {
                 window.history.replaceState({}, '', savedUrl);
                 renderSaved();
             });
-            document.body.append(asset, preciseEdit, makeVideo, back);
+            document.body.append(asset, ...decoys, preciseEdit, makeVideo, back);
         };
 
         window.history.replaceState({}, '', savedUrl);
         renderSaved();
-    }, { accountUuid, mediaUuid, secondMediaUuid, stopAfterAddPrompt });
+    }, { accountUuid, mediaUuid, secondMediaUuid, includeDecoys, stopAfterAddPrompt });
 }
 
 async function dispatchRuntimeMessage(page, message) {
@@ -387,8 +533,10 @@ test.describe('Grok Power Tools E2E', () => {
             window.__chromeMessageListeners = [];
             window.__chromeEvents = [];
             window.__chromeEventSequence = 0;
+            window.__chromeStorageSetObservers = [];
             window.__chromeStorageLocalState = localState;
             window.__chromeStorageSyncState = syncState;
+            window.__recordChromeEvent = record;
             const getRuntimeResponse = (message) => {
                 const responseByAction = window.__chromeRuntimeResponseByAction || {};
                 const action = message?.action;
@@ -435,6 +583,7 @@ test.describe('Grok Power Tools E2E', () => {
                         set: (data, cb) => {
                             record('storage_set', { area: 'local', values: clone(data || {}) });
                             Object.assign(localState, data || {});
+                            window.__chromeStorageSetObservers.forEach((observer) => observer(clone(data || {})));
                             if (cb) cb();
                             return Promise.resolve();
                         }
@@ -570,11 +719,32 @@ test.describe('Grok Power Tools E2E', () => {
         expect(runtimeMessages).not.toContainEqual(expect.objectContaining({
             url: expect.stringContaining(secondMediaUuid)
         }));
+        expect(await page.evaluate(() => window.__agentRenderedMediaUrls)).toEqual([
+            `https://assets.grok.com/users/${accountUuid}/generated/${secondMediaUuid}/preview.jpg`,
+            `https://assets.grok.com/users/${accountUuid}/generated/${firstMediaUuid}/preview.jpg`
+        ]);
         await expect(page.locator('#second-saved-image')).toHaveCount(1);
-        await expect.poll(async () => page.evaluate(() => window.__galleryScrollCalls)).toEqual([]);
         await expect.poll(async () => page.evaluate(() => window.__historyBackCalls)).toBe(1);
+        expect(await page.evaluate(() => window.__agentScrollCalls)).toEqual([]);
+        expect(await page.evaluate(() => window.__savedScrollByCalls)).toEqual([]);
+        expect(await page.evaluate(() => window.__savedScrollWrites)).toEqual([
+            { phase: 'returned', value: 360 }
+        ]);
+        expect(await page.locator('#saved-gallery-scroller').evaluate((scroller) => scroller.scrollTop)).toBe(360);
 
         const transferEvents = await page.evaluate(() => window.__chromeEvents);
+        const navigationSetIndex = transferEvents.findIndex((event) =>
+            event.type === 'storage_set'
+            && event.area === 'local'
+            && event.values.currentItemId === firstSavedUrl
+            && event.values.scrapeNavigation?.currentItemId === firstSavedUrl
+            && event.values.scrapeNavigation?.expectedIdentity === firstMediaUuid
+            && event.values.scrapeNavigation?.galleryScrollTop === 360
+        );
+        const downloadMessageIndex = transferEvents.findIndex((event) =>
+            event.type === 'runtime_message'
+            && event.message?.action === 'DOWNLOAD_MEDIA'
+        );
         const queuedResponseIndex = transferEvents.findIndex((event) =>
             event.type === 'runtime_response'
             && event.action === 'DOWNLOAD_MEDIA'
@@ -585,8 +755,81 @@ test.describe('Grok Power Tools E2E', () => {
             && event.area === 'local'
             && event.values.processedIds?.some((id) => id.includes(firstMediaUuid))
         );
-        expect(queuedResponseIndex).toBeGreaterThanOrEqual(0);
+        const scrollRestoreIndex = transferEvents.findIndex((event) =>
+            event.type === 'saved_scroll_set'
+            && event.phase === 'returned'
+            && event.value === 360
+        );
+        const navigationClearIndex = transferEvents.findIndex((event) =>
+            event.type === 'storage_set'
+            && event.area === 'local'
+            && Object.keys(event.values).length === 2
+            && event.values.scrapeNavigation === null
+            && event.values.currentItemId === null
+        );
+        expect(navigationSetIndex).toBeGreaterThanOrEqual(0);
+        expect(downloadMessageIndex).toBeGreaterThan(navigationSetIndex);
+        expect(queuedResponseIndex).toBeGreaterThan(downloadMessageIndex);
         expect(processedIdIndex).toBeGreaterThan(queuedResponseIndex);
+        expect(scrollRestoreIndex).toBeGreaterThan(processedIdIndex);
+        expect(navigationClearIndex).toBeGreaterThan(scrollRestoreIndex);
+        expect(await page.evaluate(() => ({
+            currentItemId: window.__chromeStorageLocalState.currentItemId,
+            scrapeNavigation: window.__chromeStorageLocalState.scrapeNavigation,
+            processedIds: window.__chromeStorageLocalState.processedIds
+        }))).toEqual({
+            currentItemId: null,
+            scrapeNavigation: null,
+            processedIds: [firstSavedUrl]
+        });
+    });
+
+    test('Start Sync fails closed when Agent Mode contains two exact media matches', async ({ page }) => {
+        const accountUuid = '12121212-1212-4212-8212-121212121212';
+        const expectedMediaUuid = '34343434-3434-4434-8434-343434343434';
+        const wrongMediaUuid = '56565656-5656-4656-8656-565656565656';
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [expectedMediaUuid, wrongMediaUuid],
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'local_only' } },
+                DOWNLOAD_MEDIA: { status: 'queued' }
+            },
+            runToken: 'e2e-agent-ambiguity',
+            agentMediaMode: 'ambiguous'
+        });
+
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start())).toEqual({
+            status: 'started',
+            surface: 'saved_gallery',
+            runToken: 'e2e-agent-ambiguity'
+        });
+        await expect.poll(async () => page.evaluate(() => ({
+            scraperState: window.__chromeStorageLocalState.scraperState,
+            stopReason: window.__chromeStorageLocalState.scrapeStopReason
+        }))).toEqual({
+            scraperState: 'idle',
+            stopReason: 'agent_media_ambiguous'
+        });
+
+        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).not.toContainEqual(
+            expect.objectContaining({ action: 'DOWNLOAD_MEDIA' })
+        );
+        expect(await page.evaluate(() => window.__chromeEvents)).not.toContainEqual(
+            expect.objectContaining({
+                type: 'storage_set',
+                values: expect.objectContaining({ processedIds: expect.any(Array) })
+            })
+        );
+        expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
+        expect(await page.evaluate(() => window.__agentRenderedMediaUrls)).toEqual([
+            `https://assets.grok.com/users/${accountUuid}/generated/${wrongMediaUuid}/preview.jpg`,
+            `https://assets.grok.com/users/${accountUuid}/generated/${expectedMediaUuid}/preview.jpg`,
+            `https://assets.grok.com/users/${accountUuid}/generated/${expectedMediaUuid}/preview_image.jpg`
+        ]);
+        expect(await page.evaluate(() => window.__agentScrollCalls)).toEqual([]);
     });
 
     test('Cloud-only Start Sync sends bridge media before persisting the upload', async ({ page }) => {
@@ -746,6 +989,69 @@ test.describe('Grok Power Tools E2E', () => {
         expect(processedIdIndex).toBeGreaterThan(acknowledgementIndex);
     });
 
+    test('R2 upload error never persists a backup processed ID', async ({ page }) => {
+        const accountUuid = '13572468-1357-4468-8357-135724681357';
+        const mediaUuid = '24681357-2468-4357-8468-246813572468';
+        const blobDataUrl = 'data:image/jpeg;base64,cjItZXJyb3ItZml4dHVyZQ==';
+        const rejectedBackupProcessedId = 'r2/rejected/24681357-2468-4357-8468-246813572468';
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [mediaUuid],
+            responseByAction: {
+                VALIDATE_CLOUD_CONFIG: { valid: true },
+                R2_BACKUP_UPLOAD: {
+                    status: 'error',
+                    error: 'mock R2 rejection',
+                    backupProcessedId: rejectedBackupProcessedId
+                }
+            },
+            runToken: 'e2e-r2-upload-error',
+            bridgeResponse: { dataUrl: blobDataUrl, size: 16, type: 'image/jpeg' }
+        });
+
+        await expect(page.evaluate(() => window.__gptE2e.scraper.startBackupMode({
+            mode: 'full'
+        }))).resolves.toEqual({
+            status: 'started',
+            surface: 'saved_gallery',
+            runToken: 'e2e-r2-upload-error'
+        });
+        await expect.poll(async () => page.evaluate(() => ({
+            scraperState: window.__chromeStorageLocalState.scraperState,
+            stopReason: window.__chromeStorageLocalState.r2BackupState?.stopReason
+        }))).toEqual({
+            scraperState: 'idle',
+            stopReason: 'media_transfer_failed'
+        });
+
+        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual({
+            action: 'R2_BACKUP_UPLOAD',
+            url: `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`,
+            isVideo: false,
+            promptText: '',
+            blobDataUrl,
+            skipLocalDownload: false,
+            acceptance: null
+        });
+        const backupEvents = await page.evaluate(() => window.__chromeEvents);
+        expect(backupEvents).toContainEqual(expect.objectContaining({
+            type: 'runtime_response',
+            action: 'R2_BACKUP_UPLOAD',
+            response: expect.objectContaining({
+                status: 'error',
+                backupProcessedId: rejectedBackupProcessedId
+            })
+        }));
+        expect(backupEvents).not.toContainEqual(expect.objectContaining({
+            type: 'storage_set',
+            area: 'local',
+            values: expect.objectContaining({ processedIds: expect.any(Array) })
+        }));
+        expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
+    });
+
     test('Prompted Batch routes Saved media through Add Prompt and Make video', async ({ page }) => {
         const accountUuid = '66666666-6666-4666-8666-666666666666';
         const mediaUuid = '77777777-7777-4777-8777-777777777777';
@@ -753,17 +1059,43 @@ test.describe('Grok Power Tools E2E', () => {
 
         await evaluateExtensionContent(page);
         await page.evaluate(bridgeJs);
-        await setupMockPromptedBatch(page, { accountUuid, mediaUuid, secondMediaUuid });
+        await setupMockPromptedBatch(page, {
+            accountUuid,
+            mediaUuid,
+            secondMediaUuid,
+            includeDecoys: true,
+            stopAfterAddPrompt: secondMediaUuid
+        });
 
         await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
             'prompted',
             'slow orbit around the generated sculpture',
-            { videoGoal: 1, galleryLimit: 1 }
+            { videoGoal: 2, galleryLimit: 2 }
         ))).resolves.toBe(true);
 
         const events = await page.evaluate(() => window.__promptedBatchEvents);
-        expect(events.savedClicks).toEqual([mediaUuid]);
-        expect(events.menuChoices).toEqual(['Add Prompt']);
+        expect(events.savedClicks).toEqual([mediaUuid, secondMediaUuid]);
+        expect(events.savedTransitions).toEqual([
+            {
+                mediaUuid,
+                goalCount: 0,
+                batchRunning: true,
+                batchIndex: 0,
+                batchQueueLength: 2
+            },
+            {
+                mediaUuid: secondMediaUuid,
+                goalCount: 1,
+                batchRunning: true,
+                batchIndex: 0,
+                batchQueueLength: 1
+            }
+        ]);
+        expect(events.decoyAddPromptCount).toBe(0);
+        expect(events.decoyPromptAtSubmit).toBeNull();
+        expect(events.decoySubmitCount).toBe(0);
+        expect(events.menuChoices).toEqual(['Add Prompt', 'Add Prompt']);
+        expect(events.menuMediaUuids).toEqual([mediaUuid, secondMediaUuid]);
         expect(events.promptWrites).toEqual(['slow orbit around the generated sculpture']);
         expect(events.promptWriteResults).toEqual([true]);
         expect(events.promptAtSubmit).toBe('slow orbit around the generated sculpture');
@@ -771,8 +1103,19 @@ test.describe('Grok Power Tools E2E', () => {
         expect(events.editCount).toBe(0);
         expect(events.backCount).toBe(1);
         expect(events.scrollToCalls).toContainEqual([0, 480]);
-        await expect(page.locator('img[alt="Generated image"]')).toHaveCount(2);
-        await expect(page.locator('.query-bar')).toHaveCount(0);
+        expect(events.focusedQuiescenceMs).toBe(500);
+        const selectedTriggerId = `selected-make-video-${secondMediaUuid}`;
+        const selectedMenuId = `selected-video-menu-${secondMediaUuid}`;
+        await expect(page.locator(`#${selectedTriggerId}`)).toHaveAttribute('aria-controls', selectedMenuId);
+        await expect(page.locator(`#${selectedTriggerId}`)).toHaveAttribute('data-state', 'open');
+        await expect(page.locator(`#${selectedMenuId}`)).toHaveAttribute('aria-labelledby', selectedTriggerId);
+        await expect(page.locator(`#${selectedMenuId}`)).toHaveAttribute('data-state', 'open');
+        await expect(page.locator('#decoy-video-menu')).toBeVisible();
+        await expect(page.locator('#decoy-video-menu')).not.toHaveAttribute('aria-labelledby', /.+/);
+        await expect(page.locator('#decoy-prompt-input')).toBeVisible();
+        await expect(page.locator('#decoy-prompt-input')).toHaveText('');
+        await expect(page.locator(`#selected-prompt-input-${secondMediaUuid}`)).toHaveText('');
+        expect(await page.evaluate(() => document.activeElement?.id)).toBe(`selected-prompt-input-${secondMediaUuid}`);
         await expect(page.evaluate(() => ({
             goalCount: window.__gptE2e.retry.goalCount,
             batchIndex: window.__gptE2e.retry.batchIndex,
@@ -820,7 +1163,7 @@ test.describe('Grok Power Tools E2E', () => {
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).not.toContainEqual(expect.objectContaining({ action: 'DOWNLOAD_MEDIA' }));
         expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
-        expect(await page.evaluate(() => window.__galleryScrollCalls)).toEqual([]);
+        expect(await page.evaluate(() => window.__agentScrollCalls)).toEqual([]);
     });
 
     test('Stop after Add Prompt prevents scoped injection and Make video submission', async ({ page }) => {
