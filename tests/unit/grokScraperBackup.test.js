@@ -1278,6 +1278,61 @@ describe('cloud-only download proof and cleanup ordering', () => {
         return storage;
     }
 
+    function publicDualWriteRetryStorage(downloadId, attempts, {
+        downloadState = 'in_progress',
+        localIdentityPersisted = false
+    } = {}) {
+        const storage = publicRetryStorage(downloadId, attempts);
+        storage.cloudConfig.mode = 'dual_write';
+        storage.processedIds = localIdentityPersisted ? [mediaId] : [];
+        storage.cloudSyncQueue[0].cleanupDownloadId = null;
+        storage.pendingDownloadOperations[downloadId] = {
+            ...storage.pendingDownloadOperations[downloadId],
+            allowLocal: true,
+            cleanupDownloadId: null,
+            downloadState,
+            localIdentityPersisted
+        };
+        return storage;
+    }
+
+    async function completeFailedPublicDualWriteDownload(harness, downloadId) {
+        global.fetch = jest.fn(() => Promise.reject(new Error('[media-fetch] temporary failure')));
+        await harness.load();
+        const suggest = jest.fn();
+
+        expect(harness.getFilenameListener()({
+            id: downloadId,
+            url: publicUrl,
+            filename: 'image.jpg'
+        }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue?.[0]?.attempts).toBe(1));
+
+        expect(harness.storageState.cloudSyncQueue[0].cleanupDownloadId).toBe(downloadId);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].cleanupDownloadId).toBe(downloadId);
+
+        harness.downloads.set(downloadId, {
+            id: downloadId,
+            url: publicUrl,
+            filename: '/Downloads/public-dual.jpg',
+            mime: 'image/jpeg',
+            state: 'complete'
+        });
+        await Promise.resolve(harness.getDownloadChangedListener()({
+            id: downloadId,
+            state: { current: 'complete' }
+        }));
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            downloadState: 'complete',
+            r2State: 'pending',
+            localIdentityPersisted: true
+        }));
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+    }
+
     function completedCloudOnlyOperation(downloadId) {
         const storage = cloudOnlyStorage();
         storage.pendingDownloadOperations = {
@@ -1422,6 +1477,129 @@ describe('cloud-only download proof and cleanup ordering', () => {
         expect(global.fetch).not.toHaveBeenCalled();
         expect(harness.storageState.cloudSyncQueue[0].attempts).toBe(CloudSyncUtils.MAX_RETRY_ATTEMPTS);
         expect(harness.chromeApi.alarms.create).not.toHaveBeenCalled();
+    });
+
+    test('preserves legacy public dual-write queue ownership and advances one attempt per alarm', async () => {
+        const downloadId = 62;
+        const storage = publicDualWriteRetryStorage(downloadId, 5);
+        global.fetch = jest.fn(() => Promise.reject(new Error('[media-fetch] temporary failure')));
+        const harness = createDurableBackgroundHarness(storage, {
+            [downloadId]: {
+                id: downloadId,
+                url: publicUrl,
+                filename: '/Downloads/public-dual-retry.jpg',
+                mime: 'image/jpeg',
+                state: 'in_progress'
+            }
+        });
+        const background = await harness.load();
+
+        await background.initializeBackgroundState();
+
+        expect(harness.storageState.cloudSyncQueue).toHaveLength(1);
+        expect(harness.storageState.cloudSyncQueue[0]).toEqual(expect.objectContaining({
+            cleanupDownloadId: downloadId,
+            attempts: 5,
+            lastError: storage.cloudSyncQueue[0].lastError
+        }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].cleanupDownloadId).toBe(downloadId);
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(harness.chromeApi.alarms.create).toHaveBeenLastCalledWith('gptCloudRetry', {
+            delayInMinutes: CloudSyncUtils.getRetryDelayMinutes(6)
+        });
+
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue[0].attempts).toBe(6));
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(harness.storageState.cloudSyncQueue).toHaveLength(1);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].attempts).toBe(0);
+    });
+
+    test('does not retry a capped legacy public dual-write queue through operation state', async () => {
+        const downloadId = 63;
+        const storage = publicDualWriteRetryStorage(downloadId, CloudSyncUtils.MAX_RETRY_ATTEMPTS);
+        global.fetch = jest.fn(() => Promise.reject(new Error('[media-fetch] should not run')));
+        const harness = createDurableBackgroundHarness(storage, {
+            [downloadId]: {
+                id: downloadId,
+                url: publicUrl,
+                filename: '/Downloads/public-dual-capped.jpg',
+                mime: 'image/jpeg',
+                state: 'in_progress'
+            }
+        });
+        const background = await harness.load();
+
+        await background.initializeBackgroundState();
+        expect(harness.chromeApi.alarms.create).not.toHaveBeenCalled();
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(harness.storageState.cloudSyncQueue[0]).toEqual(expect.objectContaining({
+            cleanupDownloadId: downloadId,
+            attempts: CloudSyncUtils.MAX_RETRY_ATTEMPTS,
+            lastError: storage.cloudSyncQueue[0].lastError
+        }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].cleanupDownloadId).toBe(downloadId);
+        expect(harness.chromeApi.alarms.create).not.toHaveBeenCalled();
+    });
+
+    test('keeps public dual-write completion until queue success without resurrecting a reset ID', async () => {
+        const downloadId = 64;
+        const storage = cloudOnlyStorage();
+        storage.cloudConfig.mode = 'dual_write';
+        const harness = createDurableBackgroundHarness(storage);
+        await completeFailedPublicDualWriteDownload(harness, downloadId);
+
+        const reset = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'PROCESSED_IDS_RESET' });
+        await reset.response;
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            r2State: 'pending',
+            localIdentityPersisted: true
+        }));
+
+        installR2PresentFetch(publicUrl);
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue).toEqual([]));
+
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+    });
+
+    test('retains missing-history public dual-write ownership across restart and reset', async () => {
+        const downloadId = 65;
+        const storage = cloudOnlyStorage();
+        storage.cloudConfig.mode = 'dual_write';
+        const harness = createDurableBackgroundHarness(storage);
+        await completeFailedPublicDualWriteDownload(harness, downloadId);
+
+        const reset = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'PROCESSED_IDS_RESET' });
+        await reset.response;
+        harness.downloads.delete(downloadId);
+        installR2PresentFetch(publicUrl);
+
+        await harness.load();
+        await waitForAssertion(() => expect(
+            harness.storageState.pendingDownloadOperations[String(downloadId)]
+        ).toEqual(expect.objectContaining({
+            cleanupDownloadId: downloadId,
+            downloadState: 'complete',
+            r2State: 'pending',
+            localIdentityPersisted: true
+        })));
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(global.fetch).not.toHaveBeenCalled();
+
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue).toEqual([]));
+
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
     });
 
     test('retains failed authenticated cloud-only work and retries it after restart', async () => {

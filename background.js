@@ -623,6 +623,11 @@ async function scheduleCloudRetryAlarm() {
     const queueOwnedDownloadIds = new Set(cloudSyncQueue
         .filter((item) => item.type === 'media' && Number.isInteger(item.cleanupDownloadId))
         .map((item) => item.cleanupDownloadId));
+    for (const operation of pendingDownloadOperations.values()) {
+        if (operation.strategy === 'public_queue' && findPublicQueueItemForOperation(operation)) {
+            queueOwnedDownloadIds.add(operation.downloadId);
+        }
+    }
     const retryableDownloads = Array.from(pendingDownloadOperations.values()).filter((operation) => (
         operation.cloudRequired
         && !(operation.strategy === 'public_queue'
@@ -2453,7 +2458,7 @@ async function removeDownloadedFile(downloadId) {
 async function finalizeDownloadOperation(downloadId, { historyMissing = false } = {}) {
     const operation = await getDownloadOperation(downloadId);
     if (!operation || operation.downloadState !== 'complete') return false;
-    if (operation.cloudRequired && !operation.allowLocal && operation.r2State !== 'present') return false;
+    if (operation.cloudRequired && operation.r2State !== 'present') return false;
 
     if (operation.mediaId && (!operation.allowLocal || !operation.localIdentityPersisted)) {
         await mutateProcessedIds({ ids: [operation.mediaId] });
@@ -2484,8 +2489,7 @@ async function markDownloadOperationR2Present(downloadId, result) {
     if (!operation) return false;
 
     if (operation.downloadState === 'complete') {
-        if (operation.allowLocal) await removeDownloadOperation(downloadId);
-        else await finalizeDownloadOperation(downloadId);
+        await finalizeDownloadOperation(downloadId);
     }
     return true;
 }
@@ -2506,13 +2510,44 @@ async function recordDownloadOperationError(downloadId, error, code) {
     return lastError;
 }
 
+function findPublicQueueItemForOperation(operation) {
+    const directlyLinked = cloudSyncQueue.find((item) => (
+        item.type === 'media'
+        && item.cleanupDownloadId === operation.downloadId
+    ));
+    if (directlyLinked) return directlyLinked;
+
+    return cloudSyncQueue.find((item) => {
+        if (item.type !== 'media' || Number.isInteger(item.cleanupDownloadId)) return false;
+        if (!item.finalPath || item.finalPath !== operation.finalPath) return false;
+        return (operation.mediaId && item.backupProcessedId === operation.mediaId)
+            || (operation.reservationKey && (
+                item.assetId === operation.reservationKey
+                || item.sourceUrlHash === operation.reservationKey
+            ));
+    }) || null;
+}
+
+async function linkPublicQueueOperation(operation) {
+    const queueItem = findPublicQueueItemForOperation(operation);
+    if (!queueItem) return null;
+
+    if (queueItem.cleanupDownloadId !== operation.downloadId) {
+        queueItem.cleanupDownloadId = operation.downloadId;
+        await persistCloudState();
+    }
+    if (operation.cleanupDownloadId !== operation.downloadId) {
+        await updateDownloadOperation(operation.downloadId, {
+            cleanupDownloadId: operation.downloadId
+        });
+    }
+    return queueItem;
+}
+
 async function ensurePublicDownloadQueued(operation, downloadItem) {
     if (!operation?.cloudRequired || operation.strategy !== 'public_queue') return;
     if (activeDownloadOperations.has(operation.downloadId)) return;
-    if (Number.isInteger(operation.cleanupDownloadId) && cloudSyncQueue.some((item) => (
-        item.type === 'media'
-        && item.cleanupDownloadId === operation.cleanupDownloadId
-    ))) return;
+    if (await linkPublicQueueOperation(operation)) return;
     const sourceUrl = downloadItem?.finalUrl || downloadItem?.url;
     if (!sourceUrl) {
         await recordDownloadOperationError(
@@ -2525,8 +2560,13 @@ async function ensurePublicDownloadQueued(operation, downloadItem) {
 
     activeDownloadOperations.add(operation.downloadId);
     try {
+        if (operation.cleanupDownloadId !== operation.downloadId) {
+            await updateDownloadOperation(operation.downloadId, {
+                cleanupDownloadId: operation.downloadId
+            });
+        }
         await enqueueCloudMediaUpload(sourceUrl, operation.finalPath, '', null, {
-            cleanupDownloadId: operation.cleanupDownloadId
+            cleanupDownloadId: operation.downloadId
         });
     } catch (error) {
         await recordDownloadOperationError(operation.downloadId, error, 'public_queue_failed');
@@ -2612,8 +2652,7 @@ async function processCompletedDownloadOperation(downloadId, downloadItem = null
     }
 
     if (operation.strategy === 'public_queue') {
-        if (operation.allowLocal) await removeDownloadOperation(downloadId);
-        else await finalizeDownloadOperation(downloadId);
+        await finalizeDownloadOperation(downloadId);
         return;
     }
 
@@ -2622,6 +2661,9 @@ async function processCompletedDownloadOperation(downloadId, downloadItem = null
 
 async function reconcileMissingDownloadOperation(operation) {
     if (operation.strategy === 'public_queue' && operation.r2State !== 'present') {
+        const queueItem = await linkPublicQueueOperation(operation);
+        if (operation.allowLocal && operation.localIdentityPersisted && queueItem) return;
+
         let queueChanged = false;
         cloudSyncQueue.forEach((item) => {
             if (item.type === 'media' && item.cleanupDownloadId === operation.downloadId) {
@@ -2710,7 +2752,9 @@ async function handleDownloadFilename(item, suggestOnce) {
             allowLocal,
             cloudRequired,
             strategy,
-            cleanupDownloadId: cloudRequired && !allowLocal ? item.id : null,
+            cleanupDownloadId: cloudRequired && (strategy === 'public_queue' || !allowLocal)
+                ? item.id
+                : null,
             downloadState: 'in_progress',
             r2State: cloudRequired ? 'pending' : 'not_required',
             r2Status: null,
