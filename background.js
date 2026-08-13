@@ -232,11 +232,13 @@ console.log('Grok Downloader Background Service Started');
 
 let isScraping = false;
 let isR2Backup = false;
-let currentTabId = null;
 let scrapeStartPending = false;
-let scrapeStartEpoch = 0;
-let activeScrapeRunToken = null;
 const ACTIVE_SCRAPE_RUN_TOKEN_KEY = 'activeScrapeRunToken';
+const SCRAPE_LEASE_VERSION = 1;
+const SCRAPE_ABORT_TIMEOUT_MS = 2000;
+let activeScrapeLease = null;
+let scrapeLeaseHydrationPromise = null;
+let scrapeLeaseMutationQueue = Promise.resolve();
 const MAX_LOGS = 100;
 const CLOUD_ALARM_NAME = 'gptCloudRetry';
 const CLOUD_METADATA_DEBOUNCE_MS = 2000;
@@ -1642,14 +1644,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         processedUUIDs = new Set(normalizeProcessedIds(changes[PROCESSED_IDS_KEY].newValue));
     }
 
-    if (changes.isScraping?.newValue === false || changes.scraperState?.newValue === 'idle') {
-        isScraping = false;
-        isR2Backup = false;
-        setActiveScrapeRunToken(null).catch(() => {});
-    } else if (changes.isR2Backup?.newValue === false) {
-        isR2Backup = false;
-    }
-
     if (changes[CloudSync.STORAGE_KEYS.cloudConfig]) {
         const oldNormalized = CloudSync.normalizeCloudConfig(changes[CloudSync.STORAGE_KEYS.cloudConfig].oldValue);
         const newNormalized = CloudSync.normalizeCloudConfig(changes[CloudSync.STORAGE_KEYS.cloudConfig].newValue);
@@ -1772,29 +1766,201 @@ function queueChromeDownload(options) {
     });
 }
 
-async function setActiveScrapeRunToken(runToken) {
-    activeScrapeRunToken = runToken || null;
-    const session = chrome.storage?.session;
-    if (!session) return;
-    if (activeScrapeRunToken) {
-        await session.set({ [ACTIVE_SCRAPE_RUN_TOKEN_KEY]: activeScrapeRunToken });
-    } else if (typeof session.remove === 'function') {
-        await session.remove(ACTIVE_SCRAPE_RUN_TOKEN_KEY);
+function normalizeScrapeLease(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const status = value.status === 'active' ? 'active' : (value.status === 'idle' ? 'idle' : null);
+    const kind = value.kind === 'sync' || value.kind === 'r2_backup' ? value.kind : null;
+    const epoch = Number.isInteger(value.epoch) && value.epoch >= 0 ? value.epoch : null;
+    if (!status || epoch === null || value.version !== SCRAPE_LEASE_VERSION) return null;
+    if (status === 'active') {
+        if (!kind || typeof value.token !== 'string' || !value.token || !Number.isInteger(value.tabId)) return null;
     }
+    return {
+        version: SCRAPE_LEASE_VERSION,
+        epoch,
+        token: status === 'active' ? value.token : null,
+        tabId: status === 'active' ? value.tabId : null,
+        kind: status === 'active' ? kind : null,
+        status,
+        startedAt: status === 'active' && Number.isFinite(value.startedAt) ? value.startedAt : null
+    };
 }
 
-async function getActiveScrapeRunToken() {
-    if (activeScrapeRunToken) return activeScrapeRunToken;
+function createIdleScrapeLease(epoch = 0) {
+    return {
+        version: SCRAPE_LEASE_VERSION,
+        epoch: Math.max(0, Number.isInteger(epoch) ? epoch : 0),
+        token: null,
+        tabId: null,
+        kind: null,
+        status: 'idle',
+        startedAt: null
+    };
+}
+
+function scrapeLeaseMatches(left, right) {
+    return Boolean(
+        left
+        && right
+        && left.status === 'active'
+        && right.status === 'active'
+        && left.version === right.version
+        && left.epoch === right.epoch
+        && left.token === right.token
+        && left.tabId === right.tabId
+        && left.kind === right.kind
+    );
+}
+
+function localRunMatchesLease(stored, lease) {
+    return Boolean(
+        lease?.status === 'active'
+        && stored?.scraperState === 'running'
+        && stored?.scrapeRunToken === lease.token
+        && stored?.scrapeRunEpoch === lease.epoch
+        && stored?.isScraping === true
+        && (stored?.isR2Backup === true) === (lease.kind === 'r2_backup')
+    );
+}
+
+function hasStaleLocalRunState(stored = {}) {
+    return stored.scraperState === 'running'
+        || Boolean(stored.scrapeRunToken)
+        || Number.isInteger(stored.scrapeRunEpoch)
+        || Boolean(stored.scrapeNavigation)
+        || Boolean(stored.currentItemId)
+        || stored.isScraping === true
+        || stored.isR2Backup === true
+        || stored.r2BackupState?.isRunning === true;
+}
+
+function buildAuthoritativeIdleLocalState(stored = {}, stopReason = 'stopped') {
+    const values = {
+        scraperState: 'idle',
+        currentIndex: 0,
+        scrapeRunToken: null,
+        scrapeRunEpoch: null,
+        scrapeNavigation: null,
+        currentItemId: null,
+        scrapeBackupOptions: null,
+        isScraping: false,
+        isR2Backup: false,
+        scrapeStopReason: stopReason
+    };
+    if (stored.r2BackupState && typeof stored.r2BackupState === 'object') {
+        values.r2BackupState = {
+            ...stored.r2BackupState,
+            isRunning: false,
+            stopReason
+        };
+    }
+    return values;
+}
+
+async function persistScrapeLease(lease) {
     const session = chrome.storage?.session;
-    if (!session || typeof session.get !== 'function') return null;
-    const stored = await session.get([ACTIVE_SCRAPE_RUN_TOKEN_KEY]);
-    activeScrapeRunToken = stored?.[ACTIVE_SCRAPE_RUN_TOKEN_KEY] || null;
-    return activeScrapeRunToken;
+    if (!session || typeof session.set !== 'function') {
+        throw new Error('Session storage is unavailable.');
+    }
+    await session.set({ [ACTIVE_SCRAPE_RUN_TOKEN_KEY]: lease });
+    activeScrapeLease = lease;
+    return lease;
 }
 
-async function validateScrapeResume(runToken) {
-    const activeRunToken = await getActiveScrapeRunToken();
-    return Boolean(runToken && activeRunToken && runToken === activeRunToken);
+async function hydrateScrapeLeaseAuthority() {
+    const session = chrome.storage?.session;
+    if (!session || typeof session.get !== 'function' || typeof session.set !== 'function') {
+        throw new Error('Session storage is unavailable.');
+    }
+    const [sessionValues, stored] = await Promise.all([
+        session.get([ACTIVE_SCRAPE_RUN_TOKEN_KEY]),
+        chrome.storage.local.get([
+            'scraperState',
+            'scrapeRunToken',
+            'scrapeRunEpoch',
+            'scrapeNavigation',
+            'currentItemId',
+            'scrapeBackupOptions',
+            'isScraping',
+            'isR2Backup',
+            'r2BackupState'
+        ])
+    ]);
+    const storedLease = normalizeScrapeLease(sessionValues?.[ACTIVE_SCRAPE_RUN_TOKEN_KEY]);
+    if (storedLease?.status === 'active' && localRunMatchesLease(stored, storedLease)) {
+        activeScrapeLease = storedLease;
+        isScraping = true;
+        isR2Backup = storedLease.kind === 'r2_backup';
+        scrapeStartPending = false;
+        return storedLease;
+    }
+
+    const nextEpoch = storedLease?.status === 'active'
+        ? storedLease.epoch + 1
+        : (storedLease?.epoch || 0);
+    const tombstone = await persistScrapeLease(createIdleScrapeLease(nextEpoch));
+    isScraping = false;
+    isR2Backup = false;
+    scrapeStartPending = false;
+    if (hasStaleLocalRunState(stored)) {
+        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, 'stale_session'));
+    }
+    return tombstone;
+}
+
+function ensureScrapeLeaseHydrated() {
+    if (!scrapeLeaseHydrationPromise) {
+        scrapeLeaseHydrationPromise = hydrateScrapeLeaseAuthority().catch((error) => {
+            scrapeLeaseHydrationPromise = null;
+            throw error;
+        });
+    }
+    return scrapeLeaseHydrationPromise;
+}
+
+function enqueueScrapeLeaseOperation(operation) {
+    const execute = async () => {
+        await ensureScrapeLeaseHydrated();
+        return operation();
+    };
+    const result = scrapeLeaseMutationQueue.then(execute, execute);
+    scrapeLeaseMutationQueue = result.catch(() => {});
+    return result;
+}
+
+function makeScrapeRunToken() {
+    return `scrape_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getRequestedLease(value, senderTabId = null) {
+    if (value && typeof value === 'object') {
+        return normalizeScrapeLease({
+            version: SCRAPE_LEASE_VERSION,
+            epoch: value.epoch ?? value.runEpoch,
+            token: value.token ?? value.runToken,
+            tabId: Number.isInteger(senderTabId) ? senderTabId : value.tabId,
+            kind: value.kind || (value.isR2Backup ? 'r2_backup' : 'sync'),
+            status: 'active',
+            startedAt: value.startedAt || Date.now()
+        });
+    }
+    return null;
+}
+
+async function validateScrapeResume(value, senderTabId = null) {
+    const requested = getRequestedLease(value, senderTabId);
+    if (!requested) return false;
+    return enqueueScrapeLeaseOperation(async () => {
+        if (!scrapeLeaseMatches(activeScrapeLease, requested)) return false;
+        const stored = await chrome.storage.local.get([
+            'scraperState',
+            'scrapeRunToken',
+            'scrapeRunEpoch',
+            'isScraping',
+            'isR2Backup'
+        ]);
+        return localRunMatchesLease(stored, activeScrapeLease);
+    });
 }
 
 async function sendScrapeInitWithInjection(tabId, initMessage) {
@@ -1807,20 +1973,97 @@ async function sendScrapeInitWithInjection(tabId, initMessage) {
     }
 }
 
-async function initializeScrapeInActiveTab(initMessage, { backup = false } = {}) {
-    if (isScraping || scrapeStartPending) {
-        return { status: 'error', surface: 'unsupported', error: 'A sync or backup run is already active.' };
-    }
+function withTimeout(promise, timeoutMs, fallback) {
+    return Promise.race([
+        promise,
+        new Promise((resolve) => setTimeout(() => resolve(fallback), timeoutMs))
+    ]);
+}
 
-    scrapeStartPending = true;
-    const startEpoch = scrapeStartEpoch;
-    let initializedTabId = null;
+async function sendScrapeAbort(lease) {
+    if (!lease || lease.status !== 'active') return false;
+    const action = lease.kind === 'r2_backup' ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE';
+    try {
+        const response = await withTimeout(sendMessageToTab(lease.tabId, {
+            action,
+            runToken: lease.token,
+            runEpoch: lease.epoch
+        }), SCRAPE_ABORT_TIMEOUT_MS, null);
+        return response?.status === 'stopped';
+    } catch {
+        return false;
+    }
+}
+
+async function prepareScrapeStart(tabId, kind) {
+    return enqueueScrapeLeaseOperation(async () => {
+        if (activeScrapeLease?.status === 'active' || scrapeStartPending) return null;
+        const lease = {
+            version: SCRAPE_LEASE_VERSION,
+            epoch: (activeScrapeLease?.epoch || 0) + 1,
+            token: makeScrapeRunToken(),
+            tabId,
+            kind,
+            status: 'active',
+            startedAt: Date.now()
+        };
+        scrapeStartPending = true;
+        await persistScrapeLease(lease);
+        return lease;
+    });
+}
+
+async function cancelPreparedScrapeStart(lease, stopReason = 'start_failed') {
+    return enqueueScrapeLeaseOperation(async () => {
+        if (!scrapeLeaseMatches(activeScrapeLease, lease)) return false;
+        await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
+        scrapeStartPending = false;
+        isScraping = false;
+        isR2Backup = false;
+        const stored = await chrome.storage.local.get(['r2BackupState']);
+        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
+        return true;
+    });
+}
+
+async function finalizeScrapeStart(lease, initResponse) {
+    return enqueueScrapeLeaseOperation(async () => {
+        if (!scrapeLeaseMatches(activeScrapeLease, lease)) {
+            return { status: 'error', surface: initResponse?.surface || 'saved_gallery', error: 'Start was cancelled.' };
+        }
+        if (
+            initResponse?.status !== 'started'
+            || initResponse.surface !== 'saved_gallery'
+            || initResponse.runToken !== lease.token
+            || initResponse.runEpoch !== lease.epoch
+        ) {
+            await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
+            scrapeStartPending = false;
+            isScraping = false;
+            isR2Backup = false;
+            const stored = await chrome.storage.local.get(['r2BackupState']);
+            await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, 'start_rejected'));
+            if (initResponse?.status === 'invalid_context') return initResponse;
+            return {
+                status: 'error',
+                surface: initResponse?.surface || 'unsupported',
+                error: initResponse?.error || 'Content script returned no authoritative start acknowledgement.'
+            };
+        }
+
+        scrapeStartPending = false;
+        isScraping = true;
+        isR2Backup = lease.kind === 'r2_backup';
+        await chrome.storage.local.set({ isScraping: true, isR2Backup });
+        return { ...initResponse, runToken: lease.token, runEpoch: lease.epoch };
+    });
+}
+
+async function initializeScrapeInActiveTab(initMessage, { backup = false } = {}) {
+    let lease = null;
     try {
         const tab = await queryActiveTab();
         if (!tab || !isGrokSavedUrl(tab.url)) {
-            isScraping = false;
-            isR2Backup = false;
-            await chrome.storage.local.set({ isScraping: false, isR2Backup: false });
             return {
                 status: 'invalid_context',
                 surface: 'unsupported',
@@ -1829,50 +2072,85 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false } = {})
                     : 'Open Grok Imagine Saved before starting sync.'
             };
         }
-        initializedTabId = tab.id;
-
-        const initResponse = await sendScrapeInitWithInjection(tab.id, initMessage);
-        if (startEpoch !== scrapeStartEpoch) {
-            await sendMessageToTab(tab.id, { action: backup ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE' }).catch(() => {});
-            return { status: 'error', surface: initResponse?.surface || 'saved_gallery', error: 'Start was cancelled.' };
+        lease = await prepareScrapeStart(tab.id, backup ? 'r2_backup' : 'sync');
+        if (!lease) {
+            return { status: 'error', surface: 'unsupported', error: 'A sync or backup run is already active.' };
         }
-        if (initResponse?.status !== 'started' || initResponse.surface !== 'saved_gallery') {
-            isScraping = false;
-            isR2Backup = false;
-            await chrome.storage.local.set({ isScraping: false, isR2Backup: false });
-            if (initResponse?.status === 'invalid_context') return initResponse;
-            return {
-                status: 'error',
-                surface: initResponse?.surface || 'unsupported',
-                error: initResponse?.error || 'Content script returned no start response.'
-            };
-        }
-
-        if (!initResponse.runToken) {
-            await sendMessageToTab(tab.id, { action: backup ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE' }).catch(() => {});
-            return { status: 'error', surface: 'saved_gallery', error: 'Content script returned no run token.' };
-        }
-
-        currentTabId = tab.id;
-        await setActiveScrapeRunToken(initResponse.runToken);
-        isScraping = true;
-        isR2Backup = backup;
-        await chrome.storage.local.set({ isScraping: true, isR2Backup: backup });
-        return initResponse;
+        const initResponse = await sendScrapeInitWithInjection(tab.id, {
+            ...initMessage,
+            runToken: lease.token,
+            runEpoch: lease.epoch
+        });
+        const response = await finalizeScrapeStart(lease, initResponse);
+        if (response.status !== 'started') await sendScrapeAbort(lease);
+        return response;
     } catch (error) {
-        if (initializedTabId) {
-            await sendMessageToTab(initializedTabId, {
-                action: backup ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE'
-            }).catch(() => {});
+        if (lease) {
+            await cancelPreparedScrapeStart(lease, 'start_failed').catch(() => {});
+            await sendScrapeAbort(lease);
         }
+        return { status: 'error', surface: 'unsupported', error: error.message || 'Failed to start.' };
+    }
+}
+
+async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
+    return enqueueScrapeLeaseOperation(async () => {
+        const lease = activeScrapeLease?.status === 'active' ? { ...activeScrapeLease } : null;
+        if (!lease) {
+            const stored = await chrome.storage.local.get(['r2BackupState']);
+            await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
+            return { status: 'stopped', abortAcknowledged: false };
+        }
+        if (requestedKind && lease.kind !== requestedKind) {
+            return { status: 'error', error: `The active run is ${lease.kind}.` };
+        }
+
+        await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
+        scrapeStartPending = false;
         isScraping = false;
         isR2Backup = false;
-        await setActiveScrapeRunToken(null).catch(() => {});
-        await chrome.storage.local.set({ isScraping: false, isR2Backup: false }).catch(() => {});
-        return { status: 'error', surface: 'unsupported', error: error.message || 'Failed to start.' };
-    } finally {
+        const abortAcknowledged = await sendScrapeAbort(lease);
+        const stored = await chrome.storage.local.get(['r2BackupState']);
+        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
+        return { status: 'stopped', abortAcknowledged };
+    });
+}
+
+async function handleR2BackupProgress(request, sender) {
+    return enqueueScrapeLeaseOperation(async () => {
+        const requested = getRequestedLease({ ...request, kind: 'r2_backup' }, sender?.tab?.id ?? null);
+        if (!scrapeLeaseMatches(activeScrapeLease, requested)) return { status: 'ignored' };
+        chrome.runtime.sendMessage({
+            action: 'UPDATE_R2_BACKUP_PROGRESS',
+            stats: request.stats
+        }).catch(() => {});
+        return { status: 'ok' };
+    });
+}
+
+async function completeScrapeRun(request, sender, kind) {
+    return enqueueScrapeLeaseOperation(async () => {
+        const requested = getRequestedLease({ ...request, kind }, sender?.tab?.id ?? null);
+        if (!scrapeLeaseMatches(activeScrapeLease, requested)) return { status: 'ignored' };
+        const lease = activeScrapeLease;
+        await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
         scrapeStartPending = false;
-    }
+        isScraping = false;
+        isR2Backup = false;
+        const stored = await chrome.storage.local.get(['r2BackupState']);
+        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, request.stats?.stopReason || 'complete'));
+
+        if (kind === 'r2_backup') {
+            const stats = request.stats || {};
+            const completed = isR2BackupCompletionSuccessful(stats);
+            const statusLabel = getR2BackupCompletionStatusLabel(stats);
+            log(`R2 Backup ${statusLabel}. Uploaded: ${stats.uploaded || 0}, Already present: ${stats.alreadyPresent || 0}, Queued: ${stats.queued || 0}, Errors: ${stats.errors || 0}`, completed ? 'success' : 'warning');
+            chrome.runtime.sendMessage({ action: 'R2_BACKUP_DONE', stats }).catch(() => {});
+        } else {
+            chrome.runtime.sendMessage({ action: 'SCRAPE_COMPLETE' }).catch(() => {});
+        }
+        return { status: 'ok' };
+    });
 }
 
 async function uploadDirectMediaData(request, finalPath, acceptanceSource = 'direct-upload') {
@@ -1926,43 +2204,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'STOP_SCRAPE') {
-        scrapeStartEpoch++;
-        isScraping = false;
-        setActiveScrapeRunToken(null).catch(() => {});
-        chrome.storage.local.set({ isScraping: false });
-        if (currentTabId) chrome.tabs.sendMessage(currentTabId, { action: 'ABORT_SCRAPE' });
-        sendResponse({ status: 'stopped' });
-        return false;
+        stopScrapeRun('sync').then(sendResponse).catch((error) => {
+            sendResponse({ status: 'error', error: error.message || 'Failed to stop sync.' });
+        });
+        return true;
     }
 
     if (request.action === 'START_R2_BACKUP') {
-        if (isScraping) {
-            sendResponse({ status: 'error', error: 'Scraper is already running.' });
-            return false;
-        }
         (async () => {
             const config = await getCloudConfig();
             const initMessage = buildR2BackupInitMessageForConfig(request, config);
             log(initMessage.mode === 'canary' ? 'Starting R2 Canary Backup...' : 'Starting Full R2 Media Backup...');
             sendResponse(await initializeScrapeInActiveTab(initMessage, { backup: true }));
         })().catch((e) => {
-            if (isR2Backup) isR2Backup = false;
-            if (isScraping) isScraping = false;
-            chrome.storage.local.set({ isScraping: false, isR2Backup: false }).catch(() => { });
             sendResponse({ status: 'error', error: e.message });
         });
         return true;
     }
 
     if (request.action === 'STOP_R2_BACKUP') {
-        scrapeStartEpoch++;
-        isR2Backup = false;
-        isScraping = false;
-        setActiveScrapeRunToken(null).catch(() => {});
-        chrome.storage.local.set({ isScraping: false, isR2Backup: false });
-        if (currentTabId) chrome.tabs.sendMessage(currentTabId, { action: 'ABORT_R2_BACKUP' });
-        sendResponse({ status: 'stopped' });
-        return false;
+        stopScrapeRun('r2_backup').then(sendResponse).catch((error) => {
+            sendResponse({ status: 'error', error: error.message || 'Failed to stop backup.' });
+        });
+        return true;
     }
 
     if (request.action === 'R2_BACKUP_UPLOAD') {
@@ -2014,29 +2278,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'R2_BACKUP_PROGRESS') {
-        chrome.runtime.sendMessage({
-            action: 'UPDATE_R2_BACKUP_PROGRESS',
-            stats: request.stats
-        }).catch(() => {});
-        sendResponse({ status: 'ok' });
-        return false;
+        handleR2BackupProgress(request, sender).then(sendResponse).catch(() => {
+            sendResponse({ status: 'ignored' });
+        });
+        return true;
     }
 
     if (request.action === 'R2_BACKUP_COMPLETE') {
-        isR2Backup = false;
-        isScraping = false;
-        setActiveScrapeRunToken(null).catch(() => {});
-        chrome.storage.local.set({ isScraping: false, isR2Backup: false });
-        const stats = request.stats || {};
-        const completed = isR2BackupCompletionSuccessful(stats);
-        const statusLabel = getR2BackupCompletionStatusLabel(stats);
-        log(`R2 Backup ${statusLabel}. Uploaded: ${stats.uploaded || 0}, Already present: ${stats.alreadyPresent || 0}, Queued: ${stats.queued || 0}, Errors: ${stats.errors || 0}`, completed ? 'success' : 'warning');
-        chrome.runtime.sendMessage({
-            action: 'R2_BACKUP_DONE',
-            stats: stats
-        }).catch(() => {});
-        sendResponse({ status: 'ok' });
-        return false;
+        completeScrapeRun(request, sender, 'r2_backup').then(sendResponse).catch(() => {
+            sendResponse({ status: 'ignored' });
+        });
+        return true;
+    }
+
+    if (request.action === 'SCRAPE_COMPLETE') {
+        completeScrapeRun(request, sender, 'sync').then(sendResponse).catch(() => {
+            sendResponse({ status: 'ignored' });
+        });
+        return true;
     }
 
     if (request.action === 'VALIDATE_CLOUD_CONFIG') {
@@ -2062,7 +2321,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'VALIDATE_SCRAPE_RESUME') {
-        validateScrapeResume(request.runToken).then((valid) => sendResponse({ valid })).catch(() => {
+        validateScrapeResume(request, sender?.tab?.id ?? null).then((valid) => sendResponse({ valid })).catch(() => {
             sendResponse({ valid: false });
         });
         return true;
@@ -2267,10 +2526,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
 });
 
+async function getActiveLeaseForTabEvent(tabId, tab = {}) {
+    return enqueueScrapeLeaseOperation(async () => {
+        const lease = activeScrapeLease;
+        if (lease?.status !== 'active') return null;
+        if (tabId !== lease.tabId && tab?.openerTabId !== lease.tabId) return null;
+        const stored = await chrome.storage.local.get([
+            'scraperState',
+            'scrapeRunToken',
+            'scrapeRunEpoch',
+            'isScraping',
+            'isR2Backup'
+        ]);
+        return localRunMatchesLease(stored, lease) ? { ...lease } : null;
+    });
+}
+
 // --- NEW TAB INTERCEPTOR ---
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
-    const stored = await chrome.storage.local.get(['isScraping']);
-    if (!stored.isScraping) return;
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    const lease = await getActiveLeaseForTabEvent(tabId, tab);
+    if (!lease) return;
 
     if (changeInfo.url) {
         const url = changeInfo.url;
@@ -2838,10 +3113,11 @@ if (typeof module !== 'undefined') {
         handleDownloadFilename,
         initializeBackgroundState,
         initializeScrapeInActiveTab,
+        ensureScrapeLeaseHydrated,
         isGrokSavedUrl,
         isR2BackupCompletionSuccessful,
         queueChromeDownload,
-        setActiveScrapeRunToken,
+        stopScrapeRun,
         validateScrapeResume,
         persistQueuedBackupProcessedId,
         persistQueuedBackupProcessedIdAfterSuccess,

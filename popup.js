@@ -133,8 +133,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     stopBtn.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ action: 'STOP_SCRAPE' }, () => {
-            setRunningState(false);
+        setStoppingState();
+        chrome.runtime.sendMessage({ action: 'STOP_SCRAPE' }, (response) => {
+            if (response?.status === 'stopped') {
+                setRunningState(false);
+            } else {
+                setRunningState(true);
+                addLog(response?.error || 'Failed to stop sync.', 'error');
+            }
         });
     });
 
@@ -363,12 +369,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     r2BackupStopBtn.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ action: 'STOP_R2_BACKUP' }, () => {
-            cloudMediaCanaryBtn.disabled = false;
-            cloudMediaBackupBtn.disabled = false;
-            r2BackupStopBtn.style.display = 'none';
-            r2BackupStatus.textContent = 'Stopped';
-            addLog('Backup stopped by user', 'warning');
+        cloudMediaCanaryBtn.disabled = true;
+        cloudMediaBackupBtn.disabled = true;
+        r2BackupStopBtn.disabled = true;
+        r2BackupStatus.textContent = 'Stopping...';
+        chrome.runtime.sendMessage({ action: 'STOP_R2_BACKUP' }, (response) => {
+            r2BackupStopBtn.disabled = false;
+            if (response?.status === 'stopped') {
+                cloudMediaCanaryBtn.disabled = false;
+                cloudMediaBackupBtn.disabled = false;
+                r2BackupStopBtn.style.display = 'none';
+                r2BackupStatus.textContent = 'Stopped';
+                addLog('Backup stopped by user', 'warning');
+            } else {
+                r2BackupStatus.textContent = 'Running...';
+                addLog(response?.error || 'Failed to stop backup.', 'error');
+            }
         });
     });
 
@@ -405,6 +421,12 @@ document.addEventListener('DOMContentLoaded', () => {
         startBtn.disabled = isRunning;
         stopBtn.disabled = !isRunning;
         statusText.textContent = isRunning ? 'Scanning timeline...' : 'Idle';
+    }
+
+    function setStoppingState() {
+        startBtn.disabled = true;
+        stopBtn.disabled = true;
+        statusText.textContent = 'Stopping...';
     }
 
     function renderLogs(logs) {

@@ -916,6 +916,7 @@ describe('content processed ID mutation messages', () => {
         const scraper = Object.create(GrokScraper.prototype);
         scraper.state = { isRunning: true };
         scraper.runToken = 'run-1';
+        scraper.runEpoch = 1;
         scraper.processedIds = new Set();
         scraper.handleExtensionContextInvalidated = jest.fn();
 
@@ -2069,8 +2070,18 @@ describe('Grok backup canary flow', () => {
         scraper.log = jest.fn();
         scraper.determineModeAndExecute = jest.fn();
 
-        const firstStart = scraper.startBackupMode({ mode: 'canary', limit: 1 });
-        const secondStart = scraper.startBackupMode({ mode: 'canary', limit: 1 });
+        const firstStart = scraper.startBackupMode({
+            mode: 'canary',
+            limit: 1,
+            runToken: 'run-1',
+            runEpoch: 1
+        });
+        const secondStart = scraper.startBackupMode({
+            mode: 'canary',
+            limit: 1,
+            runToken: 'run-1',
+            runEpoch: 1
+        });
 
         expect(chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
         expect(scraper.log).toHaveBeenCalledWith('R2 Backup already running or starting.', 'warning');
@@ -2084,13 +2095,76 @@ describe('Grok backup canary flow', () => {
         expect(scraper.state.isRunning).toBe(true);
     });
 
+    test('Stop during deferred R2 INIT prevents the pending lease from starting', async () => {
+        let resolveValidation;
+        const validationPromise = new Promise((resolve) => {
+            resolveValidation = resolve;
+        });
+        global.chrome = {
+            runtime: {
+                sendMessage: jest.fn((message, callback) => {
+                    if (message.action === 'VALIDATE_CLOUD_CONFIG') validationPromise.then(callback);
+                    return Promise.resolve();
+                })
+            },
+            storage: {
+                local: {
+                    set: jest.fn(() => Promise.resolve())
+                }
+            }
+        };
+        const scraper = Object.create(GrokScraper.prototype);
+        scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
+        scraper.backupOptions = { mode: 'full', limit: null, options: {} };
+        scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        scraper.getCurrentSurface = jest.fn(() => 'saved_gallery');
+        scraper.log = jest.fn();
+        scraper.determineModeAndExecute = jest.fn();
+
+        const start = scraper.startBackupMode({
+            mode: 'full',
+            runToken: 'pending-backup',
+            runEpoch: 9
+        });
+        await Promise.resolve();
+        const stop = scraper.stopBackupMode('stopped', {
+            notifyBackground: false,
+            expectedRunToken: 'pending-backup',
+            expectedRunEpoch: 9
+        });
+
+        await expect(stop).resolves.toEqual({ status: 'stopped' });
+        resolveValidation({ valid: true });
+        await expect(start).resolves.toEqual({
+            status: 'error',
+            surface: 'saved_gallery',
+            error: 'Start was cancelled.'
+        });
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
+        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
+            scraperState: 'idle',
+            scrapeRunToken: null,
+            scrapeRunEpoch: null,
+            scrapeNavigation: null,
+            currentItemId: null
+        }));
+    });
+
     test('starts hard-capped canary from page-origin canary command', () => {
+        global.chrome = {
+            runtime: {
+                id: 'extension-id',
+                sendMessage: jest.fn(() => Promise.resolve())
+            }
+        };
         const scraper = Object.create(GrokScraper.prototype);
         scraper.startBackupMode = jest.fn();
 
         scraper.handlePageCommand({ action: 'INIT_R2_CANARY' });
 
-        expect(scraper.startBackupMode).toHaveBeenCalledWith({
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            action: 'START_R2_BACKUP',
             mode: 'canary',
             limit: 1,
             options: { stopAfterMediaAttempt: true }
@@ -2111,6 +2185,8 @@ describe('Grok backup canary flow', () => {
         };
         const scraper = Object.create(GrokScraper.prototype);
         scraper.state = { isRunning: true, currentIndex: 0, mode: 'DETAIL' };
+        scraper.runToken = 'run-1';
+        scraper.runEpoch = 1;
         scraper.backupMode = true;
         scraper.backupOptions = { mode: 'canary', limit: 1, options: { stopAfterMediaAttempt: true } };
         scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };

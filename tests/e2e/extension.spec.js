@@ -106,6 +106,7 @@ async function setupMockSavedAgentSync(page, {
     mediaUuids,
     responseByAction,
     runToken,
+    runEpoch = 1,
     agentMedia = true,
     agentMediaMode = 'exact_with_decoy',
     stopAfterNavigationClear = true,
@@ -116,6 +117,7 @@ async function setupMockSavedAgentSync(page, {
         mediaUuids,
         responseByAction,
         runToken,
+        runEpoch,
         agentMedia,
         agentMediaMode,
         stopAfterNavigationClear,
@@ -126,7 +128,7 @@ async function setupMockSavedAgentSync(page, {
         const { scraper } = window.__gptE2e;
         scraper.Config = { actionWait: 0, navWait: 0, surfaceWait: 100, historyWait: 100 };
         scraper.sleep = () => Promise.resolve();
-        scraper.createRunToken = () => runToken;
+        window.__gptE2eRunLease = { runToken, runEpoch };
 
         const savedUrl = 'https://grok.com/imagine/saved';
         const buildImage = (mediaUuid, id) => {
@@ -252,6 +254,7 @@ async function setupMockSavedAgentSync(page, {
         mediaUuids,
         responseByAction,
         runToken,
+        runEpoch,
         agentMedia,
         agentMediaMode,
         stopAfterNavigationClear,
@@ -740,7 +743,18 @@ test.describe('Grok Power Tools E2E', () => {
         await page.waitForTimeout(50);
 
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
-        expect(runtimeMessages).toContainEqual(expect.objectContaining({
+        expect(runtimeMessages).toContainEqual({
+            action: 'START_R2_BACKUP',
+            mode: 'canary',
+            limit: 1,
+            options: { stopAfterMediaAttempt: true },
+            acceptance: {
+                runId: 'run-20260609-001',
+                correlationId: 'corr-1',
+                keyPrefix: 'acceptance/run-20260609-001'
+            }
+        });
+        expect(runtimeMessages).not.toContainEqual(expect.objectContaining({
             action: 'VALIDATE_CLOUD_CONFIG'
         }));
     });
@@ -762,10 +776,11 @@ test.describe('Grok Power Tools E2E', () => {
             runToken: 'e2e-start-sync'
         });
 
-        await expect(await page.evaluate(() => window.__gptE2e.scraper.start())).toEqual({
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease))).toEqual({
             status: 'started',
             surface: 'saved_gallery',
-            runToken: 'e2e-start-sync'
+            runToken: 'e2e-start-sync',
+            runEpoch: 1
         });
 
         await expect.poll(async () => page.evaluate(() => ({
@@ -871,10 +886,11 @@ test.describe('Grok Power Tools E2E', () => {
             agentMediaMode: 'ambiguous'
         });
 
-        await expect(await page.evaluate(() => window.__gptE2e.scraper.start())).toEqual({
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease))).toEqual({
             status: 'started',
             surface: 'saved_gallery',
-            runToken: 'e2e-agent-ambiguity'
+            runToken: 'e2e-agent-ambiguity',
+            runEpoch: 1
         });
         await expect.poll(async () => page.evaluate(() => ({
             scraperState: window.__chromeStorageLocalState.scraperState,
@@ -921,10 +937,11 @@ test.describe('Grok Power Tools E2E', () => {
             bridgeResponse: { dataUrl: blobDataUrl, size: 18, type: 'image/jpeg' }
         });
 
-        await expect(await page.evaluate(() => window.__gptE2e.scraper.start())).toEqual({
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease))).toEqual({
             status: 'started',
             surface: 'saved_gallery',
-            runToken: 'e2e-cloud-only'
+            runToken: 'e2e-cloud-only',
+            runEpoch: 1
         });
 
         await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([savedUrl]);
@@ -969,7 +986,7 @@ test.describe('Grok Power Tools E2E', () => {
             bridgeResponse: { error: 'authenticated fetch denied' }
         });
 
-        await page.evaluate(() => window.__gptE2e.scraper.start());
+        await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
         await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.scraperState)).toBe('idle');
         expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
         expect(await page.evaluate(() => window.__chromeRuntimeMessages)).not.toContainEqual(
@@ -994,7 +1011,7 @@ test.describe('Grok Power Tools E2E', () => {
             bridgeResponse: { dataUrl: blobDataUrl, size: 15, type: 'image/jpeg' }
         });
 
-        await page.evaluate(() => window.__gptE2e.scraper.start());
+        await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
         await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.scraperState)).toBe('idle');
         expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
         expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual(expect.objectContaining({
@@ -1023,12 +1040,14 @@ test.describe('Grok Power Tools E2E', () => {
         });
 
         await expect(page.evaluate((acceptance) => window.__gptE2e.scraper.startBackupMode({
+            ...window.__gptE2eRunLease,
             mode: 'full',
             acceptance
         }), acceptance)).resolves.toEqual({
             status: 'started',
             surface: 'saved_gallery',
-            runToken: 'e2e-r2-backup'
+            runToken: 'e2e-r2-backup',
+            runEpoch: 1
         });
         await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toContain(backupProcessedId);
 
@@ -1082,11 +1101,13 @@ test.describe('Grok Power Tools E2E', () => {
         });
 
         await expect(page.evaluate(() => window.__gptE2e.scraper.startBackupMode({
+            ...window.__gptE2eRunLease,
             mode: 'full'
         }))).resolves.toEqual({
             status: 'started',
             surface: 'saved_gallery',
-            runToken: 'e2e-r2-upload-error'
+            runToken: 'e2e-r2-upload-error',
+            runEpoch: 1
         });
         await expect.poll(async () => page.evaluate(() => ({
             scraperState: window.__chromeStorageLocalState.scraperState,
@@ -1295,10 +1316,11 @@ test.describe('Grok Power Tools E2E', () => {
             };
         });
 
-        await expect(await page.evaluate(() => window.__gptE2e.scraper.start())).toEqual({
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease))).toEqual({
             status: 'started',
             surface: 'saved_gallery',
-            runToken: 'e2e-stop-agent-wait'
+            runToken: 'e2e-stop-agent-wait',
+            runEpoch: 1
         });
         await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.scraperState)).toBe('idle');
 

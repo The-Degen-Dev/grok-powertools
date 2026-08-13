@@ -1504,24 +1504,35 @@ class GrokOverlay {
             this.retryManager.stopQualityRepeat();
         });
 
-        this.el.querySelector('#gptScrapeDownloadBtn').addEventListener('click', () => {
+        this.el.querySelector('#gptScrapeDownloadBtn').addEventListener('click', async () => {
             const btn = this.el.querySelector('#gptScrapeDownloadBtn');
             const stopBtn = this.el.querySelector('#gptScrapeStopBtn');
             const status = this.el.querySelector('#gptScrapeStatus');
             btn.style.display = 'none';
             stopBtn.style.display = '';
             status.textContent = 'Starting gallery scan...';
-            // Use the existing scraper which scrolls, clicks into items, and downloads
-            this.scraper.start();
+            const result = await safeChromeRuntimeSendMessage({ action: 'START_SCRAPE' }, 'start overlay scrape');
+            if (result.invalidated || result.value?.status !== 'started') {
+                btn.style.display = '';
+                stopBtn.style.display = 'none';
+                status.textContent = result.value?.error || EXTENSION_CONTEXT_REFRESHED_MESSAGE;
+            }
         });
-        this.el.querySelector('#gptScrapeStopBtn').addEventListener('click', () => {
+        this.el.querySelector('#gptScrapeStopBtn').addEventListener('click', async () => {
             const btn = this.el.querySelector('#gptScrapeDownloadBtn');
             const stopBtn = this.el.querySelector('#gptScrapeStopBtn');
             const status = this.el.querySelector('#gptScrapeStatus');
-            btn.style.display = '';
-            stopBtn.style.display = 'none';
-            status.textContent = 'Stopped.';
-            this.scraper.stop();
+            btn.style.display = 'none';
+            stopBtn.style.display = '';
+            status.textContent = 'Stopping...';
+            const result = await safeChromeRuntimeSendMessage({ action: 'STOP_SCRAPE' }, 'stop overlay scrape');
+            if (!result.invalidated && result.value?.status === 'stopped') {
+                btn.style.display = '';
+                stopBtn.style.display = 'none';
+                status.textContent = 'Stopped.';
+                return;
+            }
+            status.textContent = result.value?.error || EXTENSION_CONTEXT_REFRESHED_MESSAGE;
         });
 
         const bindInput = (id, key, type = 'int') => {
@@ -4291,7 +4302,9 @@ class GrokScraper {
         this._backupVisited = new Set();
         this._runVisited = new Set();
         this.runToken = null;
+        this.runEpoch = null;
         this.pendingNavigation = null;
+        this._runStateWriteQueue = Promise.resolve();
         this.Config = { actionWait: 600, navWait: 800, surfaceWait: 10000, historyWait: 1500 };
         this.init();
     }
@@ -4302,24 +4315,64 @@ class GrokScraper {
         this.backupMode = false;
         this.state.isRunning = false;
         this.runToken = null;
+        this.runEpoch = null;
         this.pendingNavigation = null;
         showExtensionContextRefreshed(this.overlay);
         return true;
+    }
+
+    ensureRunStateWriteQueue() {
+        if (!this._runStateWriteQueue || typeof this._runStateWriteQueue.then !== 'function') {
+            this._runStateWriteQueue = Promise.resolve();
+        }
+        return this._runStateWriteQueue;
+    }
+
+    matchesRunLease(runToken, runEpoch) {
+        return Boolean(
+            this.state.isRunning
+            && runToken
+            && Number.isInteger(runEpoch)
+            && this.runToken === runToken
+            && this.runEpoch === runEpoch
+        );
+    }
+
+    queueRunStateWrite(values, operation, guard = null) {
+        const write = this.ensureRunStateWriteQueue().then(async () => {
+            if (guard && !this.matchesRunLease(guard.runToken, guard.runEpoch)) {
+                return { ok: false, invalidated: false, skipped: true, operation };
+            }
+            return safeChromeStorageSet('local', values, operation);
+        });
+        this._runStateWriteQueue = write.catch(() => {});
+        return write;
+    }
+
+    invalidateRunMemory() {
+        this._backupStartPending = false;
+        this.backupMode = false;
+        this.backupOptions = { mode: 'full', limit: null, options: {} };
+        this.state.isRunning = false;
+        this.state.mode = 'IDLE';
+        this.state.currentIndex = 0;
+        this.runToken = null;
+        this.runEpoch = null;
+        this.pendingNavigation = null;
+        this._runVisited = new Set();
+        this._backupVisited = new Set();
     }
 
     async clearStaleRunState(stopReason = 'stale_session') {
         const backupState = this.backupMode
             ? { r2BackupState: { isRunning: false, ...this.backupStats, stopReason } }
             : {};
-        this._backupStartPending = false;
-        this.backupMode = false;
-        this.state.isRunning = false;
-        this.runToken = null;
-        this.pendingNavigation = null;
-        const result = await safeChromeStorageSet('local', {
+        this.invalidateRunMemory();
+        const result = await this.queueRunStateWrite({
             scraperState: 'idle',
             currentIndex: 0,
             scrapeRunToken: null,
+            scrapeRunEpoch: null,
             scrapeNavigation: null,
             currentItemId: null,
             scrapeBackupOptions: null,
@@ -4337,6 +4390,7 @@ class GrokScraper {
             'currentIndex',
             'processedIds',
             'scrapeRunToken',
+            'scrapeRunEpoch',
             'scrapeNavigation',
             'scrapeBackupOptions',
             'isR2Backup',
@@ -4354,6 +4408,7 @@ class GrokScraper {
         this.state.isRunning = stored.scraperState === 'running';
         this.state.currentIndex = stored.currentIndex || 0;
         this.runToken = stored.scrapeRunToken || null;
+        this.runEpoch = Number.isInteger(stored.scrapeRunEpoch) ? stored.scrapeRunEpoch : null;
         this.pendingNavigation = stored.scrapeNavigation || null;
         this.backupMode = stored.isR2Backup === true;
         if (this.backupMode) {
@@ -4365,10 +4420,12 @@ class GrokScraper {
         }
 
         if (this.state.isRunning) {
-            const validationResult = this.runToken
+            const validationResult = this.runToken && Number.isInteger(this.runEpoch)
                 ? await safeChromeRuntimeSendMessage({
                     action: 'VALIDATE_SCRAPE_RESUME',
-                    runToken: this.runToken
+                    runToken: this.runToken,
+                    runEpoch: this.runEpoch,
+                    kind: this.backupMode ? 'r2_backup' : 'sync'
                 }, 'validate scrape resume')
                 : { invalidated: false, value: { valid: false } };
             if (validationResult.invalidated) {
@@ -4404,7 +4461,7 @@ class GrokScraper {
 
         if (this.state.isRunning) {
             console.log(`Resuming Scraper. Index: ${this.state.currentIndex}`);
-            Promise.resolve(this.determineModeAndExecute(this.runToken)).catch((error) => {
+            Promise.resolve(this.determineModeAndExecute(this.runToken, this.runEpoch)).catch((error) => {
                 if (this.state.isRunning) this.failRun(error.message || 'Scrape resume failed.', 'resume_failed');
             });
         }
@@ -4415,21 +4472,33 @@ class GrokScraper {
     setupListeners() {
         safeChromeAddListener(() => chrome.runtime.onMessage, (request, sender, sendResponse) => {
             if (request.action === 'INIT_SCRAPE') {
-                this.start().then(sendResponse, (error) => {
+                this.start(request).then(sendResponse, (error) => {
                     sendResponse({ status: 'error', surface: this.getCurrentSurface(), error: error.message });
                 });
                 return true;
             } else if (request.action === 'ABORT_SCRAPE') {
-                this.stop();
-                sendResponse({ status: 'stopped' });
+                this.stop('stopped', {
+                    notifyBackground: false,
+                    expectedRunToken: request.runToken,
+                    expectedRunEpoch: request.runEpoch
+                }).then(sendResponse, (error) => {
+                    sendResponse({ status: 'error', error: error.message });
+                });
+                return true;
             } else if (request.action === 'INIT_R2_BACKUP') {
                 this.startBackupMode(request).then(sendResponse, (error) => {
                     sendResponse({ status: 'error', surface: this.getCurrentSurface(), error: error.message });
                 });
                 return true;
             } else if (request.action === 'ABORT_R2_BACKUP') {
-                this.stopBackupMode();
-                sendResponse({ status: 'stopped' });
+                this.stopBackupMode('stopped', {
+                    notifyBackground: false,
+                    expectedRunToken: request.runToken,
+                    expectedRunEpoch: request.runEpoch
+                }).then(sendResponse, (error) => {
+                    sendResponse({ status: 'error', error: error.message });
+                });
+                return true;
             } else if (request.action === 'RESET_PROCESSED_IDS') {
                 this.processedIds = new Set();
                 console.log('Processed IDs cleared in-memory.');
@@ -4450,8 +4519,8 @@ class GrokScraper {
             const stopSignal = shouldStopScraperForStorageChanges(changes, this.backupMode);
             if (stopSignal && this.state.isRunning) {
                 console.log('GrokScraper: stop signal received via storage.onChanged');
-                if (this.backupMode) this.stopBackupMode();
-                else this.stop();
+                if (this.backupMode) this.stopBackupMode('stopped', { notifyBackground: false });
+                else this.stop('stopped', { notifyBackground: false });
             }
         }, 'listen for scraper stop signals');
 
@@ -4468,15 +4537,15 @@ class GrokScraper {
         const backupOptions = getR2BackupPageCommandOptions(command);
 
         if (backupOptions) {
-            Promise.resolve(this.startBackupMode(backupOptions)).catch(() => {});
+            safeChromeRuntimeSendMessageSoon({ action: 'START_R2_BACKUP', ...backupOptions }, 'start page-command R2 backup');
         } else if (action === 'INIT_R2_BACKUP') {
             console.warn('[GrokScraper] ignored page-origin R2 backup command without canary mode');
         } else if (action === 'ABORT_R2_BACKUP') {
-            this.stopBackupMode();
+            safeChromeRuntimeSendMessageSoon({ action: 'STOP_R2_BACKUP' }, 'stop page-command R2 backup');
         } else if (action === 'INIT_SCRAPE') {
-            Promise.resolve(this.start()).catch(() => {});
+            safeChromeRuntimeSendMessageSoon({ action: 'START_SCRAPE' }, 'start page-command scrape');
         } else if (action === 'ABORT_SCRAPE') {
-            this.stop();
+            safeChromeRuntimeSendMessageSoon({ action: 'STOP_SCRAPE' }, 'stop page-command scrape');
         } else if (action === 'RESET_PROCESSED_IDS') {
             this.processedIds = new Set();
             safeChromeRuntimeSendMessageSoon({ action: 'PROCESSED_IDS_RESET' }, 'reset processed IDs');
@@ -4499,13 +4568,8 @@ class GrokScraper {
         return detectGrokScrapeSurface(document, window.location);
     }
 
-    createRunToken() {
-        return `scrape_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    }
-
-    isRunActive(runToken = this.runToken) {
-        if (!runToken) return this.state.isRunning && !this.runToken;
-        return this.state.isRunning && this.runToken === runToken;
+    isRunActive(runToken = this.runToken, runEpoch = this.runEpoch) {
+        return this.matchesRunLease(runToken, runEpoch);
     }
 
     getGalleryScroller() {
@@ -4535,7 +4599,7 @@ class GrokScraper {
             .join('|');
     }
 
-    async start() {
+    async start(options = {}) {
         const surface = this.getCurrentSurface();
         if (surface !== SCRAPE_SURFACES.savedGallery) {
             const error = 'Open Grok Imagine Saved before starting sync.';
@@ -4545,38 +4609,54 @@ class GrokScraper {
         if (this.state.isRunning) {
             return { status: 'error', surface, error: 'Sync is already running.' };
         }
+        const runToken = typeof options.runToken === 'string' ? options.runToken : '';
+        const runEpoch = Number.isInteger(options.runEpoch) ? options.runEpoch : null;
+        if (!runToken || runEpoch === null) {
+            return { status: 'error', surface, error: 'Background run lease is missing.' };
+        }
 
-        const runToken = this.createRunToken();
         this.log('Scraping initialized.', 'success');
-        const result = await safeChromeStorageSet('local', {
+        this.state.isRunning = true;
+        this.state.currentIndex = 0;
+        this.runToken = runToken;
+        this.runEpoch = runEpoch;
+        this.pendingNavigation = null;
+        this.backupMode = false;
+        this._runVisited = new Set();
+        const result = await this.queueRunStateWrite({
             scraperState: 'running',
             currentIndex: 0,
             scrapeRunToken: runToken,
+            scrapeRunEpoch: runEpoch,
             scrapeBackupOptions: null
-        }, 'start scrape');
+        }, 'start scrape', { runToken, runEpoch });
         if (result.invalidated) {
             this.handleExtensionContextInvalidated();
             return { status: 'error', surface, error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
         }
-        this.state.isRunning = true;
-        this.state.currentIndex = 0;
-        this.runToken = runToken;
-        this.pendingNavigation = null;
-        this._runVisited = new Set();
-        Promise.resolve(this.determineModeAndExecute(runToken)).catch((error) => {
-            if (this.isRunActive(runToken)) this.failRun(error.message || 'Sync failed to start.', 'start_failed');
+        if (result.skipped || !this.isRunActive(runToken, runEpoch)) {
+            return { status: 'error', surface, error: 'Start was cancelled.' };
+        }
+        Promise.resolve(this.determineModeAndExecute(runToken, runEpoch)).catch((error) => {
+            if (this.isRunActive(runToken, runEpoch)) this.failRun(error.message || 'Sync failed to start.', 'start_failed');
         });
-        return { status: 'started', surface, runToken };
+        return { status: 'started', surface, runToken, runEpoch };
     }
 
-    async stop(stopReason = 'stopped') {
+    async stop(stopReason = 'stopped', options = {}) {
+        const previousToken = this.runToken;
+        const previousEpoch = this.runEpoch;
+        if (
+            options.expectedRunToken
+            && (previousToken !== options.expectedRunToken || previousEpoch !== options.expectedRunEpoch)
+        ) return { status: 'ignored' };
         console.log('Stopping scrape run.');
-        this.state.isRunning = false;
-        this.runToken = null;
-        this.pendingNavigation = null;
-        const result = await safeChromeStorageSet('local', {
+        this.invalidateRunMemory();
+        const result = await this.queueRunStateWrite({
             scraperState: 'idle',
+            currentIndex: 0,
             scrapeRunToken: null,
+            scrapeRunEpoch: null,
             scrapeNavigation: null,
             currentItemId: null,
             scrapeBackupOptions: null,
@@ -4586,9 +4666,19 @@ class GrokScraper {
         }, 'stop scrape');
         if (result.invalidated) {
             this.handleExtensionContextInvalidated();
-            return;
+            return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
         }
         this.log('Scraping stopped.', 'neutral');
+        if (options.notifyBackground !== false && previousToken && Number.isInteger(previousEpoch)) {
+            await safeChromeRuntimeSendMessage({
+                action: 'SCRAPE_COMPLETE',
+                runToken: previousToken,
+                runEpoch: previousEpoch,
+                kind: 'sync',
+                stats: { stopReason }
+            }, 'complete scrape');
+        }
+        return { status: 'stopped' };
     }
 
     async startBackupMode(options = {}) {
@@ -4602,8 +4692,15 @@ class GrokScraper {
             this.log('R2 Backup already running or starting.', 'warning');
             return { status: 'error', surface, error: 'R2 Backup is already running or starting.' };
         }
+        const runToken = typeof options.runToken === 'string' ? options.runToken : '';
+        const runEpoch = Number.isInteger(options.runEpoch) ? options.runEpoch : null;
+        if (!runToken || runEpoch === null) {
+            return { status: 'error', surface, error: 'Background run lease is missing.' };
+        }
 
         this._backupStartPending = true;
+        this.runToken = runToken;
+        this.runEpoch = runEpoch;
         // Validate cloud config before starting R2 backup
         try {
             const validationResult = await safeChromeRuntimeSendMessage({ action: 'VALIDATE_CLOUD_CONFIG' }, 'validate cloud config');
@@ -4615,13 +4712,18 @@ class GrokScraper {
             if (!validation?.valid) {
                 this.log(`R2 Backup aborted: ${validation?.error || 'Cloud config invalid.'}`, 'error');
                 console.error('R2 Backup config validation failed:', validation?.error);
+                if (this.runToken === runToken && this.runEpoch === runEpoch) this.invalidateRunMemory();
                 return { status: 'error', surface, error: validation?.error || 'Cloud config invalid.' };
             }
         } catch {
             this.log('R2 Backup aborted: Could not validate cloud config.', 'error');
+            if (this.runToken === runToken && this.runEpoch === runEpoch) this.invalidateRunMemory();
             return { status: 'error', surface, error: 'Could not validate cloud config.' };
         } finally {
             this._backupStartPending = false;
+        }
+        if (this.runToken !== runToken || this.runEpoch !== runEpoch) {
+            return { status: 'error', surface, error: 'Start was cancelled.' };
         }
 
         this.backupMode = true;
@@ -4634,38 +4736,45 @@ class GrokScraper {
         this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0, startedAt: Date.now() };
         this._backupVisited = new Set();
         this._runVisited = new Set();
-        const runToken = this.createRunToken();
         this.state.isRunning = true;
         this.state.currentIndex = 0;
-        this.runToken = runToken;
         this.pendingNavigation = null;
-        const startResult = await safeChromeStorageSet('local', {
+        const startResult = await this.queueRunStateWrite({
             scraperState: 'running',
             currentIndex: 0,
             scrapeRunToken: runToken,
+            scrapeRunEpoch: runEpoch,
             scrapeBackupOptions: this.backupOptions,
             r2BackupState: { isRunning: true, ...this.backupStats }
-        }, 'start R2 backup');
+        }, 'start R2 backup', { runToken, runEpoch });
         if (startResult.invalidated) {
             this.handleExtensionContextInvalidated();
             return { status: 'error', surface, error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
         }
+        if (startResult.skipped || !this.isRunActive(runToken, runEpoch)) {
+            return { status: 'error', surface, error: 'Start was cancelled.' };
+        }
         this.log(this.backupOptions.mode === 'canary' ? 'R2 Canary Backup started.' : 'R2 Full Media Backup started.', 'success');
-        Promise.resolve(this.determineModeAndExecute(runToken)).catch((error) => {
-            if (this.isRunActive(runToken)) this.failRun(error.message || 'R2 Backup failed to start.', 'start_failed');
+        Promise.resolve(this.determineModeAndExecute(runToken, runEpoch)).catch((error) => {
+            if (this.isRunActive(runToken, runEpoch)) this.failRun(error.message || 'R2 Backup failed to start.', 'start_failed');
         });
-        return { status: 'started', surface, runToken };
+        return { status: 'started', surface, runToken, runEpoch };
     }
 
-    async stopBackupMode(stopReason = 'stopped') {
-        this.backupMode = false;
-        this.state.isRunning = false;
-        this.runToken = null;
-        this.pendingNavigation = null;
+    async stopBackupMode(stopReason = 'stopped', options = {}) {
+        const previousToken = this.runToken;
+        const previousEpoch = this.runEpoch;
+        if (
+            options.expectedRunToken
+            && (previousToken !== options.expectedRunToken || previousEpoch !== options.expectedRunEpoch)
+        ) return { status: 'ignored' };
         const finalStats = { ...this.backupStats, stopReason };
-        const stopResult = await safeChromeStorageSet('local', {
+        this.invalidateRunMemory();
+        const stopResult = await this.queueRunStateWrite({
             scraperState: 'idle',
+            currentIndex: 0,
             scrapeRunToken: null,
+            scrapeRunEpoch: null,
             scrapeNavigation: null,
             currentItemId: null,
             scrapeBackupOptions: null,
@@ -4675,10 +4784,19 @@ class GrokScraper {
         }, 'stop R2 backup');
         if (stopResult.invalidated) {
             this.handleExtensionContextInvalidated();
-            return;
+            return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
         }
         this.log(`R2 Backup stopped. Uploaded: ${this.backupStats.uploaded}, Already present: ${this.backupStats.alreadyPresent || 0}, Queued: ${this.backupStats.queued || 0}, Errors: ${this.backupStats.errors}`, 'neutral');
-        safeChromeRuntimeSendMessageSoon({ action: 'R2_BACKUP_COMPLETE', stats: finalStats }, 'complete R2 backup');
+        if (options.notifyBackground !== false && previousToken && Number.isInteger(previousEpoch)) {
+            await safeChromeRuntimeSendMessage({
+                action: 'R2_BACKUP_COMPLETE',
+                runToken: previousToken,
+                runEpoch: previousEpoch,
+                kind: 'r2_backup',
+                stats: finalStats
+            }, 'complete R2 backup');
+        }
+        return { status: 'stopped' };
     }
 
     async determineModeAndExecute(runToken = this.runToken) {
@@ -4718,15 +4836,19 @@ class GrokScraper {
 
     async persistBackupProgress(runToken = this.runToken) {
         if (!this.backupMode || !this.isRunActive(runToken)) return false;
-        const result = await safeChromeStorageSet('local', {
+        const runEpoch = this.runEpoch;
+        const result = await this.queueRunStateWrite({
             r2BackupState: { isRunning: true, ...this.backupStats }
-        }, 'save R2 backup progress');
+        }, 'save R2 backup progress', { runToken, runEpoch });
         if (result.invalidated) {
             this.handleExtensionContextInvalidated();
             return false;
         }
         safeChromeRuntimeSendMessageSoon({
             action: 'R2_BACKUP_PROGRESS',
+            runToken,
+            runEpoch,
+            kind: 'r2_backup',
             stats: this.backupStats
         }, 'send R2 backup progress');
         return true;
@@ -4744,7 +4866,7 @@ class GrokScraper {
 
     async restorePendingGalleryContext(runToken = this.runToken) {
         const pending = this.pendingNavigation;
-        if (!pending || pending.runToken !== runToken) return;
+        if (!pending || pending.runToken !== runToken || pending.runEpoch !== this.runEpoch) return;
         await this.sleep(300);
         if (!this.isRunActive(runToken) || this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) return;
 
@@ -4757,10 +4879,10 @@ class GrokScraper {
         }
 
         this.pendingNavigation = null;
-        const result = await safeChromeStorageSet('local', {
+        const result = await this.queueRunStateWrite({
             scrapeNavigation: null,
             currentItemId: null
-        }, 'clear completed scrape navigation');
+        }, 'clear completed scrape navigation', { runToken, runEpoch: this.runEpoch });
         if (result.invalidated) this.handleExtensionContextInvalidated();
     }
 
@@ -4873,8 +4995,8 @@ class GrokScraper {
         }
     }
 
-    async processItem(targetItem, cleanId, runToken = this.runToken) {
-        if (!this.isRunActive(runToken)) return;
+    async processItem(targetItem, cleanId, runToken = this.runToken, runEpoch = this.runEpoch) {
+        if (!this.isRunActive(runToken, runEpoch)) return;
         const sourceUrl = targetItem.currentSrc || targetItem.src || '';
         const expectedIdentity = getGrokMediaIdentity(sourceUrl);
         if (!expectedIdentity) {
@@ -4885,6 +5007,7 @@ class GrokScraper {
         const scroller = this.getGalleryScroller();
         const pendingNavigation = {
             runToken,
+            runEpoch,
             currentItemId: cleanId,
             expectedIdentity,
             sourceUrl,
@@ -4894,15 +5017,15 @@ class GrokScraper {
         };
         targetItem.style.outline = "2px solid rgba(29,155,240,0.5)";
         this.log(`Opening item...`);
-        const result = await safeChromeStorageSet('local', {
+        const result = await this.queueRunStateWrite({
             currentItemId: cleanId,
             scrapeNavigation: pendingNavigation
-        }, 'save scrape navigation');
+        }, 'save scrape navigation', { runToken, runEpoch });
         if (result.invalidated) {
             this.handleExtensionContextInvalidated();
             return;
         }
-        if (!this.isRunActive(runToken)) return;
+        if (!this.isRunActive(runToken, runEpoch)) return;
         this.pendingNavigation = pendingNavigation;
         targetItem.click();
         const nextSurface = await this.waitForSurface(
@@ -4949,7 +5072,12 @@ class GrokScraper {
     async executeAgentView(runToken = this.runToken) {
         if (!this.isRunActive(runToken)) return;
         const pending = this.pendingNavigation;
-        if (!pending || pending.runToken !== runToken || !pending.expectedIdentity) {
+        if (
+            !pending
+            || pending.runToken !== runToken
+            || pending.runEpoch !== this.runEpoch
+            || !pending.expectedIdentity
+        ) {
             await this.failRun('Agent Mode opened without a pending Saved media identity.', 'agent_identity_missing');
             return;
         }

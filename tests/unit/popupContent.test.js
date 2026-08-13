@@ -56,3 +56,71 @@ describe('processed ID reset ownership', () => {
         }));
     });
 });
+
+describe('authoritative scrape Stop UI', () => {
+    afterEach(() => {
+        document.documentElement.innerHTML = '<head></head><body></body>';
+        jest.resetModules();
+        jest.clearAllMocks();
+    });
+
+    test('keeps both run controls disabled until the background confirms durable Stop', () => {
+        document.documentElement.innerHTML = fs.readFileSync(path.join(__dirname, '../../popup.html'), 'utf8');
+        let stopCallback;
+        chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message.action === 'STOP_SCRAPE') {
+                stopCallback = callback;
+                return undefined;
+            }
+            if (typeof callback === 'function') callback({ ok: true, state: {} });
+            return Promise.resolve({ ok: true, state: {} });
+        });
+        chrome.storage.local.get.mockImplementation((_keys, callback) => {
+            callback({ isScraping: true });
+        });
+
+        require('../../popup.js');
+        document.dispatchEvent(new Event('DOMContentLoaded'));
+        document.getElementById('stopBtn').click();
+
+        expect(document.getElementById('startBtn').disabled).toBe(true);
+        expect(document.getElementById('stopBtn').disabled).toBe(true);
+        expect(document.getElementById('statusText').textContent).toBe('Stopping...');
+
+        stopCallback({ status: 'stopped' });
+        expect(document.getElementById('startBtn').disabled).toBe(false);
+        expect(document.getElementById('stopBtn').disabled).toBe(true);
+        expect(document.getElementById('statusText').textContent).toBe('Idle');
+    });
+
+    test('keeps R2 controls disabled until the background confirms durable Stop', () => {
+        document.documentElement.innerHTML = fs.readFileSync(path.join(__dirname, '../../popup.html'), 'utf8');
+        let stopCallback;
+        chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            if (message.action === 'STOP_R2_BACKUP') {
+                stopCallback = callback;
+                return undefined;
+            }
+            if (typeof callback === 'function') callback({ ok: true, state: {} });
+            return Promise.resolve({ ok: true, state: {} });
+        });
+        chrome.storage.local.get.mockImplementation((_keys, callback) => {
+            callback({ isR2Backup: true, r2BackupState: { isRunning: true } });
+        });
+
+        require('../../popup.js');
+        document.dispatchEvent(new Event('DOMContentLoaded'));
+        document.getElementById('r2BackupStopBtn').click();
+
+        expect(document.getElementById('cloudMediaCanaryBtn').disabled).toBe(true);
+        expect(document.getElementById('cloudMediaBackupBtn').disabled).toBe(true);
+        expect(document.getElementById('r2BackupStopBtn').disabled).toBe(true);
+        expect(document.getElementById('r2BackupStatus').textContent).toBe('Stopping...');
+
+        stopCallback({ status: 'stopped' });
+        expect(document.getElementById('cloudMediaCanaryBtn').disabled).toBe(false);
+        expect(document.getElementById('cloudMediaBackupBtn').disabled).toBe(false);
+        expect(document.getElementById('r2BackupStopBtn').disabled).toBe(false);
+        expect(document.getElementById('r2BackupStatus').textContent).toBe('Stopped');
+    });
+});
