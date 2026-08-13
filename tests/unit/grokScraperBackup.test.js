@@ -162,6 +162,7 @@ function mockChromeForBackground() {
             onChanged: { addListener: jest.fn() }
         },
         tabs: {
+            onRemoved: { addListener: jest.fn() },
             onUpdated: { addListener: jest.fn() },
             query: jest.fn(),
             sendMessage: jest.fn()
@@ -179,8 +180,19 @@ function cloneJson(value) {
     return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
-function createDurableBackgroundHarness(initialStorage = {}, initialDownloads = {}) {
+function createDeferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+}
+
+function createDurableBackgroundHarness(initialStorage = {}, initialDownloads = {}, initialSession = {}) {
     const storageState = cloneJson(initialStorage);
+    const sessionState = cloneJson(initialSession);
     const downloads = new Map(Object.entries(initialDownloads).map(([id, item]) => [Number(id), cloneJson(item)]));
     const storageListeners = [];
 
@@ -208,6 +220,21 @@ function createDurableBackgroundHarness(initialStorage = {}, initialDownloads = 
         }
         storageListeners.forEach((listener) => listener(changes, 'local'));
     });
+    chromeApi.storage.session = {
+        get: jest.fn(async (keys) => {
+            if (keys == null) return cloneJson(sessionState);
+            const names = Array.isArray(keys) ? keys : [keys];
+            return names.reduce((result, key) => {
+                if (Object.prototype.hasOwnProperty.call(sessionState, key)) {
+                    result[key] = cloneJson(sessionState[key]);
+                }
+                return result;
+            }, {});
+        }),
+        set: jest.fn(async (values) => {
+            Object.assign(sessionState, cloneJson(values));
+        })
+    };
     chromeApi.storage.onChanged.addListener.mockImplementation((listener) => storageListeners.push(listener));
     chromeApi.downloads.search.mockImplementation(async ({ id }) => {
         const item = downloads.get(id);
@@ -265,16 +292,33 @@ async function waitForAssertion(assertion, attempts = 30) {
     throw lastError;
 }
 
-function dispatchRuntimeMessage(listener, request) {
+function dispatchRuntimeMessage(listener, request, sender = {}) {
     let returnValue;
     const response = new Promise((resolve) => {
-        returnValue = listener(request, {}, resolve);
+        returnValue = listener(request, sender, resolve);
     });
     return { response, returnValue };
 }
 
 function mediaBlob(contentType = 'image/jpeg') {
     return new NodeBlob([new Uint8Array([1, 2, 3, 4])], { type: contentType });
+}
+
+function activeScrapeLease({
+    epoch = 7,
+    token = 'active-scrape-run',
+    tabId = 42,
+    kind = 'r2_backup'
+} = {}) {
+    return {
+        version: 1,
+        epoch,
+        token,
+        tabId,
+        kind,
+        status: 'active',
+        startedAt: 1234
+    };
 }
 
 function installR2PresentFetch(sourceUrl, { sourcePromise = null } = {}) {
@@ -908,7 +952,7 @@ describe('content processed ID mutation messages', () => {
     test('checks the active run token before and after a scrape add response', async () => {
         let resolveMutation;
         chrome.runtime.sendMessage.mockImplementation((message) => {
-            if (message.action === 'PROCESSED_IDS_ADD') {
+            if (message.action === 'SCRAPE_PROCESSED_IDS_ADD') {
                 return new Promise((resolve) => { resolveMutation = resolve; });
             }
             return Promise.resolve();
@@ -927,8 +971,11 @@ describe('content processed ID mutation messages', () => {
 
         await expect(persistence).resolves.toBe(false);
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-            action: 'PROCESSED_IDS_ADD',
-            ids: ['media-a']
+            action: 'SCRAPE_PROCESSED_IDS_ADD',
+            ids: ['media-a'],
+            runToken: 'run-1',
+            runEpoch: 1,
+            kind: 'sync'
         });
         expect(scraper.processedIds).toEqual(new Set());
     });
@@ -979,6 +1026,118 @@ describe('native download processed ID lifecycle', () => {
         expect(harness.storageState.pendingDownloadOperations['41']).not.toHaveProperty('sourceUrl');
         expect(JSON.stringify(harness.storageState.pendingDownloadOperations['41'])).not.toContain('?request=');
         expect(harness.storageState.processedIds).toEqual([]);
+    });
+
+    test.each([
+        ['Grok media', mediaUrl],
+        ['non-Grok media', 'https://example.com/file.jpg']
+    ])('leaves unrelated %s downloads untouched during an active scrape', async (_label, url) => {
+        const lease = activeScrapeLease({ kind: 'sync' });
+        const harness = createDurableBackgroundHarness({
+            processedIds: [],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: { mode: 'local_only' },
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: false
+        }, {}, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        const suggest = jest.fn();
+
+        expect(harness.getFilenameListener()({ id: 70, url, filename: 'file.jpg' }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+
+        expect(suggest).toHaveBeenCalledWith();
+        expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalled();
+        expect(harness.storageState.pendingDownloadOperations || {}).toEqual({});
+        expect(harness.storageState.cloudSyncQueue || []).toEqual([]);
+        expect(harness.storageState.processedIds).toEqual([]);
+    });
+
+    test('accepts an active scrape download with a claimed pending receipt', async () => {
+        const lease = activeScrapeLease({ kind: 'sync' });
+        const harness = createDurableBackgroundHarness({
+            processedIds: [],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: { mode: 'local_only' },
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: false
+        }, {}, { activeScrapeRunToken: lease });
+        harness.chromeApi.downloads.download.mockResolvedValue(71);
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+        await expect(background.queueChromeDownload({
+            url: mediaUrl,
+            filename: 'GrokVault/claimed.jpg',
+            conflictAction: 'overwrite'
+        }, lease)).resolves.toBe(71);
+        const suggest = jest.fn();
+
+        expect(harness.getFilenameListener()({ id: 71, url: mediaUrl, filename: 'image.jpg' }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+
+        expect(suggest).toHaveBeenCalledWith(expect.objectContaining({ conflictAction: 'overwrite' }));
+        expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalled();
+        expect(harness.storageState.pendingDownloadOperations['71']).toEqual(expect.objectContaining({
+            downloadId: 71,
+            mediaId,
+            scrapeLease: expect.objectContaining({ token: lease.token, epoch: lease.epoch })
+        }));
+    });
+
+    test('reuses a persisted active-run operation when its receipt was lost on restart', async () => {
+        const lease = activeScrapeLease({ kind: 'sync' });
+        const finalPath = `GrokVault/user-1/2026-08-12_Auto/${mediaId}.jpg`;
+        const operation = {
+            downloadId: 72,
+            mediaId,
+            reservationKey: mediaId,
+            finalPath,
+            allowLocal: true,
+            cloudRequired: false,
+            strategy: 'local',
+            downloadState: 'in_progress',
+            r2State: 'not_required',
+            localIdentityPersisted: false,
+            scrapeLease: lease
+        };
+        const harness = createDurableBackgroundHarness({
+            processedIds: [],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: { mode: 'local_only' },
+            pendingDownloadOperations: { 72: operation },
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: false
+        }, {
+            72: { id: 72, url: mediaUrl, filename: finalPath, state: 'in_progress' }
+        }, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        const suggest = jest.fn();
+
+        expect(harness.getFilenameListener()({ id: 72, url: mediaUrl, filename: 'image.jpg' }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+
+        expect(suggest).toHaveBeenCalledWith({ filename: finalPath, conflictAction: 'overwrite' });
+        expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalled();
+        expect(harness.storageState.pendingDownloadOperations['72']).toEqual(expect.objectContaining({
+            downloadId: 72,
+            finalPath,
+            scrapeLease: expect.objectContaining({ token: lease.token, epoch: lease.epoch })
+        }));
     });
 
     test('calls suggest exactly once for duplicate, ignored, and error branches', async () => {
@@ -1155,6 +1314,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
     });
 
     afterEach(() => {
+        jest.useRealTimers();
         delete global.chrome;
         delete global.fetch;
         global.Blob = originalBlob;
@@ -1356,6 +1516,839 @@ describe('cloud-only download proof and cleanup ordering', () => {
         };
         return storage;
     }
+
+    async function createFailedRunOwnedDualWrite(harness, lease, downloadId) {
+        global.fetch = jest.fn(() => Promise.reject(new Error('[media-fetch] temporary failure')));
+        harness.chromeApi.downloads.download.mockResolvedValue(downloadId);
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+
+        const upload = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_UPLOAD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            url: publicUrl,
+            isVideo: false,
+            promptText: ''
+        }, { tab: { id: lease.tabId } });
+        await expect(upload.response).resolves.toEqual({ status: 'queued' });
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue?.[0]?.attempts).toBe(1));
+
+        const suggest = jest.fn();
+        expect(harness.getFilenameListener()({
+            id: downloadId,
+            url: publicUrl,
+            filename: 'image.jpg'
+        }, suggest)).toBe(true);
+        await waitForAssertion(() => expect(suggest).toHaveBeenCalledTimes(1));
+        await waitForAssertion(() => expect(
+            harness.storageState.cloudSyncQueue?.[0]?.cleanupDownloadId
+        ).toBe(downloadId));
+
+        harness.downloads.set(downloadId, {
+            id: downloadId,
+            url: publicUrl,
+            filename: '/Downloads/run-owned-dual-write.jpg',
+            mime: 'image/jpeg',
+            state: 'in_progress'
+        });
+        return background;
+    }
+
+    test('normal completion preserves linked native download authority through alarm retry', async () => {
+        const downloadId = 73;
+        const lease = activeScrapeLease({ token: 'completed-linked-native-run' });
+        const storage = {
+            ...cloudOnlyStorage(),
+            cloudConfig: { ...cloudOnlyStorage().cloudConfig, mode: 'dual_write' },
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true
+        };
+        const harness = createDurableBackgroundHarness(storage, {}, { activeScrapeRunToken: lease });
+        await createFailedRunOwnedDualWrite(harness, lease, downloadId);
+
+        expect(harness.storageState.cloudSyncQueue[0]).toEqual(expect.objectContaining({
+            cleanupDownloadId: downloadId,
+            scrapeLease: expect.objectContaining({ token: lease.token, epoch: lease.epoch })
+        }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            downloadId,
+            scrapeLease: expect.objectContaining({ token: lease.token, epoch: lease.epoch }),
+            downloadState: 'in_progress',
+            r2State: 'pending',
+            attempts: 0
+        }));
+        const runQueueRevision = harness.storageState.cloudSyncQueue[0].queueRevision;
+
+        const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await expect(completion.response).resolves.toEqual({ status: 'ok' });
+
+        expect(harness.storageState.cloudSyncQueue[0]).toEqual(expect.objectContaining({
+            attempts: 1,
+            queueRevision: expect.any(Number)
+        }));
+        expect(harness.storageState.cloudSyncQueue[0].queueRevision).toBeGreaterThan(runQueueRevision);
+        expect(harness.storageState.cloudSyncQueue[0]).not.toHaveProperty('scrapeLease');
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            attempts: 0,
+            downloadState: 'in_progress',
+            r2State: 'pending'
+        }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).not.toHaveProperty('scrapeLease');
+
+        installR2PresentFetch(publicUrl);
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(
+            harness.storageState.cloudSyncQueue.filter((item) => item.type === 'media')
+        ).toEqual([]));
+
+        expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalledWith(downloadId);
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            downloadState: 'in_progress',
+            r2State: 'present'
+        }));
+
+        harness.downloads.set(downloadId, {
+            ...harness.downloads.get(downloadId),
+            state: 'complete'
+        });
+        await Promise.resolve(harness.getDownloadChangedListener()({
+            id: downloadId,
+            state: { current: 'complete' }
+        }));
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+    });
+
+    test('stale download completion cannot remove authority detached by normal completion', async () => {
+        const downloadId = 75;
+        const lease = activeScrapeLease({ token: 'stale-download-completion-run' });
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true,
+            pendingDownloadOperations: {
+                [downloadId]: {
+                    downloadId,
+                    operationRevision: 11,
+                    mediaId,
+                    reservationKey: mediaId,
+                    finalPath: `GrokVault/user-1/2026-08-12_Auto/${mediaId}.jpg`,
+                    allowLocal: false,
+                    cloudRequired: true,
+                    strategy: 'auth_file',
+                    cleanupDownloadId: null,
+                    downloadState: 'in_progress',
+                    r2State: 'pending',
+                    attempts: 1,
+                    localIdentityPersisted: false,
+                    scrapeLease: lease
+                }
+            }
+        };
+        const harness = createDurableBackgroundHarness(storage, {
+            [downloadId]: {
+                id: downloadId,
+                url: authUrl,
+                filename: '/Downloads/stale-auth-file.jpg',
+                mime: 'image/jpeg',
+                state: 'in_progress'
+            }
+        }, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+
+        const originalGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        const authorityRead = createDeferred();
+        let authorityReadStarted = false;
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (!authorityReadStarted && Array.isArray(keys) && keys.includes('scraperState')) {
+                authorityReadStarted = true;
+                return authorityRead.promise;
+            }
+            return originalGet(keys);
+        });
+        harness.downloads.set(downloadId, {
+            ...harness.downloads.get(downloadId),
+            state: 'complete'
+        });
+
+        const changed = harness.getDownloadChangedListener()({
+            id: downloadId,
+            state: { current: 'complete' }
+        });
+        await waitForAssertion(() => expect(authorityReadStarted).toBe(true));
+
+        const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await expect(completion.response).resolves.toEqual({ status: 'ok' });
+
+        authorityRead.resolve({
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true
+        });
+        await changed;
+
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            downloadId,
+            operationRevision: expect.any(Number),
+            downloadState: 'in_progress',
+            r2State: 'pending'
+        }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].operationRevision).toBeGreaterThan(11);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).not.toHaveProperty('scrapeLease');
+        expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalledWith(downloadId);
+        expect(harness.storageState.processedIds).toEqual([]);
+    });
+
+    test('rejected atomic completion transfer remains lease-owned and Stop revokes it', async () => {
+        const downloadId = 76;
+        const lease = activeScrapeLease({ token: 'rejected-completion-transfer-run' });
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true,
+            cloudSyncQueue: [{
+                id: 'rejected-transfer-item',
+                dedupeKey: 'rejected-transfer-item',
+                queueRevision: 9,
+                type: 'media',
+                backupProcessedId: mediaId,
+                attempts: 1,
+                scrapeLease: lease
+            }],
+            pendingDownloadOperations: {
+                [downloadId]: {
+                    downloadId,
+                    operationRevision: 13,
+                    mediaId,
+                    allowLocal: false,
+                    cloudRequired: true,
+                    strategy: 'auth_file',
+                    downloadState: 'in_progress',
+                    r2State: 'pending',
+                    scrapeLease: lease
+                }
+            }
+        };
+        const harness = createDurableBackgroundHarness(storage, {
+            [downloadId]: { id: downloadId, url: authUrl, state: 'in_progress' }
+        }, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+
+        const originalSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (values.cloudSyncQueue && values.pendingDownloadOperations && values.scrapeCompletionTxn) {
+                return Promise.reject(new Error('atomic completion persistence rejected'));
+            }
+            return originalSet(values);
+        });
+
+        const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await expect(completion.response).resolves.toEqual({ status: 'ignored' });
+        expect(harness.storageState.cloudSyncQueue[0].scrapeLease).toEqual(expect.objectContaining({ token: lease.token }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].scrapeLease)
+            .toEqual(expect.objectContaining({ token: lease.token }));
+
+        harness.chromeApi.storage.local.set.mockImplementation(originalSet);
+        const stopped = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'STOP_R2_BACKUP' });
+        await expect(stopped.response).resolves.toEqual(expect.objectContaining({ status: 'stopped' }));
+        expect(harness.storageState.cloudSyncQueue.filter((item) => item.type === 'media')).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.chromeApi.downloads.cancel).toHaveBeenCalledWith(downloadId);
+        expect(harness.storageState.processedIds).toEqual([]);
+    });
+
+    test('timed-out late completion transfer stays blocked and Stop revokes it across restart', async () => {
+        jest.useFakeTimers();
+        const downloadId = 77;
+        const lease = activeScrapeLease({ token: 'late-completion-transfer-run' });
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true,
+            cloudSyncQueue: [{
+                id: 'late-transfer-item',
+                dedupeKey: 'late-transfer-item',
+                queueRevision: 17,
+                type: 'media',
+                backupProcessedId: mediaId,
+                attempts: 1,
+                scrapeLease: lease
+            }],
+            pendingDownloadOperations: {
+                [downloadId]: {
+                    downloadId,
+                    operationRevision: 19,
+                    mediaId,
+                    allowLocal: false,
+                    cloudRequired: true,
+                    strategy: 'auth_file',
+                    downloadState: 'in_progress',
+                    r2State: 'pending',
+                    scrapeLease: lease
+                }
+            }
+        };
+        const harness = createDurableBackgroundHarness(storage, {
+            [downloadId]: { id: downloadId, url: authUrl, state: 'in_progress' }
+        }, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+
+        const originalSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        const lateWrite = createDeferred();
+        let lateValues = null;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!lateValues && values.cloudSyncQueue && values.pendingDownloadOperations && values.scrapeCompletionTxn) {
+                lateValues = cloneJson(values);
+                return lateWrite.promise.then(() => originalSet(lateValues));
+            }
+            return originalSet(values);
+        });
+
+        const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        for (let tick = 0; tick < 10 && !lateValues; tick++) await Promise.resolve();
+        expect(lateValues).toEqual(expect.objectContaining({
+            cloudSyncQueue: expect.any(Array),
+            pendingDownloadOperations: expect.any(Object),
+            scrapeCompletionTxn: expect.objectContaining({ phase: 'prepared' })
+        }));
+        await jest.advanceTimersByTimeAsync(1100);
+        await expect(completion.response).resolves.toEqual({ status: 'ignored' });
+
+        harness.downloads.set(downloadId, {
+            ...harness.downloads.get(downloadId),
+            filename: '/Downloads/late-auth-file.jpg',
+            mime: 'image/jpeg',
+            state: 'complete'
+        });
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+        expect(harness.chromeApi.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            action: 'READ_FILE_FOR_UPLOAD'
+        }));
+
+        const upload = jest.fn();
+        await background.processCloudQueue('blocked-late-transfer', { uploadMediaQueueItem: upload });
+        expect(upload).not.toHaveBeenCalled();
+
+        jest.useRealTimers();
+        lateWrite.resolve();
+        await lateWrite.promise;
+        await Promise.resolve();
+        const stopped = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'STOP_R2_BACKUP' });
+        await expect(stopped.response).resolves.toEqual(expect.objectContaining({ status: 'stopped' }));
+        expect(harness.storageState.cloudSyncQueue).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.storageState.processedIds).toEqual([]);
+
+        await harness.load();
+        await Promise.resolve();
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await Promise.resolve();
+        expect(harness.storageState.cloudSyncQueue).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(upload).not.toHaveBeenCalled();
+    });
+
+    test('startup commits a prepared completion transfer and unblocks its retry work', async () => {
+        const lease = activeScrapeLease({ token: 'prepared-restart-run' });
+        const completionTxn = {
+            id: 'scrape_completion_prepared_restart',
+            phase: 'prepared',
+            lease,
+            createdAt: 1234
+        };
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'idle',
+            scrapeRunToken: null,
+            scrapeRunEpoch: null,
+            isScraping: false,
+            isR2Backup: false,
+            scrapeStopReason: 'complete',
+            scrapeCompletionTxn: completionTxn,
+            cloudSyncQueue: [{
+                id: 'prepared-restart-item',
+                dedupeKey: 'prepared-restart-item',
+                queueRevision: 31,
+                type: 'media',
+                backupProcessedId: mediaId,
+                attempts: 1,
+                completionTxnId: completionTxn.id,
+                revocationLease: lease
+            }]
+        };
+        const idleLease = {
+            version: 1,
+            epoch: lease.epoch + 1,
+            token: null,
+            tabId: null,
+            kind: null,
+            status: 'idle',
+            startedAt: null
+        };
+        const harness = createDurableBackgroundHarness(storage, {}, { activeScrapeRunToken: idleLease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+
+        expect(harness.storageState.scrapeCompletionTxn).toEqual(expect.objectContaining({
+            id: completionTxn.id,
+            phase: 'committed'
+        }));
+
+        const upload = jest.fn(() => Promise.resolve({ status: 'already_present', bytes: 0 }));
+        await background.processCloudQueue('prepared-restart-recovery', { uploadMediaQueueItem: upload });
+
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(harness.storageState.cloudSyncQueue).toEqual([]);
+        expect(harness.storageState.processedIds).toEqual([mediaId]);
+    });
+
+    test('startup discards a stopped prepared completion transfer without retrying it', async () => {
+        const lease = activeScrapeLease({ token: 'stopped-prepared-restart-run' });
+        const completionTxn = {
+            id: 'scrape_completion_stopped_prepared_restart',
+            phase: 'prepared',
+            lease,
+            createdAt: 1234
+        };
+        const downloadId = 79;
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'idle',
+            scrapeRunToken: null,
+            scrapeRunEpoch: null,
+            isScraping: false,
+            isR2Backup: false,
+            scrapeStopReason: 'stopped',
+            scrapeCompletionTxn: completionTxn,
+            cloudSyncQueue: [{
+                id: 'stopped-prepared-restart-item',
+                dedupeKey: 'stopped-prepared-restart-item',
+                queueRevision: 32,
+                type: 'media',
+                backupProcessedId: mediaId,
+                attempts: 1,
+                completionTxnId: completionTxn.id,
+                revocationLease: lease
+            }],
+            pendingDownloadOperations: {
+                [downloadId]: {
+                    downloadId,
+                    operationRevision: 33,
+                    mediaId,
+                    allowLocal: false,
+                    cloudRequired: true,
+                    strategy: 'auth_file',
+                    downloadState: 'in_progress',
+                    r2State: 'pending',
+                    completionTxnId: completionTxn.id,
+                    revocationLease: lease
+                }
+            }
+        };
+        const idleLease = {
+            version: 1,
+            epoch: lease.epoch + 1,
+            token: null,
+            tabId: null,
+            kind: null,
+            status: 'idle',
+            startedAt: null
+        };
+        const harness = createDurableBackgroundHarness(storage, {}, { activeScrapeRunToken: idleLease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+
+        const upload = jest.fn();
+        await background.processCloudQueue('stopped-prepared-recovery', { uploadMediaQueueItem: upload });
+
+        expect(upload).not.toHaveBeenCalled();
+        expect(harness.storageState.scrapeCompletionTxn).toBeNull();
+        expect(harness.storageState.cloudSyncQueue).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.storageState.processedIds).toEqual([]);
+    });
+
+    test('a failed completion commit recovers and drains without a service-worker restart', async () => {
+        const lease = activeScrapeLease({ token: 'same-worker-commit-recovery-run' });
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true,
+            cloudSyncQueue: [{
+                id: 'same-worker-commit-recovery-item',
+                dedupeKey: 'same-worker-commit-recovery-item',
+                queueRevision: 34,
+                type: 'media',
+                backupProcessedId: mediaId,
+                attempts: 1,
+                scrapeLease: lease
+            }]
+        };
+        const harness = createDurableBackgroundHarness(storage, {}, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+
+        const originalSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let rejectedCommit = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!rejectedCommit && values.scrapeCompletionTxn?.phase === 'committed') {
+                rejectedCommit = true;
+                return Promise.reject(new Error('completion commit rejected once'));
+            }
+            return originalSet(values);
+        });
+
+        const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await expect(completion.response).resolves.toEqual({ status: 'ignored' });
+        expect(harness.storageState.scrapeCompletionTxn).toEqual(expect.objectContaining({ phase: 'prepared' }));
+
+        const upload = jest.fn(() => Promise.resolve({ status: 'already_present', bytes: 0 }));
+        await background.processCloudQueue('same-worker-completion-recovery', { uploadMediaQueueItem: upload });
+
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(harness.storageState.scrapeCompletionTxn).toEqual(expect.objectContaining({ phase: 'committed' }));
+        expect(harness.storageState.cloudSyncQueue).toEqual([]);
+        expect(harness.storageState.processedIds).toEqual([mediaId]);
+    });
+
+    test('stale interrupted download callback cannot remove a detached retry operation', async () => {
+        const downloadId = 80;
+        const lease = activeScrapeLease({ token: 'stale-interrupted-download-run' });
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true,
+            pendingDownloadOperations: {
+                [downloadId]: {
+                    downloadId,
+                    operationRevision: 41,
+                    mediaId,
+                    allowLocal: false,
+                    cloudRequired: true,
+                    strategy: 'auth_file',
+                    downloadState: 'in_progress',
+                    r2State: 'pending',
+                    scrapeLease: lease
+                }
+            }
+        };
+        const harness = createDurableBackgroundHarness(storage, {
+            [downloadId]: { id: downloadId, url: authUrl, state: 'in_progress' }
+        }, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+
+        const originalGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        const authorityRead = createDeferred();
+        let authorityReadStarted = false;
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (!authorityReadStarted && Array.isArray(keys) && keys.includes('scraperState')) {
+                authorityReadStarted = true;
+                return authorityRead.promise;
+            }
+            return originalGet(keys);
+        });
+
+        const changed = harness.getDownloadChangedListener()({
+            id: downloadId,
+            state: { current: 'interrupted' }
+        });
+        await waitForAssertion(() => expect(authorityReadStarted).toBe(true));
+
+        const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await expect(completion.response).resolves.toEqual({ status: 'ok' });
+
+        authorityRead.resolve({
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true
+        });
+        await changed;
+
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            operationRevision: expect.any(Number),
+            downloadState: 'in_progress',
+            r2State: 'pending'
+        }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].operationRevision).toBeGreaterThan(41);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).not.toHaveProperty('scrapeLease');
+        expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalledWith(downloadId);
+    });
+
+    test('normal completion transfers an unqueued authenticated-file retry operation', async () => {
+        const downloadId = 78;
+        const lease = activeScrapeLease({ token: 'unqueued-auth-file-run' });
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true,
+            pendingDownloadOperations: {
+                [downloadId]: {
+                    downloadId,
+                    operationRevision: 23,
+                    mediaId,
+                    reservationKey: mediaId,
+                    finalPath: `GrokVault/user-1/2026-08-12_Auto/${mediaId}.jpg`,
+                    allowLocal: false,
+                    cloudRequired: true,
+                    strategy: 'auth_file',
+                    downloadState: 'in_progress',
+                    r2State: 'pending',
+                    attempts: 1,
+                    localIdentityPersisted: false,
+                    scrapeLease: lease
+                }
+            }
+        };
+        const harness = createDurableBackgroundHarness(storage, {
+            [downloadId]: { id: downloadId, url: authUrl, state: 'in_progress' }
+        }, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+
+        const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await expect(completion.response).resolves.toEqual({ status: 'ok' });
+
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            downloadId,
+            operationRevision: expect.any(Number),
+            downloadState: 'in_progress',
+            r2State: 'pending'
+        }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].operationRevision).toBeGreaterThan(23);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).not.toHaveProperty('scrapeLease');
+        expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalledWith(downloadId);
+    });
+
+    test('coalesces concurrent cloud drains before the deferred config read', async () => {
+        const harness = createDurableBackgroundHarness(cloudOnlyStorage());
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        background.setCloudSyncQueueForTest([{
+            id: 'single-flight-item',
+            dedupeKey: 'single-flight-item',
+            queueRevision: 31,
+            type: 'media',
+            backupProcessedId: mediaId,
+            attempts: 0
+        }]);
+
+        const originalGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        const configRead = createDeferred();
+        let configReads = 0;
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (Array.isArray(keys) && keys.length === 1 && keys[0] === 'cloudConfig') {
+                configReads += 1;
+                return configRead.promise;
+            }
+            return originalGet(keys);
+        });
+        const uploadResult = createDeferred();
+        const upload = jest.fn(() => uploadResult.promise);
+
+        const first = background.processCloudQueue('concurrent-first', { uploadMediaQueueItem: upload });
+        const second = background.processCloudQueue('concurrent-second', { uploadMediaQueueItem: upload });
+        expect(second).toBe(first);
+        configRead.resolve({ cloudConfig: cloneJson(harness.storageState.cloudConfig) });
+        await waitForAssertion(() => expect(upload).toHaveBeenCalled());
+        const uploadCallsBeforeRelease = upload.mock.calls.length;
+        uploadResult.resolve({ status: 'already_present', bytes: 0 });
+        await Promise.all([first, second]);
+
+        expect(configReads).toBe(1);
+        expect(uploadCallsBeforeRelease).toBe(1);
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(harness.storageState.processedIds).toEqual([mediaId]);
+    });
+
+    test('Stop still revokes linked native download and queue work before completion', async () => {
+        const downloadId = 74;
+        const lease = activeScrapeLease({ token: 'stopped-linked-native-run' });
+        const storage = {
+            ...cloudOnlyStorage(),
+            cloudConfig: { ...cloudOnlyStorage().cloudConfig, mode: 'dual_write' },
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true
+        };
+        const harness = createDurableBackgroundHarness(storage, {}, { activeScrapeRunToken: lease });
+        await createFailedRunOwnedDualWrite(harness, lease, downloadId);
+
+        const stopped = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'STOP_R2_BACKUP' });
+        await expect(stopped.response).resolves.toEqual(expect.objectContaining({ status: 'stopped' }));
+
+        expect(harness.storageState.cloudSyncQueue.filter((item) => item.type === 'media')).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.chromeApi.downloads.cancel).toHaveBeenCalledWith(downloadId);
+        expect(harness.storageState.processedIds).toEqual([]);
+    });
+
+    test('retries a failed run queue item after normal completion detaches its authority', async () => {
+        const lease = activeScrapeLease();
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true
+        };
+        global.fetch = jest.fn(() => Promise.reject(new Error('[media-fetch] temporary failure')));
+        const harness = createDurableBackgroundHarness(storage, {}, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+
+        const upload = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_UPLOAD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            url: publicUrl,
+            isVideo: false,
+            promptText: '',
+            skipLocalDownload: true
+        }, { tab: { id: lease.tabId } });
+        await expect(upload.response).resolves.toEqual({ status: 'queued' });
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue?.[0]?.attempts).toBe(1));
+        expect(harness.storageState.cloudSyncQueue[0].scrapeLease).toEqual(expect.objectContaining({
+            token: lease.token,
+            epoch: lease.epoch
+        }));
+
+        const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await expect(completion.response).resolves.toEqual({ status: 'ok' });
+
+        expect(harness.storageState.cloudSyncQueue).toHaveLength(1);
+        expect(harness.storageState.cloudSyncQueue[0]).not.toHaveProperty('scrapeLease');
+        installR2PresentFetch(publicUrl);
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+
+        expect(harness.storageState.cloudSyncQueue).toEqual([]);
+    });
+
+    test('Stop still removes failed queue work owned by the revoked run', async () => {
+        const lease = activeScrapeLease({ token: 'stopped-r2-run' });
+        const storage = {
+            ...cloudOnlyStorage(),
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true
+        };
+        global.fetch = jest.fn(() => Promise.reject(new Error('[media-fetch] temporary failure')));
+        const harness = createDurableBackgroundHarness(storage, {}, { activeScrapeRunToken: lease });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+
+        const upload = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'R2_BACKUP_UPLOAD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            url: publicUrl,
+            isVideo: false,
+            promptText: '',
+            skipLocalDownload: true
+        }, { tab: { id: lease.tabId } });
+        await expect(upload.response).resolves.toEqual({ status: 'queued' });
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue?.[0]?.attempts).toBe(1));
+
+        const stopped = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'STOP_R2_BACKUP' });
+        await expect(stopped.response).resolves.toEqual(expect.objectContaining({ status: 'stopped' }));
+
+        expect(harness.storageState.cloudSyncQueue.filter((item) => item.type === 'media')).toEqual([]);
+        expect(harness.storageState.processedIds).toEqual([]);
+    });
 
     test('waits for download completion when public R2 proof arrives first', async () => {
         installR2PresentFetch(publicUrl);
@@ -1843,16 +2836,35 @@ describe('cloud-only download proof and cleanup ordering', () => {
             }
             throw new Error(`Unexpected test fetch: ${String(url)}`);
         });
-        const harness = createDurableBackgroundHarness(cloudOnlyStorage());
+        const lease = {
+            version: 1,
+            epoch: 4,
+            token: 'backup-redaction-run',
+            tabId: 42,
+            kind: 'r2_backup',
+            status: 'active',
+            startedAt: 1234
+        };
+        const harness = createDurableBackgroundHarness({
+            ...cloudOnlyStorage(),
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true
+        }, {}, { activeScrapeRunToken: lease });
         await harness.load();
 
         const dispatched = dispatchRuntimeMessage(harness.getRuntimeListener(), {
             action: 'R2_BACKUP_UPLOAD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
             url: authUrl,
             isVideo: false,
             promptText: 'private words',
             blobDataUrl: 'data:image/jpeg;base64,AQIDBA=='
-        });
+        }, { tab: { id: lease.tabId } });
 
         expect(dispatched.returnValue).toBe(true);
         const response = await dispatched.response;
@@ -2054,6 +3066,8 @@ describe('Grok backup canary flow', () => {
                 sendMessage: jest.fn((message, callback) => {
                     if (message.action === 'VALIDATE_CLOUD_CONFIG') {
                         validationPromise.then(callback);
+                    } else if (message.action === 'SCRAPE_RUN_STATE_WRITE') {
+                        callback({ status: 'ok' });
                     } else if (message.action === 'VALIDATE_SCRAPE_RESUME') {
                         callback({ valid: true, reason: 'active_owner' });
                     }
@@ -2069,6 +3083,7 @@ describe('Grok backup canary flow', () => {
         const scraper = Object.create(GrokScraper.prototype);
         scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         scraper.getCurrentSurface = jest.fn(() => 'saved_gallery');
+        scraper.getSavedGalleryScope = jest.fn(() => 'all');
         scraper.log = jest.fn();
         scraper.determineModeAndExecute = jest.fn();
 
@@ -2092,7 +3107,13 @@ describe('Grok backup canary flow', () => {
         await firstStart;
         await secondStart;
 
-        expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            runToken: 'run-1',
+            runEpoch: 1,
+            kind: 'r2_backup'
+        }), expect.any(Function));
         expect(scraper.determineModeAndExecute).toHaveBeenCalledTimes(1);
         expect(scraper.state.isRunning).toBe(true);
     });
@@ -2120,6 +3141,7 @@ describe('Grok backup canary flow', () => {
         scraper.backupOptions = { mode: 'full', limit: null, options: {} };
         scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
         scraper.getCurrentSurface = jest.fn(() => 'saved_gallery');
+        scraper.getSavedGalleryScope = jest.fn(() => 'all');
         scraper.log = jest.fn();
         scraper.determineModeAndExecute = jest.fn();
 
@@ -2144,13 +3166,11 @@ describe('Grok backup canary flow', () => {
         });
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
         expect(scraper.state.isRunning).toBe(false);
-        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
-            scraperState: 'idle',
-            scrapeRunToken: null,
-            scrapeRunEpoch: null,
-            scrapeNavigation: null,
-            currentItemId: null
-        }));
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ action: 'SCRAPE_RUN_STATE_WRITE' }),
+            expect.any(Function)
+        );
     });
 
     test('starts hard-capped canary from page-origin canary command', () => {
@@ -2173,7 +3193,7 @@ describe('Grok backup canary flow', () => {
         });
     });
 
-    test('stops before navigating back after one successful canary media attempt', async () => {
+    test('returns to Saved before completing one successful legacy canary media attempt', async () => {
         global.chrome = {
             runtime: {
                 sendMessage: jest.fn(() => Promise.resolve())
@@ -2204,6 +3224,7 @@ describe('Grok backup canary flow', () => {
             scraper.backupMode = false;
             scraper.stopReason = stopReason;
         });
+        scraper.returnToSavedGallery = jest.fn(async () => {});
         scraper.waitForSelector = jest.fn();
         scraper.determineModeAndExecute = jest.fn();
 
@@ -2211,7 +3232,10 @@ describe('Grok backup canary flow', () => {
 
         expect(scraper.backupStats.totalSeen).toBe(1);
         expect(scraper.performDownload).toHaveBeenCalledTimes(1);
-        expect(scraper.stopBackupMode).toHaveBeenCalledWith('canary_complete');
+        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1', {
+            stopBackupReason: 'canary_complete'
+        });
+        expect(scraper.stopBackupMode).not.toHaveBeenCalled();
         expect(scraper.waitForSelector).not.toHaveBeenCalled();
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
     });

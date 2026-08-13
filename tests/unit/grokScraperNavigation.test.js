@@ -1,13 +1,21 @@
 const {
     SCRAPE_SURFACES,
+    SAVED_GALLERY_SCOPES,
     GrokScraper,
+    captureSavedViewportReceipt,
+    detectSavedGalleryScope,
     detectGrokScrapeSurface,
     findMatchingAgentMedia,
+    getSavedGalleryContext,
     getGrokMediaIdentity,
+    hasOrderedSavedNeighborhood,
     isSuccessfulMediaTransferStatus,
+    normalizeSavedViewportReceipt,
     shouldStopScraperForStorageChanges
 } = require('../../content.js');
 const CloudSyncUtils = require('../../cloudSyncUtils.js');
+const { Blob: NodeBlob } = require('buffer');
+const { webcrypto } = require('crypto');
 
 function mockContentChrome() {
     global.chrome = {
@@ -17,7 +25,11 @@ function mockContentChrome() {
             sendMessage: jest.fn((message) => Promise.resolve(
                 message?.action === 'VALIDATE_SCRAPE_RESUME'
                     ? { valid: true, reason: 'active_owner' }
-                    : undefined
+                    : (message?.action === 'SCRAPE_RUN_STATE_WRITE'
+                        ? { status: 'ok' }
+                        : (message?.action === 'SCRAPE_PROCESSED_IDS_ADD'
+                            ? { status: 'ok', processedIds: message.ids || [] }
+                            : undefined))
             )),
             onMessage: { addListener: jest.fn() }
         },
@@ -35,6 +47,8 @@ function createScraper(surface = SCRAPE_SURFACES.savedGallery) {
     const scraper = Object.create(GrokScraper.prototype);
     scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
     scraper.backupMode = false;
+    scraper.backupOptions = { mode: 'full', limit: null, options: {} };
+    scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
     scraper.processedIds = new Set();
     scraper._backupVisited = new Set();
     scraper._runVisited = new Set();
@@ -45,10 +59,58 @@ function createScraper(surface = SCRAPE_SURFACES.savedGallery) {
     scraper._runStateWriteQueue = Promise.resolve();
     scraper.Config = { actionWait: 0, navWait: 0, surfaceWait: 50 };
     scraper.getCurrentSurface = jest.fn(() => surface);
+    scraper.getSavedGalleryScope = jest.fn(() => SAVED_GALLERY_SCOPES.all);
     scraper.createRunToken = jest.fn(() => 'run-1');
     scraper.determineModeAndExecute = jest.fn();
     scraper.log = jest.fn();
     return scraper;
+}
+
+function makeVisible(element, width = 120, height = 32) {
+    element.getBoundingClientRect = () => ({
+        width,
+        height,
+        top: 0,
+        right: width,
+        bottom: height,
+        left: 0
+    });
+    return element;
+}
+
+function mountSavedScope(selected = 'all') {
+    const toolbar = document.createElement('div');
+    const all = makeVisible(document.createElement('button'));
+    const liked = makeVisible(document.createElement('button'));
+    all.textContent = 'All';
+    liked.textContent = 'Liked';
+    if (selected === 'all') all.className = 'bg-primary text-background hover:bg-primary';
+    if (selected === 'liked') liked.className = 'bg-primary text-background hover:bg-primary';
+    toolbar.append(all, liked);
+    document.body.appendChild(toolbar);
+    return { toolbar, all, liked };
+}
+
+function mountSemanticSavedImage(sourceUrl, scrollTop = 0) {
+    const scroller = document.createElement('div');
+    scroller.style.overflowY = 'scroll';
+    scroller.scrollTop = scrollTop;
+    Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 2400 },
+        clientHeight: { configurable: true, value: 800 }
+    });
+    const list = document.createElement('div');
+    list.setAttribute('role', 'list');
+    const card = document.createElement('article');
+    card.setAttribute('role', 'listitem');
+    const image = document.createElement('img');
+    image.alt = 'Generated image';
+    image.src = sourceUrl;
+    card.appendChild(image);
+    list.appendChild(card);
+    scroller.appendChild(list);
+    document.body.appendChild(scroller);
+    return { scroller, list, card, image };
 }
 
 describe('Grok scrape surface detection', () => {
@@ -93,6 +155,35 @@ describe('Grok scrape surface detection', () => {
             .toBe(SCRAPE_SURFACES.unsupported);
         expect(detectGrokScrapeSurface(document, 'https://grok.com/imagine/post/post-1'))
             .toBe(SCRAPE_SURFACES.legacyDetail);
+    });
+});
+
+describe('Grok Saved gallery scope detection', () => {
+    afterEach(() => {
+        document.body.textContent = '';
+    });
+
+    test.each([
+        ['all', SAVED_GALLERY_SCOPES.all],
+        ['liked', SAVED_GALLERY_SCOPES.liked],
+        ['unknown', SAVED_GALLERY_SCOPES.unknown]
+    ])('detects the current first-party %s scope without trusting text alone', (selected, expected) => {
+        mountSavedScope(selected);
+
+        expect(detectSavedGalleryScope(document)).toBe(expected);
+    });
+
+    test('accepts accessible selected-state semantics and fails closed on hidden or ambiguous controls', () => {
+        const { all, liked } = mountSavedScope('unknown');
+        all.setAttribute('aria-selected', 'true');
+        expect(detectSavedGalleryScope(document)).toBe(SAVED_GALLERY_SCOPES.all);
+
+        liked.setAttribute('aria-pressed', 'true');
+        expect(detectSavedGalleryScope(document)).toBe(SAVED_GALLERY_SCOPES.unknown);
+
+        liked.setAttribute('aria-pressed', 'false');
+        all.hidden = true;
+        expect(detectSavedGalleryScope(document)).toBe(SAVED_GALLERY_SCOPES.unknown);
     });
 });
 
@@ -229,6 +320,7 @@ describe('Grok scrape start preflight', () => {
 
     afterEach(() => {
         delete global.chrome;
+        document.body.textContent = '';
     });
 
     test('fails closed off Saved without changing persistent running state', async () => {
@@ -256,17 +348,14 @@ describe('Grok scrape start preflight', () => {
             runToken: 'run-1',
             runEpoch: 1
         });
-        expect(chrome.storage.local.set).toHaveBeenCalledWith({
-            scraperState: 'running',
-            currentIndex: 0,
-            scrapeRunToken: 'run-1',
-            scrapeRunEpoch: 1,
-            scrapeNavigation: null,
-            currentItemId: null,
-            scrapeBackupOptions: null,
-            isScraping: true,
-            isR2Backup: false
-        });
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            runToken: 'run-1',
+            runEpoch: 1,
+            kind: 'sync',
+            values: expect.objectContaining({ currentIndex: 0, scrapeNavigation: null })
+        }));
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
             action: 'VALIDATE_SCRAPE_RESUME',
             runToken: 'run-1',
@@ -275,6 +364,184 @@ describe('Grok scrape start preflight', () => {
         });
         expect(scraper.state.isRunning).toBe(true);
         expect(scraper.determineModeAndExecute).toHaveBeenCalledWith('run-1', 1);
+    });
+
+    test.each([
+        ['Sync', false],
+        ['R2 backup', true]
+    ])('%s fails closed when Saved scope drifts while start state is being persisted', async (_label, backup) => {
+        const scraper = createScraper();
+        const stateWrite = deferred();
+        const stateWriteStarted = deferred();
+        let currentScope = SAVED_GALLERY_SCOPES.all;
+        scraper.getSavedGalleryScope.mockImplementation(() => currentScope);
+        scraper.queueRunStateWrite = jest.fn(() => {
+            stateWriteStarted.resolve();
+            return stateWrite.promise;
+        });
+        scraper.processItem = jest.fn();
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'VALIDATE_CLOUD_CONFIG') return Promise.resolve({ valid: true });
+            if (message.action === 'VALIDATE_SCRAPE_RESUME') {
+                return Promise.resolve({ valid: true, reason: 'active_owner' });
+            }
+            return Promise.resolve();
+        });
+        const { image } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/generated/11111111-1111-4111-8111-111111111111/image.jpg'
+        );
+        image.click = jest.fn();
+
+        const starting = backup
+            ? scraper.startBackupMode({ mode: 'full', runToken: 'run-state', runEpoch: 21 })
+            : scraper.start({ runToken: 'run-state', runEpoch: 21 });
+        await stateWriteStarted.promise;
+        currentScope = SAVED_GALLERY_SCOPES.liked;
+        stateWrite.resolve({ ok: true, invalidated: false, skipped: false });
+        const response = await starting;
+
+        expect(response).toMatchObject({
+            status: 'invalid_context',
+            surface: SCRAPE_SURFACES.savedGallery,
+            scope: SAVED_GALLERY_SCOPES.liked
+        });
+        expect(response.status).not.toBe('started');
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(image.click).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: backup ? 'R2_BACKUP_COMPLETE' : 'SCRAPE_COMPLETE',
+            runToken: 'run-state',
+            runEpoch: 21
+        }));
+        expect(chrome.runtime.sendMessage.mock.calls.map(([message]) => message.action)).not.toEqual(
+            expect.arrayContaining(['DOWNLOAD_MEDIA', 'R2_BACKUP_UPLOAD'])
+        );
+    });
+
+    test.each([
+        ['Sync', false],
+        ['R2 backup', true]
+    ])('%s fails closed when Saved scope drifts during authority validation', async (_label, backup) => {
+        const scraper = createScraper();
+        const authority = deferred();
+        const authorityStarted = deferred();
+        let currentScope = SAVED_GALLERY_SCOPES.all;
+        scraper.getSavedGalleryScope.mockImplementation(() => currentScope);
+        scraper.processItem = jest.fn();
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'VALIDATE_CLOUD_CONFIG') return Promise.resolve({ valid: true });
+            if (message.action === 'SCRAPE_RUN_STATE_WRITE') return Promise.resolve({ status: 'ok' });
+            if (message.action === 'VALIDATE_SCRAPE_RESUME') {
+                authorityStarted.resolve();
+                return authority.promise;
+            }
+            return Promise.resolve();
+        });
+        const { image } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/generated/22222222-2222-4222-8222-222222222222/image.jpg'
+        );
+        image.click = jest.fn();
+
+        const starting = backup
+            ? scraper.startBackupMode({ mode: 'full', runToken: 'run-authority', runEpoch: 22 })
+            : scraper.start({ runToken: 'run-authority', runEpoch: 22 });
+        await authorityStarted.promise;
+        currentScope = SAVED_GALLERY_SCOPES.unknown;
+        authority.resolve({ valid: true, reason: 'active_owner' });
+        const response = await starting;
+
+        expect(response).toMatchObject({
+            status: 'invalid_context',
+            surface: SCRAPE_SURFACES.savedGallery,
+            scope: SAVED_GALLERY_SCOPES.unknown
+        });
+        expect(response.status).not.toBe('started');
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(image.click).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
+        expect(chrome.runtime.sendMessage.mock.calls.map(([message]) => message.action)).not.toEqual(
+            expect.arrayContaining(['DOWNLOAD_MEDIA', 'R2_BACKUP_UPLOAD'])
+        );
+    });
+
+    test.each([
+        ['Liked', SAVED_GALLERY_SCOPES.liked],
+        ['an unknown scope', SAVED_GALLERY_SCOPES.unknown]
+    ])('R2 backup fails closed when cloud validation resolves after scope changes to %s', async (_label, driftedScope) => {
+        const scraper = createScraper();
+        const cloudValidation = deferred();
+        const cloudValidationStarted = deferred();
+        let currentScope = SAVED_GALLERY_SCOPES.all;
+        scraper.getSavedGalleryScope.mockImplementation(() => currentScope);
+        scraper.queueRunStateWrite = jest.fn().mockResolvedValue({
+            ok: true,
+            invalidated: false,
+            skipped: false
+        });
+        scraper.processItem = jest.fn();
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'VALIDATE_CLOUD_CONFIG') {
+                cloudValidationStarted.resolve();
+                return cloudValidation.promise;
+            }
+            return Promise.resolve();
+        });
+        const { image } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/generated/33333333-3333-4333-8333-333333333333/image.jpg'
+        );
+        image.click = jest.fn();
+
+        const starting = scraper.startBackupMode({
+            mode: 'full',
+            runToken: 'run-cloud-validation',
+            runEpoch: 23
+        });
+        await cloudValidationStarted.promise;
+        currentScope = driftedScope;
+        cloudValidation.resolve({ valid: true });
+        const response = await starting;
+
+        expect(response).toMatchObject({
+            status: 'invalid_context',
+            surface: SCRAPE_SURFACES.savedGallery,
+            scope: driftedScope
+        });
+        expect(response.status).not.toBe('started');
+        expect(scraper.queueRunStateWrite).not.toHaveBeenCalled();
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(image.click).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
+        expect(chrome.runtime.sendMessage.mock.calls.map(([message]) => message.action)).not.toEqual(
+            expect.arrayContaining(['VALIDATE_SCRAPE_RESUME', 'DOWNLOAD_MEDIA', 'R2_BACKUP_UPLOAD'])
+        );
+    });
+
+    test.each([
+        ['sync', (scraper) => scraper.start({ runToken: 'run-liked', runEpoch: 7 })],
+        ['r2_backup', (scraper) => scraper.startBackupMode({
+            mode: 'full',
+            runToken: 'run-liked',
+            runEpoch: 7
+        })]
+    ])('fails %s closed unless the Saved All scope is selected', async (_kind, startRun) => {
+        const scraper = createScraper();
+        scraper.getSavedGalleryScope.mockReturnValue(SAVED_GALLERY_SCOPES.liked);
+
+        await expect(startRun(scraper)).resolves.toMatchObject({
+            status: 'invalid_context',
+            surface: SCRAPE_SURFACES.savedGallery,
+            scope: SAVED_GALLERY_SCOPES.liked,
+            error: 'Switch Grok Saved to All before starting.'
+        });
+
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
     });
 
     test('uses the documented error status when a run is already active', async () => {
@@ -311,9 +578,10 @@ describe('Grok scrape start preflight', () => {
             runEpoch: 12
         });
         expect(scraper.createRunToken).not.toHaveBeenCalled();
-        expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
-            scrapeRunToken: 'background-run',
-            scrapeRunEpoch: 12
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            runToken: 'background-run',
+            runEpoch: 12
         }));
     });
 
@@ -324,6 +592,7 @@ describe('Grok scrape start preflight', () => {
             if (message.action === 'VALIDATE_SCRAPE_RESUME') {
                 return { valid: true, reason: 'active_owner' };
             }
+            if (message.action === 'SCRAPE_RUN_STATE_WRITE') return { status: 'ok' };
             return undefined;
         });
 
@@ -338,12 +607,14 @@ describe('Grok scrape start preflight', () => {
             runToken: 'background-backup',
             runEpoch: 13
         });
-        expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
-            scrapeRunToken: 'background-backup',
-            scrapeRunEpoch: 13,
-            isScraping: true,
-            isR2Backup: true,
-            r2BackupState: expect.objectContaining({ isRunning: true })
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            runToken: 'background-backup',
+            runEpoch: 13,
+            kind: 'r2_backup',
+            values: expect.objectContaining({
+                r2BackupState: expect.objectContaining({ isRunning: true })
+            })
         }));
     });
 
@@ -361,6 +632,7 @@ describe('Grok scrape start preflight', () => {
             if (message.action === 'VALIDATE_SCRAPE_RESUME') {
                 return { valid: false, reason: 'stale_authority' };
             }
+            if (message.action === 'SCRAPE_RUN_STATE_WRITE') return { status: 'ok' };
             return undefined;
         });
 
@@ -371,16 +643,87 @@ describe('Grok scrape start preflight', () => {
 
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
         expect(scraper.state.isRunning).toBe(false);
-        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
-            scraperState: 'idle',
-            scrapeRunToken: null,
-            scrapeRunEpoch: null,
-            isScraping: false,
-            isR2Backup: false,
-            ...(kind === 'r2_backup'
-                ? { r2BackupState: expect.objectContaining({ isRunning: false }) }
-                : {})
-        }));
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+});
+
+describe('Grok Saved semantic candidate and viewport receipts', () => {
+    const appendCard = (list, mediaId) => {
+        const card = document.createElement('article');
+        card.setAttribute('role', 'listitem');
+        const image = document.createElement('img');
+        image.alt = 'Generated image';
+        image.src = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        card.appendChild(image);
+        list.appendChild(card);
+        return { card, image };
+    };
+
+    afterEach(() => {
+        document.body.textContent = '';
+    });
+
+    test('rejects multiple plausible generated-media lists instead of choosing the largest', () => {
+        const primary = document.createElement('div');
+        const decoy = document.createElement('div');
+        primary.setAttribute('role', 'list');
+        decoy.setAttribute('role', 'list');
+        appendCard(primary, '11111111-1111-4111-8111-111111111111');
+        appendCard(primary, '22222222-2222-4222-8222-222222222222');
+        appendCard(decoy, '33333333-3333-4333-8333-333333333333');
+        document.body.append(primary, decoy);
+
+        expect(getSavedGalleryContext(document)).toBeNull();
+    });
+
+    test('requires one source and one immediately adjacent expected-next identity', () => {
+        const source = '11111111-1111-4111-8111-111111111111';
+        const middle = '22222222-2222-4222-8222-222222222222';
+        const next = '33333333-3333-4333-8333-333333333333';
+        const entries = [source, middle, next].map((sourceIdentity) => ({ sourceIdentity }));
+
+        expect(hasOrderedSavedNeighborhood(entries, {
+            sourceIdentity: source,
+            expectedNextIdentity: middle
+        })).toBe(true);
+        expect(hasOrderedSavedNeighborhood(entries, {
+            sourceIdentity: source,
+            expectedNextIdentity: next
+        })).toBe(false);
+        expect(hasOrderedSavedNeighborhood([...entries, { sourceIdentity: middle }], {
+            sourceIdentity: source,
+            expectedNextIdentity: middle
+        })).toBe(false);
+        expect(hasOrderedSavedNeighborhood([...entries, { sourceIdentity: source }], {
+            sourceIdentity: source,
+            expectedNextIdentity: middle
+        })).toBe(false);
+        expect(hasOrderedSavedNeighborhood([...entries].reverse(), {
+            sourceIdentity: source,
+            expectedNextIdentity: middle
+        })).toBe(false);
+    });
+
+    test('captures the literal semantic neighbor and rejects stale v1 receipts', () => {
+        const list = document.createElement('div');
+        list.setAttribute('role', 'list');
+        const source = '11111111-1111-4111-8111-111111111111';
+        const next = '22222222-2222-4222-8222-222222222222';
+        appendCard(list, source);
+        appendCard(list, next);
+        document.body.appendChild(list);
+
+        expect(captureSavedViewportReceipt({ root: document, sourceIdentity: source })).toMatchObject({
+            version: 2,
+            sourceIdentity: source,
+            expectedNextIdentity: next
+        });
+        expect(normalizeSavedViewportReceipt({
+            version: 1,
+            sourceIdentity: source,
+            expectedNextIdentity: next,
+            scrollTop: 0
+        })).toBeNull();
     });
 });
 
@@ -407,6 +750,129 @@ describe('Grok scrape surface transitions', () => {
         scrollSpy.mockRestore();
     });
 
+    test.each([
+        ['sync', false],
+        ['R2 backup', true]
+    ])('stops %s before scanning, clicking, or scrolling when Saved scope drifts to Liked', async (_kind, backupMode) => {
+        mockContentChrome();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = backupMode;
+        scraper.getSavedGalleryScope
+            .mockReturnValueOnce(SAVED_GALLERY_SCOPES.all)
+            .mockReturnValue(SAVED_GALLERY_SCOPES.liked);
+        const { image } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/generated/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
+        );
+        image.click = jest.fn();
+        scraper.processItem = jest.fn();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        const scrollSpy = jest.spyOn(window, 'scrollBy').mockImplementation(() => {});
+
+        await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Saved scope changed to Liked. Switch Grok Saved to All before continuing.',
+            'saved_scope_drift'
+        );
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(image.click).not.toHaveBeenCalled();
+        expect(scrollSpy).not.toHaveBeenCalled();
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+        scrollSpy.mockRestore();
+    });
+
+    test('stops on a post-return Saved scope drift before receipt cleanup or list continuation', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            currentItemId: 'gallery-clean-id'
+        };
+        scraper.getSavedGalleryScope.mockReturnValue(SAVED_GALLERY_SCOPES.liked);
+        scraper.restorePendingGalleryContext = jest.fn().mockResolvedValue(true);
+        scraper.executeListView = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+
+        await GrokScraper.prototype.determineModeAndExecute.call(scraper, 'run-1');
+
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Saved scope changed to Liked. Switch Grok Saved to All before continuing.',
+            'saved_scope_drift'
+        );
+        expect(scraper.restorePendingGalleryContext).not.toHaveBeenCalled();
+        expect(scraper.executeListView).not.toHaveBeenCalled();
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['Liked', SAVED_GALLERY_SCOPES.liked],
+        ['an unknown scope', SAVED_GALLERY_SCOPES.unknown]
+    ])('stops after receipt restoration when Saved scope changes to %s before cleanup', async (_label, driftedScope) => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const sourceId = 'c8c8c8c8-aaaa-4bbb-8ccc-d9d9d9d9d9d9';
+        const pending = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            currentItemId: 'gallery-clean-id',
+            expectedIdentity: sourceId,
+            savedViewportReceipt: {
+                version: 2,
+                sourceIdentity: sourceId,
+                expectedNextIdentity: null,
+                scrollTop: 840
+            }
+        };
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = pending;
+        window.history.pushState({}, '', '/imagine/saved');
+        let currentScope = SAVED_GALLERY_SCOPES.all;
+        scraper.getSavedGalleryScope.mockImplementation(() => currentScope);
+        scraper.failRun = jest.fn().mockResolvedValue();
+        scraper.executeListView = jest.fn().mockResolvedValue();
+        const { list, scroller } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/generated/a7a7a7a7-bbbb-4ccc-8ddd-e8e8e8e8e8e8/image.jpg'
+        );
+        const scrollEvent = jest.fn();
+        scroller.addEventListener('scroll', scrollEvent);
+        const windowScroll = jest.spyOn(window, 'scrollTo').mockImplementation(() => {});
+        scraper.sleep = jest.fn(async () => {
+            const card = document.createElement('article');
+            card.setAttribute('role', 'listitem');
+            const image = document.createElement('img');
+            image.alt = 'Generated image';
+            image.src = `https://assets.grok.com/users/u/generated/${sourceId}/image.jpg`;
+            card.appendChild(image);
+            list.appendChild(card);
+            currentScope = driftedScope;
+        });
+
+        await GrokScraper.prototype.determineModeAndExecute.call(scraper, 'run-1');
+
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            driftedScope === SAVED_GALLERY_SCOPES.liked
+                ? 'Saved scope changed to Liked. Switch Grok Saved to All before continuing.'
+                : 'Could not verify Grok Saved scope. Switch Grok Saved to All before continuing.',
+            'saved_scope_drift'
+        );
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            values: { scrapeNavigation: null, currentItemId: null }
+        }));
+        expect(scraper.pendingNavigation).toBe(pending);
+        expect(scraper.executeListView).not.toHaveBeenCalled();
+        expect(scroller.scrollTop).toBe(0);
+        expect(scrollEvent).not.toHaveBeenCalled();
+        expect(windowScroll).not.toHaveBeenCalled();
+        windowScroll.mockRestore();
+    });
+
     test('captures Saved context before clicking and routes the resulting surface', async () => {
         mockContentChrome();
         const scraper = createScraper();
@@ -414,23 +880,129 @@ describe('Grok scrape surface transitions', () => {
         scraper.runToken = 'run-1';
         scraper.getGalleryScroller = jest.fn(() => ({ scrollTop: 640, scrollHeight: 2000, clientHeight: 800 }));
         scraper.waitForSurface = jest.fn(() => Promise.resolve(SCRAPE_SURFACES.agentMedia));
-        const target = document.createElement('img');
-        target.src = 'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content?size=small';
+        const { image: target } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content?size=small',
+            640
+        );
         target.click = jest.fn();
 
         await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
 
-        expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
-            currentItemId: 'gallery-clean-id',
-            scrapeNavigation: expect.objectContaining({
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            values: expect.objectContaining({
+                currentItemId: 'gallery-clean-id',
+                scrapeNavigation: expect.objectContaining({
                 runToken: 'run-1',
                 currentItemId: 'gallery-clean-id',
                 expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
                 galleryScrollTop: 640
+                })
             })
         }));
         expect(target.click).toHaveBeenCalledTimes(1);
         expect(scraper.determineModeAndExecute).toHaveBeenCalledWith('run-1');
+    });
+
+    test('stops before clicking when Saved scope drifts during the navigation state write', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.getGalleryScroller = jest.fn(() => ({ scrollTop: 640, scrollHeight: 2000, clientHeight: 800 }));
+        const navigationWrite = deferred();
+        const navigationWriteStarted = deferred();
+        scraper.queueRunStateWrite = jest.fn(() => {
+            navigationWriteStarted.resolve();
+            return navigationWrite.promise;
+        });
+        scraper.failRun = jest.fn().mockResolvedValue();
+        scraper.waitForSurface = jest.fn();
+        let currentScope = SAVED_GALLERY_SCOPES.all;
+        scraper.getSavedGalleryScope.mockImplementation(() => currentScope);
+        const { image: target } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/generated/73e5e137-1334-49ea-b06b-a9d9ba891003/content',
+            640
+        );
+        target.click = jest.fn();
+
+        const processing = GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
+        await navigationWriteStarted.promise;
+        currentScope = SAVED_GALLERY_SCOPES.liked;
+        navigationWrite.resolve({ ok: true, invalidated: false });
+        await processing;
+
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Saved scope changed to Liked. Switch Grok Saved to All before continuing.',
+            'saved_scope_drift'
+        );
+        expect(target.click).not.toHaveBeenCalled();
+        expect(scraper.waitForSurface).not.toHaveBeenCalled();
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.pendingNavigation).toBeUndefined();
+    });
+
+    test('captures the semantic Saved scroller and expected-next identity instead of unrelated overflow', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.waitForSurface = jest.fn(() => Promise.resolve(SCRAPE_SURFACES.agentMedia));
+
+        const unrelatedScroller = document.createElement('div');
+        unrelatedScroller.className = 'overflow-scroll';
+        unrelatedScroller.scrollTop = 999;
+        const galleryScroller = document.createElement('div');
+        galleryScroller.className = 'h-dvh overflow-scroll items-center';
+        galleryScroller.style.overflowY = 'scroll';
+        galleryScroller.scrollTop = 640;
+        Object.defineProperties(galleryScroller, {
+            scrollHeight: { configurable: true, value: 2400 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        const list = document.createElement('div');
+        list.setAttribute('role', 'list');
+        const sourceId = '73e5e137-1334-49ea-b06b-a9d9ba891003';
+        const nextId = '84f6f248-2445-4afb-c17c-b0e0cb902114';
+        const appendCard = (mediaId) => {
+            const card = document.createElement('article');
+            card.setAttribute('role', 'listitem');
+            const image = document.createElement('img');
+            image.alt = 'Generated image';
+            image.src = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+            card.appendChild(image);
+            list.appendChild(card);
+            return image;
+        };
+        const target = appendCard(sourceId);
+        appendCard(nextId);
+        target.click = jest.fn();
+        galleryScroller.appendChild(list);
+        document.body.append(unrelatedScroller, galleryScroller);
+
+        await GrokScraper.prototype.processItem.call(
+            scraper,
+            target,
+            target.src.split('?')[0],
+            'run-1',
+            1,
+            nextId
+        );
+
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            values: expect.objectContaining({
+                scrapeNavigation: expect.objectContaining({
+                    savedViewportReceipt: {
+                        version: 2,
+                        sourceIdentity: sourceId,
+                        expectedNextIdentity: nextId,
+                        scrollTop: 640
+                    }
+                })
+            })
+        }));
+        expect(unrelatedScroller.scrollTop).toBe(999);
     });
 
     test('stops explicitly when a selected Saved card never changes surfaces', async () => {
@@ -441,8 +1013,9 @@ describe('Grok scrape surface transitions', () => {
         scraper.getGalleryScroller = jest.fn(() => ({ scrollTop: 0, scrollHeight: 1000, clientHeight: 800 }));
         scraper.waitForSurface = jest.fn(() => Promise.resolve(null));
         scraper.failRun = jest.fn(() => Promise.resolve());
-        const target = document.createElement('img');
-        target.src = 'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content';
+        const { image: target } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
+        );
         target.click = jest.fn();
 
         await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
@@ -460,12 +1033,14 @@ describe('Grok scrape surface transitions', () => {
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
         scraper.getGalleryScroller = jest.fn(() => ({ scrollTop: 0, scrollHeight: 1000, clientHeight: 800 }));
-        chrome.storage.local.set.mockImplementation(async () => {
-            scraper.runToken = 'run-2';
+        chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'SCRAPE_RUN_STATE_WRITE') scraper.runToken = 'run-2';
+            return { status: 'ok' };
         });
         scraper.waitForSurface = jest.fn();
-        const target = document.createElement('img');
-        target.src = 'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content';
+        const { image: target } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
+        );
         target.click = jest.fn();
 
         await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
@@ -483,16 +1058,15 @@ describe('Grok scrape surface transitions', () => {
         scraper.getGalleryScroller = jest.fn(() => ({ scrollTop: 0, scrollHeight: 1000, clientHeight: 800 }));
         scraper.waitForSurface = jest.fn();
         const navigationWrite = deferred();
-        const stored = {};
-        chrome.storage.local.set.mockImplementation((values) => {
-            if (values.scrapeNavigation) {
-                return navigationWrite.promise.then(() => Object.assign(stored, values));
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'SCRAPE_RUN_STATE_WRITE' && message.values.scrapeNavigation) {
+                return navigationWrite.promise.then(() => ({ status: 'ok' }));
             }
-            Object.assign(stored, values);
-            return Promise.resolve();
+            return Promise.resolve({ status: 'ok' });
         });
-        const target = document.createElement('img');
-        target.src = 'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content';
+        const { image: target } = mountSemanticSavedImage(
+            'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
+        );
         target.click = jest.fn();
 
         const processing = GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1', 4);
@@ -507,13 +1081,7 @@ describe('Grok scrape surface transitions', () => {
         await Promise.all([processing, stopping]);
 
         expect(target.click).not.toHaveBeenCalled();
-        expect(stored).toMatchObject({
-            scraperState: 'idle',
-            scrapeRunToken: null,
-            scrapeRunEpoch: null,
-            scrapeNavigation: null,
-            currentItemId: null
-        });
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
     });
 
     test('does not acknowledge an ABORT message until deferred run writes and idle persistence finish', async () => {
@@ -627,6 +1195,37 @@ describe('Grok scrape surface transitions', () => {
         expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
     });
 
+    test('returns a successful Agent canary to Saved before completing the run', async () => {
+        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
+        const media = document.createElement('video');
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = { mode: 'canary', limit: 1, options: { stopAfterMediaAttempt: true } };
+        scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
+            currentItemId: 'gallery-clean-id'
+        };
+        scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'matched', media }));
+        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
+        scraper.performDownload = jest.fn(async () => {
+            scraper.backupStats.uploaded++;
+            return { status: 'uploaded' };
+        });
+        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
+        scraper.stopBackupMode = jest.fn();
+
+        await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
+
+        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1', {
+            stopBackupReason: 'canary_complete'
+        });
+        expect(scraper.stopBackupMode).not.toHaveBeenCalled();
+    });
+
     test('never persists a failed Agent transfer', async () => {
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
         scraper.state.isRunning = true;
@@ -733,26 +1332,187 @@ describe('Grok scrape surface transitions', () => {
     test('restores the Saved scroll position and clears only navigation state', async () => {
         mockContentChrome();
         const scraper = createScraper();
-        const scroller = { scrollTop: 0 };
+        const sourceId = '84848484-aaaa-4bbb-8ccc-c3c3c3c3c3c3';
+        window.history.pushState({}, '', '/imagine/saved');
+        const scroller = document.createElement('div');
+        scroller.style.overflowY = 'scroll';
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 2200 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        const list = document.createElement('div');
+        list.setAttribute('role', 'list');
+        const card = document.createElement('article');
+        card.setAttribute('role', 'listitem');
+        const image = document.createElement('img');
+        image.alt = 'Generated image';
+        image.src = `https://assets.grok.com/users/u/generated/${sourceId}/image.jpg`;
+        card.appendChild(image);
+        list.appendChild(card);
+        scroller.appendChild(list);
+        document.body.appendChild(scroller);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
         scraper.pendingNavigation = {
             runToken: 'run-1',
             runEpoch: 1,
+            expectedIdentity: sourceId,
             galleryScrollTop: 840,
-            currentItemId: 'gallery-clean-id'
+            currentItemId: 'gallery-clean-id',
+            savedViewportReceipt: {
+                version: 2,
+                sourceIdentity: sourceId,
+                expectedNextIdentity: null,
+                scrollTop: 840
+            }
         };
         scraper.sleep = jest.fn(() => Promise.resolve());
-        scraper.getGalleryScroller = jest.fn(() => scroller);
 
         await GrokScraper.prototype.restorePendingGalleryContext.call(scraper, 'run-1');
 
         expect(scroller.scrollTop).toBe(840);
         expect(scraper.pendingNavigation).toBeNull();
-        expect(chrome.storage.local.set).toHaveBeenCalledWith({
-            scrapeNavigation: null,
-            currentItemId: null
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            values: { scrapeNavigation: null, currentItemId: null }
+        }));
+    });
+
+    test('waits for the semantic Saved neighborhood and persisted cleanup before clearing its receipt', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const sourceId = '95959595-aaaa-4bbb-8ccc-d4d4d4d4d4d4';
+        const nextId = 'a6a6a6a6-bbbb-4ccc-8ddd-e5e5e5e5e5e5';
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            currentItemId: 'gallery-clean-id',
+            expectedIdentity: sourceId,
+            galleryUrl: 'https://grok.com/imagine/saved',
+            savedViewportReceipt: {
+                version: 2,
+                sourceIdentity: sourceId,
+                expectedNextIdentity: nextId,
+                scrollTop: 840
+            }
+        };
+
+        const unrelatedScroller = document.createElement('div');
+        unrelatedScroller.className = 'overflow-scroll';
+        unrelatedScroller.scrollTop = 123;
+        const galleryScroller = document.createElement('div');
+        galleryScroller.className = 'h-dvh overflow-scroll items-center';
+        galleryScroller.style.overflowY = 'scroll';
+        galleryScroller.scrollTop = 0;
+        Object.defineProperties(galleryScroller, {
+            scrollHeight: { configurable: true, value: 2400 },
+            clientHeight: { configurable: true, value: 800 }
         });
+        const list = document.createElement('div');
+        list.setAttribute('role', 'list');
+        const appendCard = (mediaId) => {
+            const card = document.createElement('article');
+            card.setAttribute('role', 'listitem');
+            const image = document.createElement('img');
+            image.alt = 'Generated image';
+            image.src = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+            card.appendChild(image);
+            list.appendChild(card);
+        };
+        appendCard('b7b7b7b7-cccc-4ddd-8eee-f6f6f6f6f6f6');
+        galleryScroller.appendChild(list);
+        document.body.append(unrelatedScroller, galleryScroller);
+
+        let sleepCount = 0;
+        scraper.sleep = jest.fn(async () => {
+            sleepCount++;
+            if (sleepCount === 1) appendCard(sourceId);
+            if (sleepCount === 2) appendCard(nextId);
+        });
+        const cleanupWrite = deferred();
+        const cleanupStarted = deferred();
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'SCRAPE_RUN_STATE_WRITE'
+                && message.values?.scrapeNavigation === null) {
+                cleanupStarted.resolve();
+                return cleanupWrite.promise;
+            }
+            return Promise.resolve({ status: 'ok' });
+        });
+
+        const restoring = GrokScraper.prototype.restorePendingGalleryContext.call(scraper, 'run-1');
+        await cleanupStarted.promise;
+
+        expect(galleryScroller.scrollTop).toBe(840);
+        expect(unrelatedScroller.scrollTop).toBe(123);
+        expect(sleepCount).toBeGreaterThanOrEqual(2);
+        expect(scraper.pendingNavigation).not.toBeNull();
+
+        cleanupWrite.resolve({ status: 'ok' });
+        await restoring;
+
+        expect(scraper.pendingNavigation).toBeNull();
+    });
+
+    test('reapplies the Saved receipt when restoring scroll remounts the semantic scroller', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const sourceId = 'a7a7a7a7-bbbb-4ccc-8ddd-e6e6e6e6e6e6';
+        const nextId = 'b8b8b8b8-cccc-4ddd-8eee-f7f7f7f7f7f7';
+        window.history.pushState({}, '', '/imagine/saved');
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            currentItemId: 'gallery-clean-id',
+            savedViewportReceipt: {
+                version: 2,
+                sourceIdentity: sourceId,
+                expectedNextIdentity: nextId,
+                scrollTop: 730
+            }
+        };
+
+        const createScroller = () => {
+            const scroller = document.createElement('div');
+            scroller.style.overflowY = 'scroll';
+            Object.defineProperties(scroller, {
+                scrollHeight: { configurable: true, value: 2200 },
+                clientHeight: { configurable: true, value: 800 }
+            });
+            const list = document.createElement('div');
+            list.setAttribute('role', 'list');
+            for (const mediaId of [sourceId, nextId]) {
+                const card = document.createElement('article');
+                card.setAttribute('role', 'listitem');
+                const image = document.createElement('img');
+                image.alt = 'Generated image';
+                image.src = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+                card.appendChild(image);
+                list.appendChild(card);
+            }
+            scroller.appendChild(list);
+            return scroller;
+        };
+
+        const originalScroller = createScroller();
+        let replacementScroller = null;
+        originalScroller.addEventListener('scroll', () => {
+            replacementScroller = createScroller();
+            originalScroller.replaceWith(replacementScroller);
+        }, { once: true });
+        document.body.appendChild(originalScroller);
+        scraper.sleep = jest.fn().mockResolvedValue();
+
+        await GrokScraper.prototype.restorePendingGalleryContext.call(scraper, 'run-1');
+
+        expect(replacementScroller).not.toBeNull();
+        expect(replacementScroller.scrollTop).toBe(730);
+        expect(scraper.sleep).toHaveBeenCalled();
+        expect(scraper.pendingNavigation).toBeNull();
     });
 
     test('falls back to the captured Saved URL when browser history does not return', async () => {
@@ -778,6 +1538,37 @@ describe('Grok scrape surface transitions', () => {
         backSpy.mockRestore();
     });
 
+    test('restores the Saved viewport before completing a successful backup canary', async () => {
+        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            galleryUrl: 'https://grok.com/imagine/saved'
+        };
+        const order = [];
+        scraper.waitForSurface = jest.fn(() => Promise.resolve(SCRAPE_SURFACES.savedGallery));
+        scraper.restorePendingGalleryContext = jest.fn(async () => {
+            order.push('restore');
+            return true;
+        });
+        scraper.stopBackupMode = jest.fn(async () => {
+            order.push('stop');
+        });
+        const backSpy = jest.spyOn(window.history, 'back').mockImplementation(() => {});
+
+        await GrokScraper.prototype.returnToSavedGallery.call(scraper, 'run-1', {
+            stopBackupReason: 'canary_complete'
+        });
+
+        expect(order).toEqual(['restore', 'stop']);
+        expect(scraper.stopBackupMode).toHaveBeenCalledWith('canary_complete');
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        backSpy.mockRestore();
+    });
+
     test('does not navigate after Stop wins during the history wait', async () => {
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
         scraper.state.isRunning = true;
@@ -798,6 +1589,264 @@ describe('Grok scrape surface transitions', () => {
 
         expect(scraper.navigateToGalleryUrl).not.toHaveBeenCalled();
         backSpy.mockRestore();
+    });
+
+    test.each([
+        ['normal Sync', false],
+        ['R2 backup', true]
+    ])('Stop returns %s from an open media surface to Saved without resuming', async (_label, backupMode) => {
+        mockContentChrome();
+        let surface = SCRAPE_SURFACES.legacyDetail;
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.runEpoch = 4;
+        scraper.backupMode = backupMode;
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 4,
+            galleryUrl: 'https://grok.com/imagine/saved'
+        };
+        scraper.getCurrentSurface.mockImplementation(() => surface);
+        scraper.sleep = jest.fn().mockResolvedValue();
+        scraper.determineModeAndExecute = jest.fn();
+        const backSpy = jest.spyOn(window.history, 'back').mockImplementation(() => {
+            surface = SCRAPE_SURFACES.savedGallery;
+        });
+
+        const stopMethod = backupMode
+            ? GrokScraper.prototype.stopBackupMode
+            : GrokScraper.prototype.stop;
+        await stopMethod.call(scraper, 'stopped', {
+            notifyBackground: false,
+            expectedRunToken: 'run-1',
+            expectedRunEpoch: 4
+        });
+
+        expect(backSpy).toHaveBeenCalledTimes(1);
+        expect(scraper.getCurrentSurface()).toBe(SCRAPE_SURFACES.savedGallery);
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
+        expect(scraper.runToken).toBeNull();
+        backSpy.mockRestore();
+    });
+
+    test('a storage tombstone preserves the pending Saved return before invalidating the run', async () => {
+        mockContentChrome();
+        let surface = SCRAPE_SURFACES.legacyDetail;
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.runEpoch = 5;
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 5,
+            galleryUrl: 'https://grok.com/imagine/saved'
+        };
+        scraper.getCurrentSurface.mockImplementation(() => surface);
+        scraper.sleep = jest.fn().mockResolvedValue();
+        scraper._initPromise = Promise.resolve();
+        scraper.setupListeners();
+        const storageListener = chrome.storage.onChanged.addListener.mock.calls[0][0];
+        const backSpy = jest.spyOn(window.history, 'back').mockImplementation(() => {
+            surface = SCRAPE_SURFACES.savedGallery;
+        });
+
+        storageListener({ scraperState: { oldValue: 'running', newValue: 'idle' } }, 'local');
+        await flushAsyncTurns(16);
+
+        expect(backSpy).toHaveBeenCalledTimes(1);
+        expect(scraper.getCurrentSurface()).toBe(SCRAPE_SURFACES.savedGallery);
+        expect(scraper.state.isRunning).toBe(false);
+        backSpy.mockRestore();
+    });
+
+    test('a storage tombstone returns a freshly initialized detail page using its old navigation receipt', async () => {
+        mockContentChrome();
+        let surface = SCRAPE_SURFACES.legacyDetail;
+        const scraper = createScraper();
+        scraper.runToken = null;
+        scraper.runEpoch = null;
+        scraper.pendingNavigation = null;
+        scraper.getCurrentSurface.mockImplementation(() => surface);
+        scraper.sleep = jest.fn().mockResolvedValue();
+        scraper._initPromise = Promise.resolve();
+        scraper.setupListeners();
+        const storageListener = chrome.storage.onChanged.addListener.mock.calls[0][0];
+        const backSpy = jest.spyOn(window.history, 'back').mockImplementation(() => {
+            surface = SCRAPE_SURFACES.savedGallery;
+        });
+
+        storageListener({
+            scraperState: { oldValue: 'running', newValue: 'idle' },
+            scrapeNavigation: {
+                oldValue: {
+                    runToken: 'run-1',
+                    runEpoch: 7,
+                    galleryUrl: 'https://grok.com/imagine/saved'
+                },
+                newValue: null
+            }
+        }, 'local');
+        await flushAsyncTurns(16);
+
+        expect(backSpy).toHaveBeenCalledTimes(1);
+        expect(scraper.getCurrentSurface()).toBe(SCRAPE_SURFACES.savedGallery);
+        backSpy.mockRestore();
+    });
+
+    test('a storage tombstone identifies a freshly initialized R2 detail page from old backup state', async () => {
+        mockContentChrome();
+        let surface = SCRAPE_SURFACES.agentMedia;
+        const scraper = createScraper();
+        scraper.runToken = null;
+        scraper.runEpoch = null;
+        scraper.pendingNavigation = null;
+        scraper.getCurrentSurface.mockImplementation(() => surface);
+        scraper.sleep = jest.fn().mockResolvedValue();
+        scraper._initPromise = Promise.resolve();
+        scraper.stop = jest.fn();
+        scraper.setupListeners();
+        const storageListener = chrome.storage.onChanged.addListener.mock.calls[0][0];
+        const backSpy = jest.spyOn(window.history, 'back').mockImplementation(() => {
+            surface = SCRAPE_SURFACES.savedGallery;
+        });
+
+        storageListener({
+            scraperState: { oldValue: 'running', newValue: 'idle' },
+            isR2Backup: { oldValue: true, newValue: false },
+            scrapeNavigation: {
+                oldValue: {
+                    runToken: 'run-r2',
+                    runEpoch: 10,
+                    galleryUrl: 'https://grok.com/imagine/saved'
+                },
+                newValue: null
+            }
+        }, 'local');
+        await flushAsyncTurns(16);
+
+        expect(scraper.stop).not.toHaveBeenCalled();
+        expect(backSpy).toHaveBeenCalledTimes(1);
+        expect(scraper.getCurrentSurface()).toBe(SCRAPE_SURFACES.savedGallery);
+        backSpy.mockRestore();
+    });
+
+    test('a late abort returns a detail page using the navigation receipt from the background', async () => {
+        mockContentChrome();
+        let surface = SCRAPE_SURFACES.legacyDetail;
+        const scraper = createScraper();
+        scraper.runToken = null;
+        scraper.runEpoch = null;
+        scraper.pendingNavigation = null;
+        scraper.getCurrentSurface.mockImplementation(() => surface);
+        scraper.sleep = jest.fn().mockResolvedValue();
+        const backSpy = jest.spyOn(window.history, 'back').mockImplementation(() => {
+            surface = SCRAPE_SURFACES.savedGallery;
+        });
+
+        await GrokScraper.prototype.stop.call(scraper, 'stopped', {
+            notifyBackground: false,
+            expectedRunToken: 'run-1',
+            expectedRunEpoch: 8,
+            stopNavigation: {
+                runToken: 'run-1',
+                runEpoch: 8,
+                galleryUrl: 'https://grok.com/imagine/saved'
+            }
+        });
+
+        expect(backSpy).toHaveBeenCalledTimes(1);
+        expect(scraper.getCurrentSurface()).toBe(SCRAPE_SURFACES.savedGallery);
+        backSpy.mockRestore();
+    });
+
+    test('a late R2 abort returns a detail page using the navigation receipt from the background', async () => {
+        mockContentChrome();
+        let surface = SCRAPE_SURFACES.agentMedia;
+        const scraper = createScraper();
+        scraper.runToken = null;
+        scraper.runEpoch = null;
+        scraper.pendingNavigation = null;
+        scraper.getCurrentSurface.mockImplementation(() => surface);
+        scraper.sleep = jest.fn().mockResolvedValue();
+        const backSpy = jest.spyOn(window.history, 'back').mockImplementation(() => {
+            surface = SCRAPE_SURFACES.savedGallery;
+        });
+
+        await GrokScraper.prototype.stopBackupMode.call(scraper, 'stopped', {
+            notifyBackground: false,
+            expectedRunToken: 'run-r2',
+            expectedRunEpoch: 9,
+            stopNavigation: {
+                runToken: 'run-r2',
+                runEpoch: 9,
+                galleryUrl: 'https://grok.com/imagine/saved'
+            }
+        });
+
+        expect(backSpy).toHaveBeenCalledTimes(1);
+        expect(scraper.getCurrentSurface()).toBe(SCRAPE_SURFACES.savedGallery);
+        backSpy.mockRestore();
+    });
+
+    test('Stop does not issue a second Back while the normal Saved return is already in flight', async () => {
+        mockContentChrome();
+        let surface = SCRAPE_SURFACES.legacyDetail;
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.runEpoch = 6;
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 6,
+            galleryUrl: 'https://grok.com/imagine/saved'
+        };
+        scraper._returnToSavedInFlight = {
+            runToken: 'run-1',
+            runEpoch: 6,
+            galleryUrl: 'https://grok.com/imagine/saved'
+        };
+        scraper.getCurrentSurface.mockImplementation(() => surface);
+        scraper.sleep = jest.fn(async () => {
+            surface = SCRAPE_SURFACES.savedGallery;
+        });
+        const backSpy = jest.spyOn(window.history, 'back').mockImplementation(() => {});
+
+        await GrokScraper.prototype.stop.call(scraper, 'stopped', {
+            notifyBackground: false,
+            expectedRunToken: 'run-1',
+            expectedRunEpoch: 6
+        });
+
+        expect(backSpy).not.toHaveBeenCalled();
+        expect(scraper.getCurrentSurface()).toBe(SCRAPE_SURFACES.savedGallery);
+        backSpy.mockRestore();
+    });
+
+    test('duplicate receipt-bearing Stop delivery reuses the first cleanup transaction', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-duplicate-stop';
+        scraper.runEpoch = 11;
+        scraper.pendingNavigation = {
+            runToken: 'run-duplicate-stop',
+            runEpoch: 11,
+            galleryUrl: 'https://grok.com/imagine/saved'
+        };
+        scraper.returnToSavedAfterStop = jest.fn().mockResolvedValue(true);
+        const options = {
+            notifyBackground: false,
+            expectedRunToken: 'run-duplicate-stop',
+            expectedRunEpoch: 11,
+            stopNavigation: scraper.pendingNavigation
+        };
+
+        await GrokScraper.prototype.stop.call(scraper, 'stopped', options);
+        await GrokScraper.prototype.stop.call(scraper, 'stopped', options);
+
+        expect(scraper.returnToSavedAfterStop).toHaveBeenCalledTimes(1);
     });
 
     test('does not record backup success after Stop wins during upload', async () => {
@@ -888,7 +1937,7 @@ describe('Grok scrape surface transitions', () => {
             if (message.action === 'R2_BACKUP_UPLOAD') {
                 return { status: 'uploaded', backupProcessedId: mediaId };
             }
-            if (message.action === 'PROCESSED_IDS_ADD') {
+            if (message.action === 'SCRAPE_PROCESSED_IDS_ADD') {
                 return { status: 'ok', processedIds: ['saved-media-url', media.src.split('?')[0], mediaId] };
             }
             return undefined;
@@ -902,8 +1951,11 @@ describe('Grok scrape surface transitions', () => {
         )).resolves.toEqual({ status: 'uploaded', backupProcessedId: mediaId });
 
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-            action: 'PROCESSED_IDS_ADD',
-            ids: ['saved-media-url', media.src.split('?')[0], mediaId]
+            action: 'SCRAPE_PROCESSED_IDS_ADD',
+            ids: ['saved-media-url', media.src.split('?')[0], mediaId],
+            runToken: 'run-1',
+            runEpoch: 1,
+            kind: 'r2_backup'
         });
         expect(scraper.processedIds).toEqual(new Set(['saved-media-url', media.src.split('?')[0], mediaId]));
         expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -941,7 +1993,10 @@ describe('Grok scrape surface transitions', () => {
             url: media.src,
             isVideo: false,
             promptText: 'saved prompt',
-            blobDataUrl: 'data:image/png;base64,AA=='
+            blobDataUrl: 'data:image/png;base64,AA==',
+            runToken: 'run-1',
+            runEpoch: 1,
+            kind: 'sync'
         });
     });
 
@@ -969,7 +2024,10 @@ describe('Grok scrape surface transitions', () => {
             url: media.src,
             isVideo: true,
             promptText: '',
-            blobDataUrl: null
+            blobDataUrl: null,
+            runToken: 'run-1',
+            runEpoch: 1,
+            kind: 'sync'
         });
     });
 });
@@ -1050,13 +2108,7 @@ describe('Grok backup resume state', () => {
 
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
         expect(scraper.state.isRunning).toBe(false);
-        expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
-            scraperState: 'idle',
-            isScraping: false,
-            isR2Backup: false,
-            scrapeRunToken: null,
-            scrapeNavigation: null
-        }));
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
         expect(scraper.processedIds).toEqual(new Set(['existing-id']));
     });
 
@@ -1122,14 +2174,7 @@ describe('Grok backup resume state', () => {
 
         await GrokScraper.prototype.init.call(scraper);
 
-        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
-            r2BackupState: expect.objectContaining({
-                uploaded: 4,
-                errors: 1,
-                isRunning: false,
-                stopReason: 'stale_session'
-            })
-        }));
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
     });
 
     test('normal stop persists every running flag as idle', async () => {
@@ -1140,12 +2185,7 @@ describe('Grok backup resume state', () => {
 
         await GrokScraper.prototype.stop.call(scraper, 'complete');
 
-        expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
-            scraperState: 'idle',
-            isScraping: false,
-            isR2Backup: false,
-            scrapeRunToken: null
-        }));
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
     });
 
     test('backup Stop writes isRunning false after hydrated counter fields', async () => {
@@ -1159,13 +2199,7 @@ describe('Grok backup resume state', () => {
 
         await GrokScraper.prototype.stopBackupMode.call(scraper, 'stopped', { notifyBackground: false });
 
-        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
-            r2BackupState: expect.objectContaining({
-                uploaded: 9,
-                isRunning: false,
-                stopReason: 'stopped'
-            })
-        }));
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
     });
 });
 
@@ -1248,11 +2282,7 @@ describe('storage stop signals', () => {
             error: 'Start was cancelled.'
         }));
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
-        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
-            scraperState: 'idle',
-            scrapeRunToken: null,
-            scrapeRunEpoch: null
-        }));
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
         delete global.chrome;
     });
 
@@ -1295,11 +2325,7 @@ describe('storage stop signals', () => {
         }));
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
         expect(scraper.state.isRunning).toBe(false);
-        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
-            scraperState: 'idle',
-            isR2Backup: false,
-            r2BackupState: expect.objectContaining({ isRunning: false })
-        }));
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
         delete global.chrome;
     });
 });
@@ -1316,7 +2342,7 @@ function createBackgroundChrome({
         },
         downloads: {
             cancel: jest.fn(),
-            download: jest.fn(),
+            download: jest.fn((_options, callback) => callback?.(1)),
             erase: jest.fn(),
             onChanged: { addListener: jest.fn() },
             onDeterminingFilename: { addListener: jest.fn() },
@@ -1349,6 +2375,7 @@ function createBackgroundChrome({
             onChanged: { addListener: jest.fn() }
         },
         tabs: {
+            onRemoved: { addListener: jest.fn() },
             onUpdated: { addListener: jest.fn() },
             query: jest.fn((_query, callback) => callback([{ id: 42, url }])),
             remove: jest.fn(),
@@ -1376,6 +2403,14 @@ async function flushAsyncTurns(count = 8) {
     for (let index = 0; index < count; index++) await Promise.resolve();
 }
 
+async function waitForCondition(predicate, attempts = 40) {
+    for (let index = 0; index < attempts; index++) {
+        if (predicate()) return;
+        await Promise.resolve();
+    }
+    throw new Error('Condition was not reached.');
+}
+
 function createLeaseRecord(overrides = {}) {
     return {
         version: 1,
@@ -1389,6 +2424,21 @@ function createLeaseRecord(overrides = {}) {
     };
 }
 
+function readSelectedStorage(state, keys) {
+    if (keys == null) return { ...state };
+    if (typeof keys === 'string') return { [keys]: state[keys] };
+    if (Array.isArray(keys)) {
+        return keys.reduce((selected, key) => {
+            if (Object.prototype.hasOwnProperty.call(state, key)) selected[key] = state[key];
+            return selected;
+        }, {});
+    }
+    return Object.keys(keys).reduce((selected, key) => {
+        selected[key] = Object.prototype.hasOwnProperty.call(state, key) ? state[key] : keys[key];
+        return selected;
+    }, {});
+}
+
 function createLeaseBackgroundHarness({
     lease,
     localState = {},
@@ -1399,14 +2449,14 @@ function createLeaseBackgroundHarness({
     const storedLocal = { ...localState };
     const chromeApi = createBackgroundChrome({ url });
 
-    chromeApi.storage.session.get.mockImplementation(async () => ({ ...sessionState }));
+    chromeApi.storage.session.get.mockImplementation(async (keys) => readSelectedStorage(sessionState, keys));
     chromeApi.storage.session.set.mockImplementation(async (values) => {
         Object.assign(sessionState, values);
     });
     chromeApi.storage.session.remove.mockImplementation(async (key) => {
         delete sessionState[key];
     });
-    chromeApi.storage.local.get.mockImplementation(async () => ({ ...storedLocal }));
+    chromeApi.storage.local.get.mockImplementation(async (keys) => readSelectedStorage(storedLocal, keys));
     chromeApi.storage.local.set.mockImplementation(async (values) => {
         Object.assign(storedLocal, values);
     });
@@ -1433,8 +2483,33 @@ function dispatchBackgroundMessage(chromeApi, request, sender = { tab: { id: 42 
     });
 }
 
+function dispatchBackgroundMessageThroughPort(chromeApi, request, sender = { tab: { id: 42 } }) {
+    const listener = chromeApi.runtime.onMessage.addListener.mock.calls[0]?.[0];
+    if (!listener) throw new Error('Background message listener was not registered.');
+    let resolveResponse;
+    const response = new Promise((resolve) => { resolveResponse = resolve; });
+    let portOpen = true;
+    const returnValue = listener(request, sender, (value) => {
+        if (portOpen) resolveResponse(value);
+    });
+    portOpen = returnValue === true;
+    return { returnValue, response };
+}
+
 describe('background scrape lease authority', () => {
+    const originalFetch = global.fetch;
+    const originalCrypto = global.crypto;
+    const originalBlob = global.Blob;
+
+    beforeEach(() => {
+        Object.defineProperty(global, 'crypto', { configurable: true, value: webcrypto });
+        global.Blob = NodeBlob;
+    });
+
     afterEach(() => {
+        global.fetch = originalFetch;
+        Object.defineProperty(global, 'crypto', { configurable: true, value: originalCrypto });
+        global.Blob = originalBlob;
         delete global.chrome;
         jest.resetModules();
     });
@@ -1682,6 +2757,7 @@ describe('background scrape lease authority', () => {
         global.chrome = harness.chromeApi;
         const background = require('../../background.js');
         await background.ensureScrapeLeaseHydrated();
+        await background.ensureBackgroundStateReady();
         const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
         harness.chromeApi.storage.local.get.mockImplementation((keys) => {
             if (Array.isArray(keys) && keys.length === 1 && keys[0] === 'cloudConfig') {
@@ -1854,6 +2930,44 @@ describe('background scrape lease authority', () => {
         expect(harness.storedLocal).toMatchObject({ scraperState: 'idle', scrapeNavigation: null });
     });
 
+    test('Stop sends the Saved navigation receipt with the abort before clearing local state', async () => {
+        const lease = createLeaseRecord();
+        const navigation = {
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            galleryUrl: 'https://grok.com/imagine/saved',
+            savedViewportReceipt: { version: 2, sourceIdentity: 'asset-1', scrollTop: 420 }
+        };
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                scrapeNavigation: navigation,
+                isScraping: true,
+                isR2Backup: false
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+
+        await expect(background.stopScrapeRun('sync')).resolves.toMatchObject({ status: 'stopped' });
+
+        expect(harness.chromeApi.tabs.sendMessage).toHaveBeenCalledWith(
+            lease.tabId,
+            expect.objectContaining({
+                action: 'ABORT_SCRAPE',
+                runToken: lease.token,
+                runEpoch: lease.epoch,
+                stopNavigation: navigation
+            }),
+            expect.any(Function)
+        );
+        expect(harness.storedLocal.scrapeNavigation).toBeNull();
+    });
+
     test('dropped content abort cannot preserve run authority', async () => {
         const lease = createLeaseRecord();
         const harness = createLeaseBackgroundHarness({
@@ -1946,6 +3060,1218 @@ describe('background scrape lease authority', () => {
         });
     });
 
+    test('rejects an epoch-8 mirror write from another tab without changing the epoch-9 owner mirror', async () => {
+        const lease = createLeaseRecord({ token: 'new-owner', epoch: 9, tabId: 42 });
+        const ownerMirror = {
+            scraperState: 'running',
+            currentIndex: 4,
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            scrapeNavigation: { currentItemId: 'owner-item' },
+            isScraping: true,
+            isR2Backup: false
+        };
+        const harness = createLeaseBackgroundHarness({ lease, localState: ownerMirror });
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+
+        const dispatched = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            runToken: 'old-owner',
+            runEpoch: 8,
+            kind: 'sync',
+            values: {
+                scraperState: 'running',
+                currentIndex: 0,
+                scrapeRunToken: 'old-owner',
+                scrapeRunEpoch: 8,
+                isScraping: true,
+                isR2Backup: false
+            }
+        }, { tab: { id: 99 } });
+
+        expect(dispatched.returnValue).toBe(true);
+        await expect(dispatched.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        expect(harness.storedLocal).toMatchObject(ownerMirror);
+        expect(harness.storedLocal).not.toMatchObject({
+            scrapeRunToken: 'old-owner',
+            scrapeRunEpoch: 8
+        });
+    });
+
+    test('rejects a request-controlled tab id when the runtime sender has no tab', async () => {
+        const lease = createLeaseRecord();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                currentIndex: 2,
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false
+            }
+        });
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+
+        const dispatched = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            tabId: lease.tabId,
+            values: { currentIndex: 99 }
+        }, {});
+
+        expect(dispatched.returnValue).toBe(true);
+        await expect(dispatched.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        expect(harness.storedLocal.currentIndex).toBe(2);
+    });
+
+    test('rejects an unleased media transfer before Chrome accepts a download', async () => {
+        const harness = createLeaseBackgroundHarness();
+        harness.chromeApi.downloads.download.mockImplementation((_options, callback) => callback(77));
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+
+        const dispatched = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'DOWNLOAD_MEDIA',
+            url: 'https://assets.grok.com/generated/unleased/image.jpg',
+            isVideo: false
+        }, { tab: { id: 99 } });
+
+        expect(dispatched.returnValue).toBe(true);
+        await expect(dispatched.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        expect(harness.chromeApi.downloads.download).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['DOWNLOAD_MEDIA', createLeaseRecord(), {
+            url: 'https://assets.grok.com/generated/missing-kind.jpg',
+            isVideo: false
+        }],
+        ['R2_BACKUP_UPLOAD', createLeaseRecord({ kind: 'r2_backup' }), {
+            url: 'https://assets.grok.com/generated/missing-kind.jpg',
+            isVideo: false,
+            isR2Backup: true,
+            skipLocalDownload: true
+        }]
+    ])('requires an explicit run kind for %s before transfer side effects', async (action, lease, transfer) => {
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: lease.kind === 'r2_backup',
+                cloudConfig: { enabled: false, mode: 'local_only' }
+            }
+        });
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+
+        const dispatched = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action,
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            ...transfer
+        }, { tab: { id: lease.tabId } });
+
+        expect(dispatched.returnValue).toBe(true);
+        await expect(dispatched.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        expect(harness.chromeApi.downloads.download).not.toHaveBeenCalled();
+        expect(harness.storedLocal.cloudSyncQueue || []).toEqual([]);
+    });
+
+    test('Stop during transfer configuration prevents a later Chrome download', async () => {
+        const lease = createLeaseRecord();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false,
+                cloudConfig: { enabled: false, mode: 'local_only' }
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+        const configRead = deferred();
+        const configReadStarted = deferred();
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (Array.isArray(keys) && keys.length === 1 && keys[0] === 'cloudConfig') {
+                configReadStarted.resolve();
+                return configRead.promise;
+            }
+            return baseGet(keys);
+        });
+
+        const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'DOWNLOAD_MEDIA',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            url: 'https://assets.grok.com/generated/deferred/image.jpg',
+            isVideo: false
+        });
+        await configReadStarted.promise;
+        const stopping = background.stopScrapeRun('sync');
+        configRead.resolve({ cloudConfig: { enabled: false, mode: 'local_only' } });
+
+        await expect(transfer.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+        expect(harness.chromeApi.downloads.download).not.toHaveBeenCalled();
+    });
+
+    test('Stop during backup filename preparation prevents later cloud queue growth', async () => {
+        const lease = createLeaseRecord({ kind: 'r2_backup' });
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: true,
+                cloudConfig: {
+                    enabled: true,
+                    mode: 'cloud_only',
+                    workerUrl: 'https://unit-placeholder.workers.dev',
+                    apiKey: 'unit-placeholder',
+                    keyPrefix: 'grok-powertools/v1'
+                }
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+        const filenameRead = deferred();
+        const filenameReadStarted = deferred();
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (Array.isArray(keys) && keys.includes('downloadPath')) {
+                filenameReadStarted.resolve();
+                return filenameRead.promise;
+            }
+            return baseGet(keys);
+        });
+
+        const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'R2_BACKUP_UPLOAD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            url: 'https://assets.grok.com/generated/deferred/image.jpg',
+            isVideo: false
+        });
+        await filenameReadStarted.promise;
+        const stopping = background.stopScrapeRun('r2_backup');
+        filenameRead.resolve({ downloadPath: 'GrokVault', activeGrokUserId: 'Shared_Account' });
+
+        await expect(transfer.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
+    });
+
+    test('Stop during R2 queue persistence leaves no durable queue entry or transfer', async () => {
+        const lease = createLeaseRecord({ kind: 'r2_backup' });
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: true,
+                cloudConfig: {
+                    enabled: true,
+                    mode: 'cloud_only',
+                    workerUrl: 'https://unit-placeholder.workers.dev',
+                    apiKey: 'unit-placeholder',
+                    keyPrefix: 'grok-powertools/v1'
+                }
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+        const queueWrite = deferred();
+        const queueWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (Array.isArray(values.cloudSyncQueue) && values.cloudSyncQueue.length > 0) {
+                queueWriteStarted.resolve();
+                return queueWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+
+        const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'R2_BACKUP_UPLOAD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            url: 'https://assets.grok.com/generated/queue-race.jpg',
+            isVideo: false,
+            skipLocalDownload: true
+        }, { tab: { id: lease.tabId } });
+        await queueWriteStarted.promise;
+        const stopping = background.stopScrapeRun('r2_backup');
+        queueWrite.resolve();
+
+        await expect(transfer.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+        expect(harness.storedLocal.cloudSyncQueue || []).toEqual([]);
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
+        expect(harness.chromeApi.downloads.download).not.toHaveBeenCalled();
+    });
+
+    test('Stop bypasses stalled cloud queue persistence and stale completion cannot restore its run item', async () => {
+        jest.useFakeTimers();
+        const stalledQueueWrite = deferred();
+        try {
+            const lease = createLeaseRecord({ kind: 'r2_backup' });
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: true
+                }
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureBackgroundStateReady();
+            await background.ensureScrapeLeaseHydrated();
+
+            const queueWriteStarted = deferred();
+            const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+            let intercepted = false;
+            harness.chromeApi.storage.local.set.mockImplementation((values) => {
+                if (!intercepted && Array.isArray(values.cloudSyncQueue) && values.cloudSyncQueue.length > 0) {
+                    intercepted = true;
+                    queueWriteStarted.resolve();
+                    return stalledQueueWrite.promise.then(() => baseSet(values));
+                }
+                return baseSet(values);
+            });
+
+            const staleItem = {
+                id: 'run-scoped-stalled-item',
+                type: 'media',
+                dedupeKey: 'media:stalled-run-item',
+                sourceUrl: 'https://assets.grok.com/generated/stalled/item.jpg',
+                scrapeLease: { ...lease }
+            };
+            const enqueueResult = background.enqueueCloudItemForTest(
+                staleItem,
+                staleItem.dedupeKey
+            ).catch((error) => error);
+            await queueWriteStarted.promise;
+
+            const stopping = background.stopScrapeRun('r2_backup');
+            await jest.advanceTimersByTimeAsync(2500);
+
+            await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+            await expect(enqueueResult).resolves.toMatchObject({
+                message: 'cloud_queue_mutation_persist_timeout'
+            });
+            expect(background.getCloudSyncQueueForTest()).toEqual([]);
+            expect(harness.storedLocal.cloudSyncQueue || []).toEqual([]);
+
+            stalledQueueWrite.resolve();
+            await flushAsyncTurns(16);
+
+            expect(background.getCloudSyncQueueForTest()).toEqual([]);
+            expect(harness.storedLocal.cloudSyncQueue || []).toEqual([]);
+        } finally {
+            stalledQueueWrite.resolve();
+            await jest.runOnlyPendingTimersAsync();
+            jest.useRealTimers();
+        }
+    });
+
+    test('Stop during processed-ID persistence restores the prior operation value', async () => {
+        const lease = createLeaseRecord();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false,
+                processedIds: []
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+        const processedWrite = deferred();
+        const processedWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (Array.isArray(values.processedIds) && values.processedIds.includes('cancelled-media')) {
+                processedWriteStarted.resolve();
+                return processedWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+
+        const mutation = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_PROCESSED_IDS_ADD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            ids: ['cancelled-media']
+        }, { tab: { id: lease.tabId } });
+        await processedWriteStarted.promise;
+        const stopping = background.stopScrapeRun('sync');
+        processedWrite.resolve();
+
+        await expect(mutation.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+    });
+
+    test('a user reset wins after Stop revokes an in-flight scrape processed-ID add', async () => {
+        const lease = createLeaseRecord();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false,
+                processedIds: ['existing-media']
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+        const processedWrite = deferred();
+        const processedWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (Array.isArray(values.processedIds) && values.processedIds.includes('cancelled-media')) {
+                processedWriteStarted.resolve();
+                return processedWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+
+        const add = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_PROCESSED_IDS_ADD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            ids: ['cancelled-media']
+        }, { tab: { id: lease.tabId } });
+        await processedWriteStarted.promise;
+        const stopping = background.stopScrapeRun('sync');
+        const reset = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'PROCESSED_IDS_RESET'
+        }, { id: harness.chromeApi.runtime.id });
+        processedWrite.resolve();
+
+        await expect(add.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+        await expect(reset.response).resolves.toEqual({ status: 'ok', processedIds: [] });
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+    });
+
+    test('a revoked enqueue rollback cannot delete a newer same-dedupe queue update', async () => {
+        const harness = createLeaseBackgroundHarness();
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await flushAsyncTurns(20);
+        const postPersist = deferred();
+        const releaseRevocation = deferred();
+        let authorityChecks = 0;
+        const assertAuthorized = async () => {
+            authorityChecks++;
+            if (authorityChecks !== 2) return;
+            postPersist.resolve();
+            await releaseRevocation.promise;
+            const error = new Error('revoked');
+            error.code = 'scrape_authority_revoked';
+            throw error;
+        };
+        const first = {
+            id: 'queue-a',
+            type: 'media',
+            sourceUrl: 'https://assets.grok.com/generated/shared/a.jpg',
+            finalPath: 'GrokVault/a.jpg'
+        };
+        const second = {
+            id: 'queue-b',
+            type: 'media',
+            sourceUrl: 'https://assets.grok.com/generated/shared/b.jpg',
+            finalPath: 'GrokVault/b.jpg'
+        };
+
+        const staleEnqueue = background.enqueueCloudItemForTest(first, 'media:shared', assertAuthorized);
+        await postPersist.promise;
+        await background.enqueueCloudItemForTest(second, 'media:shared');
+        releaseRevocation.resolve();
+
+        await expect(staleEnqueue).rejects.toMatchObject({ code: 'scrape_authority_revoked' });
+        expect(background.getCloudSyncQueueForTest()).toEqual([
+            expect.objectContaining({
+                sourceUrl: second.sourceUrl,
+                finalPath: second.finalPath
+            })
+        ]);
+    });
+
+    test('a successful processor cannot delete a newer same-dedupe queue revision', async () => {
+        jest.useFakeTimers();
+        try {
+            const harness = createLeaseBackgroundHarness({
+                localState: {
+                    cloudConfig: {
+                        enabled: true,
+                        mode: 'cloud_only',
+                        workerUrl: 'https://unit-placeholder.workers.dev',
+                        apiKey: 'unit-placeholder',
+                        keyPrefix: 'grok-powertools/v1'
+                    }
+                }
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureBackgroundStateReady();
+            const uploadStarted = deferred();
+            const releaseUpload = deferred();
+            const first = {
+                id: 'queue-a',
+                type: 'media',
+                dedupeKey: 'media:shared',
+                queueRevision: 1,
+                sourceUrl: 'https://assets.grok.com/generated/shared/a.jpg',
+                finalPath: 'GrokVault/a.jpg',
+                assetId: 'asset-a',
+                contentType: 'image/jpeg'
+            };
+            const second = {
+                id: 'queue-b',
+                type: 'media',
+                sourceUrl: 'https://assets.grok.com/generated/shared/b.jpg',
+                finalPath: 'GrokVault/b.jpg',
+                assetId: 'asset-b',
+                contentType: 'image/jpeg'
+            };
+            background.setCloudSyncQueueForTest([first]);
+
+            const processing = background.processCloudQueue('revision-race', {
+                uploadMediaQueueItem: async (_config, item) => {
+                    expect(item.sourceUrl).toBe(first.sourceUrl);
+                    uploadStarted.resolve();
+                    await releaseUpload.promise;
+                    return { status: 'uploaded', assetId: item.assetId, bytes: 1 };
+                }
+            });
+            await uploadStarted.promise;
+            await background.enqueueCloudItemForTest(second, first.dedupeKey);
+            releaseUpload.resolve();
+            await processing;
+
+            expect(background.getCloudSyncQueueForTest()).toEqual([
+                expect.objectContaining({
+                    sourceUrl: second.sourceUrl,
+                    finalPath: second.finalPath,
+                    assetId: second.assetId
+                })
+            ]);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('an existing unguarded queue drain cannot adopt a stopped run-scoped item', async () => {
+        const lease = createLeaseRecord({ kind: 'r2_backup' });
+        const runMediaId = '73e5e137-1334-49ea-b06b-a9d9ba891003';
+        const runUrl = `https://assets.grok.com/users/account/generated/${runMediaId}/image.jpg`;
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: true,
+                processedIds: [],
+                downloadPath: 'GrokVault',
+                activeGrokUserId: 'user-1',
+                cloudConfig: {
+                    enabled: true,
+                    mode: 'cloud_only',
+                    workerUrl: 'https://unit-placeholder.workers.dev',
+                    apiKey: 'unit-placeholder',
+                    keyPrefix: 'grok-powertools/v1'
+                }
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+        const uploadStarted = deferred();
+        const releaseUpload = deferred();
+        const uploadedUrls = [];
+        const initialUrl = 'https://assets.grok.com/generated/preexisting/image.jpg';
+        background.setCloudSyncQueueForTest([{
+            id: 'preexisting',
+            type: 'media',
+            dedupeKey: 'media:preexisting',
+            queueRevision: 1,
+            sourceUrl: initialUrl,
+            finalPath: 'GrokVault/preexisting.jpg',
+            assetId: 'preexisting',
+            contentType: 'image/jpeg'
+        }]);
+
+        const draining = background.processCloudQueue('alarm', {
+            uploadMediaQueueItem: async (_config, item) => {
+                uploadedUrls.push(item.sourceUrl);
+                if (item.sourceUrl === initialUrl) {
+                    uploadStarted.resolve();
+                    await releaseUpload.promise;
+                }
+                return { status: 'uploaded', assetId: item.assetId, bytes: 1 };
+            }
+        });
+        await uploadStarted.promise;
+
+        const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'R2_BACKUP_UPLOAD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            url: runUrl,
+            isVideo: false,
+            skipLocalDownload: true
+        }, { tab: { id: lease.tabId } });
+        await expect(transfer.response).resolves.toEqual({ status: 'queued' });
+        await expect(background.stopScrapeRun('r2_backup')).resolves.toMatchObject({ status: 'stopped' });
+        releaseUpload.resolve();
+        await draining;
+
+        expect(uploadedUrls).toEqual([initialUrl]);
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+    });
+
+    test('runtime mutations wait for startup hydration instead of being overwritten by its snapshot', async () => {
+        const harness = createLeaseBackgroundHarness({ localState: { processedIds: [] } });
+        const startupRead = deferred();
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        let interceptedStartup = false;
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (!interceptedStartup && Array.isArray(keys) && keys.includes('pendingDownloadOperations')) {
+                interceptedStartup = true;
+                return startupRead.promise;
+            }
+            return baseGet(keys);
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+
+        let responded = false;
+        const mutation = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'PROCESSED_IDS_ADD',
+            ids: ['post-startup-media']
+        }, { id: harness.chromeApi.runtime.id });
+        mutation.response.then(() => { responded = true; });
+        await flushAsyncTurns();
+
+        expect(responded).toBe(false);
+        startupRead.resolve({ processedIds: [] });
+        await expect(mutation.response).resolves.toEqual({
+            status: 'ok',
+            processedIds: ['post-startup-media']
+        });
+        await flushAsyncTurns(20);
+        expect(harness.storedLocal.processedIds).toEqual(['post-startup-media']);
+        expect(background.getProcessedUUIDsForTest()).toEqual(['post-startup-media']);
+    });
+
+    test.each([
+        'blob_fetch',
+        'preflight_verify',
+        'media_presign',
+        'media_put',
+        'post_upload_verify',
+        'sidecar_presign',
+        'sidecar_put'
+    ])('Stop at the %s boundary prevents later direct-upload side effects', async (blockedStage) => {
+        const lease = createLeaseRecord({ kind: 'r2_backup' });
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891003';
+        const mediaUrl = `https://assets.grok.com/users/account/generated/${mediaId}/image.jpg`;
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: true,
+                processedIds: [],
+                downloadPath: 'GrokVault',
+                activeGrokUserId: 'user-1',
+                cloudConfig: {
+                    enabled: true,
+                    mode: 'cloud_only',
+                    workerUrl: 'https://unit-placeholder.workers.dev',
+                    apiKey: 'unit-placeholder',
+                    keyPrefix: 'grok-powertools/v1'
+                }
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+        const blocked = deferred();
+        const release = deferred();
+        const stages = [];
+        let verifyCount = 0;
+
+        global.fetch = jest.fn((url, options = {}) => {
+            const value = String(url);
+            let stage;
+            let response;
+            if (value.startsWith('data:')) {
+                stage = 'blob_fetch';
+                response = {
+                    ok: true,
+                    blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+                };
+            } else if (value.endsWith('/v1/objects/verify')) {
+                verifyCount++;
+                stage = verifyCount === 1 ? 'preflight_verify' : 'post_upload_verify';
+                response = {
+                    ok: true,
+                    status: 200,
+                    json: async () => verifyCount === 1
+                        ? { exists: false, verified: false }
+                        : { exists: true, verified: true },
+                    text: async () => ''
+                };
+            } else if (value.endsWith('/v1/presign')) {
+                const body = JSON.parse(options.body || '{}');
+                const sidecar = String(body.objectKey || '').endsWith('.prompt.json');
+                stage = sidecar ? 'sidecar_presign' : 'media_presign';
+                response = {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        uploadUrl: sidecar ? 'https://upload.unit/sidecar' : 'https://upload.unit/media',
+                        method: 'PUT',
+                        headers: {}
+                    }),
+                    text: async () => ''
+                };
+            } else if (value === 'https://upload.unit/media') {
+                stage = 'media_put';
+                response = { ok: true, status: 200, text: async () => '' };
+            } else if (value === 'https://upload.unit/sidecar') {
+                stage = 'sidecar_put';
+                response = { ok: true, status: 200, text: async () => '' };
+            } else {
+                throw new Error(`Unexpected fetch URL: ${value}`);
+            }
+            stages.push(stage);
+            if (stage === blockedStage) {
+                blocked.resolve();
+                return release.promise.then(() => response);
+            }
+            return Promise.resolve(response);
+        });
+
+        const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'R2_BACKUP_UPLOAD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            url: mediaUrl,
+            blobDataUrl: 'data:image/png;base64,AQID',
+            promptText: 'unit prompt',
+            isVideo: false,
+            skipLocalDownload: true
+        }, { tab: { id: lease.tabId } });
+        await blocked.promise;
+        const stopping = background.stopScrapeRun('r2_backup');
+        await waitForCondition(() => harness.sessionState.activeScrapeRunToken?.status === 'idle');
+        release.resolve();
+
+        await expect(transfer.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+        expect(stages.at(-1)).toBe(blockedStage);
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+    });
+
+    test.each(['media_put', 'sidecar_put'])('Stop aborts a stalled %s before returning', async (blockedStage) => {
+        jest.useFakeTimers();
+        try {
+            const lease = createLeaseRecord({ kind: 'r2_backup' });
+            const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891003';
+            const mediaUrl = `https://assets.grok.com/users/account/generated/${mediaId}/image.jpg`;
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: true,
+                    processedIds: [],
+                    downloadPath: 'GrokVault',
+                    activeGrokUserId: 'user-1',
+                    cloudConfig: {
+                        enabled: true,
+                        mode: 'cloud_only',
+                        workerUrl: 'https://unit-placeholder.workers.dev',
+                        apiKey: 'unit-placeholder',
+                        keyPrefix: 'grok-powertools/v1'
+                    }
+                }
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureBackgroundStateReady();
+            await background.ensureScrapeLeaseHydrated();
+            const putStarted = deferred();
+            let stalledSignal = null;
+            let verifyCount = 0;
+
+            global.fetch = jest.fn((url, options = {}) => {
+                const value = String(url);
+                if (value.startsWith('data:')) {
+                    return Promise.resolve({
+                        ok: true,
+                        blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+                    });
+                }
+                if (value.endsWith('/v1/objects/verify')) {
+                    verifyCount++;
+                    return Promise.resolve({
+                        ok: true,
+                        status: 200,
+                        json: async () => verifyCount === 1
+                            ? { exists: false, verified: false }
+                            : { exists: true, verified: true },
+                        text: async () => ''
+                    });
+                }
+                if (value.endsWith('/v1/presign')) {
+                    const body = JSON.parse(options.body || '{}');
+                    const sidecar = String(body.objectKey || '').endsWith('.prompt.json');
+                    return Promise.resolve({
+                        ok: true,
+                        status: 200,
+                        json: async () => ({
+                            uploadUrl: sidecar ? 'https://upload.unit/sidecar' : 'https://upload.unit/media',
+                            method: 'PUT',
+                            headers: {}
+                        }),
+                        text: async () => ''
+                    });
+                }
+                const stage = value.endsWith('/sidecar') ? 'sidecar_put' : 'media_put';
+                if (stage !== blockedStage) {
+                    return Promise.resolve({ ok: true, status: 200, text: async () => '' });
+                }
+                stalledSignal = options.signal || null;
+                putStarted.resolve();
+                return new Promise((_resolve, reject) => {
+                    stalledSignal?.addEventListener('abort', () => {
+                        const error = new Error('aborted');
+                        error.name = 'AbortError';
+                        reject(error);
+                    }, { once: true });
+                });
+            });
+
+            const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'R2_BACKUP_UPLOAD',
+                runToken: lease.token,
+                runEpoch: lease.epoch,
+                kind: lease.kind,
+                url: mediaUrl,
+                blobDataUrl: 'data:image/png;base64,AQID',
+                promptText: 'unit prompt',
+                isVideo: false,
+                skipLocalDownload: true
+            }, { tab: { id: lease.tabId } });
+            await putStarted.promise;
+
+            const stopping = background.stopScrapeRun('r2_backup');
+            await jest.advanceTimersByTimeAsync(2500);
+
+            expect(stalledSignal).toBeDefined();
+            expect(stalledSignal.aborted).toBe(true);
+            await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+            await expect(transfer.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+            expect(harness.storedLocal.processedIds).toEqual([]);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('a delayed native download lifecycle cannot persist identity after Stop returns', async () => {
+        const lease = createLeaseRecord();
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891003';
+        const mediaUrl = `https://assets.grok.com/users/account/generated/${mediaId}/image.jpg`;
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false,
+                processedIds: [],
+                cloudConfig: { enabled: false, mode: 'local_only' }
+            }
+        });
+        harness.chromeApi.downloads.download.mockImplementation((_options, callback) => callback(77));
+        harness.chromeApi.downloads.search.mockResolvedValue([{
+            id: 77,
+            url: mediaUrl,
+            finalUrl: mediaUrl,
+            state: 'complete',
+            filename: '/tmp/GrokVault/image.jpg'
+        }]);
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+
+        const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'DOWNLOAD_MEDIA',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            url: mediaUrl,
+            isVideo: false
+        }, { tab: { id: lease.tabId } });
+        await expect(transfer.response).resolves.toEqual({ status: 'queued' });
+        await expect(background.stopScrapeRun('sync')).resolves.toMatchObject({ status: 'stopped' });
+
+        const suggest = jest.fn();
+        await background.handleDownloadFilename({ id: 77, url: mediaUrl, filename: 'image.jpg' }, suggest);
+        await background.handleDownloadChanged({ id: 77, state: { current: 'complete' } });
+
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+        expect(background.getPendingDownloadOperationsForTest()).toEqual({});
+    });
+
+    test('Stop is bounded when Chrome never settles a run-scoped download callback', async () => {
+        jest.useFakeTimers();
+        try {
+            const lease = createLeaseRecord();
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: false,
+                    cloudConfig: { enabled: false, mode: 'local_only' }
+                }
+            });
+            harness.chromeApi.downloads.download.mockImplementation(() => undefined);
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureScrapeLeaseHydrated();
+
+            dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'DOWNLOAD_MEDIA',
+                runToken: lease.token,
+                runEpoch: lease.epoch,
+                kind: lease.kind,
+                url: 'https://assets.grok.com/generated/hung/image.jpg',
+                isVideo: false
+            }, { tab: { id: lease.tabId } });
+            await Promise.resolve();
+            let stopped = false;
+            const stopping = background.stopScrapeRun('sync').then((value) => {
+                stopped = true;
+                return value;
+            });
+
+            await jest.advanceTimersByTimeAsync(3000);
+            expect(stopped).toBe(true);
+            await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+            expect(harness.storedLocal).toMatchObject({ scraperState: 'idle', isScraping: false });
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('a later run can claim the same URL after an earlier native callback times out', async () => {
+        jest.useFakeTimers();
+        try {
+            const lease = createLeaseRecord();
+            const mediaUrl = 'https://assets.grok.com/generated/shared/image.jpg';
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: false,
+                    processedIds: [],
+                    cloudConfig: { enabled: false, mode: 'local_only' }
+                }
+            });
+            const downloadCallbacks = [];
+            harness.chromeApi.downloads.download.mockImplementation((_options, callback) => {
+                downloadCallbacks.push(callback);
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureBackgroundStateReady();
+            await background.ensureScrapeLeaseHydrated();
+
+            const firstTransfer = background.queueChromeDownload({ url: mediaUrl }, lease).catch((error) => error);
+            await waitForCondition(() => downloadCallbacks.length === 1);
+
+            const stopping = background.stopScrapeRun('sync');
+            await jest.advanceTimersByTimeAsync(2500);
+            await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+
+            const nextRun = await background.initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' });
+            expect(nextRun).toMatchObject({ status: 'started', runToken: expect.any(String), runEpoch: expect.any(Number) });
+            Object.assign(harness.storedLocal, {
+                scraperState: 'running',
+                scrapeRunToken: nextRun.runToken,
+                scrapeRunEpoch: nextRun.runEpoch,
+                isScraping: true,
+                isR2Backup: false
+            });
+            const nextLease = {
+                version: 1,
+                token: nextRun.runToken,
+                epoch: nextRun.runEpoch,
+                kind: 'sync',
+                tabId: lease.tabId,
+                status: 'active',
+                startedAt: Date.now()
+            };
+            const secondTransfer = background.queueChromeDownload({ url: mediaUrl }, nextLease);
+            await waitForCondition(() => downloadCallbacks.length === 2);
+
+            const suggest = jest.fn();
+            await background.handleDownloadFilename({ id: 88, url: mediaUrl, filename: 'image.jpg' }, suggest);
+            downloadCallbacks[1](88);
+
+            await expect(secondTransfer).resolves.toBe(88);
+            expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalledWith(88);
+            expect(background.getPendingDownloadOperationsForTest()).toHaveProperty('88');
+
+            downloadCallbacks[0](77);
+            await expect(firstTransfer).resolves.toMatchObject({ code: 'scrape_authority_revoked' });
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('Stop preempts a deferred transfer authority read instead of waiting behind it', async () => {
+        jest.useFakeTimers();
+        const authorityRead = deferred();
+        try {
+            const lease = createLeaseRecord();
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: false,
+                    processedIds: []
+                }
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureBackgroundStateReady();
+            await background.ensureScrapeLeaseHydrated();
+            const authorityReadStarted = deferred();
+            const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+            let intercepted = false;
+            harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+                if (!intercepted
+                    && Array.isArray(keys)
+                    && keys.includes('scraperState')
+                    && keys.includes('scrapeRunToken')
+                    && keys.includes('scrapeRunEpoch')) {
+                    intercepted = true;
+                    authorityReadStarted.resolve();
+                    return authorityRead.promise;
+                }
+                return baseGet(keys);
+            });
+
+            const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'SCRAPE_PROCESSED_IDS_ADD',
+                runToken: lease.token,
+                runEpoch: lease.epoch,
+                kind: lease.kind,
+                ids: ['blocked-authority-media']
+            }, { tab: { id: lease.tabId } });
+            await authorityReadStarted.promise;
+
+            let stopped = false;
+            const stopping = background.stopScrapeRun('sync').then((value) => {
+                stopped = true;
+                return value;
+            });
+            await jest.advanceTimersByTimeAsync(2500);
+
+            expect(stopped).toBe(true);
+            expect(harness.sessionState.activeScrapeRunToken).toMatchObject({ status: 'idle' });
+            await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+
+            authorityRead.resolve({
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false
+            });
+            await expect(transfer.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+            expect(harness.storedLocal.processedIds).toEqual([]);
+        } finally {
+            authorityRead.resolve({});
+            jest.useRealTimers();
+        }
+    });
+
+    test('a timed-out Stop cleanup cannot poison later download-operation mutations', async () => {
+        jest.useFakeTimers();
+        const blockedCleanupWrite = deferred();
+        try {
+            const lease = createLeaseRecord();
+            const mediaUrl = 'https://assets.grok.com/generated/after-timeout/image.jpg';
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: false,
+                    processedIds: [],
+                    cloudConfig: { enabled: false, mode: 'local_only' }
+                }
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureBackgroundStateReady();
+            await background.ensureScrapeLeaseHydrated();
+            const cleanupWriteStarted = deferred();
+            const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+            let intercepted = false;
+            harness.chromeApi.storage.local.set.mockImplementation((values) => {
+                if (!intercepted && Object.prototype.hasOwnProperty.call(values, 'pendingDownloadOperations')) {
+                    intercepted = true;
+                    cleanupWriteStarted.resolve();
+                    return blockedCleanupWrite.promise.then(() => baseSet(values));
+                }
+                return baseSet(values);
+            });
+
+            const stopping = background.stopScrapeRun('sync');
+            await cleanupWriteStarted.promise;
+            await jest.advanceTimersByTimeAsync(2500);
+            await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+
+            const nextRun = await background.initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' });
+            Object.assign(harness.storedLocal, {
+                scraperState: 'running',
+                scrapeRunToken: nextRun.runToken,
+                scrapeRunEpoch: nextRun.runEpoch,
+                isScraping: true,
+                isR2Backup: false
+            });
+            const nextLease = {
+                version: 1,
+                token: nextRun.runToken,
+                epoch: nextRun.runEpoch,
+                kind: 'sync',
+                tabId: lease.tabId,
+                status: 'active',
+                startedAt: Date.now()
+            };
+            let downloadCallback = null;
+            harness.chromeApi.downloads.download.mockImplementation((_options, callback) => {
+                downloadCallback = callback;
+            });
+            const download = background.queueChromeDownload({ url: mediaUrl }, nextLease);
+            await waitForCondition(() => typeof downloadCallback === 'function');
+
+            let filenameHandled = false;
+            const filenameHandling = background.handleDownloadFilename(
+                { id: 91, url: mediaUrl, filename: 'image.jpg' },
+                jest.fn()
+            ).then(() => { filenameHandled = true; });
+            await jest.advanceTimersByTimeAsync(100);
+
+            expect(filenameHandled).toBe(true);
+            downloadCallback(91);
+            await expect(download).resolves.toBe(91);
+            await filenameHandling;
+            expect(background.getPendingDownloadOperationsForTest()).toHaveProperty('91');
+        } finally {
+            blockedCleanupWrite.resolve();
+            await jest.runOnlyPendingTimersAsync();
+            jest.useRealTimers();
+        }
+    });
+
+    test('closing the owner tab tombstones its active lease and local mirror', async () => {
+        const lease = createLeaseRecord();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false
+            }
+        });
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+        const removed = harness.chromeApi.tabs.onRemoved.addListener.mock.calls[0]?.[0];
+        expect(removed).toEqual(expect.any(Function));
+
+        removed(lease.tabId, { isWindowClosing: false });
+        await waitForCondition(() => (
+            harness.sessionState.activeScrapeRunToken?.status === 'idle'
+            && harness.storedLocal.scraperState === 'idle'
+        ));
+
+        expect(harness.storedLocal).toMatchObject({ scraperState: 'idle', isScraping: false });
+    });
+
     test.each([
         ['sync', { action: 'INIT_SCRAPE' }, 'INIT_SCRAPE'],
         ['r2_backup', { action: 'INIT_R2_BACKUP', mode: 'full' }, 'INIT_R2_BACKUP']
@@ -2017,6 +4343,7 @@ describe('background scrape lease authority', () => {
     test('revalidates tab-transfer authority after filename storage resolves', async () => {
         const lease = createLeaseRecord();
         const filenameRead = deferred();
+        const filenameReadStarted = deferred();
         const harness = createLeaseBackgroundHarness({
             lease,
             localState: {
@@ -2029,7 +4356,10 @@ describe('background scrape lease authority', () => {
         });
         const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
         harness.chromeApi.storage.local.get.mockImplementation((keys) => {
-            if (Array.isArray(keys) && keys.includes('downloadPath')) return filenameRead.promise;
+            if (Array.isArray(keys) && keys.includes('downloadPath')) {
+                filenameReadStarted.resolve();
+                return filenameRead.promise;
+            }
             return baseGet(keys);
         });
         global.chrome = harness.chromeApi;
@@ -2040,11 +4370,11 @@ describe('background scrape lease authority', () => {
         const interception = tabListener(42, {
             url: 'https://imagine-public.x.ai/media/stop-during-await.jpg'
         }, { id: 42 });
-        await flushAsyncTurns();
+        await filenameReadStarted.promise;
 
-        await expect(background.stopScrapeRun('sync')).resolves.toMatchObject({ status: 'stopped' });
+        const stopping = background.stopScrapeRun('sync');
         filenameRead.resolve({ downloadPath: 'GrokVault', activeGrokUserId: 'Shared_Account' });
-        await interception;
+        await Promise.all([interception, stopping]);
 
         expect(harness.chromeApi.downloads.download).not.toHaveBeenCalled();
         expect(harness.chromeApi.tabs.remove).not.toHaveBeenCalled();
@@ -2113,19 +4443,25 @@ describe('background scrape lease authority', () => {
                 });
             });
             global.chrome = harness.chromeApi;
-            const background = require('../../background.js');
+            require('../../background.js');
 
-            await expect(background.initializeScrapeInActiveTab(
-                { action: kind === 'r2_backup' ? 'INIT_R2_BACKUP' : 'INIT_SCRAPE' },
-                { backup: kind === 'r2_backup' }
-            )).resolves.toMatchObject({ status: 'started' });
+            const startDispatch = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+                action: kind === 'r2_backup' ? 'START_R2_BACKUP' : 'START_SCRAPE',
+                ...(kind === 'r2_backup' ? { mode: 'full' } : {})
+            });
+            expect(startDispatch.returnValue).toBe(true);
+            await expect(startDispatch.response).resolves.toMatchObject({ status: 'started' });
             expect(harness.storedLocal).toMatchObject({
                 scraperState: 'running',
                 isScraping: true,
                 isR2Backup: kind === 'r2_backup'
             });
 
-            await expect(background.stopScrapeRun(kind)).resolves.toEqual({
+            const stopDispatch = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+                action: kind === 'r2_backup' ? 'STOP_R2_BACKUP' : 'STOP_SCRAPE'
+            });
+            expect(stopDispatch.returnValue).toBe(true);
+            await expect(stopDispatch.response).resolves.toEqual({
                 status: 'stopped',
                 abortAcknowledged: true
             });

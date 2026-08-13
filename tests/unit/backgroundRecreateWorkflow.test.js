@@ -43,6 +43,7 @@ function mockChromeForBackground() {
         },
         tabs: {
             create: jest.fn(),
+            onRemoved: { addListener: jest.fn() },
             onUpdated: { addListener: jest.fn() },
             query: jest.fn(),
             remove: jest.fn(),

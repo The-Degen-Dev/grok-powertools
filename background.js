@@ -236,24 +236,43 @@ let scrapeStartPending = false;
 const ACTIVE_SCRAPE_RUN_TOKEN_KEY = 'activeScrapeRunToken';
 const SCRAPE_LEASE_VERSION = 1;
 const SCRAPE_ABORT_TIMEOUT_MS = 2000;
+const SCRAPE_TRANSFER_DRAIN_TIMEOUT_MS = 2000;
+const PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS = 1000;
+const CLOUD_QUEUE_MUTATION_TIMEOUT_MS = 1000;
 let activeScrapeLease = null;
 let scrapeLeaseHydrationPromise = null;
 let scrapeLeaseMutationQueue = Promise.resolve();
+let scrapeStopPending = false;
+const activeScrapeTransferTasks = new Map();
+const activeScrapeTransferAbortControllers = new Map();
+let backgroundStateReadyPromise = null;
 const MAX_LOGS = 100;
 const CLOUD_ALARM_NAME = 'gptCloudRetry';
 const CLOUD_METADATA_DEBOUNCE_MS = 2000;
 const CLOUD_SCHEMA_VERSION = 1;
 const PROCESSED_IDS_KEY = 'processedIds';
 const PENDING_DOWNLOAD_OPERATIONS_KEY = 'pendingDownloadOperations';
+const SCRAPE_COMPLETION_TXN_KEY = 'scrapeCompletionTxn';
 
 // Global History Set
 let processedUUIDs = new Set();
 let processedIdsMutationQueue = Promise.resolve();
 let pendingDownloadOperations = new Map();
 let pendingDownloadOperationsMutationQueue = Promise.resolve();
+let pendingDownloadOperationsRevision = 0;
+let pendingDownloadOperationRevision = 0;
 const activeDownloadOperations = new Set();
+const pendingScrapeDownloadReceiptsByUrl = new Map();
+const pendingScrapeDownloadReceiptsById = new Map();
+const revokedScrapeDownloadIds = new Set();
 
 let cloudSyncQueue = [];
+let cloudQueueMutationQueue = Promise.resolve();
+let cloudQueueRevision = 0;
+let cloudQueueDrainPromise = null;
+let cloudStatePersistenceRevision = 0;
+let scrapeCompletionTxn = null;
+let scrapeCompletionTransition = null;
 let cloudSyncState = {
     unsyncedCount: 0,
     lastError: null,
@@ -342,14 +361,29 @@ function normalizeProcessedIds(values) {
     ));
 }
 
-function mutateProcessedIds({ reset = false, ids = [] } = {}) {
+function writeProcessedIds(values) {
+    return chrome.storage.local.set({ [PROCESSED_IDS_KEY]: values });
+}
+
+function mutateProcessedIds({ reset = false, ids = [] } = {}, assertAuthorized = null) {
     const mutation = processedIdsMutationQueue.then(async () => {
         const stored = await chrome.storage.local.get([PROCESSED_IDS_KEY]);
-        const next = reset ? new Set() : new Set(normalizeProcessedIds(stored[PROCESSED_IDS_KEY]));
+        if (assertAuthorized) await assertAuthorized();
+        const previousValues = normalizeProcessedIds(stored[PROCESSED_IDS_KEY]);
+        const next = reset ? new Set() : new Set(previousValues);
         if (!reset) normalizeProcessedIds(ids).forEach((id) => next.add(id));
         const values = Array.from(next);
+        await writeProcessedIds(values);
         processedUUIDs = next;
-        await chrome.storage.local.set({ [PROCESSED_IDS_KEY]: values });
+        try {
+            if (assertAuthorized) await assertAuthorized();
+        } catch (error) {
+            if (isScrapeAuthorityRevokedError(error)) {
+                processedUUIDs = new Set(previousValues);
+                await writeProcessedIds(previousValues);
+            }
+            throw error;
+        }
         return values;
     });
     processedIdsMutationQueue = mutation.catch(() => {});
@@ -369,17 +403,20 @@ function persistQueuedBackupProcessedId(item, result, processedIds, persist) {
     return applyBackupProcessedIdPersistence(processedIds, item?.backupProcessedId, result?.status, persist);
 }
 
-async function persistQueuedBackupProcessedIdAfterSuccess(item, result) {
+async function persistQueuedBackupProcessedIdAfterSuccess(item, result, assertAuthorized = null) {
     const id = item?.backupProcessedId;
     if (!shouldPersistBackupProcessedId(result?.status)) return false;
 
     if (Number.isInteger(item.cleanupDownloadId)) {
-        const updated = await markDownloadOperationR2Present(item.cleanupDownloadId, result);
+        if (!item.scrapeLease) {
+            await detachDownloadOperationScrapeLease(item.cleanupDownloadId);
+        }
+        const updated = await markDownloadOperationR2Present(item.cleanupDownloadId, result, assertAuthorized);
         return !!updated;
     }
 
     if (!id) return false;
-    await mutateProcessedIds({ ids: [id] });
+    await mutateProcessedIds({ ids: [id] }, assertAuthorized);
     return true;
 }
 
@@ -468,12 +505,27 @@ function getCloudTestTelemetry() {
 }
 
 async function persistCloudState() {
-    cloudSyncState.unsyncedCount = cloudSyncQueue.length;
-    await chrome.storage.local.set({
-        [CloudSync.STORAGE_KEYS.cloudSyncQueue]: cloudSyncQueue,
-        [CloudSync.STORAGE_KEYS.cloudSyncState]: cloudSyncState
-    });
-    emitCloudStatus();
+    let revision = ++cloudStatePersistenceRevision;
+
+    while (true) {
+        cloudSyncState.unsyncedCount = cloudSyncQueue.length;
+        const queueSnapshot = cloudSyncQueue.map((item) => ({
+            ...item,
+            ...(item.scrapeLease ? { scrapeLease: { ...item.scrapeLease } } : {})
+        }));
+        const stateSnapshot = { ...cloudSyncState };
+        await chrome.storage.local.set({
+            [CloudSync.STORAGE_KEYS.cloudSyncQueue]: queueSnapshot,
+            [CloudSync.STORAGE_KEYS.cloudSyncState]: stateSnapshot
+        });
+
+        if (revision === cloudStatePersistenceRevision) {
+            emitCloudStatus();
+            return;
+        }
+
+        revision = cloudStatePersistenceRevision;
+    }
 }
 
 async function getCloudConfig() {
@@ -667,53 +719,183 @@ async function scheduleCloudRetryAlarm() {
     await persistCloudState();
 }
 
-async function enqueueCloudItem(queueItem, dedupeKey) {
+function enqueueCloudQueueMutation(operation) {
+    const timeout = Symbol('cloud_queue_mutation_timeout');
+    const operationPromise = cloudQueueMutationQueue.then(operation, operation);
+    const mutation = withTimeout(
+        operationPromise,
+        CLOUD_QUEUE_MUTATION_TIMEOUT_MS,
+        timeout
+    ).then((result) => {
+        if (result === timeout) throw new Error('cloud_queue_mutation_persist_timeout');
+        return result;
+    });
+    cloudQueueMutationQueue = mutation.catch(() => {});
+    return mutation;
+}
+
+async function rollbackCloudQueueItem(receipt) {
+    return enqueueCloudQueueMutation(async () => {
+        const index = cloudSyncQueue.findIndex((item) => item.dedupeKey === receipt.dedupeKey);
+        if (index === -1 || cloudSyncQueue[index].queueRevision !== receipt.queueRevision) return false;
+        if (receipt.previousItem) cloudSyncQueue[index] = receipt.previousItem;
+        else cloudSyncQueue.splice(index, 1);
+        await persistCloudState();
+        return true;
+    });
+}
+
+function snapshotCloudQueueItems() {
+    return enqueueCloudQueueMutation(() => cloudSyncQueue.map((item) => ({ ...item })));
+}
+
+function cloudQueueItemIsCurrent(item) {
+    return enqueueCloudQueueMutation(() => cloudSyncQueue.some((candidate) => (
+        candidate.dedupeKey === item.dedupeKey
+        && candidate.queueRevision === item.queueRevision
+    )));
+}
+
+function removeCloudQueueItemRevision(item) {
+    return enqueueCloudQueueMutation(async () => {
+        const index = cloudSyncQueue.findIndex((candidate) => (
+            candidate.dedupeKey === item.dedupeKey
+            && candidate.queueRevision === item.queueRevision
+        ));
+        if (index === -1) return false;
+        cloudSyncQueue.splice(index, 1);
+        await persistCloudState();
+        return true;
+    });
+}
+
+function updateCloudQueueItemRevision(item, update) {
+    return enqueueCloudQueueMutation(async () => {
+        const index = cloudSyncQueue.findIndex((candidate) => (
+            candidate.dedupeKey === item.dedupeKey
+            && candidate.queueRevision === item.queueRevision
+        ));
+        if (index === -1) return false;
+        cloudSyncQueue[index] = { ...cloudSyncQueue[index], ...update };
+        await persistCloudState();
+        return true;
+    });
+}
+
+function cloneCloudQueue(items = cloudSyncQueue) {
+    return items.map((item) => ({
+        ...item,
+        ...(item.scrapeLease ? { scrapeLease: { ...item.scrapeLease } } : {}),
+        ...(item.revocationLease ? { revocationLease: { ...item.revocationLease } } : {})
+    }));
+}
+
+function completionTxnMatchesLease(txn, lease) {
+    return Boolean(txn && scrapeLeaseMatches(txn.lease, lease));
+}
+
+function recordOwnedByScrapeLease(record, lease) {
+    return scrapeLeaseMatches(record?.scrapeLease, lease)
+        || scrapeLeaseMatches(record?.revocationLease, lease);
+}
+
+function isPreparedCompletionRecord(record) {
+    return Boolean(
+        record?.completionTxnId
+        && scrapeCompletionTxn?.phase === 'prepared'
+        && record.completionTxnId === scrapeCompletionTxn.id
+    );
+}
+
+function isCompletionTransitionBlockingRecord(record) {
+    if (!scrapeCompletionTransition || scrapeCompletionTransition.status === 'committed') return false;
+    return recordOwnedByScrapeLease(record, scrapeCompletionTransition.txn.lease)
+        || record?.completionTxnId === scrapeCompletionTransition.txn.id;
+}
+
+function hasBlockedScrapeCompletionTransfer() {
+    return scrapeCompletionTxn?.phase === 'prepared'
+        || Boolean(scrapeCompletionTransition && scrapeCompletionTransition.status !== 'committed');
+}
+
+async function enqueueCloudItem(queueItem, dedupeKey, assertAuthorized = null) {
     const key = dedupeKey || queueItem.id;
-    const existing = cloudSyncQueue.find((item) => item.dedupeKey === key);
+    if (assertAuthorized) await assertAuthorized();
+    let receipt = null;
+    try {
+        receipt = await enqueueCloudQueueMutation(async () => {
+            const existingIndex = cloudSyncQueue.findIndex((item) => item.dedupeKey === key);
+            const existing = existingIndex >= 0 ? cloudSyncQueue[existingIndex] : null;
+            const queueRevision = ++cloudQueueRevision;
+            const nextReceipt = {
+                dedupeKey: key,
+                previousItem: existing ? { ...existing } : null,
+                queueRevision
+            };
 
-    if (existing) {
-        if (queueItem.type === 'metadata') {
-            existing.payload = queueItem.payload;
-            existing.kind = queueItem.kind;
-            existing.userId = queueItem.userId;
-            existing.updatedAt = Date.now();
-            existing.attempts = 0;
-            existing.lastError = null;
-        } else if (queueItem.type === 'media') {
-            existing.sourceUrl = queueItem.sourceUrl || existing.sourceUrl;
-            existing.finalPath = queueItem.finalPath || existing.finalPath;
-            existing.objectKey = queueItem.objectKey || existing.objectKey;
-            existing.assetId = queueItem.assetId || existing.assetId;
-            existing.sourceUrlHash = queueItem.sourceUrlHash || existing.sourceUrlHash;
-            existing.assetIdentityKind = queueItem.assetIdentityKind || existing.assetIdentityKind;
-            existing.contentType = queueItem.contentType || existing.contentType;
-            existing.promptText = queueItem.promptText || existing.promptText || '';
-            existing.backupProcessedId = queueItem.backupProcessedId || existing.backupProcessedId;
-            existing.cleanupDownloadId = Number.isInteger(queueItem.cleanupDownloadId)
-                ? queueItem.cleanupDownloadId
-                : existing.cleanupDownloadId;
-            existing.updatedAt = Date.now();
-            existing.attempts = 0;
-            existing.lastError = null;
-        }
-    } else {
-        cloudSyncQueue.push({
-            ...queueItem,
-            dedupeKey: key,
-            attempts: queueItem.attempts || 0,
-            createdAt: queueItem.createdAt || Date.now()
+            if (existing) {
+                if (queueItem.type === 'metadata') {
+                    cloudSyncQueue[existingIndex] = {
+                        ...existing,
+                        payload: queueItem.payload,
+                        kind: queueItem.kind,
+                        userId: queueItem.userId,
+                        updatedAt: Date.now(),
+                        attempts: 0,
+                        lastError: null,
+                        queueRevision
+                    };
+                } else if (queueItem.type === 'media') {
+                    cloudSyncQueue[existingIndex] = {
+                        ...existing,
+                        sourceUrl: queueItem.sourceUrl || existing.sourceUrl,
+                        finalPath: queueItem.finalPath || existing.finalPath,
+                        objectKey: queueItem.objectKey || existing.objectKey,
+                        assetId: queueItem.assetId || existing.assetId,
+                        sourceUrlHash: queueItem.sourceUrlHash || existing.sourceUrlHash,
+                        assetIdentityKind: queueItem.assetIdentityKind || existing.assetIdentityKind,
+                        contentType: queueItem.contentType || existing.contentType,
+                        promptText: queueItem.promptText || existing.promptText || '',
+                        backupProcessedId: queueItem.backupProcessedId || existing.backupProcessedId,
+                        cleanupDownloadId: Number.isInteger(queueItem.cleanupDownloadId)
+                            ? queueItem.cleanupDownloadId
+                            : existing.cleanupDownloadId,
+                        scrapeLease: queueItem.scrapeLease || null,
+                        updatedAt: Date.now(),
+                        attempts: 0,
+                        lastError: null,
+                        queueRevision
+                    };
+                }
+            } else {
+                cloudSyncQueue.push({
+                    ...queueItem,
+                    dedupeKey: key,
+                    attempts: queueItem.attempts || 0,
+                    createdAt: queueItem.createdAt || Date.now(),
+                    queueRevision
+                });
+            }
+
+            await persistCloudState();
+            return nextReceipt;
         });
+        if (assertAuthorized) await assertAuthorized();
+        return receipt;
+    } catch (error) {
+        if (receipt && isScrapeAuthorityRevokedError(error)) await rollbackCloudQueueItem(receipt);
+        throw error;
     }
-
-    await persistCloudState();
 }
 
 async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', acceptance = null, processOptions = {}) {
     const config = await getCloudConfig();
+    if (processOptions.assertAuthorized) await processOptions.assertAuthorized();
     if (!CloudSync.isCloudEnabled(config)) return false;
     const acceptanceContext = acceptance || buildAcceptanceContextFromCloudConfig(config, 'queue-media');
 
     const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
+    if (processOptions.assertAuthorized) await processOptions.assertAuthorized();
     const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
 
     const objectKey = CloudSync.buildMediaObjectKeyForUpload({
@@ -744,18 +926,30 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', ac
         cleanupDownloadId: Number.isInteger(processOptions.cleanupDownloadId)
             ? processOptions.cleanupDownloadId
             : null,
+        scrapeLease: processOptions.scrapeLease
+            ? copyScrapeLeaseAuthority(processOptions.scrapeLease)
+            : null,
         acceptance: acceptanceContext
     };
 
-    await enqueueCloudItem(queueItem, CloudSync.buildMediaDedupeKey({
-        fallbackUserId: activeUserId,
-        sourceUrl,
-        finalPath,
-        contentType: queueItem.contentType
-    }));
+    let queueReceipt = null;
     try {
-        await processCloudQueue('media-enqueued', processOptions);
+        queueReceipt = await enqueueCloudItem(queueItem, CloudSync.buildMediaDedupeKey({
+            fallbackUserId: activeUserId,
+            sourceUrl,
+            finalPath,
+            contentType: queueItem.contentType
+        }), processOptions.assertAuthorized || null);
+        if (processOptions.assertAuthorized) await processOptions.assertAuthorized();
+        await processCloudQueue('media-enqueued', {
+            ...processOptions,
+            waitForExisting: false
+        });
     } catch (e) {
+        if (isScrapeAuthorityRevokedError(e)) {
+            if (queueReceipt) await rollbackCloudQueueItem(queueReceipt);
+            throw e;
+        }
         console.error('[CloudQueue]', formatRedactedMediaLog(
             'enqueue_processing_failed',
             queueItem.backupProcessedId || queueItem.assetId,
@@ -1028,8 +1222,32 @@ function buildConflictObjectKey(config, descriptor) {
     return `${keyPrefix}/users/${userId}/media/conflicts/${assetId}/${timestamp}.${descriptor.extension || 'bin'}`;
 }
 
-async function verifyR2Object(config, descriptor, expected = {}) {
-    const response = await fetch(`${config.workerUrl}/v1/objects/verify`, {
+function createScrapeAuthorityRevokedError() {
+    const error = new Error('Scrape run authority was revoked.');
+    error.code = 'scrape_authority_revoked';
+    return error;
+}
+
+function getScrapeAuthorityAbortSignal(assertAuthorized) {
+    return assertAuthorized?.signal || null;
+}
+
+async function fetchWithScrapeAuthority(url, options = {}, assertAuthorized = null) {
+    if (assertAuthorized) await assertAuthorized();
+    const signal = getScrapeAuthorityAbortSignal(assertAuthorized);
+    if (signal?.aborted) throw createScrapeAuthorityRevokedError();
+    try {
+        const response = await fetch(url, signal ? { ...options, signal } : options);
+        if (assertAuthorized) await assertAuthorized();
+        return response;
+    } catch (error) {
+        if (signal?.aborted) throw createScrapeAuthorityRevokedError();
+        throw error;
+    }
+}
+
+async function verifyR2Object(config, descriptor, expected = {}, assertAuthorized = null) {
+    const response = await fetchWithScrapeAuthority(`${config.workerUrl}/v1/objects/verify`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1044,7 +1262,7 @@ async function verifyR2Object(config, descriptor, expected = {}) {
             assetId: descriptor.assetId,
             sourceUrlHash: descriptor.sourceUrlHash
         })
-    });
+    }, assertAuthorized);
 
     if (!response.ok) {
         const detail = await response.text().catch(() => 'Unknown verify failure');
@@ -1054,7 +1272,7 @@ async function verifyR2Object(config, descriptor, expected = {}) {
     return response.json();
 }
 
-async function requestPresignedUrl(config, queueItem, contentLength) {
+async function requestPresignedUrl(config, queueItem, contentLength, assertAuthorized = null) {
     const body = {
         objectKey: queueItem.objectKey,
         contentType: queueItem.contentType || 'application/octet-stream',
@@ -1066,7 +1284,7 @@ async function requestPresignedUrl(config, queueItem, contentLength) {
         body.metadata = metadata;
     }
 
-    const response = await fetch(`${config.workerUrl}/v1/presign`, {
+    const response = await fetchWithScrapeAuthority(`${config.workerUrl}/v1/presign`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1074,7 +1292,7 @@ async function requestPresignedUrl(config, queueItem, contentLength) {
             ...CloudSync.buildAcceptanceHeaders(queueItem)
         },
         body: JSON.stringify(body)
-    });
+    }, assertAuthorized);
 
     if (!response.ok) {
         const detail = await response.text().catch(() => 'Unknown presign failure');
@@ -1084,10 +1302,11 @@ async function requestPresignedUrl(config, queueItem, contentLength) {
     return response.json();
 }
 
-async function uploadPromptSidecar(config, descriptor) {
+async function uploadPromptSidecar(config, descriptor, assertAuthorized = null) {
     if (!descriptor.promptText) return;
 
     try {
+        if (assertAuthorized) await assertAuthorized();
         const sidecarKey = descriptor.objectKey + '.prompt.json';
         const sidecar = JSON.stringify({
             prompt: descriptor.promptText,
@@ -1105,21 +1324,25 @@ async function uploadPromptSidecar(config, descriptor) {
             })
         };
         const sidecarBytes = new Blob([sidecar]).size;
-        const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, sidecarBytes);
-        await fetch(sidecarPresigned.uploadUrl, {
+        const sidecarPresigned = await requestPresignedUrl(config, sidecarItem, sidecarBytes, assertAuthorized);
+        if (assertAuthorized) await assertAuthorized();
+        await fetchWithScrapeAuthority(sidecarPresigned.uploadUrl, {
             method: 'PUT',
             headers: { ...(sidecarPresigned.headers || {}), 'Content-Type': 'application/json' },
             body: sidecar
-        });
+        }, assertAuthorized);
+        if (assertAuthorized) await assertAuthorized();
         console.log('[CloudQueue]', formatRedactedMediaLog('sidecar_uploaded', descriptor.assetId, { bytes: sidecarBytes }));
-    } catch {
+    } catch (error) {
+        if (isScrapeAuthorityRevokedError(error)) throw error;
         console.warn('[CloudQueue]', formatRedactedMediaLog('sidecar_failed', descriptor.assetId));
     }
 }
 
-async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
+async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAuthorized = null) {
     const contentType = uploadCandidate.contentType || blob.type || 'application/octet-stream';
     const contentSha256 = await sha256Blob(blob);
+    if (assertAuthorized) await assertAuthorized();
     let descriptor = buildUploadDescriptor(config, {
         ...uploadCandidate,
         contentType,
@@ -1128,19 +1351,24 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
 
     let preflight;
     try {
+        if (assertAuthorized) await assertAuthorized();
         preflight = await verifyR2Object(config, descriptor, {
             sizeBytes: blob.size,
             sha256: contentSha256,
             contentType
-        });
+        }, assertAuthorized);
+        if (assertAuthorized) await assertAuthorized();
     } catch (e) {
+        if (isScrapeAuthorityRevokedError(e)) throw e;
         throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
     }
 
     if (preflight.exists && preflight.verified) {
+        if (assertAuthorized) await assertAuthorized();
         cloudSyncState.r2BytesVerifiedExisting += blob.size;
         cloudSyncState.r2DuplicateUploadsSkipped += 1;
         await persistCloudState();
+        if (assertAuthorized) await assertAuthorized();
         log(`Cloud upload ${formatRedactedMediaLog('already_present', descriptor.assetId, { bytes: blob.size })}`, 'success');
         return {
             status: 'already_present',
@@ -1152,6 +1380,7 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
     }
 
     if (preflight.exists && !preflight.verified) {
+        if (assertAuthorized) await assertAuthorized();
         const canonicalKey = descriptor.objectKey;
         descriptor = {
             ...descriptor,
@@ -1164,13 +1393,17 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
         };
         cloudSyncState.r2ConflictsDetected += 1;
         await persistCloudState();
+        if (assertAuthorized) await assertAuthorized();
         log(`Cloud upload ${formatRedactedMediaLog('conflict_detected', descriptor.assetId, { bytes: blob.size })}`, 'warning');
     }
 
     let presigned;
     try {
-        presigned = await requestPresignedUrl(config, descriptor, blob.size);
+        if (assertAuthorized) await assertAuthorized();
+        presigned = await requestPresignedUrl(config, descriptor, blob.size, assertAuthorized);
+        if (assertAuthorized) await assertAuthorized();
     } catch (e) {
+        if (isScrapeAuthorityRevokedError(e)) throw e;
         throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
     }
 
@@ -1180,33 +1413,40 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
             uploadHeaders['Content-Type'] = contentType;
         }
 
-        const uploadResponse = await fetch(presigned.uploadUrl, {
+        if (assertAuthorized) await assertAuthorized();
+        const uploadResponse = await fetchWithScrapeAuthority(presigned.uploadUrl, {
             method: presigned.method || 'PUT',
             headers: uploadHeaders,
             body: blob
-        });
+        }, assertAuthorized);
+        if (assertAuthorized) await assertAuthorized();
 
         if (!uploadResponse.ok) {
             const detail = await uploadResponse.text().catch(() => 'Unknown upload error');
             throw new Error(`HTTP ${uploadResponse.status}: ${detail}`);
         }
     } catch (e) {
+        if (isScrapeAuthorityRevokedError(e)) throw e;
         if (e.message.startsWith(`[${CloudSync.UPLOAD_STAGES.r2Put}]`)) throw e;
         throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] ${e.message}`);
     }
 
+    if (assertAuthorized) await assertAuthorized();
     const postUpload = await verifyR2Object(config, descriptor, {
         sizeBytes: blob.size,
         sha256: contentSha256,
         contentType
-    });
+    }, assertAuthorized);
+    if (assertAuthorized) await assertAuthorized();
     if (!postUpload.exists || !postUpload.verified) {
         throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] R2 post-upload verification failed`);
     }
 
     cloudSyncState.r2BytesUploadedNew += blob.size;
     await persistCloudState();
-    await uploadPromptSidecar(config, descriptor);
+    if (assertAuthorized) await assertAuthorized();
+    await uploadPromptSidecar(config, descriptor, assertAuthorized);
+    if (assertAuthorized) await assertAuthorized();
 
     return {
         status: descriptor.conflictOfObjectKey ? 'conflict_uploaded' : 'uploaded',
@@ -1218,7 +1458,7 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob) {
     };
 }
 
-async function uploadMediaQueueItem(config, queueItem) {
+async function uploadMediaQueueItem(config, queueItem, assertAuthorized = null) {
     let blob;
     let contentType;
 
@@ -1229,6 +1469,7 @@ async function uploadMediaQueueItem(config, queueItem) {
         if (queueItem.sourceUrl.includes('assets.grok.com')) {
             try {
                 const cookies = await chrome.cookies.getAll({ domain: '.grok.com' });
+                if (assertAuthorized) await assertAuthorized();
                 if (cookies.length > 0) {
                     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
                     fetchOpts.headers = { 'Cookie': cookieHeader };
@@ -1246,14 +1487,17 @@ async function uploadMediaQueueItem(config, queueItem) {
             }
         }
 
-        const mediaResponse = await fetch(queueItem.sourceUrl, fetchOpts);
+        const mediaResponse = await fetchWithScrapeAuthority(queueItem.sourceUrl, fetchOpts, assertAuthorized);
+        if (assertAuthorized) await assertAuthorized();
         if (!mediaResponse.ok) {
             throw new Error(`HTTP ${mediaResponse.status}`);
         }
         blob = await mediaResponse.blob();
+        if (assertAuthorized) await assertAuthorized();
         contentType = mediaResponse.headers.get('content-type') || queueItem.contentType || 'application/octet-stream';
         queueItem.contentType = contentType;
     } catch (e) {
+        if (isScrapeAuthorityRevokedError(e)) throw e;
         const hint = !CloudSync.isValidMediaSourceUrl(queueItem.sourceUrl)
             ? ' (source host not in known media hosts)'
             : '';
@@ -1263,7 +1507,7 @@ async function uploadMediaQueueItem(config, queueItem) {
     return uploadBlobWithR2Dedupe(config, {
         ...queueItem,
         contentType
-    }, blob);
+    }, blob, assertAuthorized);
 }
 
 async function uploadMetadataQueueItem(config, queueItem) {
@@ -1289,13 +1533,13 @@ async function uploadMetadataQueueItem(config, queueItem) {
     return response.json();
 }
 
-async function processCloudQueue(reason = 'auto', options = {}) {
-    if (cloudSyncState.processing) {
-        console.log('[CloudQueue] SKIPPED processCloudQueue — already processing (reason:', reason, ')');
-        return;
+async function drainCloudQueue(reason = 'auto', options = {}) {
+    if (hasBlockedScrapeCompletionTransfer()) {
+        await recoverPreparedScrapeCompletionTransfer();
+        if (hasBlockedScrapeCompletionTransfer()) return;
     }
-
     const config = await getCloudConfig();
+    if (options.assertAuthorized) await options.assertAuthorized();
     if (!CloudSync.isCloudEnabled(config)) {
         await scheduleCloudRetryAlarm();
         return;
@@ -1310,32 +1554,61 @@ async function processCloudQueue(reason = 'auto', options = {}) {
 
     cloudSyncState.processing = true;
     await persistCloudState();
+    try {
+        if (options.assertAuthorized) await options.assertAuthorized();
+    } catch (error) {
+        cloudSyncState.processing = false;
+        await persistCloudState();
+        throw error;
+    }
 
     const force = !!options.force;
-    const uploadMedia = options.uploadMediaQueueItem || uploadMediaQueueItem;
-    const remaining = [];
+    const uploadMediaOverride = options.uploadMediaQueueItem || null;
+    const queueSnapshot = await snapshotCloudQueueItems();
+    let authorityError = null;
 
     try {
-        for (const item of cloudSyncQueue) {
+        for (const item of queueSnapshot) {
+            if (!await cloudQueueItemIsCurrent(item)) continue;
+            const itemLease = normalizeScrapeLease(item.scrapeLease);
+            const processLease = normalizeScrapeLease(options.scrapeLease);
+            const usesProcessAuthority = itemLease
+                && processLease
+                && scrapeLeaseMatches(itemLease, processLease)
+                && options.assertAuthorized;
+            const itemAbortController = itemLease && !usesProcessAuthority
+                ? registerScrapeTransferAbortController(itemLease)
+                : null;
+            const itemAssertAuthorized = itemLease
+                ? (usesProcessAuthority
+                    ? options.assertAuthorized
+                    : createScrapeTransferAuthorityGuard(itemLease, itemAbortController.signal))
+                : (options.assertAuthorized || null);
             const attempts = item.attempts || 0;
-            if (!force && attempts >= CloudSync.MAX_RETRY_ATTEMPTS) {
-                if (!item._permanentFailLogged) {
-                    const message = item.type === 'media'
-                        ? `Cloud sync ${formatRedactedMediaLog('permanently_failed', item.backupProcessedId || item.assetId, { count: attempts })}`
-                        : `Cloud sync permanently failed (${item.type}): ${item.kind} after ${attempts} attempts`;
-                    log(message, 'error');
-                    item._permanentFailLogged = true;
-                }
-                remaining.push(item);
-                continue;
-            }
-
             try {
+                if (!force && attempts >= CloudSync.MAX_RETRY_ATTEMPTS) {
+                    if (!item._permanentFailLogged) {
+                        const message = item.type === 'media'
+                            ? `Cloud sync ${formatRedactedMediaLog('permanently_failed', item.backupProcessedId || item.assetId, { count: attempts })}`
+                            : `Cloud sync permanently failed (${item.type}): ${item.kind} after ${attempts} attempts`;
+                        log(message, 'error');
+                        await updateCloudQueueItemRevision(item, { _permanentFailLogged: true });
+                    }
+                    continue;
+                }
                 if (item.type === 'media') {
+                    if (itemAssertAuthorized) await itemAssertAuthorized();
                     const mediaIdentity = item.backupProcessedId || item.assetId;
                     console.log('[CloudQueue]', formatRedactedMediaLog('processing', mediaIdentity));
-                    const result = await uploadMedia(config, item);
-                    await persistQueuedBackupProcessedIdAfterSuccess(item, result);
+                    const result = uploadMediaOverride
+                        ? await uploadMediaOverride(config, item, itemAssertAuthorized)
+                        : await uploadMediaQueueItem(config, item, itemAssertAuthorized);
+                    if (itemAssertAuthorized) await itemAssertAuthorized();
+                    await persistQueuedBackupProcessedIdAfterSuccess(
+                        item,
+                        result,
+                        itemAssertAuthorized
+                    );
                     log(
                         `Cloud upload ${formatRedactedMediaLog(result.status, mediaIdentity, { bytes: result.bytes })}`,
                         result.status === 'conflict_uploaded' ? 'warning' : 'success'
@@ -1354,7 +1627,16 @@ async function processCloudQueue(reason = 'auto', options = {}) {
 
                 clearCloudError();
                 cloudSyncState.lastSyncAt = new Date().toISOString();
+                await removeCloudQueueItemRevision(item);
             } catch (e) {
+                if (isScrapeAuthorityRevokedError(e)) {
+                    if (itemLease) {
+                        await removeCloudQueueItemRevision(item);
+                        continue;
+                    }
+                    authorityError = e;
+                    break;
+                }
                 if (item.type === 'media') {
                     console.error('[CloudQueue]', formatRedactedMediaLog(
                         'failed',
@@ -1364,7 +1646,7 @@ async function processCloudQueue(reason = 'auto', options = {}) {
                 } else {
                     console.error('[CloudQueue] Metadata upload failed:', item.kind);
                 }
-                item.attempts = attempts + 1;
+                const nextAttempts = attempts + 1;
                 const redactedError = item.type === 'media'
                     ? formatRedactedMediaError(
                         e,
@@ -1372,25 +1654,30 @@ async function processCloudQueue(reason = 'auto', options = {}) {
                         'queue_upload_failed'
                     )
                     : e.message;
-                item.lastError = redactedError;
-                item.lastAttemptAt = Date.now();
-                remaining.push(item);
+                await updateCloudQueueItemRevision(item, {
+                    attempts: nextAttempts,
+                    lastError: redactedError,
+                    lastAttemptAt: Date.now()
+                });
                 updateCloudError(redactedError);
                 const message = item.type === 'media'
                     ? `Cloud sync ${formatRedactedMediaLog(
                         'failed',
                         item.backupProcessedId || item.assetId,
-                        { count: item.attempts, stage: getUploadFailureStage(e) }
+                        { count: nextAttempts, stage: getUploadFailureStage(e) }
                     )}`
                     : `Cloud sync failed (${item.type})`;
                 log(message, 'warning');
+            } finally {
+                if (itemAbortController) releaseScrapeTransferAbortController(itemLease, itemAbortController);
             }
         }
     } finally {
-        cloudSyncQueue = remaining;
         cloudSyncState.processing = false;
         await persistCloudState();
     }
+
+    if (authorityError) throw authorityError;
 
     // If new items were queued while we were processing, drain immediately
     if (cloudSyncQueue.length > 0 && cloudSyncQueue.some(i => (i.attempts || 0) === 0)) {
@@ -1402,6 +1689,19 @@ async function processCloudQueue(reason = 'auto', options = {}) {
     if (reason === 'manual') {
         log('Manual cloud retry completed.', 'info');
     }
+}
+
+function processCloudQueue(reason = 'auto', options = {}) {
+    if (cloudQueueDrainPromise) {
+        return options.waitForExisting === false ? Promise.resolve() : cloudQueueDrainPromise;
+    }
+
+    const drain = drainCloudQueue(reason, options);
+    cloudQueueDrainPromise = drain;
+    drain.finally(() => {
+        if (cloudQueueDrainPromise === drain) cloudQueueDrainPromise = null;
+    }).catch(() => {});
+    return drain;
 }
 
 async function runCloudBackfill() {
@@ -1577,7 +1877,8 @@ async function initializeBackgroundState() {
         PROCESSED_IDS_KEY,
         CloudSync.STORAGE_KEYS.cloudSyncQueue,
         CloudSync.STORAGE_KEYS.cloudSyncState,
-        PENDING_DOWNLOAD_OPERATIONS_KEY
+        PENDING_DOWNLOAD_OPERATIONS_KEY,
+        SCRAPE_COMPLETION_TXN_KEY
     ]);
 
     if (stored[PROCESSED_IDS_KEY]) {
@@ -1586,6 +1887,17 @@ async function initializeBackgroundState() {
     }
 
     pendingDownloadOperations = deserializeDownloadOperations(stored[PENDING_DOWNLOAD_OPERATIONS_KEY]);
+    pendingDownloadOperationRevision = Array.from(pendingDownloadOperations.values()).reduce(
+        (latest, operation) => Math.max(
+            latest,
+            Number.isInteger(operation?.operationRevision) ? operation.operationRevision : 0
+        ),
+        pendingDownloadOperationRevision
+    );
+    scrapeCompletionTxn = stored[SCRAPE_COMPLETION_TXN_KEY]
+        && typeof stored[SCRAPE_COMPLETION_TXN_KEY] === 'object'
+        ? { ...stored[SCRAPE_COMPLETION_TXN_KEY] }
+        : null;
     const startupDownloadOperations = Array.from(pendingDownloadOperations.values())
         .map((operation) => ({ ...operation }));
 
@@ -1602,6 +1914,10 @@ async function initializeBackgroundState() {
             };
         })
         : [];
+    cloudQueueRevision = cloudSyncQueue.reduce(
+        (latest, item) => Math.max(latest, Number.isInteger(item?.queueRevision) ? item.queueRevision : 0),
+        cloudQueueRevision
+    );
 
     cloudSyncState = {
         ...cloudSyncState,
@@ -1615,19 +1931,26 @@ async function initializeBackgroundState() {
     const latestMediaError = cloudSyncQueue.find((item) => item.type === 'media' && item.lastError)?.lastError;
     if (latestMediaError) cloudSyncState.lastError = latestMediaError;
 
+    await recoverPreparedScrapeCompletionTransfer();
     await ensureCloudConfigExists();
     await persistCloudState();
     await scheduleCloudRetryAlarm();
     await reconcilePendingDownloadOperations(startupDownloadOperations);
 }
 
-initializeBackgroundState().catch((e) => {
+backgroundStateReadyPromise = initializeBackgroundState();
+backgroundStateReadyPromise.catch((e) => {
     console.error('Background initialization failed:', e);
 });
+
+function ensureBackgroundStateReady() {
+    return backgroundStateReadyPromise || Promise.resolve();
+}
 
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === CLOUD_ALARM_NAME) {
         (async () => {
+            await ensureBackgroundStateReady();
             await reconcilePendingDownloadOperations();
             await processCloudQueue('alarm');
         })().catch((e) => {
@@ -1740,28 +2063,50 @@ function injectContentScripts(tabId) {
     });
 }
 
-function queueChromeDownload(options) {
+function queueChromeDownload(options, scrapeLease = null) {
     return new Promise((resolve, reject) => {
         let settled = false;
-        const finish = (downloadId) => {
+        let finishing = false;
+        const receipt = scrapeLease
+            ? registerPendingScrapeDownload(options.url, scrapeLease)
+            : null;
+        const fail = (error) => {
             if (settled) return;
             settled = true;
+            if (receipt) releasePendingScrapeDownload(receipt);
+            reject(error);
+        };
+        const finish = async (downloadId) => {
+            if (settled || finishing) return;
+            finishing = true;
             const error = chrome.runtime.lastError;
             if (error) {
-                reject(new Error(error.message));
+                fail(new Error(error.message));
                 return;
             }
             if (!Number.isInteger(downloadId)) {
-                reject(new Error('Chrome did not accept the download.'));
+                fail(new Error('Chrome did not accept the download.'));
                 return;
             }
+            if (receipt) {
+                bindPendingScrapeDownloadId(receipt, downloadId);
+                try {
+                    await assertScrapeTransferAuthorized(scrapeLease);
+                } catch (authorityError) {
+                    receipt.revoked = true;
+                    cancelDownload(downloadId);
+                    fail(authorityError);
+                    return;
+                }
+            }
+            settled = true;
             resolve(downloadId);
         };
         try {
             const result = chrome.downloads.download(options, finish);
-            if (result && typeof result.then === 'function') result.then(finish, reject);
+            if (result && typeof result.then === 'function') result.then(finish, fail);
         } catch (error) {
-            reject(error);
+            fail(error);
         }
     });
 }
@@ -1961,8 +2306,16 @@ function getRequestedLease(value, senderTabId = null) {
     return null;
 }
 
+function getRunScopedScrapeLease(value, senderTabId = null, expectedKind = null) {
+    if (!value || typeof value !== 'object') return null;
+    if (!Number.isInteger(senderTabId)) return null;
+    if (value.kind !== 'sync' && value.kind !== 'r2_backup') return null;
+    if (expectedKind && value.kind !== expectedKind) return null;
+    return getRequestedLease(value, senderTabId);
+}
+
 async function validateScrapeResume(value, senderTabId = null) {
-    const requested = getRequestedLease(value, senderTabId);
+    const requested = getRunScopedScrapeLease(value, senderTabId);
     if (!requested) return { valid: false, reason: 'stale_authority' };
     return enqueueScrapeLeaseOperation(async () => {
         const owner = activeScrapeLease;
@@ -1992,6 +2345,253 @@ async function validateScrapeResume(value, senderTabId = null) {
     });
 }
 
+const SCRAPE_RUN_MIRROR_KEYS = [
+    'currentIndex',
+    'scrapeNavigation',
+    'currentItemId',
+    'scrapeBackupOptions',
+    'r2BackupState'
+];
+
+function buildAuthorizedRunningMirror(lease, values = {}) {
+    const mirror = {};
+    for (const key of SCRAPE_RUN_MIRROR_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(values, key)) mirror[key] = values[key];
+    }
+    return {
+        ...mirror,
+        scraperState: 'running',
+        scrapeRunToken: lease.token,
+        scrapeRunEpoch: lease.epoch,
+        isScraping: true,
+        isR2Backup: lease.kind === 'r2_backup',
+        ...(lease.kind === 'r2_backup' && mirror.r2BackupState
+            ? { r2BackupState: { ...mirror.r2BackupState, isRunning: true } }
+            : {})
+    };
+}
+
+async function commitScrapeRunState(request, sender) {
+    const requested = getRunScopedScrapeLease(request, sender?.tab?.id ?? null);
+    return enqueueScrapeLeaseOperation(async () => {
+        if (!scrapeLeaseMatches(activeScrapeLease, requested)) {
+            return { status: 'ignored', reason: 'stale_authority' };
+        }
+        await chrome.storage.local.set(buildAuthorizedRunningMirror(requested, request.values));
+        return { status: 'ok' };
+    });
+}
+
+async function getAuthorizedScrapeTransferLease(request, sender) {
+    const requested = getRunScopedScrapeLease(request, sender?.tab?.id ?? null);
+    const authoritySnapshot = await enqueueScrapeLeaseOperation(() => (
+        scrapeLeaseMatches(activeScrapeLease, requested) ? { ...requested } : null
+    ));
+    if (!authoritySnapshot) return null;
+    const stored = await chrome.storage.local.get([
+        'scraperState',
+        'scrapeRunToken',
+        'scrapeRunEpoch',
+        'isScraping',
+        'isR2Backup'
+    ]);
+    return enqueueScrapeLeaseOperation(() => {
+        if (!scrapeLeaseMatches(activeScrapeLease, requested) || !localRunMatchesLease(stored, requested)) {
+            return null;
+        }
+        return { ...requested };
+    });
+}
+
+async function assertScrapeTransferAuthorized(lease) {
+    const current = await getAuthorizedScrapeTransferLease(lease, { tab: { id: lease.tabId } });
+    if (!current) {
+        const error = new Error('Scrape run authority was revoked.');
+        error.code = 'scrape_authority_revoked';
+        throw error;
+    }
+    return current;
+}
+
+function createScrapeTransferAuthorityGuard(lease, signal = null) {
+    const guard = async () => {
+        if (signal?.aborted) throw createScrapeAuthorityRevokedError();
+        const current = await assertScrapeTransferAuthorized(lease);
+        if (signal?.aborted) throw createScrapeAuthorityRevokedError();
+        return current;
+    };
+    guard.signal = signal;
+    guard.scrapeLease = copyScrapeLeaseAuthority(lease);
+    return guard;
+}
+
+function copyScrapeLeaseAuthority(lease) {
+    return {
+        version: SCRAPE_LEASE_VERSION,
+        epoch: lease.epoch,
+        token: lease.token,
+        tabId: lease.tabId,
+        kind: lease.kind,
+        status: 'active',
+        startedAt: lease.startedAt || Date.now()
+    };
+}
+
+function getDownloadOperationScrapeLease(operation) {
+    return normalizeScrapeLease(operation?.scrapeLease);
+}
+
+function registerPendingScrapeDownload(url, lease) {
+    const key = String(url || '');
+    const receipt = {
+        url: key,
+        lease: copyScrapeLeaseAuthority(lease),
+        downloadId: null,
+        claimed: false,
+        revoked: false
+    };
+    const receipts = pendingScrapeDownloadReceiptsByUrl.get(key) || [];
+    receipts.push(receipt);
+    pendingScrapeDownloadReceiptsByUrl.set(key, receipts);
+    return receipt;
+}
+
+function releasePendingScrapeDownload(receipt) {
+    if (!receipt) return;
+    if (Number.isInteger(receipt.downloadId)) {
+        if (pendingScrapeDownloadReceiptsById.get(receipt.downloadId) === receipt) {
+            pendingScrapeDownloadReceiptsById.delete(receipt.downloadId);
+        }
+    }
+    const receipts = pendingScrapeDownloadReceiptsByUrl.get(receipt.url);
+    if (!receipts) return;
+    const remaining = receipts.filter((candidate) => candidate !== receipt);
+    if (remaining.length) pendingScrapeDownloadReceiptsByUrl.set(receipt.url, remaining);
+    else pendingScrapeDownloadReceiptsByUrl.delete(receipt.url);
+}
+
+function bindPendingScrapeDownloadId(receipt, downloadId) {
+    receipt.downloadId = downloadId;
+    pendingScrapeDownloadReceiptsById.set(downloadId, receipt);
+    if (receipt.revoked) {
+        revokedScrapeDownloadIds.add(downloadId);
+        releasePendingScrapeDownload(receipt);
+    }
+}
+
+function claimPendingScrapeDownload(item) {
+    if (revokedScrapeDownloadIds.has(item.id)) return { revoked: true, downloadId: item.id };
+    const byId = pendingScrapeDownloadReceiptsById.get(item.id);
+    if (byId) {
+        byId.claimed = true;
+        return byId;
+    }
+    const urls = [item.url, item.finalUrl].filter(Boolean);
+    for (const url of urls) {
+        const receipt = (pendingScrapeDownloadReceiptsByUrl.get(String(url)) || [])
+            .find((candidate) => !candidate.claimed);
+        if (!receipt) continue;
+        receipt.claimed = true;
+        bindPendingScrapeDownloadId(receipt, item.id);
+        return receipt;
+    }
+    return null;
+}
+
+async function revokeScrapeDownloadAuthority(lease) {
+    abortScrapeTransferControllers(lease);
+    for (const receipts of pendingScrapeDownloadReceiptsByUrl.values()) {
+        for (const receipt of [...receipts]) {
+            if (!scrapeLeaseMatches(receipt.lease, lease)) continue;
+            receipt.revoked = true;
+            if (Number.isInteger(receipt.downloadId)) {
+                revokedScrapeDownloadIds.add(receipt.downloadId);
+                cancelDownload(receipt.downloadId);
+                releasePendingScrapeDownload(receipt);
+            } else {
+                releasePendingScrapeDownload(receipt);
+            }
+        }
+    }
+
+    const knownOperationIds = Array.from(pendingDownloadOperations.values())
+        .filter((operation) => recordOwnedByScrapeLease(operation, lease))
+        .map((operation) => operation.downloadId);
+    for (const downloadId of knownOperationIds) {
+        revokedScrapeDownloadIds.add(downloadId);
+        cancelDownload(downloadId);
+    }
+
+    const completionTransitionSettled = await settleRevokedScrapeCompletionTransition(lease);
+    await revokeScrapeRetryAuthorityAtomically(lease);
+    if (completionTransitionSettled
+        && scrapeCompletionTransition?.revoked
+        && completionTxnMatchesLease(scrapeCompletionTransition.txn, lease)) {
+        scrapeCompletionTransition = null;
+    }
+}
+
+function scrapeTransferKey(lease) {
+    return `${lease.kind}:${lease.epoch}:${lease.token}:${lease.tabId}`;
+}
+
+function registerScrapeTransferAbortController(lease) {
+    const key = scrapeTransferKey(lease);
+    const controllers = activeScrapeTransferAbortControllers.get(key) || new Set();
+    const controller = new AbortController();
+    controllers.add(controller);
+    activeScrapeTransferAbortControllers.set(key, controllers);
+    return controller;
+}
+
+function releaseScrapeTransferAbortController(lease, controller) {
+    const key = scrapeTransferKey(lease);
+    const controllers = activeScrapeTransferAbortControllers.get(key);
+    if (!controllers) return;
+    controllers.delete(controller);
+    if (controllers.size === 0) activeScrapeTransferAbortControllers.delete(key);
+}
+
+function abortScrapeTransferControllers(lease) {
+    const key = scrapeTransferKey(lease);
+    const controllers = activeScrapeTransferAbortControllers.get(key);
+    if (!controllers) return;
+    for (const controller of controllers) controller.abort();
+    activeScrapeTransferAbortControllers.delete(key);
+}
+
+function trackScrapeTransferTask(lease, operation) {
+    const key = scrapeTransferKey(lease);
+    const tasks = activeScrapeTransferTasks.get(key) || new Set();
+    const controller = registerScrapeTransferAbortController(lease);
+    const task = Promise.resolve().then(() => operation(controller.signal));
+    tasks.add(task);
+    activeScrapeTransferTasks.set(key, tasks);
+    task.finally(() => {
+        releaseScrapeTransferAbortController(lease, controller);
+        tasks.delete(task);
+        if (tasks.size === 0) activeScrapeTransferTasks.delete(key);
+    }).catch(() => {});
+    return task;
+}
+
+async function waitForScrapeTransferTasks(lease) {
+    const key = scrapeTransferKey(lease);
+    const tasks = activeScrapeTransferTasks.get(key);
+    if (!tasks?.size) return true;
+    const drained = await withTimeout(
+        Promise.allSettled(Array.from(tasks)).then(() => true),
+        SCRAPE_TRANSFER_DRAIN_TIMEOUT_MS,
+        false
+    );
+    if (!drained) activeScrapeTransferTasks.delete(key);
+    return drained;
+}
+
+function isScrapeAuthorityRevokedError(error) {
+    return error?.code === 'scrape_authority_revoked';
+}
+
 async function sendScrapeInitWithInjection(tabId, initMessage) {
     try {
         return await sendMessageToTab(tabId, initMessage);
@@ -2016,15 +2616,21 @@ async function withTimeout(promise, timeoutMs, fallback) {
     }
 }
 
-async function sendScrapeAbort(lease) {
+async function sendScrapeAbort(lease, stopNavigation = null) {
     if (!lease || lease.status !== 'active') return false;
     const action = lease.kind === 'r2_backup' ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE';
     try {
-        const response = await withTimeout(sendMessageToTab(lease.tabId, {
+        const message = {
             action,
             runToken: lease.token,
             runEpoch: lease.epoch
-        }), SCRAPE_ABORT_TIMEOUT_MS, null);
+        };
+        if (stopNavigation) message.stopNavigation = stopNavigation;
+        const response = await withTimeout(
+            sendMessageToTab(lease.tabId, message),
+            SCRAPE_ABORT_TIMEOUT_MS,
+            null
+        );
         return response?.status === 'stopped';
     } catch {
         return false;
@@ -2033,7 +2639,7 @@ async function sendScrapeAbort(lease) {
 
 async function reserveScrapeStartIntent(kind) {
     return enqueueScrapeLeaseOperation(async () => {
-        if (activeScrapeLease?.status === 'active' || activeScrapeLease?.status === 'starting' || scrapeStartPending) {
+        if (activeScrapeLease?.status === 'active' || activeScrapeLease?.status === 'starting' || scrapeStartPending || scrapeStopPending) {
             return null;
         }
         const lease = {
@@ -2164,33 +2770,65 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false } = {})
 }
 
 async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
-    return enqueueScrapeLeaseOperation(async () => {
+    const prepared = await enqueueScrapeLeaseOperation(async () => {
         const lease = activeScrapeLease?.status === 'active' || activeScrapeLease?.status === 'starting'
             ? { ...activeScrapeLease }
             : null;
         if (!lease) {
+            const incompleteLease = scrapeCompletionTxn?.phase === 'prepared'
+                ? normalizeScrapeLease(scrapeCompletionTxn.lease)
+                : normalizeScrapeLease(scrapeCompletionTransition?.txn?.lease);
+            if (incompleteLease) {
+                markScrapeCompletionTransitionRevoked(incompleteLease);
+                await revokeScrapeDownloadAuthority(incompleteLease);
+            }
             const stored = await chrome.storage.local.get(['r2BackupState']);
             await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
-            return { status: 'stopped', abortAcknowledged: false };
+            return { response: { status: 'stopped', abortAcknowledged: false } };
         }
         if (requestedKind && lease.kind !== requestedKind) {
-            return { status: 'error', error: `The active run is ${lease.kind}.` };
+            return { response: { status: 'error', error: `The active run is ${lease.kind}.` } };
         }
 
-        await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
+        scrapeStopPending = true;
+        markScrapeCompletionTransitionRevoked(lease);
+        const tombstone = await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
+        abortScrapeTransferControllers(lease);
         scrapeStartPending = false;
         isScraping = false;
         isR2Backup = false;
-        const abortAcknowledged = lease.status === 'active' ? await sendScrapeAbort(lease) : false;
-        const stored = await chrome.storage.local.get(['r2BackupState']);
+        const stored = await chrome.storage.local.get(['r2BackupState', 'scrapeNavigation']);
+        const stopNavigation = stored.scrapeNavigation || null;
         await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
-        return { status: 'stopped', abortAcknowledged };
+        await revokeScrapeDownloadAuthority(lease);
+        return { lease, tombstone, stopNavigation };
     });
+
+    if (prepared.response) return prepared.response;
+    const { lease, tombstone, stopNavigation } = prepared;
+    try {
+        const [abortAcknowledged] = await Promise.all([
+            lease.status === 'active' ? sendScrapeAbort(lease, stopNavigation) : false,
+            waitForScrapeTransferTasks(lease)
+        ]);
+        return await enqueueScrapeLeaseOperation(async () => {
+            scrapeStopPending = false;
+            if (activeScrapeLease?.status !== 'idle' || activeScrapeLease.epoch !== tombstone.epoch) {
+                return { status: 'stopped', abortAcknowledged };
+            }
+            return { status: 'stopped', abortAcknowledged };
+        });
+    } catch (error) {
+        await enqueueScrapeLeaseOperation(async () => {
+            scrapeStopPending = false;
+        }).catch(() => {});
+        throw error;
+    }
 }
 
 async function handleR2BackupProgress(request, sender) {
     return enqueueScrapeLeaseOperation(async () => {
-        const requested = getRequestedLease({ ...request, kind: 'r2_backup' }, sender?.tab?.id ?? null);
+        const requested = getRunScopedScrapeLease(request, sender?.tab?.id ?? null, 'r2_backup');
         if (!scrapeLeaseMatches(activeScrapeLease, requested)) return { status: 'ignored' };
         chrome.runtime.sendMessage({
             action: 'UPDATE_R2_BACKUP_PROGRESS',
@@ -2202,16 +2840,19 @@ async function handleR2BackupProgress(request, sender) {
 
 async function completeScrapeRun(request, sender, kind) {
     return enqueueScrapeLeaseOperation(async () => {
-        const requested = getRequestedLease({ ...request, kind }, sender?.tab?.id ?? null);
+        const requested = getRunScopedScrapeLease(request, sender?.tab?.id ?? null, kind);
         if (!scrapeLeaseMatches(activeScrapeLease, requested)) return { status: 'ignored' };
         const lease = { ...activeScrapeLease };
         const stored = await chrome.storage.local.get(['r2BackupState']);
+        if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
+        const completionTransfer = await prepareScrapeCompletionTransfer(lease);
         if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
         await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
         scrapeStartPending = false;
         isScraping = false;
         isR2Backup = false;
         await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, request.stats?.stopReason || 'complete'));
+        await commitScrapeCompletionTransfer(completionTransfer);
 
         if (kind === 'r2_backup') {
             const stats = request.stats || {};
@@ -2226,18 +2867,23 @@ async function completeScrapeRun(request, sender, kind) {
     });
 }
 
-async function uploadDirectMediaData(request, finalPath, acceptanceSource = 'direct-upload') {
+async function uploadDirectMediaData(request, finalPath, acceptanceSource = 'direct-upload', assertAuthorized = null) {
     const config = await getCloudConfig();
+    if (assertAuthorized) await assertAuthorized();
     if (!CloudSync.isCloudEnabled(config)) {
         return { status: 'not_queued', error: 'Cloud sync is not enabled.' };
     }
 
-    const response = await fetch(request.blobDataUrl);
+    const response = await fetchWithScrapeAuthority(request.blobDataUrl, {}, assertAuthorized);
+    if (assertAuthorized) await assertAuthorized();
     const blob = await response.blob();
+    if (assertAuthorized) await assertAuthorized();
     const contentType = blob.type || (request.isVideo ? 'video/mp4' : 'image/png');
     const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
+    if (assertAuthorized) await assertAuthorized();
     const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
     const acceptance = request.acceptance || buildAcceptanceContextFromCloudConfig(config, acceptanceSource);
+    if (assertAuthorized) await assertAuthorized();
     const result = await uploadBlobWithR2Dedupe(config, {
         sourceUrl: request.url,
         finalPath,
@@ -2245,13 +2891,14 @@ async function uploadDirectMediaData(request, finalPath, acceptanceSource = 'dir
         contentType,
         promptText: request.promptText || '',
         acceptance
-    }, blob);
+    }, blob, assertAuthorized);
+    if (assertAuthorized) await assertAuthorized();
 
     return buildDirectBackupUploadResponse(result, request.url);
 }
 
 // Handle messages
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+function handleRuntimeMessage(request, sender, sendResponse) {
     if (request.action === 'PROCESSED_IDS_ADD') {
         mutateProcessedIds({ ids: request.ids }).then((processedIds) => {
             sendResponse({ status: 'ok', processedIds });
@@ -2265,6 +2912,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         mutateProcessedIds({ reset: true }).then((processedIds) => {
             sendResponse({ status: 'ok', processedIds });
         }).catch(() => {
+            sendResponse({ status: 'error', error: 'processed_ids_mutation_failed' });
+        });
+        return true;
+    }
+
+    if (request.action === 'SCRAPE_RUN_STATE_WRITE') {
+        commitScrapeRunState(request, sender).then(sendResponse).catch(() => {
+            sendResponse({ status: 'ignored', reason: 'stale_authority' });
+        });
+        return true;
+    }
+
+    if (request.action === 'SCRAPE_PROCESSED_IDS_ADD') {
+        (async () => {
+            const lease = await getAuthorizedScrapeTransferLease(request, sender);
+            if (!lease) return { status: 'ignored', reason: 'stale_authority' };
+            return trackScrapeTransferTask(lease, async (signal) => {
+                const assertAuthorized = createScrapeTransferAuthorityGuard(lease, signal);
+                await assertAuthorized();
+                const processedIds = await mutateProcessedIds(
+                    { ids: request.ids },
+                    assertAuthorized
+                );
+                await assertAuthorized();
+                return { status: 'ok', processedIds };
+            });
+        })().then(sendResponse).catch((error) => {
+            if (isScrapeAuthorityRevokedError(error)) {
+                sendResponse({ status: 'ignored', reason: 'stale_authority' });
+                return;
+            }
             sendResponse({ status: 'error', error: 'processed_ids_mutation_failed' });
         });
         return true;
@@ -2304,48 +2982,83 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === 'R2_BACKUP_UPLOAD') {
         (async () => {
+            const lease = await getAuthorizedScrapeTransferLease(request, sender);
+            if (!lease) return { status: 'ignored', reason: 'stale_authority' };
+            return trackScrapeTransferTask(lease, async (signal) => {
+            const assertAuthorized = createScrapeTransferAuthorityGuard(lease, signal);
+            await assertAuthorized();
             const extHint = request.isVideo ? 'mp4' : null;
             const finalPath = await generateFilenameForBackup(request.url, extHint);
+            await assertAuthorized();
 
             // If content script provided blob data (fetched with cookies), upload directly
             if (request.blobDataUrl) {
                 try {
-                    sendResponse(await uploadDirectMediaData(request, finalPath));
+                    const response = await uploadDirectMediaData(
+                        request,
+                        finalPath,
+                        'direct-upload',
+                        assertAuthorized
+                    );
+                    await assertAuthorized();
+                    return response;
                 } catch (e) {
+                    if (isScrapeAuthorityRevokedError(e)) throw e;
                     console.error('[CloudQueue]', formatRedactedMediaLog(
                         'direct_upload_failed',
                         request.url,
                         { stage: getUploadFailureStage(e) }
                     ));
-                    sendResponse({
+                    return {
                         status: 'error',
                         error: formatRedactedMediaError(e, request.url, 'direct_upload_failed')
-                    });
+                    };
                 }
-                return;
             }
 
             // No blob data — fall back to service worker fetch (works for public URLs)
-            const queued = await enqueueCloudMediaUpload(request.url, finalPath, request.promptText, request.acceptance || null);
+            const queued = await enqueueCloudMediaUpload(
+                request.url,
+                finalPath,
+                request.promptText,
+                request.acceptance || null,
+                {
+                    scrapeLease: lease,
+                    assertAuthorized
+                }
+            );
+            await assertAuthorized();
 
             if (!request.skipLocalDownload) {
                 const config = await getCloudConfig();
+                await assertAuthorized();
                 if (CloudSync.isLocalDownloadEnabled(config)) {
-                    chrome.downloads.download({ url: request.url, filename: finalPath, conflictAction: 'overwrite' });
+                    await queueChromeDownload(
+                        { url: request.url, filename: finalPath, conflictAction: 'overwrite' },
+                        lease
+                    );
+                    await assertAuthorized();
                 }
             }
             if (queued) {
-                sendResponse({ status: 'queued' });
+                return { status: 'queued' };
             } else {
                 isScraping = false;
                 isR2Backup = false;
-                sendResponse({ status: 'not_queued', error: 'Cloud sync is not enabled. Check Cloud R2 Settings.' });
+                return { status: 'not_queued', error: 'Cloud sync is not enabled. Check Cloud R2 Settings.' };
             }
+            });
         })().catch((e) => {
+            if (isScrapeAuthorityRevokedError(e)) {
+                sendResponse({ status: 'ignored', reason: 'stale_authority' });
+                return;
+            }
             sendResponse({
                 status: 'error',
                 error: formatRedactedMediaError(e, request.url, 'backup_upload_failed')
             });
+        }).then((response) => {
+            if (response) sendResponse(response);
         });
         return true;
     }
@@ -2412,29 +3125,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === 'DOWNLOAD_MEDIA') {
         (async () => {
+            const lease = await getAuthorizedScrapeTransferLease(request, sender);
+            if (!lease) return { status: 'ignored', reason: 'stale_authority' };
+            return trackScrapeTransferTask(lease, async (signal) => {
+            const assertAuthorized = createScrapeTransferAuthorityGuard(lease, signal);
             const config = await getCloudConfig();
+            await assertAuthorized();
             const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
 
             if (allowLocalDownload) {
                 // This triggers onDeterminingFilename.
-                await queueChromeDownload({ url: request.url, conflictAction: 'overwrite' });
-                sendResponse({ status: 'queued' });
-                return;
+                await assertAuthorized();
+                await queueChromeDownload({ url: request.url, conflictAction: 'overwrite' }, lease);
+                await assertAuthorized();
+                return { status: 'queued' };
             }
 
             if (!request.blobDataUrl) {
-                sendResponse({ status: 'error', error: 'Authenticated media data is required in Cloud only mode.' });
-                return;
+                return { status: 'error', error: 'Authenticated media data is required in Cloud only mode.' };
             }
 
             const extHint = request.isVideo ? 'mp4' : null;
             const finalPath = await generateFilenameForBackup(request.url, extHint);
-            sendResponse(await uploadDirectMediaData(request, finalPath, 'direct-sync'));
+            await assertAuthorized();
+            const response = await uploadDirectMediaData(
+                request,
+                finalPath,
+                'direct-sync',
+                assertAuthorized
+            );
+            await assertAuthorized();
+            return response;
+            });
         })().catch((e) => {
+            if (isScrapeAuthorityRevokedError(e)) {
+                sendResponse({ status: 'ignored', reason: 'stale_authority' });
+                return;
+            }
             sendResponse({
                 status: 'error',
                 error: formatRedactedMediaError(e, request.url, 'download_media_failed')
             });
+        }).then((response) => {
+            if (response) sendResponse(response);
         });
         return true;
     }
@@ -2597,6 +3330,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     return false;
+}
+
+const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
+    'PROCESSED_IDS_ADD',
+    'PROCESSED_IDS_RESET',
+    'SCRAPE_RUN_STATE_WRITE',
+    'SCRAPE_PROCESSED_IDS_ADD',
+    'START_SCRAPE',
+    'STOP_SCRAPE',
+    'START_R2_BACKUP',
+    'STOP_R2_BACKUP',
+    'R2_BACKUP_UPLOAD',
+    'R2_BACKUP_PROGRESS',
+    'R2_BACKUP_COMPLETE',
+    'SCRAPE_COMPLETE',
+    'DOWNLOAD_MEDIA',
+    'CLOUD_TEST_CONNECTION',
+    'CLOUD_RETRY_UNSYNCED',
+    'CLOUD_RUN_BACKFILL',
+    'CLOUD_CLEAR_STATUS'
+]);
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (!BACKGROUND_READY_MESSAGE_ACTIONS.has(request?.action)) {
+        return handleRuntimeMessage(request, sender, sendResponse);
+    }
+    ensureBackgroundStateReady().then(() => {
+        handleRuntimeMessage(request, sender, sendResponse);
+    }).catch((error) => {
+        sendResponse({ status: 'error', error: error.message || 'background_initialization_failed' });
+    });
+    return true;
 });
 
 async function getActiveLeaseForTabEvent(tabId, tab = {}) {
@@ -2617,46 +3382,64 @@ async function getActiveLeaseForTabEvent(tabId, tab = {}) {
 
 // --- NEW TAB INTERCEPTOR ---
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    await ensureBackgroundStateReady();
     const lease = await getActiveLeaseForTabEvent(tabId, tab);
     if (!lease) return;
 
     if (changeInfo.url) {
         const url = changeInfo.url;
         if (url.includes('imagine-public.x.ai') || url.match(/\.(png|jpg|jpeg|mp4|webp)(\?|$)/i)) {
-            console.log('Background:', formatRedactedMediaLog('media_tab_intercepted', url));
+            return trackScrapeTransferTask(lease, async (signal) => {
+                const assertAuthorized = createScrapeTransferAuthorityGuard(lease, signal);
+                try {
+                    console.log('Background:', formatRedactedMediaLog('media_tab_intercepted', url));
 
-            // Generate Filename (Forces GrokVault path + Dedupe)
-            const finalPath = await generateFilename(url);
-            const currentLease = await getActiveLeaseForTabEvent(tabId, tab);
-            if (!scrapeLeaseMatches(currentLease, lease)) return;
+                    const finalPath = await generateFilename(url);
+                    await assertAuthorized();
 
-            if (finalPath) {
-                const config = await getCloudConfig();
-                const transferLease = await getActiveLeaseForTabEvent(tabId, tab);
-                if (!scrapeLeaseMatches(transferLease, lease)) return;
-                const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
+                    if (finalPath) {
+                        const config = await getCloudConfig();
+                        await assertAuthorized();
+                        const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
 
-                if (allowLocalDownload) {
-                    chrome.downloads.download({ url: url, filename: finalPath, conflictAction: 'overwrite' }, (id) => {
-                        if (chrome.runtime.lastError) console.error('BG Download failed:', chrome.runtime.lastError);
-                        else console.log('BG Download started:', id);
-                    });
-                } else {
-                    console.log('Cloud-only mode active: local download skipped.');
+                        if (allowLocalDownload) {
+                            await assertAuthorized();
+                            await queueChromeDownload({
+                                url,
+                                filename: finalPath,
+                                conflictAction: 'overwrite'
+                            }, lease);
+                            await assertAuthorized();
+                        } else {
+                            console.log('Cloud-only mode active: local download skipped.');
+                        }
+
+                        await enqueueCloudMediaUpload(url, finalPath, '', null, {
+                            scrapeLease: lease,
+                            assertAuthorized
+                        });
+                        await assertAuthorized();
+                        chrome.tabs.remove(tabId);
+                    } else {
+                        await assertAuthorized();
+                        console.log('Download skipped (Duplicate). Closing tab.');
+                        chrome.tabs.remove(tabId);
+                    }
+                } catch (error) {
+                    if (isScrapeAuthorityRevokedError(error)) return;
+                    updateCloudError(formatRedactedMediaError(error, url, 'tab_queue_failed'));
+                    await persistCloudState().catch(() => {});
                 }
-
-                enqueueCloudMediaUpload(url, finalPath).catch((e) => {
-                    updateCloudError(formatRedactedMediaError(e, url, 'tab_queue_failed'));
-                    persistCloudState().catch(() => { });
-                });
-
-                chrome.tabs.remove(tabId);
-            } else {
-                console.log('Download skipped (Duplicate). Closing tab.');
-                chrome.tabs.remove(tabId);
-            }
+            });
         }
     }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+    ensureBackgroundStateReady().then(() => getActiveLeaseForTabEvent(tabId)).then((lease) => {
+        if (!lease || lease.tabId !== tabId) return;
+        return stopScrapeRun(lease.kind, 'owner_tab_closed');
+    }).catch(() => {});
 });
 
 function deserializeDownloadOperations(value) {
@@ -2686,32 +3469,37 @@ function serializeDownloadOperations(operations) {
 }
 
 function mutatePendingDownloadOperations(mutator) {
-    const mutation = pendingDownloadOperationsMutationQueue.then(async () => {
-        const stored = await chrome.storage.local.get([
-            PENDING_DOWNLOAD_OPERATIONS_KEY,
-            PROCESSED_IDS_KEY
-        ]);
-        const operations = deserializeDownloadOperations(stored[PENDING_DOWNLOAD_OPERATIONS_KEY]);
-        processedUUIDs = new Set(normalizeProcessedIds(stored[PROCESSED_IDS_KEY]));
+    const execute = async () => {
+        const revision = ++pendingDownloadOperationsRevision;
+        const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
         const result = await mutator(operations);
         pendingDownloadOperations = operations;
-        await chrome.storage.local.set({
+        const write = chrome.storage.local.set({
             [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(operations)
         });
+        const persisted = await withTimeout(
+            Promise.resolve(write).then(() => true),
+            PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS,
+            false
+        );
+        if (!persisted) {
+            Promise.resolve(write).then(() => {
+                if (revision === pendingDownloadOperationsRevision) return;
+                return chrome.storage.local.set({
+                    [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(pendingDownloadOperations)
+                });
+            }).catch(() => {});
+            throw new Error('pending_download_operations_persist_timeout');
+        }
         return result;
-    });
+    };
+    const mutation = pendingDownloadOperationsMutationQueue.then(execute, execute);
     pendingDownloadOperationsMutationQueue = mutation.catch(() => {});
     return mutation;
 }
 
 function hydrateDownloadOperations() {
-    const hydration = pendingDownloadOperationsMutationQueue.then(async () => {
-        const stored = await chrome.storage.local.get([PENDING_DOWNLOAD_OPERATIONS_KEY]);
-        pendingDownloadOperations = deserializeDownloadOperations(stored[PENDING_DOWNLOAD_OPERATIONS_KEY]);
-        return pendingDownloadOperations;
-    });
-    pendingDownloadOperationsMutationQueue = hydration.catch(() => {});
-    return hydration;
+    return pendingDownloadOperationsMutationQueue.then(() => pendingDownloadOperations);
 }
 
 async function getDownloadOperation(downloadId) {
@@ -2730,7 +3518,10 @@ function reserveDownloadOperation(operation) {
             ));
             if (duplicate) return false;
         }
-        operations.set(operation.downloadId, { ...operation });
+        operations.set(operation.downloadId, {
+            ...operation,
+            operationRevision: ++pendingDownloadOperationRevision
+        });
         return true;
     });
 }
@@ -2740,9 +3531,301 @@ function updateDownloadOperation(downloadId, update) {
         const existing = operations.get(downloadId);
         if (!existing) return null;
         const next = typeof update === 'function' ? update({ ...existing }) : { ...existing, ...update };
+        next.operationRevision = Number.isInteger(next.operationRevision)
+            ? next.operationRevision
+            : (existing.operationRevision || 0);
+        pendingDownloadOperationRevision = Math.max(
+            pendingDownloadOperationRevision,
+            next.operationRevision
+        );
         operations.set(downloadId, next);
         return { ...next };
     });
+}
+
+function updateDownloadOperationRevision(downloadId, operationRevision, update) {
+    return mutatePendingDownloadOperations((operations) => {
+        const existing = operations.get(downloadId);
+        if (!existing || (existing.operationRevision || 0) !== operationRevision) return null;
+        const next = typeof update === 'function' ? update({ ...existing }) : { ...existing, ...update };
+        next.operationRevision = existing.operationRevision || 0;
+        operations.set(downloadId, next);
+        return { ...next };
+    });
+}
+
+function detachDownloadOperationScrapeLease(downloadId) {
+    return updateDownloadOperation(downloadId, (existing) => {
+        if (!existing.scrapeLease) return existing;
+        const { scrapeLease: _scrapeLease, ...detached } = existing;
+        return {
+            ...detached,
+            operationRevision: ++pendingDownloadOperationRevision
+        };
+    });
+}
+
+function removeDownloadOperationRevision(downloadId, operationRevision, lease) {
+    return mutatePendingDownloadOperations((operations) => {
+        const existing = operations.get(downloadId);
+        if (!existing || (existing.operationRevision || 0) !== operationRevision) return null;
+        if (lease && !scrapeLeaseMatches(getDownloadOperationScrapeLease(existing), lease)) return null;
+        operations.delete(downloadId);
+        return { ...existing };
+    });
+}
+
+function makeScrapeCompletionTxn(lease) {
+    return {
+        id: `scrape_completion_${lease.epoch}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+        phase: 'prepared',
+        lease: copyScrapeLeaseAuthority(lease),
+        createdAt: Date.now()
+    };
+}
+
+function buildCompletionRetrySnapshots(lease, txn) {
+    const queue = cloneCloudQueue().map((item) => {
+        if (!scrapeLeaseMatches(item.scrapeLease, lease)) return item;
+        const { scrapeLease: _scrapeLease, ...detached } = item;
+        return {
+            ...detached,
+            completionTxnId: txn.id,
+            revocationLease: copyScrapeLeaseAuthority(lease),
+            queueRevision: ++cloudQueueRevision,
+            updatedAt: Date.now()
+        };
+    });
+    const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
+    for (const [downloadId, operation] of operations) {
+        if (!scrapeLeaseMatches(getDownloadOperationScrapeLease(operation), lease)) continue;
+        const { scrapeLease: _scrapeLease, ...detached } = operation;
+        operations.set(downloadId, {
+            ...detached,
+            completionTxnId: txn.id,
+            revocationLease: copyScrapeLeaseAuthority(lease),
+            operationRevision: ++pendingDownloadOperationRevision
+        });
+    }
+    return { queue, operations };
+}
+
+function buildCompletionRetryStorageValues(queue, operations, txn) {
+    return {
+        [CloudSync.STORAGE_KEYS.cloudSyncQueue]: cloneCloudQueue(queue),
+        [CloudSync.STORAGE_KEYS.cloudSyncState]: {
+            ...cloudSyncState,
+            unsyncedCount: queue.length,
+            processing: false
+        },
+        [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(operations),
+        [SCRAPE_COMPLETION_TXN_KEY]: txn
+    };
+}
+
+function applyCompletionRetrySnapshots(queue, operations, txn) {
+    cloudSyncQueue = cloneCloudQueue(queue);
+    pendingDownloadOperations = deserializeDownloadOperations(serializeDownloadOperations(operations));
+    cloudSyncState = {
+        ...cloudSyncState,
+        unsyncedCount: cloudSyncQueue.length,
+        processing: false
+    };
+    scrapeCompletionTxn = txn ? { ...txn } : null;
+}
+
+async function recoverPreparedScrapeCompletionTransfer() {
+    const txn = scrapeCompletionTxn;
+    if (txn?.phase !== 'prepared') return false;
+    if (scrapeCompletionTransition && scrapeCompletionTransition.status !== 'committed') return false;
+
+    const lease = normalizeScrapeLease(txn.lease);
+    if (!lease) {
+        const queue = cloneCloudQueue().filter((item) => item?.completionTxnId !== txn.id);
+        const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
+        for (const [downloadId, operation] of operations) {
+            if (operation?.completionTxnId === txn.id) operations.delete(downloadId);
+        }
+        await chrome.storage.local.set(buildCompletionRetryStorageValues(queue, operations, null));
+        applyCompletionRetrySnapshots(queue, operations, null);
+        return false;
+    }
+
+    await ensureScrapeLeaseHydrated();
+    const stored = await chrome.storage.local.get(['r2BackupState', 'scrapeStopReason']);
+    const stopReason = stored.scrapeStopReason || stored.r2BackupState?.stopReason || null;
+    if (stopReason === 'stopped' || stopReason === 'owner_tab_closed') {
+        await revokeScrapeRetryAuthorityAtomically(lease);
+        return false;
+    }
+    if (activeScrapeLease?.status === 'active' && !scrapeLeaseMatches(activeScrapeLease, lease)) {
+        await revokeScrapeRetryAuthorityAtomically(lease);
+        return false;
+    }
+
+    if (scrapeLeaseMatches(activeScrapeLease, lease)) {
+        await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
+        scrapeStartPending = false;
+        isScraping = false;
+        isR2Backup = false;
+        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(
+            stored,
+            stored.scrapeStopReason || 'recovered_complete'
+        ));
+    }
+
+    const committedTxn = {
+        ...txn,
+        phase: 'committed',
+        committedAt: Date.now(),
+        recoveredAt: Date.now()
+    };
+    const queue = cloneCloudQueue();
+    const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
+    await chrome.storage.local.set(buildCompletionRetryStorageValues(queue, operations, committedTxn));
+    applyCompletionRetrySnapshots(queue, operations, committedTxn);
+    return true;
+}
+
+async function persistCompletionRetrySnapshots(queue, operations, txn, transition, stage) {
+    const write = chrome.storage.local.set(buildCompletionRetryStorageValues(queue, operations, txn));
+    transition.pendingWritePromise = Promise.resolve(write);
+    transition.status = stage;
+    let persisted;
+    try {
+        persisted = await withTimeout(
+            transition.pendingWritePromise.then(() => true),
+            CLOUD_QUEUE_MUTATION_TIMEOUT_MS,
+            false
+        );
+    } catch (error) {
+        if (scrapeCompletionTransition === transition) scrapeCompletionTransition = null;
+        throw error;
+    }
+    if (!persisted) {
+        transition.status = `${stage}_timed_out`;
+        transition.pendingWritePromise.then(async () => {
+            transition.persisted = true;
+            if (transition.revoked) {
+                await revokeScrapeRetryAuthorityAtomically(transition.txn.lease);
+                if (scrapeCompletionTransition === transition) scrapeCompletionTransition = null;
+                return;
+            }
+            applyCompletionRetrySnapshots(queue, operations, txn);
+            if (txn.phase === 'committed') {
+                transition.status = 'committed';
+                if (scrapeCompletionTransition === transition) scrapeCompletionTransition = null;
+            }
+        }).catch(() => {
+            if (scrapeCompletionTransition === transition) scrapeCompletionTransition = null;
+        });
+        throw new Error('scrape_completion_transfer_persist_timeout');
+    }
+    transition.persisted = true;
+    transition.pendingWritePromise = null;
+    applyCompletionRetrySnapshots(queue, operations, txn);
+}
+
+async function prepareScrapeCompletionTransfer(lease) {
+    if (hasBlockedScrapeCompletionTransfer()) {
+        throw new Error('scrape_completion_transfer_in_progress');
+    }
+    const txn = makeScrapeCompletionTxn(lease);
+    const transition = {
+        txn,
+        status: 'preparing',
+        persisted: false,
+        revoked: false,
+        pendingWritePromise: null
+    };
+    scrapeCompletionTransition = transition;
+    try {
+        const activeDrain = cloudQueueDrainPromise;
+        if (activeDrain) await activeDrain;
+        await Promise.all([cloudQueueMutationQueue, pendingDownloadOperationsMutationQueue]);
+        const snapshots = buildCompletionRetrySnapshots(lease, txn);
+        await persistCompletionRetrySnapshots(
+            snapshots.queue,
+            snapshots.operations,
+            txn,
+            transition,
+            'preparing'
+        );
+        transition.status = 'prepared';
+        return { txn, transition, ...snapshots };
+    } catch (error) {
+        if (!/_timed_out$/.test(transition.status) && scrapeCompletionTransition === transition) {
+            scrapeCompletionTransition = null;
+        }
+        throw error;
+    }
+}
+
+async function commitScrapeCompletionTransfer(prepared) {
+    const committedTxn = {
+        ...prepared.txn,
+        phase: 'committed',
+        committedAt: Date.now()
+    };
+    await persistCompletionRetrySnapshots(
+        prepared.queue,
+        prepared.operations,
+        committedTxn,
+        prepared.transition,
+        'committing'
+    );
+    prepared.transition.status = 'committed';
+    if (scrapeCompletionTransition === prepared.transition) scrapeCompletionTransition = null;
+}
+
+function markScrapeCompletionTransitionRevoked(lease) {
+    if (scrapeCompletionTransition
+        && completionTxnMatchesLease(scrapeCompletionTransition.txn, lease)) {
+        scrapeCompletionTransition.revoked = true;
+    }
+}
+
+async function revokeScrapeRetryAuthorityAtomically(lease) {
+    const queue = cloneCloudQueue().filter((item) => !recordOwnedByScrapeLease(item, lease));
+    const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
+    for (const [downloadId, operation] of operations) {
+        if (recordOwnedByScrapeLease(operation, lease)) operations.delete(downloadId);
+    }
+    const nextTxn = completionTxnMatchesLease(scrapeCompletionTxn, lease) ? null : scrapeCompletionTxn;
+    cloudStatePersistenceRevision += 1;
+    pendingDownloadOperationsRevision += 1;
+    applyCompletionRetrySnapshots(queue, operations, nextTxn);
+    const write = Promise.resolve(chrome.storage.local.set(
+        buildCompletionRetryStorageValues(queue, operations, nextTxn)
+    ));
+    const persisted = await withTimeout(
+        write.then(() => true).catch(() => false),
+        Math.max(CLOUD_QUEUE_MUTATION_TIMEOUT_MS, PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS),
+        false
+    );
+    if (!persisted) {
+        write.finally(() => chrome.storage.local.set(buildCompletionRetryStorageValues(
+            cloudSyncQueue,
+            pendingDownloadOperations,
+            scrapeCompletionTxn
+        )).catch(() => {})).catch(() => {});
+    }
+}
+
+async function settleRevokedScrapeCompletionTransition(lease) {
+    const transition = scrapeCompletionTransition;
+    if (!transition || !completionTxnMatchesLease(transition.txn, lease)) return true;
+    transition.revoked = true;
+    if (!transition.pendingWritePromise) return true;
+    const timeout = Symbol('scrape_completion_stop_timeout');
+    const result = await withTimeout(
+        transition.pendingWritePromise.then(() => true).catch(() => false),
+        SCRAPE_TRANSFER_DRAIN_TIMEOUT_MS,
+        timeout
+    );
+    if (result === timeout) return false;
+    transition.pendingWritePromise = null;
+    return true;
 }
 
 function removeDownloadOperation(downloadId) {
@@ -2807,30 +3890,43 @@ async function removeDownloadedFile(downloadId) {
     );
 }
 
-async function finalizeDownloadOperation(downloadId, { historyMissing = false } = {}) {
+function getDownloadOperationAuthorityGuard(operation) {
+    const lease = getDownloadOperationScrapeLease(operation);
+    return lease ? () => assertScrapeTransferAuthorized(lease) : null;
+}
+
+async function finalizeDownloadOperation(downloadId, { historyMissing = false, assertAuthorized = null } = {}) {
+    if (assertAuthorized) await assertAuthorized();
     const operation = await getDownloadOperation(downloadId);
     if (!operation || operation.downloadState !== 'complete') return false;
     if (operation.cloudRequired && operation.r2State !== 'present') return false;
+    const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
+    if (authorityGuard) await authorityGuard();
 
     if (operation.mediaId && (!operation.allowLocal || !operation.localIdentityPersisted)) {
-        await mutateProcessedIds({ ids: [operation.mediaId] });
+        await mutateProcessedIds({ ids: [operation.mediaId] }, authorityGuard);
     }
     if (!operation.allowLocal) {
+        if (authorityGuard) await authorityGuard();
         if (!historyMissing) {
             try {
                 await removeDownloadedFile(downloadId);
+                if (authorityGuard) await authorityGuard();
             } catch (error) {
+                if (isScrapeAuthorityRevokedError(error)) throw error;
                 await recordDownloadOperationError(downloadId, error, 'download_cleanup_failed');
                 return false;
             }
             console.log('[CloudQueue]', formatRedactedMediaLog('local_file_deleted', operation.mediaId));
         }
     }
+    if (authorityGuard) await authorityGuard();
     await removeDownloadOperation(downloadId);
     return true;
 }
 
-async function markDownloadOperationR2Present(downloadId, result) {
+async function markDownloadOperationR2Present(downloadId, result, assertAuthorized = null) {
+    if (assertAuthorized) await assertAuthorized();
     const operation = await updateDownloadOperation(downloadId, (existing) => ({
         ...existing,
         r2State: 'present',
@@ -2839,9 +3935,11 @@ async function markDownloadOperationR2Present(downloadId, result) {
         lastError: null
     }));
     if (!operation) return false;
+    const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
+    if (authorityGuard) await authorityGuard();
 
     if (operation.downloadState === 'complete') {
-        await finalizeDownloadOperation(downloadId);
+        await finalizeDownloadOperation(downloadId, { assertAuthorized: authorityGuard });
     }
     return true;
 }
@@ -2896,10 +3994,13 @@ async function linkPublicQueueOperation(operation) {
     return queueItem;
 }
 
-async function ensurePublicDownloadQueued(operation, downloadItem) {
+async function ensurePublicDownloadQueued(operation, downloadItem, assertAuthorized = null) {
     if (!operation?.cloudRequired || operation.strategy !== 'public_queue') return;
     if (activeDownloadOperations.has(operation.downloadId)) return;
+    const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
+    if (authorityGuard) await authorityGuard();
     if (await linkPublicQueueOperation(operation)) return;
+    if (authorityGuard) await authorityGuard();
     const sourceUrl = downloadItem?.finalUrl || downloadItem?.url;
     if (!sourceUrl) {
         await recordDownloadOperationError(
@@ -2918,17 +4019,23 @@ async function ensurePublicDownloadQueued(operation, downloadItem) {
             });
         }
         await enqueueCloudMediaUpload(sourceUrl, operation.finalPath, '', null, {
-            cleanupDownloadId: operation.downloadId
+            cleanupDownloadId: operation.downloadId,
+            scrapeLease: getDownloadOperationScrapeLease(operation),
+            assertAuthorized: authorityGuard
         });
+        if (authorityGuard) await authorityGuard();
     } catch (error) {
+        if (isScrapeAuthorityRevokedError(error)) throw error;
         await recordDownloadOperationError(operation.downloadId, error, 'public_queue_failed');
     } finally {
         activeDownloadOperations.delete(operation.downloadId);
     }
 }
 
-async function uploadAuthenticatedDownload(operation, downloadItem) {
+async function uploadAuthenticatedDownload(operation, downloadItem, assertAuthorized = null) {
     if (activeDownloadOperations.has(operation.downloadId)) return;
+    const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
+    if (authorityGuard) await authorityGuard();
     activeDownloadOperations.add(operation.downloadId);
     try {
         if (!downloadItem?.filename) throw new Error('[download-search] file unavailable');
@@ -2942,6 +4049,7 @@ async function uploadAuthenticatedDownload(operation, downloadItem) {
                 reasons: ['BLOBS'],
                 justification: 'Read downloaded file for R2 cloud backup upload'
             });
+            if (authorityGuard) await authorityGuard();
         } catch (error) {
             if (!error.message.includes('already exists') && !error.message.includes('Only a single offscreen')) {
                 throw error;
@@ -2953,11 +4061,14 @@ async function uploadAuthenticatedDownload(operation, downloadItem) {
             filePath: downloadItem.filename,
             contentType: downloadItem.mime || 'application/octet-stream'
         });
+        if (authorityGuard) await authorityGuard();
         if (!fileData || !fileData.ok) throw new Error('[file-read] unavailable');
         console.log('[CloudQueue]', formatRedactedMediaLog('file_read', operation.mediaId, { bytes: fileData.size }));
 
         const config = await getCloudConfig();
+        if (authorityGuard) await authorityGuard();
         const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
+        if (authorityGuard) await authorityGuard();
         const binaryStr = atob(fileData.base64);
         const bytes = new Uint8Array(binaryStr.length);
         for (let index = 0; index < binaryStr.length; index++) bytes[index] = binaryStr.charCodeAt(index);
@@ -2968,14 +4079,16 @@ async function uploadAuthenticatedDownload(operation, downloadItem) {
             userId: userInfo.activeGrokUserId || 'Shared_Account',
             contentType: fileData.type,
             acceptance: buildAcceptanceContextFromCloudConfig(config, 'download-upload')
-        }, blob);
+        }, blob, authorityGuard);
+        if (authorityGuard) await authorityGuard();
 
         log(
             `Cloud upload ${formatRedactedMediaLog(result.status, operation.mediaId, { bytes: result.bytes })}`,
             result.status === 'conflict_uploaded' ? 'warning' : 'success'
         );
-        await markDownloadOperationR2Present(operation.downloadId, result);
+        await markDownloadOperationR2Present(operation.downloadId, result, authorityGuard);
     } catch (error) {
+        if (isScrapeAuthorityRevokedError(error)) throw error;
         console.error('[CloudQueue]', formatRedactedMediaLog(
             'post_download_upload_failed',
             operation.mediaId,
@@ -2987,15 +4100,20 @@ async function uploadAuthenticatedDownload(operation, downloadItem) {
     }
 }
 
-async function processCompletedDownloadOperation(downloadId, downloadItem = null) {
+async function processCompletedDownloadOperation(downloadId, downloadItem = null, assertAuthorized = null) {
+    if (assertAuthorized) await assertAuthorized();
     let operation = await getDownloadOperation(downloadId);
     if (!operation) return;
+    const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
+    if (authorityGuard) await authorityGuard();
     const item = downloadItem || (await chrome.downloads.search({ id: downloadId }))[0];
+    if (authorityGuard) await authorityGuard();
 
     if (operation.allowLocal && operation.mediaId && !operation.localIdentityPersisted) {
-        await mutateProcessedIds({ ids: [operation.mediaId] });
+        await mutateProcessedIds({ ids: [operation.mediaId] }, authorityGuard);
         operation = await updateDownloadOperation(downloadId, { localIdentityPersisted: true });
         if (!operation) return;
+        if (authorityGuard) await authorityGuard();
     }
 
     if (!operation.cloudRequired) {
@@ -3004,16 +4122,18 @@ async function processCompletedDownloadOperation(downloadId, downloadItem = null
     }
 
     if (operation.strategy === 'public_queue') {
-        await finalizeDownloadOperation(downloadId);
+        await finalizeDownloadOperation(downloadId, { assertAuthorized: authorityGuard });
         return;
     }
 
-    await uploadAuthenticatedDownload(operation, item);
+    await uploadAuthenticatedDownload(operation, item, authorityGuard);
 }
 
-async function reconcileMissingDownloadOperation(operation) {
+async function reconcileMissingDownloadOperation(operation, assertAuthorized = null) {
+    if (assertAuthorized) await assertAuthorized();
     if (operation.strategy === 'public_queue' && operation.r2State !== 'present') {
         const queueItem = await linkPublicQueueOperation(operation);
+        if (assertAuthorized) await assertAuthorized();
         if (operation.allowLocal && operation.localIdentityPersisted && queueItem) return;
 
         let queueChanged = false;
@@ -3024,20 +4144,22 @@ async function reconcileMissingDownloadOperation(operation) {
             }
         });
         if (queueChanged) await persistCloudState();
+        if (assertAuthorized) await assertAuthorized();
         await removeDownloadOperation(operation.downloadId);
         return;
     }
 
     if (operation.downloadState === 'complete') {
         if (!operation.allowLocal && operation.r2State === 'present') {
-            await finalizeDownloadOperation(operation.downloadId, { historyMissing: true });
+            await finalizeDownloadOperation(operation.downloadId, { historyMissing: true, assertAuthorized });
             return;
         }
         if (operation.allowLocal && operation.mediaId && !operation.localIdentityPersisted) {
-            await mutateProcessedIds({ ids: [operation.mediaId] });
+            await mutateProcessedIds({ ids: [operation.mediaId] }, assertAuthorized);
         }
     }
 
+    if (assertAuthorized) await assertAuthorized();
     await removeDownloadOperation(operation.downloadId);
 }
 
@@ -3046,9 +4168,25 @@ async function reconcilePendingDownloadOperations(startupOperations = null) {
         ? startupOperations
         : Array.from((await hydrateDownloadOperations()).values()).map((operation) => ({ ...operation }));
     for (const operation of operations) {
+        if (isPreparedCompletionRecord(operation) || isCompletionTransitionBlockingRecord(operation)) continue;
+        const scrapeLease = getDownloadOperationScrapeLease(operation);
+        const assertAuthorized = scrapeLease
+            ? () => assertScrapeTransferAuthorized(scrapeLease)
+            : null;
+        if (assertAuthorized) {
+            try {
+                await assertAuthorized();
+            } catch (error) {
+                if (!isScrapeAuthorityRevokedError(error)) throw error;
+                await removeDownloadOperation(operation.downloadId);
+                cancelDownload(operation.downloadId);
+                continue;
+            }
+        }
         const [downloadItem] = await chrome.downloads.search({ id: operation.downloadId });
+        if (assertAuthorized) await assertAuthorized();
         if (!downloadItem) {
-            await reconcileMissingDownloadOperation(operation);
+            await reconcileMissingDownloadOperation(operation, assertAuthorized);
             continue;
         }
         if (downloadItem.state === 'interrupted') {
@@ -3062,20 +4200,62 @@ async function reconcilePendingDownloadOperations(startupOperations = null) {
         }
 
         if (current.strategy === 'public_queue' && current.r2State !== 'present') {
-            await ensurePublicDownloadQueued(current, downloadItem);
+            await ensurePublicDownloadQueued(current, downloadItem, assertAuthorized);
             current = await getDownloadOperation(operation.downloadId);
             if (!current) continue;
+            if (assertAuthorized) await assertAuthorized();
         }
 
         if (downloadItem.state === 'complete') {
-            await processCompletedDownloadOperation(operation.downloadId, downloadItem);
+            await processCompletedDownloadOperation(operation.downloadId, downloadItem, assertAuthorized);
         }
     }
     await scheduleCloudRetryAlarm();
 }
 
 async function handleDownloadFilename(item, suggestOnce) {
-    if (!isScraping && !item.url.includes('imagine-public') && !item.url.includes('assets.grok.com')) {
+    await ensureScrapeLeaseHydrated();
+    const scrapeReceipt = claimPendingScrapeDownload(item);
+    if (scrapeReceipt?.revoked || revokedScrapeDownloadIds.has(item.id)) {
+        releasePendingScrapeDownload(scrapeReceipt);
+        revokedScrapeDownloadIds.delete(item.id);
+        suggestOnce();
+        cancelDownload(item.id);
+        return;
+    }
+    const scrapeLease = scrapeReceipt?.lease || null;
+    const assertAuthorized = scrapeLease
+        ? () => assertScrapeTransferAuthorized(scrapeLease)
+        : null;
+    const existingOperation = scrapeLease ? null : await getDownloadOperation(item.id);
+
+    if (!scrapeLease && existingOperation) {
+        const existingLease = getDownloadOperationScrapeLease(existingOperation);
+        try {
+            if (existingLease) await assertScrapeTransferAuthorized(existingLease);
+            if (existingOperation.finalPath) {
+                suggestOnce({ filename: existingOperation.finalPath, conflictAction: 'overwrite' });
+            } else {
+                suggestOnce();
+            }
+        } catch (error) {
+            suggestOnce();
+            if (isScrapeAuthorityRevokedError(error)) {
+                await removeDownloadOperation(item.id).catch(() => {});
+                cancelDownload(item.id);
+                return;
+            }
+            throw error;
+        }
+        return;
+    }
+
+    if (!scrapeLease && isScraping) {
+        suggestOnce();
+        return;
+    }
+
+    if (!scrapeLease && !isScraping && !item.url.includes('imagine-public') && !item.url.includes('assets.grok.com')) {
         suggestOnce();
         return;
     }
@@ -3083,14 +4263,18 @@ async function handleDownloadFilename(item, suggestOnce) {
     let reserved = false;
     const mediaId = CloudSync.extractGrokMediaId(item.url);
     try {
+        if (assertAuthorized) await assertAuthorized();
         const finalPath = await generateFilename(item.url, item.filename);
+        if (assertAuthorized) await assertAuthorized();
         if (!finalPath) {
+            releasePendingScrapeDownload(scrapeReceipt);
             suggestOnce();
             cancelDownload(item.id);
             return;
         }
 
         const config = await getCloudConfig();
+        if (assertAuthorized) await assertAuthorized();
         const cloudRequired = CloudSync.isCloudEnabled(config);
         const allowLocal = CloudSync.isLocalDownloadEnabled(config);
         const isAuthUrl = item.url.includes('assets.grok.com');
@@ -3112,26 +4296,33 @@ async function handleDownloadFilename(item, suggestOnce) {
             r2Status: null,
             attempts: 0,
             lastError: null,
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            ...(scrapeLease ? { scrapeLease: copyScrapeLeaseAuthority(scrapeLease) } : {})
         };
 
         reserved = await reserveDownloadOperation(operation);
+        if (assertAuthorized) await assertAuthorized();
         if (!reserved) {
+            releasePendingScrapeDownload(scrapeReceipt);
             suggestOnce();
             cancelDownload(item.id);
             return;
         }
 
+        releasePendingScrapeDownload(scrapeReceipt);
         suggestOnce({ filename: finalPath, conflictAction: 'overwrite' });
         if (cloudRequired && strategy === 'public_queue') {
-            await ensurePublicDownloadQueued(operation, item);
+            await ensurePublicDownloadQueued(operation, item, assertAuthorized);
+            if (assertAuthorized) await assertAuthorized();
         } else if (cloudRequired) {
             console.log('[CloudQueue]', formatRedactedMediaLog('download_tracked', mediaId));
         }
     } catch (error) {
+        releasePendingScrapeDownload(scrapeReceipt);
         if (reserved) await removeDownloadOperation(item.id).catch(() => {});
         suggestOnce();
         cancelDownload(item.id);
+        if (isScrapeAuthorityRevokedError(error)) return;
         console.error('[CloudQueue]', formatRedactedMediaLog(
             'filename_rejected',
             mediaId,
@@ -3148,7 +4339,7 @@ function handleDownloadFilenameEvent(item, suggest) {
         if (typeof suggestion === 'undefined') suggest();
         else suggest(suggestion);
     };
-    Promise.resolve().then(() => handleDownloadFilename(item, suggestOnce)).catch(() => {
+    ensureBackgroundStateReady().then(() => handleDownloadFilename(item, suggestOnce)).catch(() => {
         suggestOnce();
         cancelDownload(item.id);
     });
@@ -3156,17 +4347,80 @@ function handleDownloadFilenameEvent(item, suggest) {
 }
 
 async function handleDownloadChanged(delta) {
+    await ensureBackgroundStateReady();
+    if (revokedScrapeDownloadIds.has(delta.id)) {
+        revokedScrapeDownloadIds.delete(delta.id);
+        await removeDownloadOperation(delta.id).catch(() => {});
+        cancelDownload(delta.id);
+        return;
+    }
     const state = delta.state?.current;
     if (state === 'interrupted' || (delta.error && state !== 'complete')) {
-        const operation = await removeDownloadOperation(delta.id);
-        console.warn('[CloudQueue]', formatRedactedMediaLog('download_interrupted', operation?.mediaId));
+        const existing = await getDownloadOperation(delta.id);
+        if (!existing) return;
+        if (isPreparedCompletionRecord(existing) || isCompletionTransitionBlockingRecord(existing)) return;
+        const scrapeLease = getDownloadOperationScrapeLease(existing);
+        const operationRevision = existing.operationRevision || 0;
+        const operation = async (signal = null) => {
+            const assertAuthorized = scrapeLease
+                ? createScrapeTransferAuthorityGuard(scrapeLease, signal)
+                : null;
+            try {
+                if (assertAuthorized) await assertAuthorized();
+                const removed = await removeDownloadOperationRevision(
+                    delta.id,
+                    operationRevision,
+                    scrapeLease
+                );
+                if (!removed) return;
+                console.warn('[CloudQueue]', formatRedactedMediaLog('download_interrupted', removed.mediaId));
+            } catch (error) {
+                if (!isScrapeAuthorityRevokedError(error)) throw error;
+                const removed = await removeDownloadOperationRevision(
+                    delta.id,
+                    operationRevision,
+                    scrapeLease
+                ).catch(() => null);
+                if (removed) cancelDownload(delta.id);
+            }
+        };
+        if (scrapeLease) await trackScrapeTransferTask(scrapeLease, operation);
+        else await operation();
         return;
     }
     if (state !== 'complete') return;
 
-    const operation = await updateDownloadOperation(delta.id, { downloadState: 'complete' });
-    if (!operation) return;
-    await processCompletedDownloadOperation(delta.id);
+    const existing = await getDownloadOperation(delta.id);
+    if (!existing) return;
+    if (isPreparedCompletionRecord(existing) || isCompletionTransitionBlockingRecord(existing)) return;
+    const scrapeLease = getDownloadOperationScrapeLease(existing);
+    const operationRevision = existing.operationRevision || 0;
+    const operation = async (signal = null) => {
+        const assertAuthorized = scrapeLease
+            ? createScrapeTransferAuthorityGuard(scrapeLease, signal)
+            : null;
+        try {
+            if (assertAuthorized) await assertAuthorized();
+            const updated = await updateDownloadOperationRevision(
+                delta.id,
+                operationRevision,
+                { downloadState: 'complete' }
+            );
+            if (!updated) return;
+            if (assertAuthorized) await assertAuthorized();
+            await processCompletedDownloadOperation(delta.id, null, assertAuthorized);
+        } catch (error) {
+            if (!isScrapeAuthorityRevokedError(error)) throw error;
+            const removed = await removeDownloadOperationRevision(
+                delta.id,
+                operationRevision,
+                scrapeLease
+            ).catch(() => null);
+            if (removed) cancelDownload(delta.id);
+        }
+    };
+    if (scrapeLease) await trackScrapeTransferTask(scrapeLease, operation);
+    else await operation();
 }
 
 if (typeof module !== 'undefined') {
@@ -3177,6 +4431,7 @@ if (typeof module !== 'undefined') {
         buildR2BackupInitMessage,
         buildR2BackupInitMessageForConfig,
         dispatchNativeClick,
+        enqueueCloudItemForTest: enqueueCloudItem,
         enqueueCloudMediaUpload,
         extractGrokMediaIdFallback,
         fetchRecreateReferenceDataUrl,
@@ -3189,6 +4444,7 @@ if (typeof module !== 'undefined') {
         handleDownloadChanged,
         handleDownloadFilename,
         initializeBackgroundState,
+        ensureBackgroundStateReady,
         initializeScrapeInActiveTab,
         ensureScrapeLeaseHydrated,
         isGrokSavedUrl,
@@ -3204,7 +4460,13 @@ if (typeof module !== 'undefined') {
         requestPresignedUrl,
         parseFilenameInfo,
         processCloudQueue,
-        setCloudSyncQueueForTest: (items) => { cloudSyncQueue = items.map((item) => ({ ...item })); },
+        setCloudSyncQueueForTest: (items) => {
+            cloudSyncQueue = items.map((item) => ({ ...item }));
+            cloudQueueRevision = cloudSyncQueue.reduce(
+                (latest, item) => Math.max(latest, Number.isInteger(item.queueRevision) ? item.queueRevision : 0),
+                cloudQueueRevision
+            );
+        },
         setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); },
         testCloudConnection,
         uploadMetadataQueueItem,

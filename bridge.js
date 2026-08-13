@@ -1,6 +1,10 @@
 // bridge.js — Runs in the page's MAIN world (not the content script's isolated world)
 // Provides access to TipTap editor and Grok's fetch for the content script via custom events
 
+(function initializeGrokPowerToolsBridge() {
+if (window.__gptPowerToolsBridgeInstalled) return;
+window.__gptPowerToolsBridgeInstalled = true;
+
 function findGrokContentEditable() {
     var editors = Array.prototype.slice.call(
         document.querySelectorAll('[contenteditable], [role="textbox"], div[aria-label], div[data-placeholder]')
@@ -148,6 +152,35 @@ if (!promptedVideoBridgeState.setContentHandler) {
 }
 
 // Fetch media with page cookies for R2 backup (content script can't include page cookies)
+var mediaFetchBridgeState = window.__gptMediaFetchBridgeState
+    || (window.__gptMediaFetchBridgeState = {
+        released: new Set(),
+        blobUrls: new Map(),
+        expiryTimers: new Map()
+    });
+
+function releaseMediaFetchResult(requestId) {
+    if (!requestId) return;
+    mediaFetchBridgeState.released.add(requestId);
+    var blobUrl = mediaFetchBridgeState.blobUrls.get(requestId);
+    if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+        mediaFetchBridgeState.blobUrls.delete(requestId);
+    }
+    var expiryTimer = mediaFetchBridgeState.expiryTimers.get(requestId);
+    if (expiryTimer) {
+        clearTimeout(expiryTimer);
+        mediaFetchBridgeState.expiryTimers.delete(requestId);
+    }
+    setTimeout(function() {
+        mediaFetchBridgeState.released.delete(requestId);
+    }, 60000);
+}
+
+document.addEventListener('__gpt_fetch_media_release', function(e) {
+    releaseMediaFetchResult(e.detail && e.detail.requestId);
+});
+
 document.addEventListener('__gpt_fetch_media', function(e) {
     var url = e.detail && e.detail.url;
     var requestId = e.detail && e.detail.requestId;
@@ -159,13 +192,19 @@ document.addEventListener('__gpt_fetch_media', function(e) {
             return resp.blob();
         })
         .then(function(blob) {
+            if (mediaFetchBridgeState.released.has(requestId)) return;
             // Create blob URL — accessible from content script's isolated world (same page)
             var blobUrl = URL.createObjectURL(blob);
+            mediaFetchBridgeState.blobUrls.set(requestId, blobUrl);
+            mediaFetchBridgeState.expiryTimers.set(requestId, setTimeout(function() {
+                releaseMediaFetchResult(requestId);
+            }, 60000));
             document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
                 detail: { requestId: requestId, blobUrl: blobUrl, size: blob.size, type: blob.type }
             }));
         })
         .catch(function(err) {
+            if (mediaFetchBridgeState.released.has(requestId)) return;
             document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
                 detail: { requestId: requestId, error: err.message }
             }));
@@ -237,4 +276,6 @@ document.addEventListener('__gpt_fetch_media_data_url', function(e) {
         });
         return resp;
     };
+})();
+
 })();

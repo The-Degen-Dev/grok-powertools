@@ -35,6 +35,19 @@ function makeVisible(element, rect = {}) {
 
 let promptedVideoFixtureId = 0;
 
+function appendReadyVideoResult(sourceUrl, root = document.body) {
+    const resultId = ++promptedVideoFixtureId;
+    const target = root.querySelector?.('.react-flow__node-asset.selected') || root;
+    const video = document.createElement('video');
+    video.src = sourceUrl.replace(/\/[^/]*(?:\?.*)?$/, `/generated_video_${resultId}.mp4`);
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 });
+    target.appendChild(video);
+    const complete = document.createElement('button');
+    complete.setAttribute('aria-label', 'Video Generation Complete');
+    document.body.appendChild(complete);
+    return video;
+}
+
 function openLinkedMenu(trigger, menu) {
     const fixtureId = ++promptedVideoFixtureId;
     if (!trigger.id) trigger.id = `make-video-trigger-${fixtureId}`;
@@ -71,6 +84,52 @@ function mountFocusedPromptedVideoComposer({ root = null, onSubmit = null } = {}
     if (onSubmit) submit.addEventListener('click', onSubmit);
     composer.append(input, submit);
     if (!composer.isConnected) document.body.appendChild(composer);
+    input.focus();
+    return { composer, input, submit };
+}
+
+function mountFocusedGrok2VideoComposer({
+    selectedMode = 'Video',
+    includeResolution = true,
+    includeDuration = true,
+    submitDisabled = false,
+    onSubmit = null
+} = {}) {
+    const composer = document.createElement('div');
+    const input = document.createElement('div');
+    input.setAttribute('contenteditable', 'true');
+    input.setAttribute('role', 'textbox');
+    input.setAttribute('aria-label', 'Ask Grok anything');
+    input.tabIndex = -1;
+
+    const createRadioGroup = (label, options, selected) => {
+        const group = document.createElement('div');
+        group.setAttribute('role', 'radiogroup');
+        group.setAttribute('aria-label', label);
+        options.forEach((option) => {
+            const radio = document.createElement('button');
+            radio.setAttribute('role', 'radio');
+            radio.setAttribute('aria-checked', option === selected ? 'true' : 'false');
+            if (label === 'Generation mode') radio.setAttribute('aria-label', option);
+            radio.textContent = option;
+            group.appendChild(radio);
+        });
+        return group;
+    };
+
+    const mode = createRadioGroup('Generation mode', ['Image', 'Video', 'Agent'], selectedMode);
+    const resolution = createRadioGroup('Video resolution', ['480p', '720p', '1080p'], '480p');
+    const duration = createRadioGroup('Video duration', ['6s', '10s', '15s'], '6s');
+    const submit = makeVisible(document.createElement('button'));
+    submit.setAttribute('aria-label', 'Send');
+    submit.disabled = submitDisabled;
+    if (onSubmit) submit.addEventListener('click', onSubmit);
+
+    composer.append(input, mode);
+    if (includeResolution) composer.appendChild(resolution);
+    if (includeDuration) composer.appendChild(duration);
+    composer.appendChild(submit);
+    document.body.appendChild(composer);
     input.focus();
     return { composer, input, submit };
 }
@@ -121,10 +180,11 @@ function renderAgentEditor({
     addPrompt = true,
     composer = true,
     includeAgentAsset = true,
-    onSubmit = null
+    onSubmit = null,
+    produceResult = true
 } = {}) {
     document.body.innerHTML = `${includeAgentAsset ? `
-        <div class="react-flow__node-asset">
+        <div class="react-flow__node-asset selected" data-id="asset-source">
             <img src="${sourceUrl}">
         </div>` : ''}
         <div class="query-bar"></div>`;
@@ -141,7 +201,12 @@ function renderAgentEditor({
             const menu = makeVisible(document.createElement('div'));
             const menuItem = createMenuItem('Add Prompt', () => {
                 if (!composer) return;
-                mountFocusedPromptedVideoComposer({ onSubmit });
+                mountFocusedPromptedVideoComposer({
+                    onSubmit: () => {
+                        if (onSubmit) onSubmit();
+                        if (produceResult) appendReadyVideoResult(sourceUrl);
+                    }
+                });
                 menuItem.remove();
             });
             menu.appendChild(menuItem);
@@ -199,6 +264,8 @@ describe('VideoRetryManager', () => {
 
     afterEach(() => {
         document.removeEventListener('__gpt_set_prompted_video_content', promptedVideoBridgeHandler);
+        retryManager.stopObserver();
+        retryManager.generateMoreObserver.disconnect();
         jest.restoreAllMocks();
     });
 
@@ -438,7 +505,7 @@ describe('VideoRetryManager', () => {
         image.addEventListener('click', () => {
             window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
             document.body.innerHTML = `
-                <div class="react-flow__node-asset">
+                <div class="react-flow__node-asset selected" data-id="asset-source">
                     <img src="${sourceUrl}">
                 </div>
                 <div class="query-bar"></div>
@@ -457,7 +524,12 @@ describe('VideoRetryManager', () => {
             makeVideo.addEventListener('click', () => {
                 const menu = makeVisible(document.createElement('div'));
                 const addPrompt = createMenuItem('Add Prompt', () => {
-                    mountFocusedPromptedVideoComposer({ onSubmit: () => { submitted++; } });
+                    mountFocusedPromptedVideoComposer({
+                        onSubmit: () => {
+                            submitted++;
+                            appendReadyVideoResult(sourceUrl);
+                        }
+                    });
                     addPrompt.remove();
                 });
                 menu.appendChild(addPrompt);
@@ -492,6 +564,7 @@ describe('VideoRetryManager', () => {
             document.body.innerHTML = '';
             const decoyNode = document.createElement('div');
             decoyNode.className = 'react-flow__node-asset';
+            decoyNode.setAttribute('data-id', 'asset-decoy');
             const decoyMedia = document.createElement('img');
             decoyMedia.src = 'https://assets.grok.com/users/example/generated/12121212-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
             decoyNode.appendChild(decoyMedia);
@@ -507,7 +580,8 @@ describe('VideoRetryManager', () => {
             readinessPolls++;
             if (readinessPolls === 1) {
                 const node = document.createElement('div');
-                node.className = 'react-flow__node-asset';
+                node.className = 'react-flow__node-asset selected';
+                node.setAttribute('data-id', 'asset-source');
                 const media = document.createElement('img');
                 media.src = sourceUrl;
                 node.appendChild(media);
@@ -520,7 +594,12 @@ describe('VideoRetryManager', () => {
                 makeVideo.addEventListener('click', () => {
                     const menu = makeVisible(document.createElement('div'));
                     const addPrompt = createMenuItem('Add Prompt', () => {
-                        mountFocusedPromptedVideoComposer({ onSubmit: () => { submitted++; } });
+                        mountFocusedPromptedVideoComposer({
+                            onSubmit: () => {
+                                submitted++;
+                                appendReadyVideoResult(sourceUrl);
+                            }
+                        });
                     });
                     menu.appendChild(addPrompt);
                     openLinkedMenu(makeVideo, menu);
@@ -534,6 +613,220 @@ describe('VideoRetryManager', () => {
         expect(readinessPolls).toBeGreaterThanOrEqual(2);
         expect(submitted).toBe(1);
         expect(retryManager.goalCount).toBe(1);
+    });
+
+    test('binds the exact Agent asset before choosing the side-panel Make Video action', async () => {
+        const token = 'exact-agent-binding';
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/12121212-aaaa-4bbb-8ccc-343434343434/image.jpg';
+        window.history.pushState({}, '', '/imagine/agent/exact-binding?conversation=exact-binding');
+
+        const asset = document.createElement('div');
+        asset.className = 'react-flow__node-asset';
+        asset.setAttribute('data-id', 'asset-source');
+        const image = document.createElement('img');
+        image.src = sourceUrl;
+        asset.appendChild(image);
+        const assetClick = jest.fn(() => asset.classList.add('selected'));
+        asset.addEventListener('click', assetClick);
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'react-flow__node-toolbar';
+        toolbar.setAttribute('data-id', 'asset-source');
+        const dangerousToolbarAction = makeVisible(document.createElement('button'));
+        dangerousToolbarAction.setAttribute('aria-label', 'Make Video');
+        dangerousToolbarAction.setAttribute('aria-haspopup', 'menu');
+        dangerousToolbarAction.click = jest.fn();
+        toolbar.appendChild(dangerousToolbarAction);
+
+        const sidePanelAction = makeVisible(document.createElement('button'));
+        sidePanelAction.setAttribute('aria-label', 'Make Video');
+        sidePanelAction.setAttribute('aria-haspopup', 'menu');
+        document.body.append(asset, toolbar, sidePanelAction);
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        await Promise.resolve();
+
+        const result = await retryManager.waitForPromptedBatchEditorReady(sourceUrl, token, 1000);
+
+        expect(result).toMatchObject({
+            status: 'ready',
+            surface: 'agent_media',
+            makeVideoTrigger: sidePanelAction,
+            agentBinding: {
+                assetNodeId: 'asset-source',
+                sourceIdentity: '12121212-aaaa-4bbb-8ccc-343434343434'
+            }
+        });
+        expect(assetClick).toHaveBeenCalledTimes(1);
+        expect(dangerousToolbarAction.click).not.toHaveBeenCalled();
+    });
+
+    test('reselects the exact Agent asset when React remounts its node during selection', async () => {
+        const token = 'remounted-agent-asset';
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/13131313-aaaa-4bbb-8ccc-353535353535/image.jpg';
+        window.history.pushState({}, '', '/imagine/agent/remounted-asset?conversation=remounted-asset');
+
+        const createAsset = () => {
+            const asset = document.createElement('div');
+            asset.className = 'react-flow__node-asset';
+            asset.setAttribute('data-id', 'asset-source');
+            const image = document.createElement('img');
+            image.src = sourceUrl;
+            asset.appendChild(image);
+            return asset;
+        };
+        const originalAsset = createAsset();
+        const replacementAsset = createAsset();
+        const replacementClick = jest.fn(() => replacementAsset.classList.add('selected'));
+        replacementAsset.addEventListener('click', replacementClick);
+        originalAsset.addEventListener('click', () => originalAsset.replaceWith(replacementAsset));
+
+        const sidePanelAction = makeVisible(document.createElement('button'));
+        sidePanelAction.setAttribute('aria-label', 'Make Video');
+        sidePanelAction.setAttribute('aria-haspopup', 'menu');
+        document.body.append(originalAsset, sidePanelAction);
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        const result = await retryManager.waitForPromptedBatchEditorReady(sourceUrl, token, 1000);
+
+        expect(result).toMatchObject({
+            status: 'ready',
+            surface: 'agent_media',
+            makeVideoTrigger: sidePanelAction
+        });
+        expect(replacementClick).toHaveBeenCalledTimes(1);
+    });
+
+    test('returns the stable selected-asset action after the side panel remounts', async () => {
+        const token = 'remounted-agent-action';
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/14141414-aaaa-4bbb-8ccc-363636363636/image.jpg';
+        window.history.pushState({}, '', '/imagine/agent/remounted-action?conversation=remounted-action');
+        document.body.innerHTML = `
+            <div class="react-flow__node-asset selected" data-id="asset-source">
+                <img src="${sourceUrl}">
+            </div>
+        `;
+        const originalAction = makeVisible(document.createElement('button'));
+        originalAction.setAttribute('aria-label', 'Make Video');
+        originalAction.setAttribute('aria-haspopup', 'menu');
+        const replacementAction = makeVisible(document.createElement('button'));
+        replacementAction.setAttribute('aria-label', 'Make Video');
+        replacementAction.setAttribute('aria-haspopup', 'menu');
+        document.body.appendChild(originalAction);
+        let replaced = false;
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (!replaced) {
+                replaced = true;
+                originalAction.replaceWith(replacementAction);
+            }
+        });
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+
+        const result = await retryManager.waitForPromptedBatchEditorReady(sourceUrl, token, 1000);
+
+        expect(result).toMatchObject({
+            status: 'ready',
+            surface: 'agent_media',
+            makeVideoTrigger: replacementAction
+        });
+        expect(retryManager.sleep).toHaveBeenCalled();
+    });
+
+    test('fails closed when Agent Mode exposes two side-panel Make Video actions', async () => {
+        const token = 'ambiguous-agent-action';
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/23232323-aaaa-4bbb-8ccc-454545454545/image.jpg';
+        window.history.pushState({}, '', '/imagine/agent/ambiguous-action?conversation=ambiguous-action');
+        document.body.innerHTML = `
+            <div class="react-flow__node-asset selected" data-id="asset-source">
+                <img src="${sourceUrl}">
+            </div>
+        `;
+        for (let index = 0; index < 2; index++) {
+            const trigger = makeVisible(document.createElement('button'));
+            trigger.setAttribute('aria-label', 'Make Video');
+            trigger.setAttribute('aria-haspopup', 'menu');
+            document.body.appendChild(trigger);
+        }
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        await Promise.resolve();
+
+        await expect(retryManager.waitForPromptedBatchEditorReady(sourceUrl, token, 1000))
+            .resolves.toMatchObject({ status: 'ambiguous_action', surface: 'agent_media' });
+    });
+
+    test('fails closed when the exact Agent asset has no stable data id', async () => {
+        const token = 'unbound-agent-asset';
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/34343434-aaaa-4bbb-8ccc-565656565656/image.jpg';
+        window.history.pushState({}, '', '/imagine/agent/unbound?conversation=unbound');
+        document.body.innerHTML = `
+            <div class="react-flow__node-asset selected"><img src="${sourceUrl}"></div>
+        `;
+        const trigger = makeVisible(document.createElement('button'));
+        trigger.setAttribute('aria-label', 'Make Video');
+        trigger.setAttribute('aria-haspopup', 'menu');
+        document.body.appendChild(trigger);
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        await Promise.resolve();
+
+        await expect(retryManager.waitForPromptedBatchEditorReady(sourceUrl, token, 1000))
+            .resolves.toMatchObject({ status: 'unbound', surface: 'agent_media' });
+    });
+
+    test('selection drift after opening Make Video prevents Add Prompt and composer writes', async () => {
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/45454545-aaaa-4bbb-8ccc-676767676767/image.jpg';
+        window.history.pushState({}, '', '/imagine/agent/selection-drift?conversation=selection-drift');
+        const sourceAsset = document.createElement('div');
+        sourceAsset.className = 'react-flow__node-asset selected';
+        sourceAsset.setAttribute('data-id', 'asset-source');
+        const sourceImage = document.createElement('img');
+        sourceImage.src = sourceUrl;
+        sourceAsset.appendChild(sourceImage);
+        const otherAsset = document.createElement('div');
+        otherAsset.className = 'react-flow__node-asset';
+        otherAsset.setAttribute('data-id', 'asset-other');
+        const otherImage = document.createElement('img');
+        otherImage.src = 'https://assets.grok.com/users/example/generated/56565656-aaaa-4bbb-8ccc-787878787878/image.jpg';
+        otherAsset.appendChild(otherImage);
+        const trigger = makeVisible(document.createElement('button'));
+        trigger.setAttribute('aria-label', 'Make Video');
+        trigger.setAttribute('aria-haspopup', 'menu');
+        let addPromptClicks = 0;
+        trigger.addEventListener('click', () => {
+            sourceAsset.classList.remove('selected');
+            otherAsset.classList.add('selected');
+            const menu = makeVisible(document.createElement('div'));
+            menu.appendChild(createMenuItem('Add Prompt', () => {
+                addPromptClicks++;
+                mountFocusedPromptedVideoComposer();
+            }));
+            openLinkedMenu(trigger, menu);
+        });
+        document.body.append(sourceAsset, otherAsset, trigger);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.simulateClick = jest.fn((element) => element.click());
+        await Promise.resolve();
+        const binding = {
+            assetNodeId: 'asset-source',
+            sourceIdentity: '45454545-aaaa-4bbb-8ccc-676767676767',
+            sourceUrl
+        };
+
+        await expect(retryManager.selectMakeVideoMode(undefined, trigger, binding)).resolves.toBe(false);
+        expect(addPromptClicks).toBe(0);
+        expect(document.querySelector('.query-bar')).toBeNull();
     });
 
     test('uses the semantic generated image when a decoy image appears first in the Saved card', async () => {
@@ -595,6 +888,41 @@ describe('VideoRetryManager', () => {
         expect(submitted).toBe(1);
         expect(window.location.pathname).toBe('/imagine/saved');
         expect(retryManager.goalCount).toBe(1);
+    });
+
+    test('a dispatched Prompted Batch click without a confirmed result stays eligible and does not advance', async () => {
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/acacacac-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        window.history.pushState({}, '', '/imagine/saved');
+        const first = createSavedBatchCard(sourceUrl, () => {
+            window.history.pushState({}, '', '/imagine/agent/no-result?conversation=no-result');
+            renderAgentEditor({
+                sourceUrl,
+                produceResult: false,
+                onBack: () => {
+                    window.history.pushState({}, '', '/imagine/saved');
+                    document.body.innerHTML = '';
+                    createSavedBatchCard(sourceUrl);
+                }
+            });
+        });
+        primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
+        retryManager.awaitBatchItemCompletion = jest.fn().mockResolvedValue('failed');
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await retryManager.processBatchItemPrompted(
+            { button: first.makeVideo, container: first.card },
+            retryManager.batchRunToken
+        );
+
+        expect(retryManager.awaitBatchItemCompletion).toHaveBeenCalledWith(document, expect.objectContaining({
+            allowRetry: false,
+            labelPrefix: 'Prompted Batch [gallery]',
+            videoResultBaseline: expect.objectContaining({ surface: 'agent_media' })
+        }));
+        expect(retryManager.batchProcessedSrcs.has('acacacac-bbbb-4ccc-8ddd-eeeeeeeeeeee')).toBe(false);
+        expect(retryManager.goalCount).toBe(0);
+        expect(retryManager.batchRunning).toBe(false);
+        expect(window.location.pathname).toBe('/imagine/saved');
     });
 
     test('prompted Saved batch stops without injection or submit when its click never leaves Saved', async () => {
@@ -786,7 +1114,7 @@ describe('VideoRetryManager', () => {
         window.history.pushState({}, '', '/imagine/saved');
         const first = createSavedBatchCard(sourceUrl, () => {
             window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
-            document.body.innerHTML = `<div class="react-flow__node-asset"><img src="${sourceUrl}"></div>`;
+            document.body.innerHTML = `<div class="react-flow__node-asset selected" data-id="asset-source"><img src="${sourceUrl}"></div>`;
             const makeVideo = makeVisible(document.createElement('button'));
             makeVideo.setAttribute('aria-label', 'Make Video');
             makeVideo.setAttribute('aria-haspopup', 'menu');
@@ -874,6 +1202,7 @@ describe('VideoRetryManager', () => {
         jest.spyOn(window.history, 'back').mockImplementation(() => {});
         retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
+        retryManager.awaitBatchItemCompletion = jest.fn().mockResolvedValue('success');
         const recoverSpy = jest.spyOn(retryManager, 'navigateToPromptedBatchGallery').mockImplementation(() => {});
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
@@ -891,6 +1220,12 @@ describe('VideoRetryManager', () => {
         const snapshot = {
             galleryUrl: 'http://localhost/imagine/saved',
             sourceId: '05050505-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+            savedViewportReceipt: {
+                version: 2,
+                sourceIdentity: '05050505-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+                expectedNextIdentity: null,
+                scrollTop: 420
+            },
             scrollY: 420
         };
         let now = 0;
@@ -933,7 +1268,89 @@ describe('VideoRetryManager', () => {
         expect(historyBack).toHaveBeenCalledTimes(1);
         expect(savedPolls).toBe(2);
         expect(sequence).toEqual(['saved-dom', 'scroll']);
+        expect(retryManager.batchQueue).toHaveLength(0);
+    });
+
+    test('restores the semantic Saved neighborhood before resuming the expected next card', async () => {
+        const sourceId = 'b8b8b8b8-cccc-4ddd-8eee-a7a7a7a7a7a7';
+        const nextId = 'c9c9c9c9-dddd-4eee-8fff-b8b8b8b8b8b8';
+        const token = 'semantic-return-token';
+        const snapshot = {
+            galleryUrl: 'http://localhost/imagine/saved',
+            sourceId,
+            savedViewportReceipt: {
+                version: 2,
+                sourceIdentity: sourceId,
+                expectedNextIdentity: nextId,
+                scrollTop: 420
+            }
+        };
+        window.history.pushState({}, '', '/imagine/agent/semantic-return?conversation=semantic-return');
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchMode = 'prompted';
+        retryManager.batchContext = 'gallery';
+        retryManager.batchProcessedSrcs = new Set([sourceId]);
+        retryManager.batchQueue = [];
+
+        const unrelatedScroller = document.createElement('div');
+        unrelatedScroller.className = 'overflow-scroll';
+        unrelatedScroller.scrollTop = 999;
+        document.body.appendChild(unrelatedScroller);
+        let galleryScroller = null;
+        let list = null;
+        const renderReturnedSaved = () => {
+            galleryScroller = document.createElement('div');
+            galleryScroller.className = 'h-dvh overflow-scroll items-center';
+            galleryScroller.style.overflowY = 'scroll';
+            galleryScroller.scrollTop = 0;
+            Object.defineProperties(galleryScroller, {
+                scrollHeight: { configurable: true, value: 2200 },
+                clientHeight: { configurable: true, value: 800 }
+            });
+            list = document.createElement('div');
+            list.setAttribute('role', 'list');
+            galleryScroller.appendChild(list);
+            document.body.appendChild(galleryScroller);
+        };
+        const appendCard = (mediaId) => {
+            const card = document.createElement('article');
+            card.setAttribute('role', 'listitem');
+            const image = document.createElement('img');
+            image.alt = 'Generated image';
+            image.src = `https://assets.grok.com/users/example/generated/${mediaId}/image.jpg`;
+            const makeVideo = document.createElement('button');
+            makeVideo.setAttribute('aria-label', 'Make video');
+            card.append(image, makeVideo);
+            list.appendChild(card);
+        };
+        const back = makeVisible(document.createElement('button'));
+        back.setAttribute('aria-label', 'Back');
+        back.addEventListener('click', () => {
+            window.history.pushState({}, '', '/imagine/saved');
+            back.remove();
+            renderReturnedSaved();
+            appendCard('dadadada-eeee-4fff-8aaa-c9c9c9c9c9c9');
+        });
+        document.body.appendChild(back);
+        let sleepCount = 0;
+        retryManager.sleep = jest.fn(async () => {
+            sleepCount++;
+            if (sleepCount === 1) appendCard(sourceId);
+            if (sleepCount === 2) appendCard(nextId);
+        });
+        window.scrollTo = jest.fn();
+
+        await expect(retryManager.batchGoBack(snapshot, token)).resolves.toBe('returned');
+
+        expect(sleepCount).toBeGreaterThanOrEqual(2);
+        expect(galleryScroller.scrollTop).toBe(420);
+        expect(unrelatedScroller.scrollTop).toBe(999);
+        expect(window.scrollTo).not.toHaveBeenCalled();
         expect(retryManager.batchQueue).toHaveLength(1);
+        expect(retryManager._getCardSourceId(retryManager.batchQueue[0].container)).toBe(nextId);
+        expect(retryManager.batchIndex).toBe(0);
     });
 
     test('selectMakeVideoMode opens the current Make Video menu and chooses Add Prompt', async () => {
@@ -968,6 +1385,120 @@ describe('VideoRetryManager', () => {
         expect(retryManager.simulateClick).toHaveBeenCalledWith(makeVideoTrigger);
         expect(retryManager.simulateClick).toHaveBeenCalledWith(expect.objectContaining({ textContent: 'Add Prompt' }));
         expect(editSubmit.click).not.toHaveBeenCalled();
+    });
+
+    test('accepts the Grok 2.0 video generation bar and submits only its scoped Send button', async () => {
+        const makeVideoTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        makeVideoTrigger.setAttribute('aria-label', 'Make Video');
+        makeVideoTrigger.setAttribute('aria-haspopup', 'menu');
+        let mountedComposer = null;
+        let videoSubmitClicks = 0;
+        makeVideoTrigger.addEventListener('click', () => {
+            const menu = makeVisible(document.createElement('div'));
+            const addPromptItem = createMenuItem('Add Prompt', () => {
+                mountedComposer = mountFocusedGrok2VideoComposer({
+                    submitDisabled: true,
+                    onSubmit: () => { videoSubmitClicks++; }
+                });
+                addPromptItem.remove();
+            });
+            menu.appendChild(addPromptItem);
+            openLinkedMenu(makeVideoTrigger, menu);
+        });
+
+        const chatSubmit = makeVisible(document.createElement('button'));
+        chatSubmit.setAttribute('aria-label', 'Send');
+        chatSubmit.click = jest.fn();
+        document.body.append(chatSubmit, makeVideoTrigger);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode(undefined, makeVideoTrigger)).resolves.toBe(true);
+
+        expect(retryManager.promptedVideoComposerRoot).toBe(mountedComposer.composer);
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        retryManager.sleep.mockImplementation(async () => {
+            mountedComposer.submit.disabled = false;
+        });
+        await expect(retryManager._waitForPromptedVideoSubmitButton()).resolves.toBe(
+            mountedComposer.submit
+        );
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+        expect(videoSubmitClicks).toBe(1);
+        expect(chatSubmit.click).not.toHaveBeenCalled();
+
+        const modeRadios = mountedComposer.composer.querySelectorAll(
+            '[role="radiogroup"][aria-label="Generation mode"] [role="radio"]'
+        );
+        modeRadios.forEach((radio) => {
+            radio.setAttribute('aria-checked', radio.textContent === 'Image' ? 'true' : 'false');
+        });
+
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        expect(videoSubmitClicks).toBe(1);
+        expect(chatSubmit.click).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['Image mode', { selectedMode: 'Image' }],
+        ['missing resolution', { includeResolution: false }],
+        ['missing duration', { includeDuration: false }]
+    ])('rejects a Grok 2.0 Send composer with %s', async (_label, options) => {
+        const mounted = mountFocusedGrok2VideoComposer(options);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.simulateClick = jest.fn();
+
+        await expect(retryManager._waitForLegacyPromptedVideoSubmitButton()).resolves.toBeNull();
+
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
+        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        expect(retryManager.simulateClick).not.toHaveBeenCalled();
+        expect(mounted.submit.disabled).toBe(false);
+    });
+
+    test('writes a Grok 2.0 video prompt before waiting for its scoped Send button', async () => {
+        window.history.pushState({}, '', '/imagine/post/grok2-video');
+        const makeVideoTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
+        makeVideoTrigger.setAttribute('aria-label', 'Make Video');
+        makeVideoTrigger.setAttribute('aria-haspopup', 'menu');
+        let mountedComposer = null;
+        let enableSubmitAfterWrite = false;
+        let videoSubmitClicks = 0;
+        makeVideoTrigger.addEventListener('click', () => {
+            const menu = makeVisible(document.createElement('div'));
+            const addPromptItem = createMenuItem('Add Prompt', () => {
+                mountedComposer = mountFocusedGrok2VideoComposer({
+                    submitDisabled: true,
+                    onSubmit: () => { videoSubmitClicks++; }
+                });
+                addPromptItem.remove();
+            });
+            menu.appendChild(addPromptItem);
+            openLinkedMenu(makeVideoTrigger, menu);
+        });
+        const enableSubmit = () => {
+            enableSubmitAfterWrite = true;
+        };
+        document.addEventListener('__gpt_set_prompted_video_content', enableSubmit);
+        document.body.appendChild(makeVideoTrigger);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            if (enableSubmitAfterWrite && mountedComposer) {
+                mountedComposer.submit.disabled = false;
+                enableSubmitAfterWrite = false;
+            }
+        });
+        retryManager.simulateClick = jest.fn((element) => element.click());
+        retryManager.awaitBatchItemCompletion = jest.fn().mockResolvedValue('success');
+
+        try {
+            await retryManager.startPromptedBatchFromDetail('slow camera push in', 1);
+        } finally {
+            document.removeEventListener('__gpt_set_prompted_video_content', enableSubmit);
+        }
+
+        expect(mountedComposer.input.textContent).toBe('slow camera push in');
+        expect(videoSubmitClicks).toBe(1);
+        expect(retryManager.goalCount).toBe(1);
     });
 
     test('selected linked menu and focused composer ignore remounted retained decoys', async () => {
@@ -1360,6 +1891,12 @@ describe('VideoRetryManager', () => {
 
     test('Stop during focus confirmation prevents retention, prompt write, and submit', async () => {
         window.history.pushState({}, '', '/imagine/agent/focus-stop?conversation=focus-stop');
+        const sourceAsset = document.createElement('div');
+        sourceAsset.className = 'react-flow__node-asset selected';
+        sourceAsset.setAttribute('data-id', 'asset-source');
+        const sourceImage = document.createElement('img');
+        sourceImage.src = 'https://assets.grok.com/users/example/generated/90909090-aaaa-4bbb-8ccc-b2b2b2b2b2b2/image.jpg';
+        sourceAsset.appendChild(sourceImage);
         const selectedTrigger = makeVisible(document.createElement('button'), { width: 160, right: 160 });
         selectedTrigger.setAttribute('aria-label', 'Make Video');
         selectedTrigger.setAttribute('aria-haspopup', 'menu');
@@ -1371,7 +1908,7 @@ describe('VideoRetryManager', () => {
             mountFocusedPromptedVideoComposer();
         }));
         selectedTrigger.addEventListener('click', () => openLinkedMenu(selectedTrigger, menu));
-        document.body.appendChild(selectedTrigger);
+        document.body.append(sourceAsset, selectedTrigger);
         retryManager.sleep = jest.fn().mockImplementation(async () => {
             if (!addPromptClicked) return;
             focusConfirmationSleeps++;
@@ -1622,6 +2159,12 @@ describe('VideoRetryManager', () => {
 
     test('prompted detail batch writes and submits only the Add Prompt video composer', async () => {
         window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
+        const sourceAsset = document.createElement('div');
+        sourceAsset.className = 'react-flow__node-asset selected';
+        sourceAsset.setAttribute('data-id', 'asset-source');
+        const sourceImage = document.createElement('img');
+        sourceImage.src = 'https://assets.grok.com/users/example/generated/a1a1a1a1-bbbb-4ccc-8ddd-c3c3c3c3c3c3/image.jpg';
+        sourceAsset.appendChild(sourceImage);
         const preciseEditComposer = document.createElement('div');
         const preciseEditor = document.createElement('div');
         preciseEditor.setAttribute('contenteditable', 'true');
@@ -1666,7 +2209,7 @@ describe('VideoRetryManager', () => {
             menu.append(addPrompt, spicy, quickAnimate);
             openLinkedMenu(makeVideoTrigger, menu);
         });
-        document.body.append(preciseEditComposer, makeVideoTrigger);
+        document.body.append(sourceAsset, preciseEditComposer, makeVideoTrigger);
 
         const bridgeHandler = (event) => {
             const target = event.type === '__gpt_set_prompted_video_content'
@@ -1700,7 +2243,7 @@ describe('VideoRetryManager', () => {
         expect(retryManager.promptedVideoComposerRoot).toBeNull();
     });
 
-    test.each(['Video', 'Settings'])('waits for a delayed legacy %s composer before injecting and submitting', async (modeLabel) => {
+    test.each(['Video'])('waits for a delayed legacy %s composer before injecting and submitting', async (modeLabel) => {
         let promptedText = null;
         let submitted = 0;
         window.history.pushState({}, '', '/imagine/post/legacy-delayed-composer');
@@ -1742,6 +2285,22 @@ describe('VideoRetryManager', () => {
         expect(promptedText).toBe('legacy prompt');
         expect(submitted).toBe(1);
         expect(retryManager.goalCount).toBe(1);
+    });
+
+    test('does not treat an unrelated legacy Settings button as video mode', async () => {
+        window.history.pushState({}, '', '/imagine/post/legacy-settings-decoy');
+        const settings = makeVisible(document.createElement('button'));
+        settings.setAttribute('aria-label', 'Settings');
+        const settingsClick = jest.fn(() => mountFocusedPromptedVideoComposer());
+        settings.addEventListener('click', settingsClick);
+        document.body.appendChild(settings);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.simulateClick = jest.fn((element) => element.click());
+
+        await expect(retryManager.selectMakeVideoMode(undefined)).resolves.toBe(false);
+
+        expect(settingsClick).not.toHaveBeenCalled();
+        expect(retryManager.promptedVideoComposerRoot).toBeNull();
     });
 
     test('submits only the retained visible enabled Make video button in a verified composer', async () => {
@@ -1893,7 +2452,8 @@ describe('VideoRetryManager', () => {
     test('Agent completion accepts only a new ready video source in an asset node without a URL change', () => {
         window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
         const asset = document.createElement('div');
-        asset.className = 'react-flow__node-asset';
+        asset.className = 'react-flow__node-asset selected';
+        asset.setAttribute('data-id', 'asset-source');
         const image = document.createElement('img');
         image.src = 'https://assets.grok.com/users/example/generated/source/image.jpg';
         asset.appendChild(image);
@@ -1912,10 +2472,46 @@ describe('VideoRetryManager', () => {
         expect(retryManager._hasNewPromptedVideoResult(document, baseline)).toBe(true);
     });
 
+    test('Agent completion accepts a new video only inside the bound source asset', () => {
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/67676767-aaaa-4bbb-8ccc-898989898989/image.jpg';
+        window.history.pushState({}, '', '/imagine/agent/bound-result?conversation=bound-result');
+        const sourceAsset = document.createElement('div');
+        sourceAsset.className = 'react-flow__node-asset selected';
+        sourceAsset.setAttribute('data-id', 'asset-source');
+        const sourceImage = document.createElement('img');
+        sourceImage.src = sourceUrl;
+        sourceAsset.appendChild(sourceImage);
+        const competingAsset = document.createElement('div');
+        competingAsset.className = 'react-flow__node-asset';
+        competingAsset.setAttribute('data-id', 'asset-output');
+        document.body.append(sourceAsset, competingAsset);
+        const binding = {
+            assetNodeId: 'asset-source',
+            sourceIdentity: '67676767-aaaa-4bbb-8ccc-898989898989',
+            sourceUrl
+        };
+
+        const baseline = retryManager.capturePromptedVideoResultBaseline(document, binding);
+        const competingVideo = document.createElement('video');
+        competingVideo.src = 'https://assets.grok.com/users/example/generated/78787878-aaaa-4bbb-8ccc-909090909090/generated_video.mp4';
+        Object.defineProperty(competingVideo, 'readyState', { value: 4, configurable: true });
+        competingAsset.appendChild(competingVideo);
+
+        expect(retryManager._hasNewPromptedVideoResult(document, baseline)).toBe(false);
+
+        const boundVideo = document.createElement('video');
+        boundVideo.src = 'https://assets.grok.com/users/example/generated/89898989-aaaa-4bbb-8ccc-a1a1a1a1a1a1/generated_video.mp4';
+        Object.defineProperty(boundVideo, 'readyState', { value: 4, configurable: true });
+        sourceAsset.appendChild(boundVideo);
+
+        expect(retryManager._hasNewPromptedVideoResult(document, baseline)).toBe(true);
+    });
+
     test('Agent completion does not accept a pre-existing unready source that becomes ready', () => {
         window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
         const asset = document.createElement('div');
-        asset.className = 'react-flow__node-asset';
+        asset.className = 'react-flow__node-asset selected';
+        asset.setAttribute('data-id', 'asset-source');
         const video = document.createElement('video');
         video.src = 'https://assets.grok.com/users/example/generated/11111111-2222-4333-8444-555555555555/generated_video.mp4?token=before';
         Object.defineProperty(video, 'readyState', { value: 0, configurable: true });
@@ -1932,7 +2528,8 @@ describe('VideoRetryManager', () => {
     test('Agent completion ignores unchanged sources and persistent video or Precise Edit controls', () => {
         window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
         const asset = document.createElement('div');
-        asset.className = 'react-flow__node-asset';
+        asset.className = 'react-flow__node-asset selected';
+        asset.setAttribute('data-id', 'asset-source');
         const video = document.createElement('video');
         video.src = 'https://assets.grok.com/users/example/generated/existing-video/generated_video.mp4';
         Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
@@ -1964,6 +2561,9 @@ describe('VideoRetryManager', () => {
             return true;
         });
         retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(
+            document.createElement('button')
+        );
         retryManager.capturePromptedVideoResultBaseline = jest.fn().mockReturnValue(baseline);
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
         retryManager.awaitBatchItemCompletion = jest.fn().mockResolvedValue('success');

@@ -1,6 +1,7 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect, chromium } = require('@playwright/test');
 const { Buffer } = require('buffer');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 // Read content.js and CSS
@@ -175,6 +176,13 @@ async function setupMockSavedAgentSync(page, {
             document.body.innerHTML = '';
             const phase = window.__savedRenderCount === 0 ? 'initial' : 'returned';
             window.__savedRenderCount++;
+            const scopeToolbar = document.createElement('div');
+            const allScope = document.createElement('button');
+            const likedScope = document.createElement('button');
+            allScope.textContent = 'All';
+            allScope.className = 'bg-primary text-background hover:bg-primary';
+            likedScope.textContent = 'Liked';
+            scopeToolbar.append(allScope, likedScope);
             const scroller = document.createElement('div');
             scroller.className = 'overflow-scroll';
             scroller.id = 'saved-gallery-scroller';
@@ -205,7 +213,7 @@ async function setupMockSavedAgentSync(page, {
                 list.appendChild(card);
             });
             scroller.appendChild(list);
-            document.body.appendChild(scroller);
+            document.body.append(scopeToolbar, scroller);
         };
 
         window.__agentScrollCalls = [];
@@ -302,10 +310,14 @@ async function setupMockPromptedBatch(page, {
             promptWriteResults: [],
             promptAtSubmit: null,
             submitCount: 0,
+            resultCount: 0,
+            resultAssetIds: [],
             editCount: 0,
             decoyAddPromptCount: 0,
             decoyPromptAtSubmit: null,
             decoySubmitCount: 0,
+            agentAssetClicks: [],
+            agentToolbarActionCount: 0,
             backCount: 0,
             scrollToCalls: [],
             sleepDurations: [],
@@ -344,7 +356,7 @@ async function setupMockPromptedBatch(page, {
         retry.sleep = (ms) => {
             window.__promptedBatchEvents.sleepDurations.push(ms);
             const selectedMediaUuid = document.activeElement?.getAttribute?.('data-selected-prompt-media');
-            if (!selectedMediaUuid) return Promise.resolve();
+            if (ms !== 100 || !selectedMediaUuid) return Promise.resolve();
 
             const request = {
                 index: ++quiescence.requested,
@@ -367,6 +379,13 @@ async function setupMockPromptedBatch(page, {
 
         const renderSaved = () => {
             document.body.innerHTML = '';
+            const scopeToolbar = document.createElement('div');
+            const allScope = makeVisible(document.createElement('button'));
+            const likedScope = makeVisible(document.createElement('button'));
+            allScope.textContent = 'All';
+            allScope.className = 'bg-primary text-background hover:bg-primary';
+            likedScope.textContent = 'Liked';
+            scopeToolbar.append(allScope, likedScope);
             const list = document.createElement('div');
             list.setAttribute('role', 'list');
             [mediaUuid, secondMediaUuid].filter(Boolean).forEach((savedMediaUuid) => {
@@ -394,7 +413,7 @@ async function setupMockPromptedBatch(page, {
                 card.append(image, makeVideo);
                 list.appendChild(card);
             });
-            document.body.appendChild(list);
+            document.body.append(scopeToolbar, list);
         };
 
         const renderAgent = (selectedMediaUuid) => {
@@ -402,9 +421,25 @@ async function setupMockPromptedBatch(page, {
             document.body.innerHTML = '';
             const asset = document.createElement('div');
             asset.className = 'react-flow__node-asset';
+            asset.setAttribute('data-id', `asset-${selectedMediaUuid}`);
             const assetImage = document.createElement('img');
             assetImage.src = `https://assets.grok.com/users/${accountUuid}/generated/${selectedMediaUuid}/preview.jpg`;
             asset.appendChild(assetImage);
+            asset.addEventListener('click', () => {
+                asset.classList.add('selected');
+                window.__promptedBatchEvents.agentAssetClicks.push(selectedMediaUuid);
+            });
+
+            const assetToolbar = document.createElement('div');
+            assetToolbar.className = 'react-flow__node-toolbar';
+            assetToolbar.setAttribute('data-id', `asset-${selectedMediaUuid}`);
+            const dangerousToolbarAction = makeVisible(document.createElement('button'));
+            dangerousToolbarAction.setAttribute('aria-label', 'Make Video');
+            dangerousToolbarAction.setAttribute('aria-haspopup', 'menu');
+            dangerousToolbarAction.addEventListener('click', () => {
+                window.__promptedBatchEvents.agentToolbarActionCount++;
+            });
+            assetToolbar.appendChild(dangerousToolbarAction);
 
             const decoys = [];
             if (includeDecoys) {
@@ -467,9 +502,8 @@ async function setupMockPromptedBatch(page, {
                 addPrompt.addEventListener('click', () => {
                     window.__promptedBatchEvents.menuChoices.push('Add Prompt');
                     window.__promptedBatchEvents.menuMediaUuids.push(selectedMediaUuid);
-                    const queryBar = document.createElement('div');
-                    queryBar.className = 'query-bar';
-                    queryBar.id = `selected-query-bar-${selectedMediaUuid}`;
+                    const generationBar = document.createElement('div');
+                    generationBar.id = `selected-generation-bar-${selectedMediaUuid}`;
                     const input = makeVisible(document.createElement('div'));
                     input.id = `selected-prompt-input-${selectedMediaUuid}`;
                     input.setAttribute('contenteditable', 'true');
@@ -477,14 +511,53 @@ async function setupMockPromptedBatch(page, {
                     input.setAttribute('aria-label', 'Ask Grok anything');
                     input.setAttribute('data-selected-prompt-media', selectedMediaUuid);
                     input.tabIndex = -1;
+                    const createRadioGroup = (label, options, selected) => {
+                        const group = document.createElement('div');
+                        group.setAttribute('role', 'radiogroup');
+                        group.setAttribute('aria-label', label);
+                        options.forEach((option) => {
+                            const radio = document.createElement('button');
+                            radio.setAttribute('role', 'radio');
+                            radio.setAttribute('aria-checked', option === selected ? 'true' : 'false');
+                            if (label === 'Generation mode') radio.setAttribute('aria-label', option);
+                            radio.textContent = option;
+                            group.appendChild(radio);
+                        });
+                        return group;
+                    };
+                    const mode = createRadioGroup(
+                        'Generation mode',
+                        ['Image', 'Video', 'Agent'],
+                        'Video'
+                    );
+                    const resolution = createRadioGroup(
+                        'Video resolution',
+                        ['480p', '720p', '1080p'],
+                        '480p'
+                    );
+                    const duration = createRadioGroup(
+                        'Video duration',
+                        ['6s', '10s', '15s'],
+                        '6s'
+                    );
                     const submit = makeVisible(document.createElement('button'), 48);
-                    submit.setAttribute('aria-label', 'Make video');
+                    submit.setAttribute('aria-label', 'Send');
+                    submit.disabled = true;
+                    input.addEventListener('input', () => {
+                        submit.disabled = !input.textContent.trim();
+                    });
                     submit.addEventListener('click', () => {
                         window.__promptedBatchEvents.promptAtSubmit = input.textContent;
                         window.__promptedBatchEvents.submitCount++;
+                        const result = document.createElement('video');
+                        result.src = `https://assets.grok.com/users/${accountUuid}/generated/${selectedMediaUuid}/generated_video.mp4`;
+                        Object.defineProperty(result, 'readyState', { configurable: true, value: 4 });
+                        asset.appendChild(result);
+                        window.__promptedBatchEvents.resultCount++;
+                        window.__promptedBatchEvents.resultAssetIds.push(asset.getAttribute('data-id'));
                     });
-                    queryBar.append(input, submit);
-                    document.body.appendChild(queryBar);
+                    generationBar.append(input, mode, resolution, duration, submit);
+                    document.body.appendChild(generationBar);
                     input.focus();
                     const shouldStop = stopAfterAddPrompt === true
                         || stopAfterAddPrompt === selectedMediaUuid;
@@ -501,7 +574,7 @@ async function setupMockPromptedBatch(page, {
                 window.history.replaceState({}, '', savedUrl);
                 renderSaved();
             });
-            document.body.append(asset, ...decoys, preciseEdit, makeVideo, back);
+            document.body.append(asset, assetToolbar, ...decoys, preciseEdit, makeVideo, back);
         };
 
         window.history.replaceState({}, '', savedUrl);
@@ -598,7 +671,11 @@ test.describe('Grok Power Tools E2E', () => {
                 }
                 if (action === 'VALIDATE_CLOUD_CONFIG') return { valid: true };
                 if (action === 'VALIDATE_SCRAPE_RESUME') return { valid: true, reason: 'active_owner' };
-                if (action === 'PROCESSED_IDS_ADD') {
+                if (action === 'SCRAPE_RUN_STATE_WRITE') {
+                    setLocalStorage(message.values || {});
+                    return { status: 'ok' };
+                }
+                if (action === 'PROCESSED_IDS_ADD' || action === 'SCRAPE_PROCESSED_IDS_ADD') {
                     const processedIds = Array.from(new Set([
                         ...(Array.isArray(localState.processedIds) ? localState.processedIds : []),
                         ...(Array.isArray(message.ids) ? message.ids : [])
@@ -609,6 +686,30 @@ test.describe('Grok Power Tools E2E', () => {
                 if (action === 'PROCESSED_IDS_RESET') {
                     setLocalStorage({ processedIds: [] });
                     return { status: 'ok', processedIds: [] };
+                }
+                if (action === 'SCRAPE_COMPLETE' || action === 'R2_BACKUP_COMPLETE') {
+                    const stopReason = message.stats?.stopReason || 'complete';
+                    const values = {
+                        scraperState: 'idle',
+                        currentIndex: 0,
+                        scrapeRunToken: null,
+                        scrapeRunEpoch: null,
+                        scrapeNavigation: null,
+                        currentItemId: null,
+                        scrapeBackupOptions: null,
+                        isScraping: false,
+                        isR2Backup: false,
+                        scrapeStopReason: stopReason
+                    };
+                    if (action === 'R2_BACKUP_COMPLETE') {
+                        values.r2BackupState = {
+                            ...(localState.r2BackupState || {}),
+                            isRunning: false,
+                            stopReason
+                        };
+                    }
+                    setLocalStorage(values);
+                    return { status: 'ok' };
                 }
                 return { ok: true };
             };
@@ -704,6 +805,10 @@ test.describe('Grok Power Tools E2E', () => {
                 valid: false,
                 reason: 'stale_authority'
             };
+            window.__chromeRuntimeResponseByAction.SCRAPE_RUN_STATE_WRITE = {
+                status: 'ignored',
+                reason: 'stale_authority'
+            };
             chrome.storage.local.get = (keys, callback) => new Promise((resolve, reject) => {
                 pendingGets.push(() => {
                     originalGet(keys, callback).then(resolve, reject);
@@ -754,7 +859,54 @@ test.describe('Grok Power Tools E2E', () => {
 
         await page.evaluate(() => window.__releaseDeferredContentHydration());
         await expect.poll(() => page.evaluate(() => window.__chromeStorageLocalState.scraperState))
-            .toBe('idle');
+            .toBeUndefined();
+    });
+
+    test('cold detail-page Stop returns to Saved before deferred hydration completes', async ({ page }) => {
+        const navigation = {
+            runToken: 'cold-detail-run',
+            runEpoch: 32,
+            galleryUrl: 'https://grok.com/imagine/saved',
+            savedViewportReceipt: null
+        };
+        await page.evaluate(providerRegistryJs);
+        await page.evaluate(providerRunLedgerJs);
+        await page.evaluate(chatGptImagesContentJs);
+        await page.evaluate(utilsJs);
+        await page.evaluate(contentActionsJs);
+        await page.evaluate((stopNavigation) => {
+            window.history.replaceState({}, '', '/imagine/post/cold-detail');
+            const originalGet = chrome.storage.local.get.bind(chrome.storage.local);
+            const pendingGets = [];
+            chrome.storage.local.get = (keys, callback) => new Promise((resolve, reject) => {
+                pendingGets.push(() => originalGet(keys, callback).then(resolve, reject));
+            });
+            window.__releaseDeferredContentHydration = () => {
+                pendingGets.splice(0).forEach((release) => release());
+            };
+            window.__historyBackCalls = 0;
+            Object.defineProperty(window.history, 'back', {
+                configurable: true,
+                value: () => {
+                    window.__historyBackCalls++;
+                    window.history.replaceState({}, '', stopNavigation.galleryUrl);
+                }
+            });
+        }, navigation);
+
+        await page.evaluate(contentJs);
+        const responses = await dispatchRuntimeMessage(page, {
+            action: 'ABORT_SCRAPE',
+            runToken: navigation.runToken,
+            runEpoch: navigation.runEpoch,
+            stopNavigation: navigation
+        });
+
+        expect(responses).toContainEqual({ status: 'stopped' });
+        expect(await page.evaluate(() => window.__historyBackCalls)).toBe(1);
+        expect(await page.evaluate(() => window.location.pathname)).toBe('/imagine/saved');
+        expect(await page.evaluate(() => window.__gptPowerToolsRuntime.scraper.state.isRunning)).toBe(false);
+        await page.evaluate(() => window.__releaseDeferredContentHydration());
     });
 
     test('Minimize button should work', async ({ page }) => {
@@ -862,6 +1014,9 @@ test.describe('Grok Power Tools E2E', () => {
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).toContainEqual({
             action: 'DOWNLOAD_MEDIA',
+            runToken: 'e2e-start-sync',
+            runEpoch: 1,
+            kind: 'sync',
             url: `https://assets.grok.com/users/${accountUuid}/generated/${firstMediaUuid}/preview.jpg`,
             isVideo: false,
             promptText: '',
@@ -911,10 +1066,10 @@ test.describe('Grok Power Tools E2E', () => {
             && event.phase === 'returned'
             && event.value === 360
         );
-        const navigationClearIndex = transferEvents.findIndex((event) =>
-            event.type === 'storage_set'
+        const navigationClearIndex = transferEvents.findIndex((event, index) =>
+            index > scrollRestoreIndex
+            && event.type === 'storage_set'
             && event.area === 'local'
-            && Object.keys(event.values).length === 2
             && event.values.scrapeNavigation === null
             && event.values.currentItemId === null
         );
@@ -1015,6 +1170,9 @@ test.describe('Grok Power Tools E2E', () => {
         expect(runtimeMessages).toContainEqual({ action: 'GET_CLOUD_CONFIG' });
         expect(runtimeMessages).toContainEqual({
             action: 'DOWNLOAD_MEDIA',
+            runToken: 'e2e-cloud-only',
+            runEpoch: 1,
+            kind: 'sync',
             url: agentUrl,
             isVideo: false,
             promptText: '',
@@ -1121,6 +1279,9 @@ test.describe('Grok Power Tools E2E', () => {
         expect(runtimeMessages).toContainEqual({ action: 'VALIDATE_CLOUD_CONFIG' });
         expect(runtimeMessages).toContainEqual({
             action: 'R2_BACKUP_UPLOAD',
+            runToken: 'e2e-r2-backup',
+            runEpoch: 1,
+            kind: 'r2_backup',
             url: `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`,
             isVideo: false,
             promptText: '',
@@ -1185,6 +1346,9 @@ test.describe('Grok Power Tools E2E', () => {
 
         expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual({
             action: 'R2_BACKUP_UPLOAD',
+            runToken: 'e2e-r2-upload-error',
+            runEpoch: 1,
+            kind: 'r2_backup',
             url: `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`,
             isVideo: false,
             promptText: '',
@@ -1209,7 +1373,7 @@ test.describe('Grok Power Tools E2E', () => {
         expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
     });
 
-    test('Prompted Batch routes Saved media through Add Prompt and Make video', async ({ page }) => {
+    test('Prompted Batch routes Saved media through Add Prompt and scoped Grok 2.0 Send', async ({ page }) => {
         const accountUuid = '66666666-6666-4666-8666-666666666666';
         const mediaUuid = '77777777-7777-4777-8777-777777777777';
         const secondMediaUuid = '88888888-8888-4888-8888-888888888888';
@@ -1247,6 +1411,8 @@ test.describe('Grok Power Tools E2E', () => {
                 promptWrites: events.promptWrites,
                 promptWriteResults: events.promptWriteResults,
                 selectedPromptText: document.getElementById(selectedInputId)?.textContent ?? null,
+                selectedSubmitDisabled: document.getElementById(selectedInputId)
+                    ?.parentElement?.querySelector('button[aria-label="Send"]')?.disabled ?? null,
                 promptAtSubmit: events.promptAtSubmit,
                 submitCount: events.submitCount,
                 editCount: events.editCount,
@@ -1273,6 +1439,7 @@ test.describe('Grok Power Tools E2E', () => {
                 promptWrites: [],
                 promptWriteResults: [],
                 selectedPromptText: '',
+                selectedSubmitDisabled: true,
                 promptAtSubmit: null,
                 submitCount: 0,
                 editCount: 0,
@@ -1317,12 +1484,16 @@ test.describe('Grok Power Tools E2E', () => {
         expect(events.decoyAddPromptCount).toBe(0);
         expect(events.decoyPromptAtSubmit).toBeNull();
         expect(events.decoySubmitCount).toBe(0);
+        expect(events.agentAssetClicks).toEqual([mediaUuid, secondMediaUuid]);
+        expect(events.agentToolbarActionCount).toBe(0);
         expect(events.menuChoices).toEqual(['Add Prompt', 'Add Prompt']);
         expect(events.menuMediaUuids).toEqual([mediaUuid, secondMediaUuid]);
         expect(events.promptWrites).toEqual(['slow orbit around the generated sculpture']);
         expect(events.promptWriteResults).toEqual([true]);
         expect(events.promptAtSubmit).toBe('slow orbit around the generated sculpture');
         expect(events.submitCount).toBe(1);
+        expect(events.resultCount).toBe(1);
+        expect(events.resultAssetIds).toEqual([`asset-${mediaUuid}`]);
         expect(events.editCount).toBe(0);
         expect(events.backCount).toBe(1);
         expect(events.scrollToCalls).toContainEqual([0, 480]);
@@ -1344,6 +1515,9 @@ test.describe('Grok Power Tools E2E', () => {
         await expect(page.locator('#decoy-prompt-input')).toBeVisible();
         await expect(page.locator('#decoy-prompt-input')).toHaveText('');
         await expect(page.locator(`#selected-prompt-input-${secondMediaUuid}`)).toHaveText('');
+        await expect(page.locator(
+            `#selected-generation-bar-${secondMediaUuid} button[aria-label="Send"]`
+        )).toBeDisabled();
         expect(await page.evaluate(() => document.activeElement?.id)).toBe(`selected-prompt-input-${secondMediaUuid}`);
         await expect(page.evaluate(() => ({
             goalCount: window.__gptE2e.retry.goalCount,
@@ -1394,6 +1568,11 @@ test.describe('Grok Power Tools E2E', () => {
         expect(runtimeMessages).not.toContainEqual(expect.objectContaining({ action: 'DOWNLOAD_MEDIA' }));
         expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([]);
         expect(await page.evaluate(() => window.__agentScrollCalls)).toEqual([]);
+        await expect.poll(async () => page.evaluate(() => window.location.pathname)).toBe('/imagine/saved');
+        expect(await page.evaluate(() => window.__historyBackCalls)).toBe(1);
+        expect(await page.evaluate(() => window.__savedScrollWrites)).toEqual([
+            { phase: 'returned', value: 360 }
+        ]);
     });
 
     test('Stop after Add Prompt prevents scoped injection and Make video submission', async ({ page }) => {
@@ -1755,4 +1934,46 @@ test.describe('Grok Power Tools E2E', () => {
         ]);
         await expect(page.locator('#gptHistoryList')).toContainText('Mock generated Imagine prompt');
     });
+});
+
+test('unpacked extension keeps the real service-worker response port open during startup', async () => {
+    const extensionRoot = path.join(__dirname, '../..');
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-powertools-e2e-'));
+    let context;
+    try {
+        context = await chromium.launchPersistentContext(userDataDir, {
+            channel: 'chromium',
+            headless: true,
+            args: [
+                `--disable-extensions-except=${extensionRoot}`,
+                `--load-extension=${extensionRoot}`
+            ]
+        });
+        let [serviceWorker] = context.serviceWorkers();
+        if (!serviceWorker) serviceWorker = await context.waitForEvent('serviceworker');
+        const extensionId = new URL(serviceWorker.url()).host;
+        const extensionPage = await context.newPage();
+        await extensionPage.goto(`chrome-extension://${extensionId}/popup.html`);
+
+        const response = await extensionPage.evaluate(() => new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage({
+                action: 'PROCESSED_IDS_ADD',
+                ids: ['service-worker-port-proof']
+            }, (value) => {
+                const error = chrome.runtime.lastError;
+                if (error) reject(new Error(error.message));
+                else resolve(value);
+            });
+        }));
+        const stored = await extensionPage.evaluate(() => chrome.storage.local.get(['processedIds']));
+
+        expect(response).toEqual({
+            status: 'ok',
+            processedIds: ['service-worker-port-proof']
+        });
+        expect(stored.processedIds).toEqual(['service-worker-port-proof']);
+    } finally {
+        if (context) await context.close();
+        fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
 });
