@@ -582,8 +582,12 @@ async function setupMockPromptedBatch(page, {
     }, { accountUuid, mediaUuid, secondMediaUuid, includeDecoys, stopAfterAddPrompt });
 }
 
-async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) {
-    await page.evaluate(({ accountUuid, mediaUuids }) => {
+async function setupMockPromptedResultsBatch(page, {
+    accountUuid,
+    mediaUuids,
+    insertGeneratedBeforeSource = false
+}) {
+    await page.evaluate(({ accountUuid, mediaUuids, insertGeneratedBeforeSource }) => {
         const { retry } = window.__gptE2e;
         const resultsUrl = 'https://grok.com/imagine';
         const promptText = 'slow orbit through warm afternoon light';
@@ -612,6 +616,7 @@ async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) 
             promptWrites: []
         };
         window.__promptedResultsReplacements = {};
+        window.__promptedResultsCompleted = {};
         document.addEventListener('__gpt_set_prompted_video_content', (event) => {
             window.__promptedResultsEvents.promptWrites.push(event.detail.text);
         });
@@ -681,7 +686,11 @@ async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) 
                             mediaUuid,
                             prompt: input.textContent
                         });
-                        window.__promptedResultsReplacements[mediaUuid] = `a${mediaUuid.slice(1)}`;
+                        if (insertGeneratedBeforeSource) {
+                            window.__promptedResultsCompleted[mediaUuid] = `a${mediaUuid.slice(1)}`;
+                        } else {
+                            window.__promptedResultsReplacements[mediaUuid] = `a${mediaUuid.slice(1)}`;
+                        }
                         const video = document.createElement('video');
                         video.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/generated_video.mp4`;
                         Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
@@ -722,9 +731,27 @@ async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) 
             const list = document.createElement('div');
             list.setAttribute('role', 'list');
             mediaUuids.forEach((mediaUuid, index) => {
+                const insertedMediaUuid = window.__promptedResultsCompleted[mediaUuid];
+                if (insertedMediaUuid) {
+                    const insertedCard = makeVisible(document.createElement('article'), index * 280, 20);
+                    insertedCard.setAttribute('role', 'listitem');
+                    const insertedLink = document.createElement('a');
+                    insertedLink.href = `/imagine/post/${insertedMediaUuid}`;
+                    const insertedImage = document.createElement('img');
+                    insertedImage.alt = 'Generated image';
+                    insertedImage.src = `https://assets.grok.com/users/${accountUuid}/generated/${insertedMediaUuid}/image.jpg`;
+                    insertedLink.appendChild(insertedImage);
+                    const videoOptions = document.createElement('button');
+                    videoOptions.setAttribute('aria-label', 'Video Options');
+                    insertedCard.append(insertedLink, videoOptions);
+                    list.appendChild(insertedCard);
+                }
                 const currentMediaUuid = window.__promptedResultsReplacements[mediaUuid] || mediaUuid;
                 const wasConverted = currentMediaUuid !== mediaUuid;
-                const card = makeVisible(document.createElement('article'), index * 140, 20);
+                const cardTop = insertGeneratedBeforeSource
+                    ? index * 280 + (insertedMediaUuid ? 140 : 0)
+                    : index * 140;
+                const card = makeVisible(document.createElement('article'), cardTop, 20);
                 card.setAttribute('role', 'listitem');
                 const link = document.createElement('a');
                 link.href = `/imagine/post/${currentMediaUuid}`;
@@ -749,7 +776,7 @@ async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) 
 
         window.history.replaceState({}, '', resultsUrl);
         renderResults();
-    }, { accountUuid, mediaUuids });
+    }, { accountUuid, mediaUuids, insertGeneratedBeforeSource });
 }
 
 async function dispatchRuntimeMessage(page, message) {
@@ -1748,6 +1775,57 @@ test.describe('Grok Power Tools E2E', () => {
                 returned: mediaUuids,
                 preciseEditClicks: 0,
                 promptWrites: [
+                    'slow orbit through warm afternoon light',
+                    'slow orbit through warm afternoon light'
+                ]
+            }
+        });
+    });
+
+    test('Prompted Batch continues after Grok inserts each generated video before its source image', async ({ page }) => {
+        const accountUuid = 'a1919191-9191-4919-8919-919191919191';
+        const mediaUuids = [
+            'b2929292-9292-4929-8929-929292929292',
+            'b3939393-9393-4939-8939-939393939393',
+            'b4949494-9494-4949-8949-949494949494'
+        ];
+
+        await evaluateExtensionContent(page);
+        await page.evaluate(bridgeJs);
+        await setupMockPromptedResultsBatch(page, {
+            accountUuid,
+            mediaUuids,
+            insertGeneratedBeforeSource: true
+        });
+
+        await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
+            'prompted',
+            'slow orbit through warm afternoon light',
+            { galleryLimit: 3, videoGoal: 7 }
+        ))).resolves.toBe(true);
+
+        await expect(page.evaluate(() => ({
+            goalCount: window.__gptE2e.retry.goalCount,
+            goalTotal: window.__gptE2e.retry.goalTotal,
+            batchRunning: window.__gptE2e.retry.batchRunning,
+            status: window.__gptE2e.overlay.el.querySelector('#gptStatusBadge')?.textContent,
+            events: window.__promptedResultsEvents
+        }))).resolves.toEqual({
+            goalCount: 3,
+            goalTotal: 3,
+            batchRunning: false,
+            status: 'Prompted Batch [results]: Complete (3/3)',
+            events: {
+                opened: mediaUuids,
+                menuChoices: mediaUuids,
+                submitted: mediaUuids.map((mediaUuid) => ({
+                    mediaUuid,
+                    prompt: 'slow orbit through warm afternoon light'
+                })),
+                returned: mediaUuids,
+                preciseEditClicks: 0,
+                promptWrites: [
+                    'slow orbit through warm afternoon light',
                     'slow orbit through warm afternoon light',
                     'slow orbit through warm afternoon light'
                 ]

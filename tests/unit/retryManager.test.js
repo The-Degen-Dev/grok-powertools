@@ -696,7 +696,63 @@ describe('VideoRetryManager', () => {
             .resolves.toBe(true);
     });
 
-    test('results return rejects a different grid when a non-source anchor changes', async () => {
+    test('results return accepts a generated video inserted before the original source and resumes at the next image', async () => {
+        const sourcePostId = 'b253dd6b-aa00-4e93-a84d-89954d826d78';
+        const nextPostId = '495f114a-bb00-4e93-a84d-89954d826d78';
+        window.history.pushState({}, '', '/imagine');
+        window.scrollTo = jest.fn();
+        const source = createSavedBatchCard('data:image/jpeg;base64,source-before');
+        const next = createSavedBatchCard('data:image/jpeg;base64,next-before');
+        const sourceLink = document.createElement('a');
+        sourceLink.href = `/imagine/post/${sourcePostId}`;
+        source.card.insertBefore(sourceLink, source.image);
+        sourceLink.appendChild(source.image);
+        const nextLink = document.createElement('a');
+        nextLink.href = `/imagine/post/${nextPostId}`;
+        next.card.insertBefore(nextLink, next.image);
+        makeVisible(source.card, { top: 0, left: 0 });
+        makeVisible(next.card, { top: 100, left: 0 });
+
+        const receipt = retryManager._captureResultsGalleryReceipt(
+            retryManager._getQualifiedResultsGalleryItems()[0]
+        );
+        expect(receipt).toEqual(expect.objectContaining({
+            sourceId: sourcePostId,
+            expectedNextId: nextPostId
+        }));
+
+        source.card.getBoundingClientRect.mockReturnValue({
+            x: 0, y: 100, top: 100, left: 0, right: 40, bottom: 140, width: 40, height: 40
+        });
+        next.card.getBoundingClientRect.mockReturnValue({
+            x: 0, y: 200, top: 200, left: 0, right: 40, bottom: 240, width: 40, height: 40
+        });
+        const inserted = createSavedBatchCard('data:image/jpeg;base64,generated-video');
+        const insertedLink = document.createElement('a');
+        insertedLink.href = '/imagine/post/a9f0db00-cf12-402f-b0fe-eb3d6e364a2c';
+        inserted.card.insertBefore(insertedLink, inserted.image);
+        insertedLink.appendChild(inserted.image);
+        inserted.makeVideo.remove();
+        const progress = document.createElement('button');
+        progress.setAttribute('aria-label', 'Video Options');
+        inserted.card.appendChild(progress);
+        makeVisible(inserted.card, { top: 0, left: 0 });
+
+        const token = 'results-return-inserted-video';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchProcessedSrcs = new Set([sourcePostId]);
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager._waitForPromptedBatchResultsSurface(receipt, token, 200))
+            .resolves.toBe(true);
+        expect(retryManager._restorePromptedBatchResultsState(receipt, token)).toBe(true);
+        expect(retryManager.batchQueue.map((item) => item.sourceId)).toEqual([nextPostId]);
+    });
+
+    test('results return rejects a different grid when a non-source anchor disappears', async () => {
         const sourcePostId = 'b253dd6b-aa00-4e93-a84d-89954d826d78';
         const nextPostId = '495f114a-bb00-4e93-a84d-89954d826d78';
         window.history.pushState({}, '', '/imagine');
@@ -718,7 +774,7 @@ describe('VideoRetryManager', () => {
         );
 
         sourceLink.href = '/imagine/post/a9f0db00-cf12-402f-b0fe-eb3d6e364a2c';
-        nextLink.href = '/imagine/post/different-neighbor';
+        next.card.remove();
         const token = 'results-return-different-grid';
         retryManager.batchRunning = true;
         retryManager.batchAborted = false;

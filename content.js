@@ -3831,26 +3831,26 @@ class VideoRetryManager {
         if (!receipt?.sourceId
             || !Number.isInteger(receipt.sourceIndex)
             || !Array.isArray(receipt.orderedIds)
-            || receipt.orderedIds[receipt.sourceIndex] !== receipt.sourceId
-            || entries.length < receipt.orderedIds.length) {
+            || receipt.orderedIds[receipt.sourceIndex] !== receipt.sourceId) {
             return false;
         }
         const identities = entries.map((entry) => entry.sourceId);
-        for (let index = 0; index < receipt.orderedIds.length; index++) {
-            if (index !== receipt.sourceIndex && identities[index] !== receipt.orderedIds[index]) {
-                return false;
-            }
+        const originalIds = new Set(receipt.orderedIds);
+        const currentIds = new Set(identities);
+        if (originalIds.size !== receipt.orderedIds.length || currentIds.size !== identities.length) {
+            return false;
         }
 
-        const currentSourceId = identities[receipt.sourceIndex];
-        if (!currentSourceId) return false;
-        if (currentSourceId === receipt.sourceId) return true;
+        const stableIds = receipt.orderedIds.filter((identity) => identity !== receipt.sourceId);
+        if (stableIds.some((identity) => !currentIds.has(identity))) return false;
 
-        // Grok replaces the source result's media and post IDs after video generation.
-        // Accept that one in-place replacement only while the rest of the grid stays anchored.
-        if (receipt.orderedIds.length < 2 || receipt.orderedIds.includes(currentSourceId)) return false;
-        return identities.filter((identity) => identity === currentSourceId).length === 1
-            && !identities.includes(receipt.sourceId);
+        const sourceStillPresent = currentIds.has(receipt.sourceId);
+        const insertedIds = identities.filter((identity) => !originalIds.has(identity));
+        if (sourceStillPresent) return insertedIds.length <= 1;
+
+        // Grok may either replace the source result or insert the generated video beside it.
+        // In both cases every non-source result must remain present and only one new ID is allowed.
+        return receipt.orderedIds.length >= 2 && insertedIds.length === 1;
     }
 
     _captureResultsGalleryReceipt(item) {
@@ -3905,9 +3905,13 @@ class VideoRetryManager {
                 && !this.isCensoredCard(item.container)
                 && !this.batchProcessedSrcs?.has(item.sourceId));
         if (receipt.expectedNextId) {
-            const nextIndex = queue.findIndex((item) => item.sourceId === receipt.expectedNextId);
-            if (nextIndex < 0) return false;
-            this.batchQueue = queue.slice(nextIndex);
+            const queueById = new Map(queue.map((item) => [item.sourceId, item]));
+            const expectedNextIndex = receipt.orderedIds.indexOf(receipt.expectedNextId);
+            if (expectedNextIndex < 0 || !queueById.has(receipt.expectedNextId)) return false;
+            this.batchQueue = receipt.orderedIds
+                .slice(expectedNextIndex)
+                .map((sourceId) => queueById.get(sourceId))
+                .filter(Boolean);
         } else {
             this.batchQueue = [];
         }
