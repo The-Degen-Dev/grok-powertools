@@ -64,6 +64,13 @@ Grok is a Next.js + React app with Radix UI components. The DOM is regenerated a
 - **Radix UI components need full pointer event sequences, not plain `.click()`.** If a dropdown won't open when your code clicks the trigger, use `simulateClick()` from `VideoRetryManager` — it dispatches `pointerdown/mousedown/pointerup/mouseup/click` in order. Plain `element.click()` dispatches only `click`, and Radix ignores it.
 - **React controlled inputs ignore `.value = 'x'`.** See §4.
 
+### Grok Imagine 2.0 contracts
+
+- Authenticated Grok media paths can contain both an account UUID and a generated media UUID. Correlate media with the generated UUID from the pathname.
+- Saved cards can open Agent Mode. Both the scraper and Prompted Batch must explicitly detect the current surface.
+- Prompted Batch submits the Add Prompt video composer's `Make video`; it must never submit Precise Edit's `Edit`.
+- Recheck the live DOM contract after Grok UI changes. Mocked tests do not prove provider selectors still work.
+
 ---
 
 ## 4. bridge.js: MAIN world vs. isolated world
