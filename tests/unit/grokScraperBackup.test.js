@@ -2054,6 +2054,8 @@ describe('Grok backup canary flow', () => {
                 sendMessage: jest.fn((message, callback) => {
                     if (message.action === 'VALIDATE_CLOUD_CONFIG') {
                         validationPromise.then(callback);
+                    } else if (message.action === 'VALIDATE_SCRAPE_RESUME') {
+                        callback({ valid: true, reason: 'active_owner' });
                     }
                     return Promise.resolve();
                 })

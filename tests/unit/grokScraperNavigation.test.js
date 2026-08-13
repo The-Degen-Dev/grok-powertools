@@ -15,7 +15,9 @@ function mockContentChrome() {
             id: 'extension-id',
             lastError: null,
             sendMessage: jest.fn((message) => Promise.resolve(
-                message?.action === 'VALIDATE_SCRAPE_RESUME' ? { valid: true } : undefined
+                message?.action === 'VALIDATE_SCRAPE_RESUME'
+                    ? { valid: true, reason: 'active_owner' }
+                    : undefined
             )),
             onMessage: { addListener: jest.fn() }
         },
@@ -38,6 +40,9 @@ function createScraper(surface = SCRAPE_SURFACES.savedGallery) {
     scraper._runVisited = new Set();
     scraper.runToken = null;
     scraper.runEpoch = 1;
+    scraper._pendingInitLease = null;
+    scraper._runInvalidationVersion = 0;
+    scraper._runStateWriteQueue = Promise.resolve();
     scraper.Config = { actionWait: 0, navWait: 0, surfaceWait: 50 };
     scraper.getCurrentSurface = jest.fn(() => surface);
     scraper.createRunToken = jest.fn(() => 'run-1');
@@ -256,7 +261,17 @@ describe('Grok scrape start preflight', () => {
             currentIndex: 0,
             scrapeRunToken: 'run-1',
             scrapeRunEpoch: 1,
-            scrapeBackupOptions: null
+            scrapeNavigation: null,
+            currentItemId: null,
+            scrapeBackupOptions: null,
+            isScraping: true,
+            isR2Backup: false
+        });
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            action: 'VALIDATE_SCRAPE_RESUME',
+            runToken: 'run-1',
+            runEpoch: 1,
+            kind: 'sync'
         });
         expect(scraper.state.isRunning).toBe(true);
         expect(scraper.determineModeAndExecute).toHaveBeenCalledWith('run-1', 1);
@@ -304,9 +319,13 @@ describe('Grok scrape start preflight', () => {
 
     test('uses the background-issued lease for R2 Backup too', async () => {
         const scraper = createScraper();
-        chrome.runtime.sendMessage.mockImplementation(async (message) => (
-            message.action === 'VALIDATE_CLOUD_CONFIG' ? { valid: true } : undefined
-        ));
+        chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'VALIDATE_CLOUD_CONFIG') return { valid: true };
+            if (message.action === 'VALIDATE_SCRAPE_RESUME') {
+                return { valid: true, reason: 'active_owner' };
+            }
+            return undefined;
+        });
 
         const response = await scraper.startBackupMode({
             mode: 'full',
@@ -321,7 +340,46 @@ describe('Grok scrape start preflight', () => {
         });
         expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
             scrapeRunToken: 'background-backup',
-            scrapeRunEpoch: 13
+            scrapeRunEpoch: 13,
+            isScraping: true,
+            isR2Backup: true,
+            r2BackupState: expect.objectContaining({ isRunning: true })
+        }));
+    });
+
+    test.each([
+        ['sync', (scraper) => scraper.start({ runToken: 'revoked-run', runEpoch: 20 })],
+        ['r2_backup', (scraper) => scraper.startBackupMode({
+            mode: 'full',
+            runToken: 'revoked-run',
+            runEpoch: 20
+        })]
+    ])('does not launch a %s loop after the background tombstones its lease', async (kind, startRun) => {
+        const scraper = createScraper();
+        chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'VALIDATE_CLOUD_CONFIG') return { valid: true };
+            if (message.action === 'VALIDATE_SCRAPE_RESUME') {
+                return { valid: false, reason: 'stale_authority' };
+            }
+            return undefined;
+        });
+
+        await expect(startRun(scraper)).resolves.toMatchObject({
+            status: 'error',
+            error: 'Start was cancelled.'
+        });
+
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
+        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
+            scraperState: 'idle',
+            scrapeRunToken: null,
+            scrapeRunEpoch: null,
+            isScraping: false,
+            isR2Backup: false,
+            ...(kind === 'r2_backup'
+                ? { r2BackupState: expect.objectContaining({ isRunning: false }) }
+                : {})
         }));
     });
 });
@@ -1002,6 +1060,78 @@ describe('Grok backup resume state', () => {
         expect(scraper.processedIds).toEqual(new Set(['existing-id']));
     });
 
+    test('a non-owner Grok tab clears only its own memory and preserves the owner local mirror', async () => {
+        const stored = {
+            scraperState: 'running',
+            currentIndex: 2,
+            processedIds: ['existing-id'],
+            scrapeRunToken: 'owner-run',
+            scrapeRunEpoch: 7,
+            scrapeNavigation: { runToken: 'owner-run', runEpoch: 7, currentItemId: 'owner-item' },
+            isScraping: true,
+            isR2Backup: false
+        };
+        mockContentChrome();
+        chrome.storage.local.get.mockResolvedValue(stored);
+        chrome.runtime.sendMessage.mockResolvedValue({ valid: false, reason: 'non_owner' });
+        const scraper = Object.create(GrokScraper.prototype);
+        scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
+        scraper.backupMode = false;
+        scraper.backupOptions = { mode: 'full', limit: null, options: {} };
+        scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        scraper.processedIds = new Set();
+        scraper._runStateWriteQueue = Promise.resolve();
+        scraper.determineModeAndExecute = jest.fn();
+        scraper.setupListeners = jest.fn();
+
+        await GrokScraper.prototype.init.call(scraper);
+
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
+        expect(chrome.storage.local.set).not.toHaveBeenCalled();
+        expect(stored).toMatchObject({
+            scraperState: 'running',
+            scrapeRunToken: 'owner-run',
+            scrapeRunEpoch: 7,
+            currentIndex: 2
+        });
+    });
+
+    test('stale R2 cleanup cannot re-spread a hydrated running flag over false', async () => {
+        const stored = {
+            scraperState: 'running',
+            currentIndex: 3,
+            scrapeRunToken: 'stale-backup',
+            scrapeRunEpoch: 8,
+            isScraping: true,
+            isR2Backup: true,
+            r2BackupState: { isRunning: true, uploaded: 4, errors: 1 }
+        };
+        mockContentChrome();
+        chrome.storage.local.get.mockResolvedValue(stored);
+        chrome.runtime.sendMessage.mockResolvedValue({ valid: false, reason: 'stale_authority' });
+        const scraper = Object.create(GrokScraper.prototype);
+        scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
+        scraper.backupMode = false;
+        scraper.backupOptions = { mode: 'full', limit: null, options: {} };
+        scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        scraper.processedIds = new Set();
+        scraper._runStateWriteQueue = Promise.resolve();
+        scraper.determineModeAndExecute = jest.fn();
+        scraper.setupListeners = jest.fn();
+
+        await GrokScraper.prototype.init.call(scraper);
+
+        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
+            r2BackupState: expect.objectContaining({
+                uploaded: 4,
+                errors: 1,
+                isRunning: false,
+                stopReason: 'stale_session'
+            })
+        }));
+    });
+
     test('normal stop persists every running flag as idle', async () => {
         mockContentChrome();
         const scraper = createScraper();
@@ -1015,6 +1145,26 @@ describe('Grok backup resume state', () => {
             isScraping: false,
             isR2Backup: false,
             scrapeRunToken: null
+        }));
+    });
+
+    test('backup Stop writes isRunning false after hydrated counter fields', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.backupMode = true;
+        scraper.runToken = 'run-1';
+        scraper.runEpoch = 4;
+        scraper.backupStats = { isRunning: true, uploaded: 9, errors: 0 };
+
+        await GrokScraper.prototype.stopBackupMode.call(scraper, 'stopped', { notifyBackground: false });
+
+        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
+            r2BackupState: expect.objectContaining({
+                uploaded: 9,
+                isRunning: false,
+                stopReason: 'stopped'
+            })
         }));
     });
 });
@@ -1064,6 +1214,92 @@ describe('storage stop signals', () => {
         expect(scraper.isMediaProcessed(
             `https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/${mediaId}/image.jpg?request=33333333-3333-4333-8333-333333333333`
         )).toBe(true);
+        delete global.chrome;
+    });
+
+    test('an immediate INIT waits for hydration and a storage Stop cancels it before launch', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const hydration = deferred();
+        const sendResponse = jest.fn();
+        scraper._initPromise = hydration.promise;
+        scraper.setupListeners();
+        const runtimeListener = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+        const storageListener = chrome.storage.onChanged.addListener.mock.calls[0][0];
+
+        expect(runtimeListener({
+            action: 'INIT_SCRAPE',
+            runToken: 'pending-sync',
+            runEpoch: 11
+        }, {}, sendResponse)).toBe(true);
+        expect(scraper._pendingInitLease).toEqual({
+            kind: 'sync',
+            runToken: 'pending-sync',
+            runEpoch: 11,
+            invalidationVersion: 0
+        });
+
+        storageListener({ scraperState: { oldValue: 'running', newValue: 'idle' } }, 'local');
+        hydration.resolve();
+        await flushAsyncTurns(16);
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'error',
+            error: 'Start was cancelled.'
+        }));
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
+            scraperState: 'idle',
+            scrapeRunToken: null,
+            scrapeRunEpoch: null
+        }));
+        delete global.chrome;
+    });
+
+    test('a dropped ABORT storage fallback cancels pending R2 cloud validation', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const validation = deferred();
+        const sendResponse = jest.fn();
+        scraper._initPromise = Promise.resolve();
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'VALIDATE_CLOUD_CONFIG') return validation.promise;
+            if (message.action === 'VALIDATE_SCRAPE_RESUME') {
+                return Promise.resolve({ valid: false, reason: 'stale_authority' });
+            }
+            return Promise.resolve();
+        });
+        scraper.setupListeners();
+        const runtimeListener = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+        const storageListener = chrome.storage.onChanged.addListener.mock.calls[0][0];
+
+        expect(runtimeListener({
+            action: 'INIT_R2_BACKUP',
+            mode: 'full',
+            runToken: 'pending-backup',
+            runEpoch: 12
+        }, {}, sendResponse)).toBe(true);
+        await flushAsyncTurns();
+        expect(scraper._backupStartPending).toBe(true);
+
+        storageListener({
+            scraperState: { oldValue: 'running', newValue: 'idle' },
+            isR2Backup: { oldValue: true, newValue: false }
+        }, 'local');
+        validation.resolve({ valid: true });
+        await flushAsyncTurns(20);
+
+        expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'error',
+            error: 'Start was cancelled.'
+        }));
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
+        expect(scraper.state.isRunning).toBe(false);
+        expect(chrome.storage.local.set).toHaveBeenLastCalledWith(expect.objectContaining({
+            scraperState: 'idle',
+            isR2Backup: false,
+            r2BackupState: expect.objectContaining({ isRunning: false })
+        }));
         delete global.chrome;
     });
 });
@@ -1134,6 +1370,10 @@ function deferred() {
         reject = rejectPromise;
     });
     return { promise, resolve, reject };
+}
+
+async function flushAsyncTurns(count = 8) {
+    for (let index = 0; index < count; index++) await Promise.resolve();
 }
 
 function createLeaseRecord(overrides = {}) {
@@ -1224,7 +1464,10 @@ describe('background scrape lease authority', () => {
         sessionRead.resolve({ activeScrapeRunToken: oldLease });
         await hydration;
         await expect(stop).resolves.toMatchObject({ status: 'stopped' });
-        await expect(background.validateScrapeResume(oldLease, 42)).resolves.toBe(false);
+        await expect(background.validateScrapeResume(oldLease, 42)).resolves.toEqual({
+            valid: false,
+            reason: 'stale_authority'
+        });
         expect(harness.sessionState.activeScrapeRunToken).toMatchObject({
             status: 'idle',
             epoch: oldLease.epoch + 1,
@@ -1272,6 +1515,122 @@ describe('background scrape lease authority', () => {
         expect(harness.chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
     });
 
+    test.each(['sync', 'r2_backup'])(
+        'fails %s closed when the worker restarts before content persists its mirror',
+        async (kind) => {
+            const lease = createLeaseRecord({ kind });
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'idle',
+                    scrapeRunToken: null,
+                    scrapeRunEpoch: null,
+                    isScraping: false,
+                    isR2Backup: false
+                }
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+
+            await background.ensureScrapeLeaseHydrated();
+
+            expect(harness.sessionState.activeScrapeRunToken).toMatchObject({
+                status: 'idle',
+                epoch: lease.epoch + 1
+            });
+            await expect(background.validateScrapeResume(lease, lease.tabId)).resolves.toEqual({
+                valid: false,
+                reason: 'stale_authority'
+            });
+            expect(harness.chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
+        }
+    );
+
+    test.each(['sync', 'r2_backup'])(
+        'restores %s after content persistence and before background finalization',
+        async (kind) => {
+            const lease = createLeaseRecord({ kind });
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    scrapeNavigation: null,
+                    currentItemId: null,
+                    isScraping: true,
+                    isR2Backup: kind === 'r2_backup',
+                    ...(kind === 'r2_backup' ? { r2BackupState: { isRunning: true } } : {})
+                }
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+
+            await background.ensureScrapeLeaseHydrated();
+
+            await expect(background.initializeScrapeInActiveTab(
+                { action: kind === 'r2_backup' ? 'INIT_R2_BACKUP' : 'INIT_SCRAPE' },
+                { backup: kind === 'r2_backup' }
+            )).resolves.toMatchObject({
+                status: 'error',
+                error: 'A sync or backup run is already active.'
+            });
+            expect(harness.sessionState.activeScrapeRunToken).toEqual(lease);
+        }
+    );
+
+    test.each(['sync', 'r2_backup'])(
+        'restores finalized %s authority after another worker restart',
+        async (kind) => {
+            const harness = createLeaseBackgroundHarness();
+            harness.chromeApi.tabs.sendMessage.mockImplementation((_tabId, message, callback) => {
+                if (message.action.startsWith('INIT_')) {
+                    Object.assign(harness.storedLocal, {
+                        scraperState: 'running',
+                        currentIndex: 0,
+                        scrapeRunToken: message.runToken,
+                        scrapeRunEpoch: message.runEpoch,
+                        scrapeNavigation: null,
+                        currentItemId: null,
+                        scrapeBackupOptions: kind === 'r2_backup' ? { mode: 'full' } : null,
+                        isScraping: true,
+                        isR2Backup: kind === 'r2_backup',
+                        ...(kind === 'r2_backup' ? { r2BackupState: { isRunning: true } } : {})
+                    });
+                    callback({
+                        status: 'started',
+                        surface: 'saved_gallery',
+                        runToken: message.runToken,
+                        runEpoch: message.runEpoch
+                    });
+                    return;
+                }
+                callback({ status: 'stopped' });
+            });
+            global.chrome = harness.chromeApi;
+            let background = require('../../background.js');
+
+            await expect(background.initializeScrapeInActiveTab(
+                { action: kind === 'r2_backup' ? 'INIT_R2_BACKUP' : 'INIT_SCRAPE' },
+                { backup: kind === 'r2_backup' }
+            )).resolves.toMatchObject({ status: 'started' });
+            const finalizedLease = { ...harness.sessionState.activeScrapeRunToken };
+
+            jest.resetModules();
+            background = require('../../background.js');
+            await background.ensureScrapeLeaseHydrated();
+
+            expect(harness.sessionState.activeScrapeRunToken).toEqual(finalizedLease);
+            await expect(background.initializeScrapeInActiveTab(
+                { action: kind === 'r2_backup' ? 'INIT_R2_BACKUP' : 'INIT_SCRAPE' },
+                { backup: kind === 'r2_backup' }
+            )).resolves.toMatchObject({
+                status: 'error',
+                error: 'A sync or backup run is already active.'
+            });
+        }
+    );
+
     test('normalizes stale local running state when session authority is missing', async () => {
         const harness = createLeaseBackgroundHarness({
             localState: {
@@ -1315,6 +1674,111 @@ describe('background scrape lease authority', () => {
         expect(responses.filter((response) => response.status === 'error')).toHaveLength(1);
         expect(harness.chromeApi.tabs.sendMessage.mock.calls.filter(([, message]) => message.action === 'INIT_SCRAPE'))
             .toHaveLength(1);
+    });
+
+    test('R2 Stop tombstones the intent while cloud configuration is still loading', async () => {
+        const harness = createLeaseBackgroundHarness();
+        const cloudConfigRead = deferred();
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (Array.isArray(keys) && keys.length === 1 && keys[0] === 'cloudConfig') {
+                return cloudConfigRead.promise;
+            }
+            return baseGet(keys);
+        });
+
+        const start = dispatchBackgroundMessage(harness.chromeApi, {
+            action: 'START_R2_BACKUP',
+            mode: 'full'
+        }, {});
+        await flushAsyncTurns();
+        expect(harness.sessionState.activeScrapeRunToken).toMatchObject({
+            status: 'starting',
+            kind: 'r2_backup'
+        });
+
+        await expect(dispatchBackgroundMessage(harness.chromeApi, { action: 'STOP_R2_BACKUP' }, {}))
+            .resolves.toMatchObject({ status: 'stopped' });
+        cloudConfigRead.resolve({ cloudConfig: { mode: 'cloud_only', enabled: true } });
+        await expect(start).resolves.toMatchObject({ status: 'error', error: 'Start was cancelled.' });
+
+        expect(harness.sessionState.activeScrapeRunToken.status).toBe('idle');
+        expect(harness.chromeApi.tabs.query).not.toHaveBeenCalled();
+        expect(harness.chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
+            42,
+            expect.objectContaining({ action: 'INIT_R2_BACKUP' }),
+            expect.any(Function)
+        );
+    });
+
+    test.each([
+        ['sync', { action: 'INIT_SCRAPE' }, false],
+        ['r2_backup', { action: 'INIT_R2_BACKUP', mode: 'full' }, true]
+    ])('Stop tombstones a durable %s intent while active-tab discovery is delayed', async (kind, initMessage, backup) => {
+        const harness = createLeaseBackgroundHarness();
+        const tabsQuery = deferred();
+        harness.chromeApi.tabs.query.mockImplementation((_query, callback) => {
+            tabsQuery.promise.then(callback);
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+
+        const start = background.initializeScrapeInActiveTab(initMessage, { backup });
+        await flushAsyncTurns();
+
+        const intent = harness.sessionState.activeScrapeRunToken;
+        expect(intent).toMatchObject({
+            status: 'starting',
+            kind,
+            epoch: 1,
+            token: expect.any(String),
+            tabId: null
+        });
+
+        await expect(background.stopScrapeRun(kind)).resolves.toMatchObject({ status: 'stopped' });
+        expect(harness.sessionState.activeScrapeRunToken).toMatchObject({
+            status: 'idle',
+            epoch: 2,
+            token: null
+        });
+
+        tabsQuery.resolve([{ id: 42, url: 'https://grok.com/imagine/saved' }]);
+        await expect(start).resolves.toMatchObject({ status: 'error', error: 'Start was cancelled.' });
+        expect(harness.chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
+            42,
+            expect.objectContaining({ action: initMessage.action }),
+            expect.any(Function)
+        );
+        expect(harness.sessionState.activeScrapeRunToken.status).toBe('idle');
+    });
+
+    test.each([
+        ['sync', { action: 'INIT_SCRAPE' }, false],
+        ['r2_backup', { action: 'INIT_R2_BACKUP', mode: 'full' }, true]
+    ])('cleans up the durable %s intent when active-tab discovery fails', async (_kind, initMessage, backup) => {
+        const harness = createLeaseBackgroundHarness();
+        harness.chromeApi.tabs.query.mockImplementation((_query, callback) => {
+            harness.chromeApi.runtime.lastError = { message: 'Active tab query failed.' };
+            callback([]);
+            harness.chromeApi.runtime.lastError = null;
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+
+        await expect(background.initializeScrapeInActiveTab(initMessage, { backup })).resolves.toEqual({
+            status: 'error',
+            surface: 'unsupported',
+            error: 'Active tab query failed.'
+        });
+        expect(harness.sessionState.activeScrapeRunToken).toMatchObject({
+            status: 'idle',
+            epoch: 2,
+            token: null
+        });
+        expect(harness.storedLocal).toMatchObject({ scraperState: 'idle', isScraping: false, isR2Backup: false });
     });
 
     test('Stop during delayed INIT revokes the lease and prevents late activation', async () => {
@@ -1454,7 +1918,7 @@ describe('background scrape lease authority', () => {
         expect(harness.sessionState.activeScrapeRunToken).toEqual(lease);
     });
 
-    test('requires exact token, epoch, and sender tab for resume validation', async () => {
+    test('returns reasoned resume validation for the owner, a non-owner tab, and stale authority', async () => {
         const lease = createLeaseRecord();
         const harness = createLeaseBackgroundHarness({
             lease,
@@ -1468,9 +1932,18 @@ describe('background scrape lease authority', () => {
         global.chrome = harness.chromeApi;
         const background = require('../../background.js');
 
-        await expect(background.validateScrapeResume(lease, 42)).resolves.toBe(true);
-        await expect(background.validateScrapeResume({ ...lease, epoch: lease.epoch + 1 }, 42)).resolves.toBe(false);
-        await expect(background.validateScrapeResume(lease, 99)).resolves.toBe(false);
+        await expect(background.validateScrapeResume(lease, 42)).resolves.toEqual({
+            valid: true,
+            reason: 'active_owner'
+        });
+        await expect(background.validateScrapeResume({ ...lease, epoch: lease.epoch + 1 }, 42)).resolves.toEqual({
+            valid: false,
+            reason: 'stale_authority'
+        });
+        await expect(background.validateScrapeResume(lease, 99)).resolves.toEqual({
+            valid: false,
+            reason: 'non_owner'
+        });
     });
 
     test.each([
@@ -1539,6 +2012,176 @@ describe('background scrape lease authority', () => {
             expect.any(Function)
         );
         expect(harness.chromeApi.tabs.remove).toHaveBeenCalledWith(42);
+    });
+
+    test('revalidates tab-transfer authority after filename storage resolves', async () => {
+        const lease = createLeaseRecord();
+        const filenameRead = deferred();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false
+            }
+        });
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (Array.isArray(keys) && keys.includes('downloadPath')) return filenameRead.promise;
+            return baseGet(keys);
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+        const tabListener = harness.chromeApi.tabs.onUpdated.addListener.mock.calls[0][0];
+
+        const interception = tabListener(42, {
+            url: 'https://imagine-public.x.ai/media/stop-during-await.jpg'
+        }, { id: 42 });
+        await flushAsyncTurns();
+
+        await expect(background.stopScrapeRun('sync')).resolves.toMatchObject({ status: 'stopped' });
+        filenameRead.resolve({ downloadPath: 'GrokVault', activeGrokUserId: 'Shared_Account' });
+        await interception;
+
+        expect(harness.chromeApi.downloads.download).not.toHaveBeenCalled();
+        expect(harness.chromeApi.tabs.remove).not.toHaveBeenCalled();
+    });
+
+    test('clears the abort timeout after an immediate acknowledgement', async () => {
+        jest.useFakeTimers();
+        const harness = createLeaseBackgroundHarness();
+        global.chrome = harness.chromeApi;
+        const { withTimeout } = require('../../background.js');
+
+        await expect(withTimeout(Promise.resolve('ack'), 2000, null)).resolves.toBe('ack');
+        expect(jest.getTimerCount()).toBe(0);
+        jest.useRealTimers();
+    });
+
+    test.each(['sync', 'r2_backup'])(
+        'completes a %s Start and Stop with Promise storage and callback tab messaging',
+        async (kind) => {
+            const harness = createLeaseBackgroundHarness();
+            const events = [];
+            const baseSessionSet = harness.chromeApi.storage.session.set.getMockImplementation();
+            harness.chromeApi.storage.session.set.mockImplementation(async (values) => {
+                await baseSessionSet(values);
+                events.push(`session:${values.activeScrapeRunToken.status}`);
+            });
+            harness.chromeApi.tabs.sendMessage.mockImplementation((_tabId, message, callback) => {
+                if (message.action.startsWith('INIT_')) {
+                    Promise.resolve().then(async () => {
+                        await harness.chromeApi.storage.local.set({
+                            scraperState: 'running',
+                            currentIndex: 0,
+                            scrapeRunToken: message.runToken,
+                            scrapeRunEpoch: message.runEpoch,
+                            scrapeNavigation: null,
+                            currentItemId: null,
+                            scrapeBackupOptions: kind === 'r2_backup' ? { mode: 'full' } : null,
+                            isScraping: true,
+                            isR2Backup: kind === 'r2_backup',
+                            ...(kind === 'r2_backup' ? { r2BackupState: { isRunning: true } } : {})
+                        });
+                        events.push('content:start-persisted');
+                        callback({
+                            status: 'started',
+                            surface: 'saved_gallery',
+                            runToken: message.runToken,
+                            runEpoch: message.runEpoch
+                        });
+                    });
+                    return;
+                }
+                Promise.resolve().then(async () => {
+                    events.push(`content:${message.action}`);
+                    await harness.chromeApi.storage.local.set({
+                        scraperState: 'idle',
+                        scrapeRunToken: null,
+                        scrapeRunEpoch: null,
+                        scrapeNavigation: null,
+                        currentItemId: null,
+                        isScraping: false,
+                        isR2Backup: false,
+                        ...(kind === 'r2_backup' ? { r2BackupState: { isRunning: false } } : {})
+                    });
+                    events.push('content:stop-persisted');
+                    callback({ status: 'stopped' });
+                });
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+
+            await expect(background.initializeScrapeInActiveTab(
+                { action: kind === 'r2_backup' ? 'INIT_R2_BACKUP' : 'INIT_SCRAPE' },
+                { backup: kind === 'r2_backup' }
+            )).resolves.toMatchObject({ status: 'started' });
+            expect(harness.storedLocal).toMatchObject({
+                scraperState: 'running',
+                isScraping: true,
+                isR2Backup: kind === 'r2_backup'
+            });
+
+            await expect(background.stopScrapeRun(kind)).resolves.toEqual({
+                status: 'stopped',
+                abortAcknowledged: true
+            });
+            expect(harness.sessionState.activeScrapeRunToken.status).toBe('idle');
+            expect(harness.storedLocal).toMatchObject({
+                scraperState: 'idle',
+                scrapeRunToken: null,
+                scrapeRunEpoch: null,
+                isScraping: false,
+                isR2Backup: false
+            });
+            const stopTombstoneIndex = events.lastIndexOf('session:idle');
+            const abortIndex = events.indexOf(
+                `content:${kind === 'r2_backup' ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE'}`
+            );
+            expect(stopTombstoneIndex).toBeLessThan(abortIndex);
+            expect(abortIndex).toBeLessThan(events.indexOf('content:stop-persisted'));
+        }
+    );
+
+    test('a late ABORT callback after timeout cannot restore authority', async () => {
+        jest.useFakeTimers();
+        try {
+            const lease = createLeaseRecord();
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: false
+                }
+            });
+            harness.chromeApi.tabs.sendMessage.mockImplementation((_tabId, message, callback) => {
+                if (message.action === 'ABORT_SCRAPE') {
+                    setTimeout(() => callback({ status: 'stopped' }), 2500);
+                }
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureScrapeLeaseHydrated();
+
+            const stop = background.stopScrapeRun('sync');
+            await flushAsyncTurns();
+            await jest.advanceTimersByTimeAsync(2000);
+            await expect(stop).resolves.toEqual({ status: 'stopped', abortAcknowledged: false });
+            const tombstone = { ...harness.sessionState.activeScrapeRunToken };
+
+            await jest.advanceTimersByTimeAsync(500);
+            await flushAsyncTurns();
+            expect(harness.sessionState.activeScrapeRunToken).toEqual(tombstone);
+            expect(harness.storedLocal.scraperState).toBe('idle');
+        } finally {
+            jest.useRealTimers();
+        }
     });
 });
 
@@ -1645,8 +2288,14 @@ describe('background scrape start handshake', () => {
         global.chrome = harness.chromeApi;
         const { validateScrapeResume } = require('../../background.js');
 
-        await expect(validateScrapeResume(lease, 42)).resolves.toBe(true);
-        await expect(validateScrapeResume({ ...lease, token: 'another-run' }, 42)).resolves.toBe(false);
+        await expect(validateScrapeResume(lease, 42)).resolves.toEqual({
+            valid: true,
+            reason: 'active_owner'
+        });
+        await expect(validateScrapeResume({ ...lease, token: 'another-run' }, 42)).resolves.toEqual({
+            valid: false,
+            reason: 'stale_authority'
+        });
         expect(chrome.storage.session.get).toHaveBeenCalledWith(['activeScrapeRunToken']);
     });
 
@@ -1666,6 +2315,23 @@ describe('background scrape start handshake', () => {
         });
         expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
         expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({ isScraping: true }));
+    });
+
+    test('releases the pending intent after a session persistence failure', async () => {
+        global.chrome = createBackgroundChrome();
+        chrome.storage.session.set
+            .mockResolvedValueOnce()
+            .mockRejectedValueOnce(new Error('Session storage unavailable'))
+            .mockResolvedValue();
+        const { initializeScrapeInActiveTab } = require('../../background.js');
+
+        await expect(initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' })).resolves.toMatchObject({
+            status: 'error',
+            error: 'Session storage unavailable'
+        });
+        await expect(initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' })).resolves.toMatchObject({
+            status: 'started'
+        });
     });
 
     test('does not let generic local idle changes mutate session authority', async () => {

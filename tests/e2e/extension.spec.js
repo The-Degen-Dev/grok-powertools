@@ -597,7 +597,7 @@ test.describe('Grok Power Tools E2E', () => {
                     return typeof configured === 'function' ? configured(message) : configured;
                 }
                 if (action === 'VALIDATE_CLOUD_CONFIG') return { valid: true };
-                if (action === 'VALIDATE_SCRAPE_RESUME') return { valid: true };
+                if (action === 'VALIDATE_SCRAPE_RESUME') return { valid: true, reason: 'active_owner' };
                 if (action === 'PROCESSED_IDS_ADD') {
                     const processedIds = Array.from(new Set([
                         ...(Array.isArray(localState.processedIds) ? localState.processedIds : []),
@@ -689,6 +689,72 @@ test.describe('Grok Power Tools E2E', () => {
 
         // Check text
         await expect(overlay).toContainText('Grok Power Tools');
+    });
+
+    test('cold reinjection registers one scraper listener before deferred hydration completes', async ({ page }) => {
+        await page.evaluate(providerRegistryJs);
+        await page.evaluate(providerRunLedgerJs);
+        await page.evaluate(chatGptImagesContentJs);
+        await page.evaluate(utilsJs);
+        await page.evaluate(contentActionsJs);
+        await page.evaluate(() => {
+            const originalGet = chrome.storage.local.get.bind(chrome.storage.local);
+            const pendingGets = [];
+            window.__chromeRuntimeResponseByAction.VALIDATE_SCRAPE_RESUME = {
+                valid: false,
+                reason: 'stale_authority'
+            };
+            chrome.storage.local.get = (keys, callback) => new Promise((resolve, reject) => {
+                pendingGets.push(() => {
+                    originalGet(keys, callback).then(resolve, reject);
+                });
+            });
+            window.__releaseDeferredContentHydration = () => {
+                pendingGets.splice(0).forEach((release) => release());
+            };
+        });
+
+        await page.evaluate(contentJs);
+        const firstSnapshot = await page.evaluate(() => {
+            window.__firstInjectedScraper = window.__gptPowerToolsRuntime.scraper;
+            return {
+                listenerCount: window.__chromeMessageListeners.length,
+                hasPendingHydration: Boolean(window.__gptPowerToolsRuntime.scraper._initPromise)
+            };
+        });
+
+        await page.evaluate(contentJs);
+        const immediate = await page.evaluate(() => {
+            const responses = [];
+            const message = { action: 'INIT_SCRAPE', runToken: 'injected-run', runEpoch: 31 };
+            const accepted = window.__chromeMessageListeners.filter((listener) => (
+                listener(message, { tab: { id: 42 } }, (response) => responses.push(response)) === true
+            ));
+            return {
+                listenerCount: window.__chromeMessageListeners.length,
+                sameInstance: window.__firstInjectedScraper === window.__gptPowerToolsRuntime.scraper,
+                acceptedCount: accepted.length,
+                pendingLease: window.__gptPowerToolsRuntime.scraper._pendingInitLease,
+                responseCount: responses.length
+            };
+        });
+
+        expect(firstSnapshot.hasPendingHydration).toBe(true);
+        expect(immediate).toMatchObject({
+            listenerCount: firstSnapshot.listenerCount,
+            sameInstance: true,
+            acceptedCount: 1,
+            pendingLease: {
+                kind: 'sync',
+                runToken: 'injected-run',
+                runEpoch: 31
+            },
+            responseCount: 0
+        });
+
+        await page.evaluate(() => window.__releaseDeferredContentHydration());
+        await expect.poll(() => page.evaluate(() => window.__chromeStorageLocalState.scraperState))
+            .toBe('idle');
     });
 
     test('Minimize button should work', async ({ page }) => {

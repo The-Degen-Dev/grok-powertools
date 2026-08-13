@@ -1768,21 +1768,22 @@ function queueChromeDownload(options) {
 
 function normalizeScrapeLease(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    const status = value.status === 'active' ? 'active' : (value.status === 'idle' ? 'idle' : null);
+    const status = ['starting', 'active', 'idle'].includes(value.status) ? value.status : null;
     const kind = value.kind === 'sync' || value.kind === 'r2_backup' ? value.kind : null;
     const epoch = Number.isInteger(value.epoch) && value.epoch >= 0 ? value.epoch : null;
     if (!status || epoch === null || value.version !== SCRAPE_LEASE_VERSION) return null;
-    if (status === 'active') {
-        if (!kind || typeof value.token !== 'string' || !value.token || !Number.isInteger(value.tabId)) return null;
+    if (status !== 'idle') {
+        if (!kind || typeof value.token !== 'string' || !value.token) return null;
+        if (status === 'active' && !Number.isInteger(value.tabId)) return null;
     }
     return {
         version: SCRAPE_LEASE_VERSION,
         epoch,
-        token: status === 'active' ? value.token : null,
+        token: status !== 'idle' ? value.token : null,
         tabId: status === 'active' ? value.tabId : null,
-        kind: status === 'active' ? kind : null,
+        kind: status !== 'idle' ? kind : null,
         status,
-        startedAt: status === 'active' && Number.isFinite(value.startedAt) ? value.startedAt : null
+        startedAt: status !== 'idle' && Number.isFinite(value.startedAt) ? value.startedAt : null
     };
 }
 
@@ -1808,6 +1809,19 @@ function scrapeLeaseMatches(left, right) {
         && left.epoch === right.epoch
         && left.token === right.token
         && left.tabId === right.tabId
+        && left.kind === right.kind
+    );
+}
+
+function scrapeLeaseIdentityMatches(left, right) {
+    return Boolean(
+        left
+        && right
+        && left.status !== 'idle'
+        && right.status !== 'idle'
+        && left.version === right.version
+        && left.epoch === right.epoch
+        && left.token === right.token
         && left.kind === right.kind
     );
 }
@@ -1895,7 +1909,7 @@ async function hydrateScrapeLeaseAuthority() {
         return storedLease;
     }
 
-    const nextEpoch = storedLease?.status === 'active'
+    const nextEpoch = storedLease?.status === 'active' || storedLease?.status === 'starting'
         ? storedLease.epoch + 1
         : (storedLease?.epoch || 0);
     const tombstone = await persistScrapeLease(createIdleScrapeLease(nextEpoch));
@@ -1949,9 +1963,21 @@ function getRequestedLease(value, senderTabId = null) {
 
 async function validateScrapeResume(value, senderTabId = null) {
     const requested = getRequestedLease(value, senderTabId);
-    if (!requested) return false;
+    if (!requested) return { valid: false, reason: 'stale_authority' };
     return enqueueScrapeLeaseOperation(async () => {
-        if (!scrapeLeaseMatches(activeScrapeLease, requested)) return false;
+        const owner = activeScrapeLease;
+        if (
+            owner?.status === 'active'
+            && owner.token === requested.token
+            && owner.epoch === requested.epoch
+            && owner.kind === requested.kind
+            && owner.tabId !== requested.tabId
+        ) {
+            return { valid: false, reason: 'non_owner' };
+        }
+        if (!scrapeLeaseMatches(owner, requested)) {
+            return { valid: false, reason: 'stale_authority' };
+        }
         const stored = await chrome.storage.local.get([
             'scraperState',
             'scrapeRunToken',
@@ -1959,7 +1985,10 @@ async function validateScrapeResume(value, senderTabId = null) {
             'isScraping',
             'isR2Backup'
         ]);
-        return localRunMatchesLease(stored, activeScrapeLease);
+        if (!scrapeLeaseMatches(activeScrapeLease, requested) || !localRunMatchesLease(stored, requested)) {
+            return { valid: false, reason: 'stale_authority' };
+        }
+        return { valid: true, reason: 'active_owner' };
     });
 }
 
@@ -1973,11 +2002,18 @@ async function sendScrapeInitWithInjection(tabId, initMessage) {
     }
 }
 
-function withTimeout(promise, timeoutMs, fallback) {
-    return Promise.race([
-        promise,
-        new Promise((resolve) => setTimeout(() => resolve(fallback), timeoutMs))
-    ]);
+async function withTimeout(promise, timeoutMs, fallback) {
+    let timeoutId = null;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((resolve) => {
+                timeoutId = setTimeout(() => resolve(fallback), timeoutMs);
+            })
+        ]);
+    } finally {
+        if (timeoutId !== null) clearTimeout(timeoutId);
+    }
 }
 
 async function sendScrapeAbort(lease) {
@@ -1995,27 +2031,53 @@ async function sendScrapeAbort(lease) {
     }
 }
 
-async function prepareScrapeStart(tabId, kind) {
+async function reserveScrapeStartIntent(kind) {
     return enqueueScrapeLeaseOperation(async () => {
-        if (activeScrapeLease?.status === 'active' || scrapeStartPending) return null;
+        if (activeScrapeLease?.status === 'active' || activeScrapeLease?.status === 'starting' || scrapeStartPending) {
+            return null;
+        }
         const lease = {
             version: SCRAPE_LEASE_VERSION,
             epoch: (activeScrapeLease?.epoch || 0) + 1,
             token: makeScrapeRunToken(),
-            tabId,
+            tabId: null,
             kind,
-            status: 'active',
+            status: 'starting',
             startedAt: Date.now()
         };
         scrapeStartPending = true;
+        try {
+            await persistScrapeLease(lease);
+            return lease;
+        } catch (error) {
+            scrapeStartPending = false;
+            throw error;
+        }
+    });
+}
+
+async function promoteScrapeStartIntent(intent, tabId) {
+    return enqueueScrapeLeaseOperation(async () => {
+        if (
+            activeScrapeLease?.status !== 'starting'
+            || !scrapeLeaseIdentityMatches(activeScrapeLease, intent)
+        ) return null;
+        const lease = { ...intent, tabId, status: 'active' };
         await persistScrapeLease(lease);
         return lease;
     });
 }
 
+async function scrapeStartIntentOwnsAuthority(intent) {
+    return enqueueScrapeLeaseOperation(async () => (
+        activeScrapeLease?.status === 'starting'
+        && scrapeLeaseIdentityMatches(activeScrapeLease, intent)
+    ));
+}
+
 async function cancelPreparedScrapeStart(lease, stopReason = 'start_failed') {
     return enqueueScrapeLeaseOperation(async () => {
-        if (!scrapeLeaseMatches(activeScrapeLease, lease)) return false;
+        if (!scrapeLeaseIdentityMatches(activeScrapeLease, lease)) return false;
         await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
         scrapeStartPending = false;
         isScraping = false;
@@ -2060,10 +2122,20 @@ async function finalizeScrapeStart(lease, initResponse) {
 }
 
 async function initializeScrapeInActiveTab(initMessage, { backup = false } = {}) {
+    let intent = null;
     let lease = null;
     try {
+        intent = await reserveScrapeStartIntent(backup ? 'r2_backup' : 'sync');
+        if (!intent) {
+            return { status: 'error', surface: 'unsupported', error: 'A sync or backup run is already active.' };
+        }
+        const resolvedInitMessage = typeof initMessage === 'function' ? await initMessage() : initMessage;
+        if (!await scrapeStartIntentOwnsAuthority(intent)) {
+            return { status: 'error', surface: 'unsupported', error: 'Start was cancelled.' };
+        }
         const tab = await queryActiveTab();
         if (!tab || !isGrokSavedUrl(tab.url)) {
+            await cancelPreparedScrapeStart(intent, 'invalid_context');
             return {
                 status: 'invalid_context',
                 surface: 'unsupported',
@@ -2072,12 +2144,12 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false } = {})
                     : 'Open Grok Imagine Saved before starting sync.'
             };
         }
-        lease = await prepareScrapeStart(tab.id, backup ? 'r2_backup' : 'sync');
+        lease = await promoteScrapeStartIntent(intent, tab.id);
         if (!lease) {
-            return { status: 'error', surface: 'unsupported', error: 'A sync or backup run is already active.' };
+            return { status: 'error', surface: 'unsupported', error: 'Start was cancelled.' };
         }
         const initResponse = await sendScrapeInitWithInjection(tab.id, {
-            ...initMessage,
+            ...resolvedInitMessage,
             runToken: lease.token,
             runEpoch: lease.epoch
         });
@@ -2085,17 +2157,17 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false } = {})
         if (response.status !== 'started') await sendScrapeAbort(lease);
         return response;
     } catch (error) {
-        if (lease) {
-            await cancelPreparedScrapeStart(lease, 'start_failed').catch(() => {});
-            await sendScrapeAbort(lease);
-        }
+        if (intent) await cancelPreparedScrapeStart(lease || intent, 'start_failed').catch(() => {});
+        if (lease) await sendScrapeAbort(lease);
         return { status: 'error', surface: 'unsupported', error: error.message || 'Failed to start.' };
     }
 }
 
 async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
     return enqueueScrapeLeaseOperation(async () => {
-        const lease = activeScrapeLease?.status === 'active' ? { ...activeScrapeLease } : null;
+        const lease = activeScrapeLease?.status === 'active' || activeScrapeLease?.status === 'starting'
+            ? { ...activeScrapeLease }
+            : null;
         if (!lease) {
             const stored = await chrome.storage.local.get(['r2BackupState']);
             await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
@@ -2109,7 +2181,7 @@ async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
         scrapeStartPending = false;
         isScraping = false;
         isR2Backup = false;
-        const abortAcknowledged = await sendScrapeAbort(lease);
+        const abortAcknowledged = lease.status === 'active' ? await sendScrapeAbort(lease) : false;
         const stored = await chrome.storage.local.get(['r2BackupState']);
         await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
         return { status: 'stopped', abortAcknowledged };
@@ -2132,12 +2204,13 @@ async function completeScrapeRun(request, sender, kind) {
     return enqueueScrapeLeaseOperation(async () => {
         const requested = getRequestedLease({ ...request, kind }, sender?.tab?.id ?? null);
         if (!scrapeLeaseMatches(activeScrapeLease, requested)) return { status: 'ignored' };
-        const lease = activeScrapeLease;
+        const lease = { ...activeScrapeLease };
+        const stored = await chrome.storage.local.get(['r2BackupState']);
+        if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
         await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
         scrapeStartPending = false;
         isScraping = false;
         isR2Backup = false;
-        const stored = await chrome.storage.local.get(['r2BackupState']);
         await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, request.stats?.stopReason || 'complete'));
 
         if (kind === 'r2_backup') {
@@ -2211,12 +2284,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'START_R2_BACKUP') {
-        (async () => {
+        initializeScrapeInActiveTab(async () => {
             const config = await getCloudConfig();
             const initMessage = buildR2BackupInitMessageForConfig(request, config);
             log(initMessage.mode === 'canary' ? 'Starting R2 Canary Backup...' : 'Starting Full R2 Media Backup...');
-            sendResponse(await initializeScrapeInActiveTab(initMessage, { backup: true }));
-        })().catch((e) => {
+            return initMessage;
+        }, { backup: true }).then(sendResponse).catch((e) => {
             sendResponse({ status: 'error', error: e.message });
         });
         return true;
@@ -2321,8 +2394,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'VALIDATE_SCRAPE_RESUME') {
-        validateScrapeResume(request, sender?.tab?.id ?? null).then((valid) => sendResponse({ valid })).catch(() => {
-            sendResponse({ valid: false });
+        validateScrapeResume(request, sender?.tab?.id ?? null).then(sendResponse).catch(() => {
+            sendResponse({ valid: false, reason: 'stale_authority' });
         });
         return true;
     }
@@ -2554,9 +2627,13 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
             // Generate Filename (Forces GrokVault path + Dedupe)
             const finalPath = await generateFilename(url);
+            const currentLease = await getActiveLeaseForTabEvent(tabId, tab);
+            if (!scrapeLeaseMatches(currentLease, lease)) return;
 
             if (finalPath) {
                 const config = await getCloudConfig();
+                const transferLease = await getActiveLeaseForTabEvent(tabId, tab);
+                if (!scrapeLeaseMatches(transferLease, lease)) return;
                 const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
 
                 if (allowLocalDownload) {
@@ -3119,6 +3196,7 @@ if (typeof module !== 'undefined') {
         queueChromeDownload,
         stopScrapeRun,
         validateScrapeResume,
+        withTimeout,
         persistQueuedBackupProcessedId,
         persistQueuedBackupProcessedIdAfterSuccess,
         recreateWorkflowController,

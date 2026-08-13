@@ -4304,9 +4304,14 @@ class GrokScraper {
         this.runToken = null;
         this.runEpoch = null;
         this.pendingNavigation = null;
+        this._backupStartPending = false;
+        this._pendingInitLease = null;
+        this._runInvalidationVersion = 0;
+        this._listenersRegistered = false;
         this._runStateWriteQueue = Promise.resolve();
         this.Config = { actionWait: 600, navWait: 800, surfaceWait: 10000, historyWait: 1500 };
-        this.init();
+        this.setupListeners();
+        this._initPromise = this.init();
     }
     setOverlay(overlay) { this.overlay = overlay; }
 
@@ -4326,6 +4331,11 @@ class GrokScraper {
             this._runStateWriteQueue = Promise.resolve();
         }
         return this._runStateWriteQueue;
+    }
+
+    getRunInvalidationVersion() {
+        if (!Number.isInteger(this._runInvalidationVersion)) this._runInvalidationVersion = 0;
+        return this._runInvalidationVersion;
     }
 
     matchesRunLease(runToken, runEpoch) {
@@ -4350,7 +4360,9 @@ class GrokScraper {
     }
 
     invalidateRunMemory() {
+        this._runInvalidationVersion = this.getRunInvalidationVersion() + 1;
         this._backupStartPending = false;
+        this._pendingInitLease = null;
         this.backupMode = false;
         this.backupOptions = { mode: 'full', limit: null, options: {} };
         this.state.isRunning = false;
@@ -4365,7 +4377,7 @@ class GrokScraper {
 
     async clearStaleRunState(stopReason = 'stale_session') {
         const backupState = this.backupMode
-            ? { r2BackupState: { isRunning: false, ...this.backupStats, stopReason } }
+            ? { r2BackupState: { ...this.backupStats, isRunning: false, stopReason } }
             : {};
         this.invalidateRunMemory();
         const result = await this.queueRunStateWrite({
@@ -4385,6 +4397,7 @@ class GrokScraper {
     }
 
     async init() {
+        const initInvalidationVersion = this.getRunInvalidationVersion();
         const storedResult = await safeChromeStorageGet('local', [
             'scraperState',
             'currentIndex',
@@ -4400,6 +4413,7 @@ class GrokScraper {
             this.handleExtensionContextInvalidated();
             return;
         }
+        if (this.getRunInvalidationVersion() !== initInvalidationVersion) return;
         const stored = storedResult.value;
         if (stored.processedIds) {
             this.processedIds = new Set(stored.processedIds);
@@ -4433,7 +4447,8 @@ class GrokScraper {
                 return;
             }
             if (!validationResult.value?.valid) {
-                await this.clearStaleRunState('stale_session');
+                if (validationResult.value?.reason === 'non_owner') this.invalidateRunMemory();
+                else await this.clearStaleRunState('stale_session');
             }
         }
 
@@ -4470,32 +4485,62 @@ class GrokScraper {
     }
 
     setupListeners() {
+        if (this._listenersRegistered) return;
+        this._listenersRegistered = true;
         safeChromeAddListener(() => chrome.runtime.onMessage, (request, sender, sendResponse) => {
             if (request.action === 'INIT_SCRAPE') {
-                this.start(request).then(sendResponse, (error) => {
+                const pendingLease = {
+                    kind: 'sync',
+                    runToken: request.runToken,
+                    runEpoch: request.runEpoch,
+                    invalidationVersion: this.getRunInvalidationVersion()
+                };
+                this._pendingInitLease = pendingLease;
+                Promise.resolve(this._initPromise).then(() => {
+                    if (
+                        this._pendingInitLease !== pendingLease
+                        || pendingLease.invalidationVersion !== this.getRunInvalidationVersion()
+                    ) return { status: 'error', surface: this.getCurrentSurface(), error: 'Start was cancelled.' };
+                    this._pendingInitLease = null;
+                    return this.start(request);
+                }).then(sendResponse, (error) => {
                     sendResponse({ status: 'error', surface: this.getCurrentSurface(), error: error.message });
                 });
                 return true;
             } else if (request.action === 'ABORT_SCRAPE') {
-                this.stop('stopped', {
+                Promise.resolve(this._initPromise).then(() => this.stop('stopped', {
                     notifyBackground: false,
                     expectedRunToken: request.runToken,
                     expectedRunEpoch: request.runEpoch
-                }).then(sendResponse, (error) => {
+                })).then(sendResponse, (error) => {
                     sendResponse({ status: 'error', error: error.message });
                 });
                 return true;
             } else if (request.action === 'INIT_R2_BACKUP') {
-                this.startBackupMode(request).then(sendResponse, (error) => {
+                const pendingLease = {
+                    kind: 'r2_backup',
+                    runToken: request.runToken,
+                    runEpoch: request.runEpoch,
+                    invalidationVersion: this.getRunInvalidationVersion()
+                };
+                this._pendingInitLease = pendingLease;
+                Promise.resolve(this._initPromise).then(() => {
+                    if (
+                        this._pendingInitLease !== pendingLease
+                        || pendingLease.invalidationVersion !== this.getRunInvalidationVersion()
+                    ) return { status: 'error', surface: this.getCurrentSurface(), error: 'Start was cancelled.' };
+                    this._pendingInitLease = null;
+                    return this.startBackupMode(request);
+                }).then(sendResponse, (error) => {
                     sendResponse({ status: 'error', surface: this.getCurrentSurface(), error: error.message });
                 });
                 return true;
             } else if (request.action === 'ABORT_R2_BACKUP') {
-                this.stopBackupMode('stopped', {
+                Promise.resolve(this._initPromise).then(() => this.stopBackupMode('stopped', {
                     notifyBackground: false,
                     expectedRunToken: request.runToken,
                     expectedRunEpoch: request.runEpoch
-                }).then(sendResponse, (error) => {
+                })).then(sendResponse, (error) => {
                     sendResponse({ status: 'error', error: error.message });
                 });
                 return true;
@@ -4516,11 +4561,21 @@ class GrokScraper {
             if (Array.isArray(changes.processedIds?.newValue)) {
                 this.processedIds = new Set(changes.processedIds.newValue);
             }
-            const stopSignal = shouldStopScraperForStorageChanges(changes, this.backupMode);
-            if (stopSignal && this.state.isRunning) {
+            const pendingBackup = this._backupStartPending || this._pendingInitLease?.kind === 'r2_backup';
+            const stopSignal = shouldStopScraperForStorageChanges(changes, this.backupMode || pendingBackup);
+            const hasRunAuthority = this.state.isRunning
+                || this._backupStartPending
+                || Boolean(this._pendingInitLease)
+                || Boolean(this.runToken)
+                || Number.isInteger(this.runEpoch);
+            if (stopSignal && hasRunAuthority) {
                 console.log('GrokScraper: stop signal received via storage.onChanged');
-                if (this.backupMode) this.stopBackupMode('stopped', { notifyBackground: false });
-                else this.stop('stopped', { notifyBackground: false });
+                const stopBackup = this.backupMode || pendingBackup;
+                this.invalidateRunMemory();
+                Promise.resolve(this._initPromise).then(() => {
+                    if (stopBackup) return this.stopBackupMode('stopped', { notifyBackground: false });
+                    return this.stop('stopped', { notifyBackground: false });
+                }).catch(() => {});
             }
         }, 'listen for scraper stop signals');
 
@@ -4614,6 +4669,7 @@ class GrokScraper {
         if (!runToken || runEpoch === null) {
             return { status: 'error', surface, error: 'Background run lease is missing.' };
         }
+        const startInvalidationVersion = this.getRunInvalidationVersion();
 
         this.log('Scraping initialized.', 'success');
         this.state.isRunning = true;
@@ -4628,13 +4684,36 @@ class GrokScraper {
             currentIndex: 0,
             scrapeRunToken: runToken,
             scrapeRunEpoch: runEpoch,
-            scrapeBackupOptions: null
+            scrapeNavigation: null,
+            currentItemId: null,
+            scrapeBackupOptions: null,
+            isScraping: true,
+            isR2Backup: false
         }, 'start scrape', { runToken, runEpoch });
         if (result.invalidated) {
             this.handleExtensionContextInvalidated();
             return { status: 'error', surface, error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
         }
         if (result.skipped || !this.isRunActive(runToken, runEpoch)) {
+            return { status: 'error', surface, error: 'Start was cancelled.' };
+        }
+        const validationResult = await safeChromeRuntimeSendMessage({
+            action: 'VALIDATE_SCRAPE_RESUME',
+            runToken,
+            runEpoch,
+            kind: 'sync'
+        }, 'validate scrape start');
+        if (validationResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return { status: 'error', surface, error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
+        }
+        if (
+            this.getRunInvalidationVersion() !== startInvalidationVersion
+            || !this.isRunActive(runToken, runEpoch)
+        ) return { status: 'error', surface, error: 'Start was cancelled.' };
+        if (!validationResult.value?.valid) {
+            if (validationResult.value?.reason === 'non_owner') this.invalidateRunMemory();
+            else await this.clearStaleRunState('stale_session');
             return { status: 'error', surface, error: 'Start was cancelled.' };
         }
         Promise.resolve(this.determineModeAndExecute(runToken, runEpoch)).catch((error) => {
@@ -4697,6 +4776,7 @@ class GrokScraper {
         if (!runToken || runEpoch === null) {
             return { status: 'error', surface, error: 'Background run lease is missing.' };
         }
+        const startInvalidationVersion = this.getRunInvalidationVersion();
 
         this._backupStartPending = true;
         this.runToken = runToken;
@@ -4722,7 +4802,11 @@ class GrokScraper {
         } finally {
             this._backupStartPending = false;
         }
-        if (this.runToken !== runToken || this.runEpoch !== runEpoch) {
+        if (
+            this.getRunInvalidationVersion() !== startInvalidationVersion
+            || this.runToken !== runToken
+            || this.runEpoch !== runEpoch
+        ) {
             return { status: 'error', surface, error: 'Start was cancelled.' };
         }
 
@@ -4744,14 +4828,37 @@ class GrokScraper {
             currentIndex: 0,
             scrapeRunToken: runToken,
             scrapeRunEpoch: runEpoch,
+            scrapeNavigation: null,
+            currentItemId: null,
             scrapeBackupOptions: this.backupOptions,
-            r2BackupState: { isRunning: true, ...this.backupStats }
+            isScraping: true,
+            isR2Backup: true,
+            r2BackupState: { ...this.backupStats, isRunning: true }
         }, 'start R2 backup', { runToken, runEpoch });
         if (startResult.invalidated) {
             this.handleExtensionContextInvalidated();
             return { status: 'error', surface, error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
         }
         if (startResult.skipped || !this.isRunActive(runToken, runEpoch)) {
+            return { status: 'error', surface, error: 'Start was cancelled.' };
+        }
+        const authorityResult = await safeChromeRuntimeSendMessage({
+            action: 'VALIDATE_SCRAPE_RESUME',
+            runToken,
+            runEpoch,
+            kind: 'r2_backup'
+        }, 'validate R2 backup start');
+        if (authorityResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return { status: 'error', surface, error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
+        }
+        if (
+            this.getRunInvalidationVersion() !== startInvalidationVersion
+            || !this.isRunActive(runToken, runEpoch)
+        ) return { status: 'error', surface, error: 'Start was cancelled.' };
+        if (!authorityResult.value?.valid) {
+            if (authorityResult.value?.reason === 'non_owner') this.invalidateRunMemory();
+            else await this.clearStaleRunState('stale_session');
             return { status: 'error', surface, error: 'Start was cancelled.' };
         }
         this.log(this.backupOptions.mode === 'canary' ? 'R2 Canary Backup started.' : 'R2 Full Media Backup started.', 'success');
@@ -4780,7 +4887,7 @@ class GrokScraper {
             scrapeBackupOptions: null,
             isScraping: false,
             isR2Backup: false,
-            r2BackupState: { isRunning: false, ...finalStats }
+            r2BackupState: { ...finalStats, isRunning: false }
         }, 'stop R2 backup');
         if (stopResult.invalidated) {
             this.handleExtensionContextInvalidated();
@@ -5475,36 +5582,41 @@ class GrokScraper {
 }
 
 if (typeof module === 'undefined') {
-    // Always initialize the Overlay and Managers on supported sites (defined in manifest)
-    const provider = detectCurrentProvider();
-    const settings = new SettingsManager();
-    const history = new PromptHistoryManager(settings);
-    if (isChatGptImagesProvider(provider)) {
-        const noopScraper = {
-            start: () => { },
-            stop: () => { },
-            setOverlay: () => { }
-        };
-        const noopRetry = {
-            overlay: null,
-            goalRunning: false,
-            batchRunning: false,
-            startGoal: () => { },
-            startBatch: async () => { },
-            startQualityRepeat: () => { },
-            stopBatch: () => { },
-            stopQualityRepeat: () => { }
-        };
-        const overlay = new GrokOverlay(noopScraper, noopRetry, settings, history, { provider });
-        noopRetry.overlay = overlay;
-    } else {
-        const scraper = new GrokScraper();
-        const retry = new VideoRetryManager(null, settings, history);
-        const overlay = new GrokOverlay(scraper, retry, settings, history, { provider });
-        const recreateBridge = new RecreateWorkflowContentBridge(overlay, history);
-        recreateBridge.setupListeners();
-        retry.overlay = overlay;
-        scraper.setOverlay(overlay);
+    const runtimeKey = '__gptPowerToolsRuntime';
+    if (!globalThis[runtimeKey]) {
+        // Always initialize the Overlay and Managers on supported sites (defined in manifest)
+        const provider = detectCurrentProvider();
+        const settings = new SettingsManager();
+        const history = new PromptHistoryManager(settings);
+        if (isChatGptImagesProvider(provider)) {
+            const noopScraper = {
+                start: () => { },
+                stop: () => { },
+                setOverlay: () => { }
+            };
+            const noopRetry = {
+                overlay: null,
+                goalRunning: false,
+                batchRunning: false,
+                startGoal: () => { },
+                startBatch: async () => { },
+                startQualityRepeat: () => { },
+                stopBatch: () => { },
+                stopQualityRepeat: () => { }
+            };
+            const overlay = new GrokOverlay(noopScraper, noopRetry, settings, history, { provider });
+            noopRetry.overlay = overlay;
+            globalThis[runtimeKey] = { provider, settings, history, scraper: noopScraper, retry: noopRetry, overlay };
+        } else {
+            const scraper = new GrokScraper();
+            const retry = new VideoRetryManager(null, settings, history);
+            const overlay = new GrokOverlay(scraper, retry, settings, history, { provider });
+            const recreateBridge = new RecreateWorkflowContentBridge(overlay, history);
+            recreateBridge.setupListeners();
+            retry.overlay = overlay;
+            scraper.setOverlay(overlay);
+            globalThis[runtimeKey] = { provider, settings, history, scraper, retry, overlay, recreateBridge };
+        }
     }
 } else {
     module.exports = {
