@@ -582,6 +582,171 @@ async function setupMockPromptedBatch(page, {
     }, { accountUuid, mediaUuid, secondMediaUuid, includeDecoys, stopAfterAddPrompt });
 }
 
+async function setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids }) {
+    await page.evaluate(({ accountUuid, mediaUuids }) => {
+        const { retry } = window.__gptE2e;
+        const resultsUrl = 'https://grok.com/imagine';
+        const promptText = 'slow orbit through warm afternoon light';
+        const makeVisible = (element, top = 20, left = 20, width = 100) => {
+            element.getBoundingClientRect = () => ({
+                x: left,
+                y: top,
+                top,
+                left,
+                right: left + width,
+                bottom: top + 40,
+                width,
+                height: 40
+            });
+            return element;
+        };
+
+        retry.createBatchRunToken = () => 'e2e-prompted-results-batch';
+        retry.sleep = () => Promise.resolve();
+        window.__promptedResultsEvents = {
+            opened: [],
+            menuChoices: [],
+            submitted: [],
+            returned: [],
+            preciseEditClicks: 0,
+            promptWrites: []
+        };
+        document.addEventListener('__gpt_set_prompted_video_content', (event) => {
+            window.__promptedResultsEvents.promptWrites.push(event.detail.text);
+        });
+
+        const createRadioGroup = (label, options, selected) => {
+            const group = document.createElement('div');
+            group.setAttribute('role', 'radiogroup');
+            group.setAttribute('aria-label', label);
+            options.forEach((option) => {
+                const radio = document.createElement('button');
+                radio.setAttribute('role', 'radio');
+                radio.setAttribute('aria-checked', option === selected ? 'true' : 'false');
+                if (label === 'Generation mode') radio.setAttribute('aria-label', option);
+                radio.textContent = option;
+                group.appendChild(radio);
+            });
+            return group;
+        };
+
+        const renderDetail = (mediaUuid) => {
+            window.history.pushState({}, '', `/imagine/post/${mediaUuid}`);
+            document.body.innerHTML = '';
+
+            const preciseEdit = makeVisible(document.createElement('button'));
+            preciseEdit.setAttribute('aria-label', 'Edit');
+            preciseEdit.textContent = 'Precise Edit';
+            preciseEdit.addEventListener('click', () => {
+                window.__promptedResultsEvents.preciseEditClicks++;
+            });
+
+            const makeVideo = makeVisible(document.createElement('button'));
+            const triggerId = `results-make-video-${mediaUuid}`;
+            const menuId = `results-video-menu-${mediaUuid}`;
+            makeVideo.id = triggerId;
+            makeVideo.setAttribute('aria-label', 'Make Video');
+            makeVideo.setAttribute('aria-haspopup', 'menu');
+            makeVideo.setAttribute('aria-controls', menuId);
+            makeVideo.setAttribute('aria-expanded', 'false');
+            makeVideo.setAttribute('data-state', 'closed');
+            makeVideo.addEventListener('click', () => {
+                makeVideo.setAttribute('aria-expanded', 'true');
+                makeVideo.setAttribute('data-state', 'open');
+                const menu = makeVisible(document.createElement('div'));
+                menu.id = menuId;
+                menu.setAttribute('role', 'menu');
+                menu.setAttribute('aria-labelledby', triggerId);
+                menu.setAttribute('data-state', 'open');
+                const addPrompt = makeVisible(document.createElement('div'));
+                addPrompt.setAttribute('role', 'menuitem');
+                addPrompt.textContent = 'Add Prompt';
+                addPrompt.addEventListener('click', () => {
+                    window.__promptedResultsEvents.menuChoices.push(mediaUuid);
+                    const composer = document.createElement('div');
+                    const input = makeVisible(document.createElement('div'));
+                    input.setAttribute('contenteditable', 'true');
+                    input.setAttribute('role', 'textbox');
+                    input.setAttribute('aria-label', 'Ask Grok anything');
+                    input.tabIndex = -1;
+                    const submit = makeVisible(document.createElement('button'), 20, 20, 48);
+                    submit.setAttribute('aria-label', 'Send');
+                    submit.disabled = true;
+                    input.addEventListener('input', () => {
+                        submit.disabled = !input.textContent.trim();
+                    });
+                    submit.addEventListener('click', () => {
+                        window.__promptedResultsEvents.submitted.push({
+                            mediaUuid,
+                            prompt: input.textContent
+                        });
+                        const video = document.createElement('video');
+                        video.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/generated_video.mp4`;
+                        Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
+                        document.body.appendChild(video);
+                        const complete = document.createElement('button');
+                        complete.setAttribute('aria-label', 'Video Generation Complete');
+                        document.body.appendChild(complete);
+                    });
+                    composer.append(
+                        input,
+                        createRadioGroup('Generation mode', ['Image', 'Video', 'Agent'], 'Video'),
+                        createRadioGroup('Video resolution', ['480p', '720p', '1080p'], '480p'),
+                        createRadioGroup('Video duration', ['6s', '10s', '15s'], '6s'),
+                        submit
+                    );
+                    document.body.appendChild(composer);
+                    input.focus();
+                });
+                menu.appendChild(addPrompt);
+                document.body.appendChild(menu);
+            });
+
+            const back = makeVisible(document.createElement('button'));
+            back.setAttribute('aria-label', 'Back');
+            back.addEventListener('click', () => {
+                window.__promptedResultsEvents.returned.push(mediaUuid);
+                window.history.replaceState({}, '', resultsUrl);
+                renderResults();
+            });
+            document.body.append(preciseEdit, makeVideo, back);
+        };
+
+        const renderResults = () => {
+            document.body.innerHTML = '';
+            const nativePrompt = document.createElement('div');
+            nativePrompt.setAttribute('contenteditable', 'true');
+            nativePrompt.textContent = promptText;
+            const list = document.createElement('div');
+            list.setAttribute('role', 'list');
+            mediaUuids.forEach((mediaUuid, index) => {
+                const card = makeVisible(document.createElement('article'), index * 140, 20);
+                card.setAttribute('role', 'listitem');
+                const link = document.createElement('a');
+                link.href = `/imagine/post/${mediaUuid}`;
+                const image = document.createElement('img');
+                image.alt = 'Generated image';
+                image.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/image.jpg`;
+                image.scrollIntoView = () => {};
+                link.appendChild(image);
+                link.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    window.__promptedResultsEvents.opened.push(mediaUuid);
+                    renderDetail(mediaUuid);
+                });
+                const makeVideo = document.createElement('button');
+                makeVideo.setAttribute('aria-label', 'Make video');
+                card.append(link, makeVideo);
+                list.appendChild(card);
+            });
+            document.body.append(nativePrompt, list);
+        };
+
+        window.history.replaceState({}, '', resultsUrl);
+        renderResults();
+    }, { accountUuid, mediaUuids });
+}
+
 async function dispatchRuntimeMessage(page, message) {
     return page.evaluate(async (runtimeMessage) => {
         const responses = [];
@@ -1529,6 +1694,56 @@ test.describe('Grok Power Tools E2E', () => {
             batchIndex: 0,
             batchQueueLength: 1,
             batchRunning: false
+        });
+    });
+
+    test('Prompted Batch processes a generated-results grid without selecting Precise Edit', async ({ page }) => {
+        const accountUuid = '91919191-9191-4919-8919-919191919191';
+        const mediaUuids = [
+            '92929292-9292-4929-8929-929292929292',
+            '93939393-9393-4939-8939-939393939393'
+        ];
+
+        await evaluateExtensionContent(page);
+        await page.evaluate(bridgeJs);
+        await setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids });
+
+        await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
+            'prompted',
+            'slow orbit through warm afternoon light',
+            { galleryLimit: 2, videoGoal: 7 }
+        ))).resolves.toBe(true);
+
+        const result = await page.evaluate(() => ({
+            context: window.__gptE2e.retry.batchContext,
+            goalCount: window.__gptE2e.retry.goalCount,
+            goalTotal: window.__gptE2e.retry.goalTotal,
+            batchRunning: window.__gptE2e.retry.batchRunning,
+            pathname: window.location.pathname,
+            status: window.__gptE2e.overlay.el.querySelector('#gptStatusBadge')?.textContent,
+            events: window.__promptedResultsEvents
+        }));
+        expect(result).toEqual({
+            context: 'results_gallery',
+            goalCount: 2,
+            goalTotal: 2,
+            batchRunning: false,
+            pathname: '/imagine',
+            status: 'Prompted Batch [results]: Complete (2/2)',
+            events: {
+                opened: mediaUuids,
+                menuChoices: mediaUuids,
+                submitted: mediaUuids.map((mediaUuid) => ({
+                    mediaUuid,
+                    prompt: 'slow orbit through warm afternoon light'
+                })),
+                returned: mediaUuids,
+                preciseEditClicks: 0,
+                promptWrites: [
+                    'slow orbit through warm afternoon light',
+                    'slow orbit through warm afternoon light'
+                ]
+            }
         });
     });
 

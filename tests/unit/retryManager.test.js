@@ -432,6 +432,291 @@ describe('VideoRetryManager', () => {
         expect(detailSpy).not.toHaveBeenCalled();
     });
 
+    test('detectBatchContext resolves a qualified current results grid separately from Saved', () => {
+        window.history.pushState({}, '', '/imagine');
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/abababab-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+
+        expect(retryManager.detectBatchContext()).toBe('results_gallery');
+    });
+
+    test('results gallery detection rejects a card with ambiguous Make video actions', () => {
+        window.history.pushState({}, '', '/imagine');
+        const { card } = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/abababab-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const duplicate = document.createElement('button');
+        duplicate.setAttribute('aria-label', 'Make video');
+        card.appendChild(duplicate);
+
+        expect(retryManager.detectBatchContext()).toBe('unsupported');
+        expect(retryManager._getQualifiedResultsGalleryItems()).toEqual([]);
+    });
+
+    test('results receipt follows visual qualified order across masonry DOM order', () => {
+        window.history.pushState({}, '', '/imagine');
+        const first = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/11111111-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const last = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/33333333-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const ineligibleMiddle = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/22222222-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        makeVisible(first.card, { top: 0, left: 0 });
+        makeVisible(ineligibleMiddle.card, { top: 100, left: 0 });
+        makeVisible(last.card, { top: 200, left: 0 });
+        ineligibleMiddle.makeVideo.remove();
+
+        const firstItem = retryManager._getQualifiedResultsGalleryItems()[0];
+        const receipt = retryManager._captureResultsGalleryReceipt(firstItem);
+
+        expect(receipt).toEqual(expect.objectContaining({
+            sourceId: '11111111-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+            expectedNextId: '33333333-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        }));
+    });
+
+    test('results card open target accepts duplicate links only when they share one post', () => {
+        window.history.pushState({}, '', '/imagine');
+        const { card, image } = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/abababab-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const imageLink = document.createElement('a');
+        imageLink.href = '/imagine/post/same-post';
+        card.insertBefore(imageLink, image);
+        imageLink.appendChild(image);
+        const overlayLink = document.createElement('a');
+        overlayLink.href = '/imagine/post/same-post';
+        card.appendChild(overlayLink);
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+
+        expect(retryManager._getResultsGalleryOpenTarget(item)).toBe(imageLink);
+
+        overlayLink.href = '/imagine/post/different-post';
+        expect(retryManager._getResultsGalleryOpenTarget(item)).toBeNull();
+    });
+
+    test('startBatch(prompted) routes a current results grid to its gallery runner', async () => {
+        window.history.pushState({}, '', '/imagine');
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/acacacac-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+
+        const savedSpy = jest.spyOn(retryManager, 'startPromptedBatchFromGallery').mockResolvedValue();
+        const resultsSpy = jest.spyOn(retryManager, 'startPromptedBatchFromResultsGallery').mockResolvedValue();
+        const detailSpy = jest.spyOn(retryManager, 'startPromptedBatchFromDetail').mockResolvedValue();
+
+        await retryManager.startBatch('prompted', 'results prompt', { galleryLimit: 5, videoGoal: 7 });
+
+        expect(resultsSpy).toHaveBeenCalledWith('results prompt', 5, expect.any(String));
+        expect(savedSpy).not.toHaveBeenCalled();
+        expect(detailSpy).not.toHaveBeenCalled();
+    });
+
+    test('prompted results gallery submits through detail and restores the same results grid', async () => {
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/adadadad-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        let submittedPrompt = null;
+        window.history.pushState({}, '', '/imagine');
+        window.scrollTo = jest.fn();
+
+        const renderResults = () => {
+            document.body.innerHTML = '';
+            const { image } = createSavedBatchCard(sourceUrl);
+            image.addEventListener('click', () => {
+                window.history.pushState({}, '', '/imagine/post/result-card');
+                document.body.innerHTML = '';
+
+                const back = makeVisible(document.createElement('button'));
+                back.setAttribute('aria-label', 'Back');
+                back.addEventListener('click', () => {
+                    window.history.pushState({}, '', '/imagine');
+                    renderResults();
+                });
+
+                const makeVideo = makeVisible(document.createElement('button'));
+                makeVideo.setAttribute('aria-label', 'Make Video');
+                makeVideo.setAttribute('aria-haspopup', 'menu');
+                makeVideo.addEventListener('click', () => {
+                    const menu = makeVisible(document.createElement('div'));
+                    const addPrompt = createMenuItem('Add Prompt', () => {
+                        const { input } = mountFocusedPromptedVideoComposer({
+                            onSubmit: () => {
+                                submittedPrompt = input.textContent;
+                                appendReadyVideoResult(sourceUrl);
+                            }
+                        });
+                    });
+                    menu.appendChild(addPrompt);
+                    openLinkedMenu(makeVideo, menu);
+                });
+
+                document.body.append(back, makeVideo);
+            });
+            return image;
+        };
+
+        renderResults();
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await retryManager.startPromptedBatchFromResultsGallery('slow camera push in', 1);
+
+        expect(submittedPrompt).toBe('slow camera push in');
+        expect(window.location.pathname).toBe('/imagine');
+        expect(retryManager.goalCount).toBe(1);
+        expect(mockOverlay.setStatus).toHaveBeenCalledWith(
+            'Prompted Batch [results]: Complete (1/1)',
+            'success'
+        );
+    });
+
+    test('results transition waits for delayed post navigation instead of rejecting the grid', async () => {
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/aeaeaeae-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        window.history.pushState({}, '', '/imagine');
+        createSavedBatchCard(sourceUrl);
+        const token = 'results-delayed-navigation';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        let sleepCount = 0;
+        retryManager.sleep = jest.fn(async () => {
+            sleepCount++;
+            if (sleepCount === 1) {
+                window.history.pushState({}, '', '/imagine/post/delayed-result');
+                document.body.innerHTML = '';
+            }
+        });
+
+        const result = await retryManager.waitForPromptedBatchEditorReady(sourceUrl, token, 1000);
+
+        expect(result).toEqual(expect.objectContaining({
+            status: 'ready',
+            surface: 'legacy_detail'
+        }));
+        expect(retryManager.sleep).toHaveBeenCalled();
+    });
+
+    test('results transition waits after the selected card action changes to progress', async () => {
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/a0a0a0a0-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        window.history.pushState({}, '', '/imagine');
+        const { card, makeVideo } = createSavedBatchCard(sourceUrl);
+        makeVideo.remove();
+        const progress = document.createElement('button');
+        progress.setAttribute('aria-label', 'Video Options');
+        card.appendChild(progress);
+        const token = 'results-delayed-progress-navigation';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        let sleepCount = 0;
+        retryManager.sleep = jest.fn(async () => {
+            sleepCount++;
+            if (sleepCount === 1) {
+                window.history.pushState({}, '', '/imagine/post/delayed-progress-result');
+                document.body.innerHTML = '';
+            }
+        });
+
+        const result = await retryManager.waitForPromptedBatchEditorReady(sourceUrl, token, 1000);
+
+        expect(result).toEqual(expect.objectContaining({
+            status: 'ready',
+            surface: 'legacy_detail'
+        }));
+        expect(retryManager.sleep).toHaveBeenCalled();
+    });
+
+    test('results return recognizes the original grid after the source action becomes progress', async () => {
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/a1a1a1a1-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        window.history.pushState({}, '', '/imagine');
+        const { card, makeVideo } = createSavedBatchCard(sourceUrl);
+        makeVideo.remove();
+        const progress = document.createElement('button');
+        progress.setAttribute('aria-label', 'Video Options');
+        card.appendChild(progress);
+        window.scrollTo = jest.fn();
+        const token = 'results-return-progress';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager._waitForPromptedBatchResultsSurface({
+            sourceId: 'a1a1a1a1-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+            expectedNextId: null,
+            scrollTop: 0
+        }, token, 200)).resolves.toBe(true);
+    });
+
+    test('Stop during results-card targeting prevents navigation and submission', async () => {
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/afafafaf-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        window.history.pushState({}, '', '/imagine');
+        const { image } = createSavedBatchCard(sourceUrl);
+        const imageClick = jest.fn();
+        image.addEventListener('click', imageClick);
+        image.scrollIntoView = () => retryManager.stopBatch();
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const token = 'results-stop-before-open';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'do not submit';
+        retryManager.batchProcessedSrcs = new Set();
+
+        await retryManager._processPromptedResultsItem(item, token);
+
+        expect(imageClick).not.toHaveBeenCalled();
+        expect(retryManager.goalCount).toBe(0);
+        expect(retryManager.batchRunning).toBe(false);
+    });
+
+    test('results batch can scroll after every visible card changes to progress', async () => {
+        const processedUrl = 'https://assets.grok.com/users/example/generated/a2a2a2a2-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        const nextUrl = 'https://assets.grok.com/users/example/generated/a3a3a3a3-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        window.history.pushState({}, '', '/imagine');
+        const { card, makeVideo } = createSavedBatchCard(processedUrl);
+        makeVideo.remove();
+        const progress = document.createElement('button');
+        progress.setAttribute('aria-label', 'Video Options');
+        card.appendChild(progress);
+        window.scrollBy = jest.fn();
+        const token = 'results-scroll-after-progress';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchMode = 'prompted';
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchQueue = [];
+        retryManager.batchProcessedSrcs = new Set([
+            'a2a2a2a2-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        ]);
+        let appended = false;
+        retryManager.sleep = jest.fn(async () => {
+            if (!appended) {
+                appended = true;
+                createSavedBatchCard(nextUrl);
+            }
+        });
+
+        await expect(retryManager.scrollForMore(token)).resolves.toBe(true);
+        expect(window.scrollBy).toHaveBeenCalled();
+        expect(retryManager.batchQueue).toEqual([
+            expect.objectContaining({
+                sourceId: 'a3a3a3a3-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+            })
+        ]);
+    });
+
+    test('detectBatchContext keeps an empty Imagine home unsupported', () => {
+        window.history.pushState({}, '', '/imagine');
+
+        expect(retryManager.detectBatchContext()).toBe('unsupported');
+    });
+
     test('startBatch(prompted) routes to detail flow on detail context', async () => {
         window.history.pushState({}, '', '/imagine/post/xyz');
         const gallerySpy = jest.spyOn(retryManager, 'startPromptedBatchFromGallery').mockResolvedValue();

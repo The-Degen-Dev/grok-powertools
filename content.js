@@ -2657,7 +2657,7 @@ class VideoRetryManager {
         this.batchMode = null;       // 'quick' or 'prompted'
         this.batchPrompt = null;     // Prompt text for prompted mode
         this.scrollAttempts = 0;
-        this.batchContext = null;    // 'gallery' or 'detail'
+        this.batchContext = null;    // 'gallery', 'results_gallery', or 'detail'
         this.batchRunToken = null;
         this.batchStartPending = false;
         this.promptedVideoComposerRoot = null;
@@ -2718,7 +2718,57 @@ class VideoRetryManager {
         const surface = detectGrokScrapeSurface(document, window.location);
         if (surface === SCRAPE_SURFACES.savedGallery) return 'gallery';
         if (surface === SCRAPE_SURFACES.agentMedia || surface === SCRAPE_SURFACES.legacyDetail) return 'detail';
+        if (/^\/imagine\/?$/.test(window.location.pathname)
+            && this._getQualifiedResultsGalleryItems().length > 0) {
+            return 'results_gallery';
+        }
         return 'unsupported';
+    }
+
+    _getResultsGalleryEntries() {
+        if (!/^\/imagine\/?$/.test(window.location.pathname)) return [];
+        const seenCards = new Set();
+        return Array.from(document.querySelectorAll('img[alt="Generated image"]'))
+            .map((image) => {
+                const container = findMediaCardRoot(image);
+                if (!container || !image || seenCards.has(container)) return null;
+                seenCards.add(container);
+                const sourceUrl = image.currentSrc || image.src || '';
+                const sourceId = getGrokMediaIdentity(sourceUrl) || sourceUrl;
+                if (!sourceId) return null;
+                const rect = container.getBoundingClientRect();
+                return {
+                    container,
+                    image,
+                    sourceId,
+                    top: rect.top + window.scrollY,
+                    left: rect.left + window.scrollX
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => {
+                if (Math.abs(a.top - b.top) > 20) return a.top - b.top;
+                return a.left - b.left;
+            });
+    }
+
+    _getQualifiedResultsGalleryItems() {
+        return this._getResultsGalleryEntries()
+            .map((entry) => {
+                const buttons = Array.from(entry.container.querySelectorAll(this.BUTTON_SELECTOR))
+                    .filter((button) => findMediaCardRoot(button) === entry.container);
+                if (buttons.length !== 1) return null;
+                return {
+                    ...entry,
+                    button: buttons[0]
+                };
+            })
+            .filter(Boolean);
+    }
+
+    _isResultsGallerySurface() {
+        return /^\/imagine\/?$/.test(window.location.pathname)
+            && this._getResultsGalleryEntries().length > 0;
     }
 
     createBatchRunToken() {
@@ -3624,9 +3674,12 @@ class VideoRetryManager {
             } else if (detectedContext === 'gallery') {
                 const galleryLimit = Math.max(1, parseInt(options.galleryLimit, 10) || this.settingsManager.get('galleryBatchLimit') || 1);
                 await this.startPromptedBatchFromGallery(prompt, galleryLimit, runToken);
+            } else if (detectedContext === 'results_gallery') {
+                const galleryLimit = Math.max(1, parseInt(options.galleryLimit, 10) || this.settingsManager.get('galleryBatchLimit') || 1);
+                await this.startPromptedBatchFromResultsGallery(prompt, galleryLimit, runToken);
             } else {
                 this.batchRunToken = null;
-                this.safeStatus('Prompted Batch: Open Saved or a supported image detail first', 'warning');
+                this.safeStatus('Prompted Batch: Open a generated results gallery, Saved, or a supported image detail first', 'warning');
             }
             return;
         }
@@ -3746,6 +3799,335 @@ class VideoRetryManager {
             this.safeStatus(this.batchFailureMessage, 'warning');
         } else {
             this.safeStatus(`Prompted Batch [gallery]: Queue exhausted (${this.goalCount}/${this.goalTotal})`, 'neutral');
+        }
+    }
+
+    _getResultsGalleryContext() {
+        const entries = this._getResultsGalleryEntries();
+        if (!entries.length) return null;
+        const list = getSavedGalleryList(entries.map((entry) => ({ card: entry.container })))
+            || document.body;
+        return {
+            entries: list === document.body
+                ? entries
+                : entries.filter((entry) => list.contains(entry.container)),
+            list,
+            scroller: getSavedGalleryScroller(list)
+        };
+    }
+
+    _hasOrderedResultsNeighborhood(entries, receipt) {
+        if (!receipt?.sourceId || receipt.sourceId === receipt.expectedNextId) return false;
+        const identities = entries.map((entry) => entry.sourceId);
+        const sourceIndices = identities
+            .map((identity, index) => identity === receipt.sourceId ? index : -1)
+            .filter((index) => index >= 0);
+        if (sourceIndices.length !== 1) return false;
+        if (!receipt.expectedNextId) return true;
+        const nextIndices = identities
+            .map((identity, index) => identity === receipt.expectedNextId ? index : -1)
+            .filter((index) => index >= 0);
+        return nextIndices.length === 1 && nextIndices[0] > sourceIndices[0];
+    }
+
+    _captureResultsGalleryReceipt(item) {
+        const context = this._getResultsGalleryContext();
+        const sourceId = this._getCardSourceId(item?.container);
+        if (!context || !sourceId || sourceId !== item?.sourceId) return null;
+        const sourceIndices = context.entries
+            .map((entry, index) => entry.sourceId === sourceId ? index : -1)
+            .filter((index) => index >= 0);
+        if (sourceIndices.length !== 1) return null;
+        const qualifiedItems = this._getQualifiedResultsGalleryItems();
+        const qualifiedSourceIndices = qualifiedItems
+            .map((entry, index) => entry.sourceId === sourceId ? index : -1)
+            .filter((index) => index >= 0);
+        if (qualifiedSourceIndices.length !== 1) return null;
+        const receipt = {
+            sourceId,
+            expectedNextId: qualifiedItems[qualifiedSourceIndices[0] + 1]?.sourceId || null,
+            scrollTop: getSavedScrollerSnapshot(context.scroller).scrollTop
+        };
+        return this._hasOrderedResultsNeighborhood(context.entries, receipt) ? receipt : null;
+    }
+
+    async _waitForPromptedBatchResultsSurface(receipt, runToken, timeoutMs = 10000) {
+        const pollInterval = 200;
+        const attempts = Math.max(1, Math.ceil(timeoutMs / pollInterval));
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            if (!this.isBatchRunActive(runToken)) return false;
+            if (this._isResultsGallerySurface()) {
+                const context = this._getResultsGalleryContext();
+                if (context && this._hasOrderedResultsNeighborhood(context.entries, receipt)) {
+                    setSavedGalleryScrollTop(context.scroller, receipt.scrollTop);
+                    const verified = this._getResultsGalleryContext();
+                    if (verified
+                        && verified.scroller === context.scroller
+                        && this._hasOrderedResultsNeighborhood(verified.entries, receipt)) {
+                        return true;
+                    }
+                }
+            }
+            await this.sleep(pollInterval);
+        }
+        return false;
+    }
+
+    _restorePromptedBatchResultsState(receipt, runToken) {
+        if (!this.isBatchRunActive(runToken)) return false;
+        const queue = this._getQualifiedResultsGalleryItems()
+            .filter((item) => !item.container.querySelector(this.PROGRESS_SELECTOR)
+                && !this.isCensoredCard(item.container)
+                && !this.batchProcessedSrcs?.has(item.sourceId));
+        if (receipt.expectedNextId) {
+            const nextIndex = queue.findIndex((item) => item.sourceId === receipt.expectedNextId);
+            if (nextIndex < 0) return false;
+            this.batchQueue = queue.slice(nextIndex);
+        } else {
+            this.batchQueue = [];
+        }
+        this.batchIndex = 0;
+        this.targetContext = null;
+        this._clearPromptedVideoComposerRoot();
+        return true;
+    }
+
+    async _returnToPromptedBatchResults(receipt, runToken) {
+        if (!this.isBatchRunActive(runToken)) return 'cancelled';
+        const backControl = this._findPromptedBatchBackControl();
+        if (backControl) {
+            backControl.click();
+            const returned = await this._waitForPromptedBatchResultsSurface(receipt, runToken);
+            if (!this.isBatchRunActive(runToken)) return 'cancelled';
+            if (returned) {
+                return this._restorePromptedBatchResultsState(receipt, runToken)
+                    ? 'returned'
+                    : 'failed';
+            }
+            if (this._isResultsGallerySurface()) return 'failed';
+        }
+
+        if (!this.isBatchRunActive(runToken)) return 'cancelled';
+        if (window.history.length > 1) {
+            window.history.back();
+            const returned = await this._waitForPromptedBatchResultsSurface(receipt, runToken);
+            if (!this.isBatchRunActive(runToken)) return 'cancelled';
+            if (returned) {
+                return this._restorePromptedBatchResultsState(receipt, runToken)
+                    ? 'returned'
+                    : 'failed';
+            }
+        }
+        return this.isBatchRunActive(runToken) ? 'failed' : 'cancelled';
+    }
+
+    async _stopPromptedResultsItem(message, receipt, runToken) {
+        if (!this.isBatchRunActive(runToken)) return false;
+        this.batchFailureMessage = message;
+        this.safeStatus(message, 'warning');
+        this._clearPromptedVideoComposerRoot();
+        if (!this._isResultsGallerySurface() && receipt) {
+            const returnStatus = await this._returnToPromptedBatchResults(receipt, runToken);
+            if (returnStatus === 'cancelled') return false;
+            if (returnStatus === 'failed') {
+                this.safeStatus(
+                    'Prompted Batch [results]: Could not return to the original results. Use Back to recover the gallery.',
+                    'warning'
+                );
+            }
+        }
+        if (!this.isBatchRunActive(runToken)) return false;
+        this.batchRunning = false;
+        this.batchRunToken = null;
+        this.targetContext = null;
+        this.updateCounters();
+        this.updateBatchButtons(false);
+        return false;
+    }
+
+    _getResultsGalleryOpenTarget(item) {
+        const links = Array.from(item.container.querySelectorAll('a[href*="/imagine/post/"]'))
+            .filter((link) => findMediaCardRoot(link) === item.container);
+        if (!links.length) return item.image;
+        const hrefs = new Set(links.map((link) => link.href));
+        if (hrefs.size !== 1) return null;
+        return links.find((link) => link.contains(item.image)) || links[0];
+    }
+
+    async _processPromptedResultsItem(item, runToken) {
+        if (!this.isBatchRunActive(runToken)) return false;
+        const receipt = this._captureResultsGalleryReceipt(item);
+        const openTarget = this._getResultsGalleryOpenTarget(item);
+        if (!receipt || !openTarget || this.detectBatchContext() !== 'results_gallery') {
+            return this._stopPromptedResultsItem(
+                'Prompted Batch [results]: Result card changed before it could be opened',
+                receipt,
+                runToken
+            );
+        }
+
+        openTarget.scrollIntoView({ behavior: 'instant', block: 'center' });
+        if (!this.isBatchRunActive(runToken)) return false;
+        openTarget.click();
+
+        const editorReady = await this.waitForPromptedBatchEditorReady(receipt.sourceId, runToken);
+        if (!this.isBatchRunActive(runToken)) return false;
+        if (editorReady.status !== 'ready') {
+            return this._stopPromptedResultsItem(
+                'Prompted Batch [results]: Selected result did not open a supported video editor',
+                receipt,
+                runToken
+            );
+        }
+
+        const modeReady = await this.selectMakeVideoMode(
+            runToken,
+            editorReady.makeVideoTrigger,
+            editorReady.agentBinding || null
+        );
+        if (!this.isBatchRunActive(runToken)) return false;
+        if (!modeReady) {
+            return this._stopPromptedResultsItem(
+                'Prompted Batch [results]: Could not open Make Video > Add Prompt',
+                receipt,
+                runToken
+            );
+        }
+
+        if (!this.injectPromptedVideoText(this.batchPrompt)) {
+            return this._stopPromptedResultsItem(
+                'Prompted Batch [results]: Video prompt field not found',
+                receipt,
+                runToken
+            );
+        }
+        const submitReady = await this._waitForPromptedVideoSubmitButton(
+            runToken,
+            editorReady.agentBinding || null
+        );
+        if (!this.isBatchRunActive(runToken)) return false;
+        if (!submitReady) {
+            return this._stopPromptedResultsItem(
+                'Prompted Batch [results]: Video submit button not ready',
+                receipt,
+                runToken
+            );
+        }
+
+        const videoResultBaseline = this.capturePromptedVideoResultBaseline(
+            document,
+            editorReady.agentBinding || null
+        );
+        if (!this.clickPromptedVideoSubmitButton(runToken, editorReady.agentBinding || null)) {
+            return this._stopPromptedResultsItem(
+                'Prompted Batch [results]: Video submit button not ready',
+                receipt,
+                runToken
+            );
+        }
+        this.lastClickTime = Date.now();
+
+        const result = await this.awaitBatchItemCompletion(document, {
+            allowRetry: false,
+            labelPrefix: 'Prompted Batch [results]',
+            videoResultBaseline,
+            runToken
+        });
+        if (!this.isBatchRunActive(runToken)) return false;
+        if (result !== 'success') {
+            return this._stopPromptedResultsItem(
+                'Prompted Batch [results]: No new video result was confirmed for the selected image',
+                receipt,
+                runToken
+            );
+        }
+        this.batchProcessedSrcs?.add(receipt.sourceId);
+
+        const returnStatus = await this._returnToPromptedBatchResults(receipt, runToken);
+        if (returnStatus !== 'returned' || !this.isBatchRunActive(runToken)) {
+            if (returnStatus === 'failed') {
+                return this._stopPromptedResultsItem(
+                    'Prompted Batch [results]: Could not return to the original results',
+                    null,
+                    runToken
+                );
+            }
+            return false;
+        }
+
+        this.goalCount++;
+        this.currentRetry = 0;
+        this.updateCounters();
+        return true;
+    }
+
+    async startPromptedBatchFromResultsGallery(prompt, galleryLimit, runToken = this.createBatchRunToken()) {
+        this._clearPromptedVideoComposerRoot();
+        this.batchRunning = true;
+        this.goalRunning = false;
+        this.batchAborted = false;
+        this.batchRunToken = runToken;
+        this.batchIndex = 0;
+        this.batchMode = 'prompted';
+        this.batchContext = 'results_gallery';
+        this.batchPrompt = prompt;
+        this.batchProcessedSrcs = new Set();
+        this.scrollAttempts = 0;
+        this.goalCount = 0;
+        this.goalTotal = Math.max(1, galleryLimit);
+        this.currentRetry = 0;
+        this.batchFailureMessage = null;
+        this.batchQueue = this._getQualifiedResultsGalleryItems();
+
+        if (!this.batchQueue.length) {
+            this.batchRunning = false;
+            this.batchRunToken = null;
+            this.safeStatus('Prompted Batch [results]: No generated images found', 'warning');
+            this.updateCounters();
+            return;
+        }
+
+        this.safeStatus(`Prompted Batch [results]: Starting 0/${this.goalTotal}`, 'info');
+        this.updateCounters();
+        this.updateBatchButtons(true);
+
+        while (this.isBatchRunActive(runToken) && this.goalCount < this.goalTotal) {
+            if (this.batchIndex >= this.batchQueue.length) {
+                const foundMore = await this.scrollForMore(runToken);
+                if (!this.isBatchRunActive(runToken) || !foundMore) break;
+            }
+            const item = this.batchQueue[this.batchIndex];
+            if (!item?.button?.isConnected || !item.container?.isConnected) {
+                this.batchIndex++;
+                continue;
+            }
+            if (item.container.querySelector(this.PROGRESS_SELECTOR)
+                || this.batchProcessedSrcs.has(item.sourceId)
+                || this.isCensoredCard(item.container)) {
+                this.batchIndex++;
+                continue;
+            }
+            this.safeStatus(`Prompted Batch [results]: ${this.goalCount + 1}/${this.goalTotal}`, 'info');
+            await this._processPromptedResultsItem(item, runToken);
+        }
+
+        if (this.batchRunToken !== runToken) return;
+        const hitLimit = this.goalCount >= this.goalTotal;
+        const wasAborted = this.batchAborted;
+        this._clearPromptedVideoComposerRoot();
+        this.batchRunning = false;
+        this.batchAborted = false;
+        this.batchRunToken = null;
+        this.updateBatchButtons(false);
+        this.updateCounters();
+        if (hitLimit) {
+            this.safeStatus(`Prompted Batch [results]: Complete (${this.goalCount}/${this.goalTotal})`, 'success');
+        } else if (wasAborted) {
+            this.safeStatus(`Prompted Batch [results]: Stopped (${this.goalCount}/${this.goalTotal})`, 'neutral');
+        } else if (this.batchFailureMessage) {
+            this.safeStatus(this.batchFailureMessage, 'warning');
+        } else {
+            this.safeStatus(`Prompted Batch [results]: Queue exhausted (${this.goalCount}/${this.goalTotal})`, 'neutral');
         }
     }
 
@@ -4015,6 +4397,10 @@ class VideoRetryManager {
             if (!this.isBatchRunActive(runToken)) return { status: 'cancelled', surface: lastSurface };
             lastSurface = detectGrokScrapeSurface(document, window.location);
             if (lastSurface === SCRAPE_SURFACES.unsupported) {
+                if (this._isResultsGallerySurface()) {
+                    await this.sleep(pollInterval);
+                    continue;
+                }
                 return { status: 'unsupported', surface: lastSurface };
             }
             if (lastSurface === SCRAPE_SURFACES.legacyDetail) {
@@ -4392,14 +4778,18 @@ class VideoRetryManager {
         if (runToken && !this.isBatchRunActive(runToken)) return false;
         if (runToken
             && this.batchMode === 'prompted'
-            && this.batchContext === 'gallery'
-            && detectGrokScrapeSurface(document, window.location) !== SCRAPE_SURFACES.savedGallery) {
+            && ((this.batchContext === 'gallery'
+                && detectGrokScrapeSurface(document, window.location) !== SCRAPE_SURFACES.savedGallery)
+                || (this.batchContext === 'results_gallery'
+                    && !this._isResultsGallerySurface()))) {
             return false;
         }
         if (this.scrollAttempts >= 3) return false;
         this.scrollAttempts++;
 
-        const galleryContext = getSavedGalleryContext(document);
+        const galleryContext = this.batchContext === 'results_gallery'
+            ? this._getResultsGalleryContext()
+            : getSavedGalleryContext(document);
         const scroller = galleryContext?.scroller || window;
         const scrollAmount = getSavedScrollerSnapshot(scroller).clientHeight
             || window.innerHeight
@@ -4415,14 +4805,29 @@ class VideoRetryManager {
         await this.sleep(2500); // Wait for lazy load
         if (runToken && !this.isBatchRunActive(runToken)) return false;
 
-        const newQueue = this.buildBatchQueue();
+        const newQueue = this.batchContext === 'results_gallery'
+            ? this._getQualifiedResultsGalleryItems().filter((item) => (
+                !item.container.querySelector(this.PROGRESS_SELECTOR)
+                && !this.isCensoredCard(item.container)
+                && !this.batchProcessedSrcs?.has(item.sourceId)
+            ))
+            : this.buildBatchQueue();
         // Only add genuinely new items (not already in queue)
-        const existingContainers = new Set(this.batchQueue.map(i => i.container));
-        const newItems = newQueue.filter(i => !existingContainers.has(i.container));
+        const existingKeys = new Set(this.batchQueue.map((item) => (
+            this.batchContext === 'results_gallery'
+                ? item.sourceId
+                : item.container
+        )));
+        const newItems = newQueue.filter((item) => !existingKeys.has(
+            this.batchContext === 'results_gallery'
+                ? item.sourceId
+                : item.container
+        ));
 
         if (newItems.length > 0) {
             this.batchQueue.push(...newItems);
-            if (!(this.batchMode === 'prompted' && this.batchContext === 'gallery')) {
+            if (!(this.batchMode === 'prompted'
+                && (this.batchContext === 'gallery' || this.batchContext === 'results_gallery'))) {
                 this.goalTotal = this.batchQueue.length;
             }
             this.scrollAttempts = 0; // Reset on success
@@ -4470,7 +4875,9 @@ class VideoRetryManager {
         const vidB = this.overlay.el.querySelector('#gptVideoCounter');
         const progressLabel = this.overlay.el.querySelector('#gptProgressLabel');
         const s = this.settingsManager.settings;
-        const isGalleryPrompted = this.batchRunning && this.batchMode === 'prompted' && this.batchContext === 'gallery';
+        const isGalleryPrompted = this.batchRunning
+            && this.batchMode === 'prompted'
+            && (this.batchContext === 'gallery' || this.batchContext === 'results_gallery');
         if (progressLabel) {
             progressLabel.textContent = isGalleryPrompted ? 'Images Processed' : 'Videos Generated';
         }
