@@ -113,6 +113,16 @@ function mountSemanticSavedImage(sourceUrl, scrollTop = 0) {
     return { scroller, list, card, image };
 }
 
+const FULL_POINTER_ACTIVATION_EVENTS = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+
+function recordPointerActivationEvents(element) {
+    const events = [];
+    FULL_POINTER_ACTIVATION_EVENTS.forEach((eventName) => {
+        element.addEventListener(eventName, () => events.push(eventName));
+    });
+    return events;
+}
+
 describe('Grok scrape surface detection', () => {
     afterEach(() => {
         document.body.textContent = '';
@@ -390,7 +400,7 @@ describe('Grok scrape start preflight', () => {
         const { image } = mountSemanticSavedImage(
             'https://assets.grok.com/users/u/generated/11111111-1111-4111-8111-111111111111/image.jpg'
         );
-        image.click = jest.fn();
+        const activationEvents = recordPointerActivationEvents(image);
 
         const starting = backup
             ? scraper.startBackupMode({ mode: 'full', runToken: 'run-state', runEpoch: 21 })
@@ -408,7 +418,7 @@ describe('Grok scrape start preflight', () => {
         expect(response.status).not.toBe('started');
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
         expect(scraper.processItem).not.toHaveBeenCalled();
-        expect(image.click).not.toHaveBeenCalled();
+        expect(activationEvents).toEqual([]);
         expect(scraper.state.isRunning).toBe(false);
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
             action: backup ? 'R2_BACKUP_COMPLETE' : 'SCRAPE_COMPLETE',
@@ -442,7 +452,7 @@ describe('Grok scrape start preflight', () => {
         const { image } = mountSemanticSavedImage(
             'https://assets.grok.com/users/u/generated/22222222-2222-4222-8222-222222222222/image.jpg'
         );
-        image.click = jest.fn();
+        const activationEvents = recordPointerActivationEvents(image);
 
         const starting = backup
             ? scraper.startBackupMode({ mode: 'full', runToken: 'run-authority', runEpoch: 22 })
@@ -460,7 +470,7 @@ describe('Grok scrape start preflight', () => {
         expect(response.status).not.toBe('started');
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
         expect(scraper.processItem).not.toHaveBeenCalled();
-        expect(image.click).not.toHaveBeenCalled();
+        expect(activationEvents).toEqual([]);
         expect(scraper.state.isRunning).toBe(false);
         expect(chrome.runtime.sendMessage.mock.calls.map(([message]) => message.action)).not.toEqual(
             expect.arrayContaining(['DOWNLOAD_MEDIA', 'R2_BACKUP_UPLOAD'])
@@ -492,7 +502,7 @@ describe('Grok scrape start preflight', () => {
         const { image } = mountSemanticSavedImage(
             'https://assets.grok.com/users/u/generated/33333333-3333-4333-8333-333333333333/image.jpg'
         );
-        image.click = jest.fn();
+        const activationEvents = recordPointerActivationEvents(image);
 
         const starting = scraper.startBackupMode({
             mode: 'full',
@@ -513,7 +523,7 @@ describe('Grok scrape start preflight', () => {
         expect(scraper.queueRunStateWrite).not.toHaveBeenCalled();
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
         expect(scraper.processItem).not.toHaveBeenCalled();
-        expect(image.click).not.toHaveBeenCalled();
+        expect(activationEvents).toEqual([]);
         expect(scraper.state.isRunning).toBe(false);
         expect(chrome.runtime.sendMessage.mock.calls.map(([message]) => message.action)).not.toEqual(
             expect.arrayContaining(['VALIDATE_SCRAPE_RESUME', 'DOWNLOAD_MEDIA', 'R2_BACKUP_UPLOAD'])
@@ -765,7 +775,7 @@ describe('Grok scrape surface transitions', () => {
         const { image } = mountSemanticSavedImage(
             'https://assets.grok.com/users/u/generated/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
         );
-        image.click = jest.fn();
+        const activationEvents = recordPointerActivationEvents(image);
         scraper.processItem = jest.fn();
         scraper.failRun = jest.fn().mockResolvedValue();
         const scrollSpy = jest.spyOn(window, 'scrollBy').mockImplementation(() => {});
@@ -777,7 +787,7 @@ describe('Grok scrape surface transitions', () => {
             'saved_scope_drift'
         );
         expect(scraper.processItem).not.toHaveBeenCalled();
-        expect(image.click).not.toHaveBeenCalled();
+        expect(activationEvents).toEqual([]);
         expect(scrollSpy).not.toHaveBeenCalled();
         expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
         scrollSpy.mockRestore();
@@ -884,7 +894,7 @@ describe('Grok scrape surface transitions', () => {
             'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content?size=small',
             640
         );
-        target.click = jest.fn();
+        const activationEvents = recordPointerActivationEvents(target);
 
         await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
 
@@ -900,7 +910,7 @@ describe('Grok scrape surface transitions', () => {
                 })
             })
         }));
-        expect(target.click).toHaveBeenCalledTimes(1);
+        expect(activationEvents).toEqual(FULL_POINTER_ACTIVATION_EVENTS);
         expect(scraper.determineModeAndExecute).toHaveBeenCalledWith('run-1');
     });
 
@@ -924,7 +934,7 @@ describe('Grok scrape surface transitions', () => {
             'https://assets.grok.com/users/u/generated/73e5e137-1334-49ea-b06b-a9d9ba891003/content',
             640
         );
-        target.click = jest.fn();
+        const activationEvents = recordPointerActivationEvents(target);
 
         const processing = GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
         await navigationWriteStarted.promise;
@@ -936,7 +946,7 @@ describe('Grok scrape surface transitions', () => {
             'Saved scope changed to Liked. Switch Grok Saved to All before continuing.',
             'saved_scope_drift'
         );
-        expect(target.click).not.toHaveBeenCalled();
+        expect(activationEvents).toEqual([]);
         expect(scraper.waitForSurface).not.toHaveBeenCalled();
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
         expect(scraper.pendingNavigation).toBeUndefined();
@@ -976,7 +986,6 @@ describe('Grok scrape surface transitions', () => {
         };
         const target = appendCard(sourceId);
         appendCard(nextId);
-        target.click = jest.fn();
         galleryScroller.appendChild(list);
         document.body.append(unrelatedScroller, galleryScroller);
 
@@ -1016,7 +1025,7 @@ describe('Grok scrape surface transitions', () => {
         const { image: target } = mountSemanticSavedImage(
             'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
         );
-        target.click = jest.fn();
+        const activationEvents = recordPointerActivationEvents(target);
 
         await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
 
@@ -1024,6 +1033,7 @@ describe('Grok scrape surface transitions', () => {
             'The selected Saved card did not open a supported media surface.',
             'surface_transition_timeout'
         );
+        expect(activationEvents).toEqual(FULL_POINTER_ACTIVATION_EVENTS);
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
     });
 
@@ -1041,11 +1051,11 @@ describe('Grok scrape surface transitions', () => {
         const { image: target } = mountSemanticSavedImage(
             'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
         );
-        target.click = jest.fn();
+        const activationEvents = recordPointerActivationEvents(target);
 
         await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
 
-        expect(target.click).not.toHaveBeenCalled();
+        expect(activationEvents).toEqual([]);
         expect(scraper.waitForSurface).not.toHaveBeenCalled();
     });
 
@@ -1067,7 +1077,7 @@ describe('Grok scrape surface transitions', () => {
         const { image: target } = mountSemanticSavedImage(
             'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
         );
-        target.click = jest.fn();
+        const activationEvents = recordPointerActivationEvents(target);
 
         const processing = GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1', 4);
         await Promise.resolve();
@@ -1080,7 +1090,7 @@ describe('Grok scrape surface transitions', () => {
         navigationWrite.resolve();
         await Promise.all([processing, stopping]);
 
-        expect(target.click).not.toHaveBeenCalled();
+        expect(activationEvents).toEqual([]);
         expect(chrome.storage.local.set).not.toHaveBeenCalled();
     });
 
@@ -1324,6 +1334,97 @@ describe('Grok scrape surface transitions', () => {
         scraper.returnToSavedGallery = jest.fn();
 
         await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
+
+        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
+        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
+    });
+
+    test('transfers the exact legacy detail media and returns through the Saved restore path', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
+        const mediaId = '47474747-4747-4747-8747-474747474747';
+        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        const media = document.createElement('img');
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: mediaId,
+            currentItemId
+        };
+        chrome.storage.local.get.mockResolvedValue({ currentItemId });
+        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(media));
+        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
+        scraper.persistProcessedId = jest.fn(() => Promise.resolve(true));
+        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
+        scraper.failRun = jest.fn();
+
+        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
+
+        expect(scraper.waitForMatchingLegacyDetailMedia).toHaveBeenCalledWith(mediaId, 'run-1');
+        expect(scraper.performDownload).toHaveBeenCalledWith(media, currentItemId, 'run-1');
+        expect(scraper.persistProcessedId).toHaveBeenCalledWith(currentItemId, 'run-1');
+        expect(scraper._runVisited).toContain(currentItemId);
+        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
+        expect(scraper.failRun).not.toHaveBeenCalled();
+    });
+
+    test('fails closed when legacy detail does not expose the selected Saved media', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
+        const mediaId = '58585858-5858-4858-8858-585858585858';
+        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: mediaId,
+            currentItemId
+        };
+        chrome.storage.local.get.mockResolvedValue({ currentItemId });
+        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
+        scraper.performDownload = jest.fn();
+        scraper.persistProcessedId = jest.fn();
+        scraper.returnToSavedGallery = jest.fn();
+        scraper.failRun = jest.fn(() => Promise.resolve());
+
+        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
+
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Legacy detail view did not expose the selected Saved media.',
+            'legacy_media_missing'
+        );
+        expect(scraper.performDownload).not.toHaveBeenCalled();
+        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
+        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
+    });
+
+    test('does not persist or return when Stop wins a legacy detail transfer', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
+        const mediaId = '69696969-6969-4969-8969-696969696969';
+        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        const media = document.createElement('img');
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: mediaId,
+            currentItemId
+        };
+        chrome.storage.local.get.mockResolvedValue({ currentItemId });
+        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(media));
+        scraper.performDownload = jest.fn(async () => {
+            scraper.runToken = 'run-2';
+            return { status: 'uploaded' };
+        });
+        scraper.persistProcessedId = jest.fn();
+        scraper.returnToSavedGallery = jest.fn();
+
+        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
 
         expect(scraper.persistProcessedId).not.toHaveBeenCalled();
         expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();

@@ -6,6 +6,7 @@ const {
     GrokScraper,
     SettingsManager,
     selectBackupMediaElement,
+    selectMatchingLegacyDetailMedia,
     shouldPersistBackupProcessedId
 } = require('../../content.js');
 const {
@@ -127,6 +128,32 @@ describe('Grok backup media selection', () => {
         const media = selectBackupMediaElement(document);
 
         expect(media).toBeNull();
+    });
+
+    test('selects only the pending Saved identity from a legacy detail surface', () => {
+        const expectedId = '11111111-1111-4111-8111-111111111111';
+        const decoyId = '22222222-2222-4222-8222-222222222222';
+        document.body.innerHTML = `
+            <img id="decoy" src="https://assets.grok.com/users/user-1/generated/${decoyId}/image.jpg">
+            <img id="expected" src="https://assets.grok.com/users/user-1/generated/${expectedId}/image.jpg">
+        `;
+        setElementBox(document.getElementById('decoy'), { width: 900, height: 900, naturalWidth: 1024 });
+        setElementBox(document.getElementById('expected'), { width: 700, height: 700, naturalWidth: 1024 });
+
+        expect(selectMatchingLegacyDetailMedia(document, expectedId)).toBe(document.getElementById('expected'));
+        expect(selectMatchingLegacyDetailMedia(document, '33333333-3333-4333-8333-333333333333')).toBeNull();
+    });
+
+    test('prefers the matching generated video over its matching poster', () => {
+        const expectedId = '44444444-4444-4444-8444-444444444444';
+        document.body.innerHTML = `
+            <img id="poster" src="https://assets.grok.com/users/user-1/generated/${expectedId}/poster.jpg">
+            <video id="video" src="https://assets.grok.com/users/user-1/generated/${expectedId}/generated_video.mp4"></video>
+        `;
+        setElementBox(document.getElementById('poster'), { width: 800, height: 800, naturalWidth: 1024 });
+        setElementBox(document.getElementById('video'), { width: 700, height: 700, naturalWidth: 0 });
+
+        expect(selectMatchingLegacyDetailMedia(document, expectedId)).toBe(document.getElementById('video'));
     });
 });
 
@@ -3216,6 +3243,8 @@ describe('Grok backup canary flow', () => {
         scraper._backupVisited = new Set();
         scraper.Config = { actionWait: 0, navWait: 0 };
         scraper.sleep = jest.fn(() => Promise.resolve());
+        const media = document.createElement('img');
+        scraper.waitForMatchingLegacyDetailMedia = jest.fn(async () => media);
         scraper.performDownload = jest.fn(async () => {
             recordBackupUploadStatus(scraper.backupStats, 'uploaded');
         });
@@ -3231,7 +3260,7 @@ describe('Grok backup canary flow', () => {
         await scraper.executeDetailView();
 
         expect(scraper.backupStats.totalSeen).toBe(1);
-        expect(scraper.performDownload).toHaveBeenCalledTimes(1);
+        expect(scraper.performDownload).toHaveBeenCalledWith(media, 'media-clean-id', 'run-1');
         expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1', {
             stopBackupReason: 'canary_complete'
         });

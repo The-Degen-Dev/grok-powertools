@@ -492,6 +492,41 @@ function findMediaCardRoot(element) {
     return element?.closest?.('[class*="media-post-masonry-card"]') || null;
 }
 
+function dispatchFullPointerClick(element) {
+    if (!element?.dispatchEvent) return false;
+    const rect = element.getBoundingClientRect();
+    const clientX = rect.x + rect.width / 2;
+    const clientY = rect.y + rect.height / 2;
+    const baseOptions = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        button: 0,
+        clientX,
+        clientY
+    };
+    const PointerEventConstructor = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+
+    element.dispatchEvent(new PointerEventConstructor('pointerdown', {
+        ...baseOptions,
+        buttons: 1,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true
+    }));
+    element.dispatchEvent(new MouseEvent('mousedown', { ...baseOptions, buttons: 1 }));
+    element.dispatchEvent(new PointerEventConstructor('pointerup', {
+        ...baseOptions,
+        buttons: 0,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true
+    }));
+    element.dispatchEvent(new MouseEvent('mouseup', { ...baseOptions, buttons: 0 }));
+    element.dispatchEvent(new MouseEvent('click', { ...baseOptions, buttons: 0 }));
+    return true;
+}
+
 const SAVED_VIEWPORT_RECEIPT_VERSION = 2;
 
 function getSavedGalleryEntries(root = document) {
@@ -794,6 +829,28 @@ function selectBackupMediaElement(root = document) {
         .sort((a, b) => (b.area - a.area) || (b.naturalArea - a.naturalArea));
 
     return candidates[0]?.img || null;
+}
+
+function selectMatchingLegacyDetailMedia(root = document, expectedIdentity = '') {
+    const normalizedExpected = getGrokMediaIdentity(expectedIdentity);
+    if (!normalizedExpected) return selectBackupMediaElement(root);
+
+    const videos = Array.from(root.querySelectorAll('video'))
+        .filter(isGeneratedDetailVideoCandidate)
+        .filter((video) => getGrokMediaIdentity(getBackupMediaElementSrc(video)) === normalizedExpected)
+        .map((video) => ({ media: video, area: getBackupElementBox(video).area }));
+    const images = Array.from(root.querySelectorAll('img[src*="imagine-public.x.ai"], img[src*="assets.grok.com/users/"]'))
+        .filter(isGeneratedDetailImageCandidate)
+        .filter((image) => getGrokMediaIdentity(getBackupMediaElementSrc(image)) === normalizedExpected)
+        .map((image) => ({
+            media: image,
+            area: getBackupElementBox(image).area,
+            naturalArea: (image.naturalWidth || 0) * (image.naturalHeight || 0)
+        }));
+
+    videos.sort((a, b) => b.area - a.area);
+    images.sort((a, b) => (b.area - a.area) || (b.naturalArea - a.naturalArea));
+    return videos[0]?.media || images[0]?.media || null;
 }
 
 function isBackupScrollerAtBottom(state) {
@@ -2854,15 +2911,7 @@ class VideoRetryManager {
     // Dispatches a full pointer event sequence that works with Radix UI dropdowns
     // (bare .click() does NOT trigger Grok's Radix-based dropdowns/menus)
     simulateClick(el) {
-        const rect = el.getBoundingClientRect();
-        const x = rect.x + rect.width / 2;
-        const y = rect.y + rect.height / 2;
-        const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
-        el.dispatchEvent(new PointerEvent('pointerdown', opts));
-        el.dispatchEvent(new MouseEvent('mousedown', opts));
-        el.dispatchEvent(new PointerEvent('pointerup', opts));
-        el.dispatchEvent(new MouseEvent('mouseup', opts));
-        el.dispatchEvent(new MouseEvent('click', opts));
+        dispatchFullPointerClick(el);
     }
 
     // Detects censored/blurred gallery cards that would redirect to homepage if clicked
@@ -6445,7 +6494,7 @@ class GrokScraper {
         if (!this.isRunActive(runToken, runEpoch)) return;
         if (!await this.ensureSavedGalleryAllScope(runToken)) return;
         this.pendingNavigation = pendingNavigation;
-        targetItem.click();
+        dispatchFullPointerClick(targetItem);
         const nextSurface = await this.waitForSurface(
             (surface) => surface !== SCRAPE_SURFACES.savedGallery,
             runToken
@@ -6467,6 +6516,16 @@ class GrokScraper {
             await this.sleep(200);
         }
         return lastResult;
+    }
+
+    async waitForMatchingLegacyDetailMedia(expectedIdentity, runToken = this.runToken) {
+        const startedAt = Date.now();
+        while (this.isRunActive(runToken) && Date.now() - startedAt < this.Config.surfaceWait) {
+            const media = selectMatchingLegacyDetailMedia(document, expectedIdentity);
+            if (media) return media;
+            await this.sleep(200);
+        }
+        return null;
     }
 
     async persistProcessedId(currentItemId, runToken = this.runToken) {
@@ -6704,6 +6763,7 @@ class GrokScraper {
         }
         const storedState = storedStateResult.value;
         let currentId = storedState.currentItemId;
+        const expectedIdentity = this.pendingNavigation?.expectedIdentity || getGrokMediaIdentity(currentId);
         if (!currentId) {
             const mediaEl = selectBackupMediaElement(document);
             if (mediaEl) {
@@ -6719,80 +6779,30 @@ class GrokScraper {
             if (!this.isRunActive(runToken)) return;
         }
 
-        // MULTI-VIDEO SUPPORT
-        // Strategies:
-        // 1. Find container with thumbnails.
-        // 2. Iterate each button inside.
-        // 3. Click, Wait, Download.
-
-        // Container seems to be the one with 'overflow-y-auto' inside the article relative area
-        // Or we can just find all buttons with img alt="Thumbnail X"
-
-        const thumbnailButtons = Array.from(document.querySelectorAll('button img[alt^="Thumbnail"]'))
-            .map(img => img.closest('button'))
-            .filter(btn => btn);
         let normalTransferSucceeded = !this.backupMode;
         let normalTransferDurable = !this.backupMode;
 
-        if (thumbnailButtons.length > 0) {
-            console.log(`Multi-Video Detected: ${thumbnailButtons.length} versions.`);
-
-            // Try to find the scrollable container to ensure all match?
-            // User provided: class="... overflow-y-auto ..."
-            // Let's try to find it from the first button
-            const scrollContainer = thumbnailButtons[0].closest('.overflow-y-auto');
-
-            for (let i = 0; i < thumbnailButtons.length; i++) {
-                if (!this.isRunActive(runToken)) return;
-                const btn = thumbnailButtons[i];
-
-                // Scroll into view if needed
-                if (scrollContainer) {
-                    btn.scrollIntoView({ behavior: 'instant', block: 'center' });
-                    await this.sleep(200);
-                    if (!this.isRunActive(runToken)) return;
-                }
-
-                this.log(`Processing Version ${i + 1}/${thumbnailButtons.length}...`);
-                btn.click();
-
-                // Wait for video/image to swap after thumbnail click
-                await this.sleep(500);
-                if (!this.isRunActive(runToken)) return;
-
-                const response = await this.performDownload(null, currentId, runToken);
-                if (!this.backupMode && !isSuccessfulMediaTransferStatus(response?.status)) {
-                    normalTransferSucceeded = false;
-                    await this.failRun(response?.error || 'Legacy media download failed.', 'media_transfer_failed');
-                    return;
-                }
-                if (!this.backupMode && !shouldPersistBackupProcessedId(response?.status)) {
-                    normalTransferDurable = false;
-                }
-                const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
-                if (this.backupMode && canaryStopReason) {
-                    await this.returnToSavedGallery(runToken, { stopBackupReason: canaryStopReason });
-                    return;
-                }
-            }
-        } else {
-            // Fallback: No thumbnails found? Maybe it's a single video without thumbnails?
-            // Or maybe our selector missed. Check if there's just a generated video/image.
-            console.log('No thumbnails found. Assuming single item.');
-            const response = await this.performDownload(null, currentId, runToken);
-            if (!this.backupMode && !isSuccessfulMediaTransferStatus(response?.status)) {
-                normalTransferSucceeded = false;
-                await this.failRun(response?.error || 'Legacy media download failed.', 'media_transfer_failed');
-                return;
-            }
-            if (!this.backupMode && !shouldPersistBackupProcessedId(response?.status)) {
-                normalTransferDurable = false;
-            }
-            const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
-            if (this.backupMode && canaryStopReason) {
-                await this.returnToSavedGallery(runToken, { stopBackupReason: canaryStopReason });
-                return;
-            }
+        this.log('Processing selected Saved media...');
+        const mediaEl = await this.waitForMatchingLegacyDetailMedia(expectedIdentity, runToken);
+        if (!this.isRunActive(runToken)) return;
+        if (!mediaEl) {
+            await this.failRun('Legacy detail view did not expose the selected Saved media.', 'legacy_media_missing');
+            return;
+        }
+        const response = await this.performDownload(mediaEl, currentId, runToken);
+        if (!this.isRunActive(runToken)) return;
+        if (!this.backupMode && !isSuccessfulMediaTransferStatus(response?.status)) {
+            normalTransferSucceeded = false;
+            await this.failRun(response?.error || 'Legacy media download failed.', 'media_transfer_failed');
+            return;
+        }
+        if (!this.backupMode && !shouldPersistBackupProcessedId(response?.status)) {
+            normalTransferDurable = false;
+        }
+        const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
+        if (this.backupMode && canaryStopReason) {
+            await this.returnToSavedGallery(runToken, { stopBackupReason: canaryStopReason });
+            return;
         }
 
         if (!this.isRunActive(runToken)) return;
@@ -6801,17 +6811,7 @@ class GrokScraper {
             await this.persistProcessedId(currentId, runToken);
         }
         if (!this.isRunActive(runToken)) return;
-
-        // Back Button
-        const backBtn = await this.waitForSelector('[aria-label="Back"], .lucide-arrow-left', 5000);
-        if (backBtn) {
-            if (!this.isRunActive(runToken)) return;
-            backBtn.click();
-            await this.sleep(this.Config.navWait);
-            if (this.isRunActive(runToken)) await this.determineModeAndExecute(runToken);
-        } else {
-            await this.failRun('Legacy detail view did not expose a Back control.', 'gallery_return_failed');
-        }
+        await this.returnToSavedGallery(runToken);
     }
 
     _getVideoSrc(videoEl) {
@@ -7082,6 +7082,7 @@ if (typeof module === 'undefined') {
         detectSavedGalleryScope,
         detectGrokScrapeSurface,
         findMatchingAgentMedia,
+        dispatchFullPointerClick,
         getSavedGalleryContext,
         getGrokMediaIdentity,
         hasOrderedSavedNeighborhood,
@@ -7092,6 +7093,7 @@ if (typeof module === 'undefined') {
         recordBackupUploadStatus,
         resolveBackupScrollAttempt,
         selectBackupMediaElement,
+        selectMatchingLegacyDetailMedia,
         getR2BackupCanaryStopReason,
         getR2BackupPageCommandOptions,
         shouldPersistBackupProcessedId,

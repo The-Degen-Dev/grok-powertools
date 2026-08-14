@@ -110,6 +110,7 @@ async function setupMockSavedAgentSync(page, {
     runEpoch = 1,
     agentMedia = true,
     agentMediaMode = 'exact_with_decoy',
+    savedActivationMode = 'click',
     stopAfterNavigationClear = true,
     bridgeResponse = null
 }) {
@@ -121,6 +122,7 @@ async function setupMockSavedAgentSync(page, {
         runEpoch,
         agentMedia,
         agentMediaMode,
+        savedActivationMode,
         stopAfterNavigationClear,
         bridgeResponse
     }) => {
@@ -208,7 +210,22 @@ async function setupMockSavedAgentSync(page, {
                 const card = document.createElement('article');
                 card.setAttribute('role', 'listitem');
                 const image = buildImage(mediaUuid, `${index === 0 ? 'first' : 'second'}-saved-image`);
-                image.addEventListener('click', () => renderAgent(mediaUuid));
+                if (savedActivationMode === 'full_pointer_sequence') {
+                    const expectedEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+                    const activationEvents = [];
+                    expectedEvents.forEach((eventName) => {
+                        card.addEventListener(eventName, () => {
+                            activationEvents.push(eventName);
+                            window.__savedActivationEvents.push({ mediaUuid, events: [...activationEvents] });
+                            if (
+                                eventName === 'click'
+                                && activationEvents.join(',') === expectedEvents.join(',')
+                            ) renderAgent(mediaUuid);
+                        });
+                    });
+                } else {
+                    image.addEventListener('click', () => renderAgent(mediaUuid));
+                }
                 card.appendChild(image);
                 list.appendChild(card);
             });
@@ -220,6 +237,7 @@ async function setupMockSavedAgentSync(page, {
         window.__agentRenderedMediaUrls = [];
         window.__savedScrollByCalls = [];
         window.__savedScrollWrites = [];
+        window.__savedActivationEvents = [];
         window.__savedRenderCount = 0;
         window.__historyBackCalls = 0;
         Object.defineProperty(window.history, 'back', {
@@ -265,9 +283,207 @@ async function setupMockSavedAgentSync(page, {
         runEpoch,
         agentMedia,
         agentMediaMode,
+        savedActivationMode,
         stopAfterNavigationClear,
         bridgeResponse
     });
+}
+
+async function setupMockSavedLegacyDetailSync(page, {
+    accountUuid,
+    mediaUuids,
+    runToken,
+    runEpoch = 1
+}) {
+    await page.evaluate(({
+        accountUuid,
+        mediaUuids,
+        runToken,
+        runEpoch
+    }) => {
+        const { scraper } = window.__gptE2e;
+        const savedUrl = 'https://grok.com/imagine/saved';
+        const expectedPointerEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+        const blobDataUrl = 'data:image/jpeg;base64,bGVnYWN5LWRldGFpbC1maXh0dXJl';
+
+        scraper.Config = { actionWait: 0, navWait: 0, surfaceWait: 100, historyWait: 100 };
+        scraper.sleep = () => Promise.resolve();
+        window.__gptE2eRunLease = { runToken, runEpoch };
+        window.__legacyDetailEvents = {
+            opened: [],
+            transfers: [],
+            returned: [],
+            backControlEvents: [],
+            thumbnailClicks: []
+        };
+        window.__chromeRuntimeResponseByAction = {
+            GET_CLOUD_CONFIG: { config: { mode: 'cloud_only' } },
+            DOWNLOAD_MEDIA: (message) => {
+                window.__legacyDetailEvents.transfers.push(message.url);
+                return { status: 'uploaded' };
+            }
+        };
+        document.addEventListener('__gpt_fetch_media', (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+                detail: {
+                    requestId: event.detail.requestId,
+                    dataUrl: blobDataUrl,
+                    size: 21,
+                    type: 'image/jpeg'
+                }
+            }));
+        });
+
+        const makeVisible = (element, top = 20, left = 20, width = 100, height = 40) => {
+            element.getBoundingClientRect = () => ({
+                x: left,
+                y: top,
+                top,
+                left,
+                right: left + width,
+                bottom: top + height,
+                width,
+                height
+            });
+            return element;
+        };
+
+        const renderDetail = (mediaUuid) => {
+            window.history.pushState({}, '', `/imagine/post/${mediaUuid}?conversation=mock`);
+            document.body.innerHTML = '';
+            window.__legacyDetailEvents.opened.push(mediaUuid);
+
+            const media = makeVisible(document.createElement('img'), 80, 120, 900, 700);
+            media.alt = 'Generated image';
+            media.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/image.jpg`;
+            Object.defineProperties(media, {
+                naturalWidth: { configurable: true, value: 1024 },
+                naturalHeight: { configurable: true, value: 1024 }
+            });
+
+            const download = makeVisible(document.createElement('button'));
+            download.setAttribute('aria-label', 'Download');
+
+            const back = makeVisible(document.createElement('button'));
+            back.setAttribute('aria-label', 'Back');
+            const backEvents = [];
+            expectedPointerEvents.forEach((eventName) => {
+                back.addEventListener(eventName, () => {
+                    backEvents.push(eventName);
+                    window.__legacyDetailEvents.backControlEvents.push(eventName);
+                    if (eventName !== 'click') return;
+                    if (backEvents.join(',') === expectedPointerEvents.join(',')) {
+                        window.history.back();
+                        return;
+                    }
+                    void scraper.stop('e2e_bare_back_control_click');
+                });
+            });
+
+            const timeline = document.createElement('div');
+            timeline.className = 'overflow-y-auto';
+            const timelineMediaUuids = [
+                '70707070-7070-4070-8070-707070707070',
+                mediaUuid,
+                '71717171-7171-4171-8171-717171717171'
+            ];
+            timelineMediaUuids.forEach((timelineMediaUuid, index) => {
+                const button = makeVisible(document.createElement('button'), 80 + (index * 52), 20, 40, 40);
+                const thumbnail = makeVisible(document.createElement('img'), 80 + (index * 52), 20, 40, 40);
+                thumbnail.alt = `Thumbnail ${index + 1}`;
+                thumbnail.src = `https://assets.grok.com/users/${accountUuid}/generated/${timelineMediaUuid}/image.jpg`;
+                button.addEventListener('click', () => {
+                    window.__legacyDetailEvents.thumbnailClicks.push(timelineMediaUuid);
+                    media.src = thumbnail.src;
+                    window.history.replaceState({}, '', `/imagine/post/${timelineMediaUuid}?conversation=mock`);
+                });
+                button.appendChild(thumbnail);
+                timeline.appendChild(button);
+            });
+
+            document.body.append(timeline, media, download, back);
+        };
+
+        const renderSaved = () => {
+            document.body.innerHTML = '';
+            const scopeToolbar = document.createElement('div');
+            const allScope = makeVisible(document.createElement('button'));
+            const likedScope = makeVisible(document.createElement('button'));
+            allScope.textContent = 'All';
+            allScope.className = 'bg-primary text-background hover:bg-primary';
+            likedScope.textContent = 'Liked';
+            scopeToolbar.append(allScope, likedScope);
+
+            const scroller = document.createElement('div');
+            scroller.className = 'overflow-scroll';
+            scroller.id = 'legacy-saved-gallery-scroller';
+            let scrollTop = 420;
+            Object.defineProperties(scroller, {
+                scrollTop: {
+                    configurable: true,
+                    get: () => scrollTop,
+                    set: (value) => { scrollTop = Number(value); }
+                },
+                scrollHeight: { configurable: true, value: 2000 },
+                clientHeight: { configurable: true, value: 800 }
+            });
+            scroller.scrollBy = () => {};
+
+            const list = document.createElement('div');
+            list.setAttribute('role', 'list');
+            mediaUuids.forEach((mediaUuid, index) => {
+                const card = document.createElement('article');
+                card.setAttribute('role', 'listitem');
+                const image = makeVisible(document.createElement('img'), 100 + (index * 220), 20, 200, 200);
+                image.alt = 'Generated image';
+                image.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/image.jpg`;
+                Object.defineProperties(image, {
+                    naturalWidth: { configurable: true, value: 1024 },
+                    naturalHeight: { configurable: true, value: 1024 }
+                });
+                const activationEvents = [];
+                expectedPointerEvents.forEach((eventName) => {
+                    card.addEventListener(eventName, () => {
+                        activationEvents.push(eventName);
+                        if (
+                            eventName === 'click'
+                            && activationEvents.join(',') === expectedPointerEvents.join(',')
+                        ) renderDetail(mediaUuid);
+                    });
+                });
+                card.appendChild(image);
+                list.appendChild(card);
+            });
+            scroller.appendChild(list);
+            document.body.append(scopeToolbar, scroller);
+        };
+
+        Object.defineProperty(window.history, 'back', {
+            configurable: true,
+            value: () => {
+                const mediaUuid = window.location.pathname.split('/').filter(Boolean).at(-1);
+                window.__legacyDetailEvents.returned.push(mediaUuid);
+                window.history.replaceState({}, '', savedUrl);
+                renderSaved();
+            }
+        });
+
+        let completedReturns = 0;
+        window.__chromeStorageSetObservers.push((values) => {
+            if (
+                values.scrapeNavigation !== null
+                || values.currentItemId !== null
+                || Object.keys(values).length !== 2
+            ) return;
+            completedReturns++;
+            if (completedReturns === mediaUuids.length) {
+                void scraper.stop('e2e_after_two_legacy_returns');
+            }
+        });
+
+        window.history.replaceState({}, '', savedUrl);
+        renderSaved();
+    }, { accountUuid, mediaUuids, runToken, runEpoch });
 }
 
 async function setupMockPromptedBatch(page, {
@@ -1285,6 +1501,104 @@ test.describe('Grok Power Tools E2E', () => {
             scrapeNavigation: null,
             processedIds: undefined
         });
+    });
+
+    test('Start Sync activates Grok 2 Saved cards with the full pointer sequence', async ({ page }) => {
+        const accountUuid = '14141414-1414-4414-8414-141414141414';
+        const firstMediaUuid = '25252525-2525-4525-8525-252525252525';
+        const secondMediaUuid = '36363636-3636-4636-8636-363636363636';
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [firstMediaUuid, secondMediaUuid],
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'local_only' } },
+                DOWNLOAD_MEDIA: { status: 'queued' }
+            },
+            runToken: 'e2e-grok2-saved-activation',
+            savedActivationMode: 'full_pointer_sequence'
+        });
+
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease))).toEqual({
+            status: 'started',
+            surface: 'saved_gallery',
+            runToken: 'e2e-grok2-saved-activation',
+            runEpoch: 1
+        });
+
+        await expect.poll(async () => page.evaluate(() => window.__chromeRuntimeMessages.some((message) => (
+            message.action === 'DOWNLOAD_MEDIA'
+        )))).toBe(true);
+        await expect.poll(async () => page.evaluate(() => window.__historyBackCalls)).toBe(1);
+        expect(await page.evaluate(() => window.__savedActivationEvents.at(-1)?.events || [])).toEqual([
+            'pointerdown',
+            'mousedown',
+            'pointerup',
+            'mouseup',
+            'click'
+        ]);
+        expect(await page.evaluate(() => window.__chromeStorageLocalState.scrapeStopReason)).not.toBe(
+            'surface_transition_timeout'
+        );
+    });
+
+    test('Cloud-only Start Sync returns through two Grok 2 legacy detail items', async ({ page }) => {
+        const accountUuid = '47474747-4747-4747-8747-474747474747';
+        const firstMediaUuid = '58585858-5858-4858-8858-585858585858';
+        const secondMediaUuid = '69696969-6969-4969-8969-696969696969';
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedLegacyDetailSync(page, {
+            accountUuid,
+            mediaUuids: [firstMediaUuid, secondMediaUuid],
+            runToken: 'e2e-two-legacy-details'
+        });
+
+        await expect(await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease))).toEqual({
+            status: 'started',
+            surface: 'saved_gallery',
+            runToken: 'e2e-two-legacy-details',
+            runEpoch: 1
+        });
+
+        await expect.poll(async () => page.evaluate(() => ({
+            scraperState: window.__chromeStorageLocalState.scraperState,
+            stopReason: window.__chromeStorageLocalState.scrapeStopReason
+        }))).toEqual({
+            scraperState: 'idle',
+            stopReason: 'e2e_after_two_legacy_returns'
+        });
+
+        const events = await page.evaluate(() => window.__legacyDetailEvents);
+        expect(events.opened).toEqual([firstMediaUuid, secondMediaUuid]);
+        expect(events.transfers).toEqual([
+            `https://assets.grok.com/users/${accountUuid}/generated/${firstMediaUuid}/image.jpg`,
+            `https://assets.grok.com/users/${accountUuid}/generated/${secondMediaUuid}/image.jpg`
+        ]);
+        expect(events.returned).toEqual([firstMediaUuid, secondMediaUuid]);
+        expect(events.backControlEvents).toEqual([]);
+        expect(events.thumbnailClicks).toEqual([]);
+        await expect(page).toHaveURL('https://grok.com/imagine/saved');
+
+        const transferMessages = await page.evaluate(() => window.__chromeRuntimeMessages.filter((message) => (
+            message.action === 'DOWNLOAD_MEDIA'
+        )));
+        expect(transferMessages).toHaveLength(2);
+        expect(transferMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                runToken: 'e2e-two-legacy-details',
+                kind: 'sync',
+                url: expect.stringContaining(firstMediaUuid),
+                blobDataUrl: expect.stringMatching(/^data:image\/jpeg;base64,/)
+            }),
+            expect.objectContaining({
+                runToken: 'e2e-two-legacy-details',
+                kind: 'sync',
+                url: expect.stringContaining(secondMediaUuid),
+                blobDataUrl: expect.stringMatching(/^data:image\/jpeg;base64,/)
+            })
+        ]));
     });
 
     test('Start Sync fails closed when Agent Mode contains two exact media matches', async ({ page }) => {
