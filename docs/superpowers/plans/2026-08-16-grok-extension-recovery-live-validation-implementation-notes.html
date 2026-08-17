@@ -65,7 +65,7 @@
             <h1>Grok Extension Recovery Implementation Notes</h1>
             <p class="stamp">Initialized 2026-08-16 23:10:16 EDT</p>
             <section class="lede">
-                <div><strong>Status:</strong> <span class="status">Task 1 of 15 in progress</span></div>
+                <div><strong>Status:</strong> <span class="status">Task 2 of 15 in progress</span></div>
                 <div><strong>Branch:</strong> <code>codex/grok-extension-recovery</code></div>
                 <div><strong>Plan:</strong> <code>2026-08-16-grok-extension-recovery-live-validation.md</code></div>
                 <div><strong>Proof boundary:</strong> No runtime edit or live lane has run yet. Existing automated and two-item evidence is not being treated as Sync, Dual-write, or full-backup proof.</div>
@@ -76,8 +76,9 @@
                 <thead><tr><th>Task</th><th>State</th><th>Evidence</th></tr></thead>
                 <tbody>
                     <tr><td>Preflight</td><td class="ok">Complete</td><td>Branch and approved dirty baseline match the preserved checkpoint. The spec exists and the 15-task plan was scanned for cross-task conflicts.</td></tr>
-                    <tr><td>Task 1</td><td class="status">In progress</td><td>Preparing the evidence contract and exact pre-runtime baseline capture.</td></tr>
-                    <tr><td>Tasks 2-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
+                    <tr><td>Task 1</td><td class="ok">Complete</td><td>Evidence contract, serialized atomic lane recording, secret-shape redaction, exact NUL-delimited Git status capture, and authoritative dirty-patch baseline passed review after one fix round.</td></tr>
+                    <tr><td>Task 2</td><td class="status">In progress</td><td>Preparing versioned gallery receipts and trusted Prompted Batch/Saved return proof.</td></tr>
+                    <tr><td>Tasks 3-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
                 </tbody>
             </table>
 
@@ -88,11 +89,12 @@
                     <tr><td>Use this plan-specific HTML file instead of replacing the tracked root <code>implementation-notes.html</code>.</td><td>The root file documents an older Video/GIF Recreate goal and is historical project evidence.</td><td>Both records remain intact; this file is the running record for the current recovery plan.</td></tr>
                     <tr><td>Allow Task 1's <code>--evidence</code> argument to accept inline JSON or a readable JSON file path.</td><td>Task 1 describes inline JSON, while Task 9's approved command passes a file path.</td><td>One CLI supports both approved call sites without creating a second tool.</td></tr>
                     <tr><td>Commit this notes file before runtime baseline capture.</td><td>Task 1 requires the dirty baseline to contain exactly the six approved tracked runtime/test files and two protected untracked files.</td><td>A docs-only commit precedes Task 1; the captured runtime patch remains exact.</td></tr>
+                    <tr><td>Serialize lane updates with a bounded same-directory lock.</td><td>An atomic rename prevents torn JSON but does not prevent two recorders from dropping each other's updates.</td><td>Concurrent lane evidence survives; a stale lock may be reclaimed only after the bounded stale threshold.</td></tr>
                 </tbody>
             </table>
 
             <h2>Deviations</h2>
-            <div class="panel"><p class="empty">None. The two rulings above resolve plan mechanics without changing the approved product or validation scope.</p></div>
+            <div class="panel"><p class="empty">None. Task 1 required one review-driven hardening round, but it did not change the approved product or validation scope.</p></div>
 
             <h2>Tradeoffs</h2>
             <table>
@@ -112,6 +114,10 @@
                 <tbody>
                     <tr><td><code>git status --short --branch</code></td><td class="ok">Matched checkpoint</td><td>Six tracked dirty files, two protected untracked files, branch ahead by two.</td></tr>
                     <tr><td>Plan/spec preflight</td><td class="ok">Complete</td><td>All 15 tasks checked internally and at shared interfaces. One CLI-input inconsistency was ruled on above.</td></tr>
+                    <tr><td>Authoritative runtime baseline</td><td class="ok">Captured</td><td>Run <code>extension-recovery-20260816-231810</code> records exactly six approved dirty tracked files and two protected untracked files. The baseline patch checksum matches its workbook.</td></tr>
+                    <tr><td>Task 1 focused Jest</td><td class="ok">6/6 passed</td><td>Includes inline/file evidence, overwrite refusal, secret-shape redaction, concurrent recorders, and exact NUL-delimited status parsing.</td></tr>
+                    <tr><td>Task 1 lint and Node 24 smoke</td><td class="ok">Passed</td><td>Synthetic artifacts were inspected and removed. The authoritative run was not overwritten or regenerated.</td></tr>
+                    <tr><td>Task 1 independent review</td><td class="ok">Approved after fix</td><td>Initial review found four issues. Scoped re-review confirmed all four addressed with no new breakage.</td></tr>
                     <tr><td>Runtime validation</td><td>Not run</td><td>No behavior claim yet.</td></tr>
                     <tr><td>Live Chrome/cloud validation</td><td>Not run</td><td>No output, R2, or full-backup claim yet.</td></tr>
                 </tbody>
@@ -121,7 +127,9 @@
             <table>
                 <thead><tr><th>Commit</th><th>Purpose</th><th>Review</th></tr></thead>
                 <tbody>
-                    <tr><td>Pending</td><td>Initialize plan-specific implementation notes.</td><td>Controller-owned documentation only.</td></tr>
+                    <tr><td><code>8d728e6</code></td><td>Initialize plan-specific implementation notes.</td><td>Controller-owned documentation only.</td></tr>
+                    <tr><td><code>cbc9c54</code></td><td>Add extension recovery evidence gate.</td><td>Initial task review found four issues.</td></tr>
+                    <tr><td><code>8e8cce3</code></td><td>Harden evidence recording, redaction, concurrency, and Git status parsing.</td><td>Scoped re-review: all findings addressed.</td></tr>
                 </tbody>
             </table>
 
