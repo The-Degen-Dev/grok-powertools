@@ -699,9 +699,15 @@ describe('Grok backup background processed ID persistence', () => {
             getR2BackupCompletionStatusLabel,
             isR2BackupCompletionSuccessful
         } = loadBackgroundForTest();
+        const completeCanary = {
+            stopReason: 'canary_complete',
+            pendingTransfers: 0,
+            errors: 0
+        };
 
-        expect(isR2BackupCompletionSuccessful({ stopReason: 'canary_complete' })).toBe(true);
-        expect(getR2BackupCompletionStatusLabel({ stopReason: 'canary_complete' })).toBe('canary complete');
+        expect(isR2BackupCompletionSuccessful(completeCanary)).toBe(true);
+        expect(getR2BackupCompletionStatusLabel(completeCanary)).toBe('canary complete');
+        expect(isR2BackupCompletionSuccessful({ stopReason: 'canary_complete', errors: 0 })).toBe(false);
         expect(isR2BackupCompletionSuccessful({ stopReason: 'canary_incomplete' })).toBe(false);
     });
 
@@ -1319,7 +1325,7 @@ describe('native download processed ID lifecycle', () => {
         });
         const background = await harness.load();
 
-        await background.initializeBackgroundState();
+        await background.ensureBackgroundStateReady();
 
         expect(harness.storageState.pendingDownloadOperations).toEqual({});
         expect(harness.storageState.processedIds).toEqual([]);
@@ -1511,13 +1517,20 @@ describe('cloud-only download proof and cleanup ordering', () => {
             id: downloadId,
             state: { current: 'complete' }
         }));
-        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+        await waitForAssertion(() => expect(
+            harness.storageState.pendingDownloadOperations[String(downloadId)]
+        ).toEqual(expect.objectContaining({
+            downloadState: 'complete',
+            r2State: 'pending'
+        })));
 
         expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
             downloadState: 'complete',
-            r2State: 'pending',
-            localIdentityPersisted: true
+            r2State: 'pending'
         }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].localIdentityPersisted)
+            .not.toBe(true);
+        expect(harness.storageState.processedIds).toEqual([]);
         expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
     }
 
@@ -1865,10 +1878,12 @@ describe('cloud-only download proof and cleanup ordering', () => {
 
         const originalSet = harness.chromeApi.storage.local.set.getMockImplementation();
         const lateWrite = createDeferred();
+        const completionWriteStarted = createDeferred();
         let lateValues = null;
         harness.chromeApi.storage.local.set.mockImplementation((values) => {
             if (!lateValues && values.cloudSyncQueue && values.pendingDownloadOperations && values.scrapeCompletionTxn) {
                 lateValues = cloneJson(values);
+                completionWriteStarted.resolve();
                 return lateWrite.promise.then(() => originalSet(lateValues));
             }
             return originalSet(values);
@@ -1881,7 +1896,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
             kind: lease.kind,
             stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
         }, { tab: { id: lease.tabId } });
-        for (let tick = 0; tick < 10 && !lateValues; tick++) await Promise.resolve();
+        await completionWriteStarted.promise;
         expect(lateValues).toEqual(expect.objectContaining({
             cloudSyncQueue: expect.any(Array),
             pendingDownloadOperations: expect.any(Object),
@@ -2567,7 +2582,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
         expect(harness.chromeApi.alarms.create).not.toHaveBeenCalled();
     });
 
-    test('keeps public dual-write completion until queue success without resurrecting a reset ID', async () => {
+    test('persists public dual-write identity only after queue success following a reset', async () => {
         const downloadId = 64;
         const storage = cloudOnlyStorage();
         storage.cloudConfig.mode = 'dual_write';
@@ -2578,20 +2593,22 @@ describe('cloud-only download proof and cleanup ordering', () => {
         await reset.response;
         expect(harness.storageState.processedIds).toEqual([]);
         expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
-            r2State: 'pending',
-            localIdentityPersisted: true
+            r2State: 'pending'
         }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].localIdentityPersisted)
+            .not.toBe(true);
 
         installR2PresentFetch(publicUrl);
         harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
         await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue).toEqual([]));
 
-        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.storageState.processedIds).toEqual([mediaId]);
         expect(harness.storageState.pendingDownloadOperations).toEqual({});
         expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
     });
 
-    test('retains missing-history public dual-write ownership across restart and reset', async () => {
+    test('retains missing-history public dual-write ownership until R2 success after restart', async () => {
         const downloadId = 65;
         const storage = cloudOnlyStorage();
         storage.cloudConfig.mode = 'dual_write';
@@ -2603,22 +2620,23 @@ describe('cloud-only download proof and cleanup ordering', () => {
         harness.downloads.delete(downloadId);
         installR2PresentFetch(publicUrl);
 
-        await harness.load();
-        await waitForAssertion(() => expect(
-            harness.storageState.pendingDownloadOperations[String(downloadId)]
-        ).toEqual(expect.objectContaining({
+        const restarted = await harness.load();
+        await restarted.ensureBackgroundStateReady();
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
             cleanupDownloadId: downloadId,
             downloadState: 'complete',
-            r2State: 'pending',
-            localIdentityPersisted: true
-        })));
+            r2State: 'pending'
+        }));
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].localIdentityPersisted)
+            .not.toBe(true);
         expect(harness.storageState.processedIds).toEqual([]);
         expect(global.fetch).not.toHaveBeenCalled();
 
         harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
         await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue).toEqual([]));
 
-        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.storageState.processedIds).toEqual([mediaId]);
         expect(harness.storageState.pendingDownloadOperations).toEqual({});
         expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
     });
@@ -2681,7 +2699,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
         expect(harness.storageState.pendingDownloadOperations).toEqual({});
     });
 
-    test('dual-write auth failure persists local completion but never deletes the file', async () => {
+    test('dual-write auth failure waits for R2 before persisting identity and never deletes the file', async () => {
         const storage = cloudOnlyStorage();
         storage.cloudConfig.mode = 'dual_write';
         global.fetch = jest.fn(async (url) => {
@@ -2715,13 +2733,23 @@ describe('cloud-only download proof and cleanup ordering', () => {
         });
 
         await Promise.resolve(harness.getDownloadChangedListener()({ id: 54, state: { current: 'complete' } }));
-        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+        await waitForAssertion(() => expect(
+            harness.storageState.pendingDownloadOperations['54']?.lastError
+        ).toEqual(expect.any(String)));
 
+        expect(harness.storageState.processedIds).toEqual([]);
         expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
         expect(harness.storageState.pendingDownloadOperations['54']).toEqual(expect.objectContaining({
             downloadState: 'complete',
             r2State: 'pending'
         }));
+
+        installR2PresentFetch(authUrl);
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+
+        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
     });
 
     test('does not resurrect a reset dual-write identity during an alarm retry', async () => {
@@ -2791,7 +2819,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
         const harness = createDurableBackgroundHarness(completedCloudOnlyOperation(downloadId));
         const background = await harness.load();
 
-        await background.initializeBackgroundState();
+        await background.ensureBackgroundStateReady();
 
         expect(harness.storageState.processedIds).toEqual([mediaId]);
         expect(harness.storageState.pendingDownloadOperations).toEqual({});
@@ -2799,23 +2827,37 @@ describe('cloud-only download proof and cleanup ordering', () => {
         expect(harness.chromeApi.downloads.erase).not.toHaveBeenCalled();
     });
 
-    test('detaches missing public download history so queued R2 success can finalize identity', async () => {
+    test('keeps missing-history R2-pending work retryable without inventing download completion', async () => {
         const downloadId = 61;
         installR2PresentFetch(publicUrl);
         const harness = createDurableBackgroundHarness(publicRetryStorage(downloadId, 0));
         const background = await harness.load();
 
-        await background.initializeBackgroundState();
+        await background.ensureBackgroundStateReady();
 
-        expect(harness.storageState.pendingDownloadOperations).toEqual({});
-        expect(harness.storageState.cloudSyncQueue[0].cleanupDownloadId).toBeNull();
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            cleanupDownloadId: downloadId,
+            downloadState: 'in_progress',
+            r2State: 'pending'
+        }));
+        expect(harness.storageState.cloudSyncQueue[0]).toEqual(expect.objectContaining({
+            cleanupDownloadId: downloadId,
+            attempts: 0
+        }));
         expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.chromeApi.alarms.create).toHaveBeenCalledWith(
+            'gptCloudRetry',
+            expect.objectContaining({ delayInMinutes: expect.any(Number) })
+        );
 
         harness.getAlarmListener()({ name: 'gptCloudRetry' });
-        await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
+        await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue).toEqual([]));
 
-        expect(harness.storageState.cloudSyncQueue).toEqual([]);
-        expect(harness.chromeApi.downloads.removeFile).not.toHaveBeenCalled();
+        expect(harness.storageState.processedIds).toEqual([]);
+        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+            downloadState: 'in_progress',
+            r2State: 'present'
+        }));
     });
 
     test('continues cleanup when file bytes were removed before worker restart', async () => {
@@ -2843,7 +2885,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
         });
         const background = await harness.load();
 
-        await background.initializeBackgroundState();
+        await background.ensureBackgroundStateReady();
 
         expect(harness.chromeApi.downloads.removeFile).toHaveBeenCalledWith(downloadId, expect.any(Function));
         expect(harness.chromeApi.downloads.erase).toHaveBeenCalledWith({ id: downloadId }, expect.any(Function));
@@ -3311,15 +3353,22 @@ describe('Grok backup popup status text', () => {
             uploaded: 2,
             alreadyPresent: 3,
             queued: 4,
+            pendingTransfers: 0,
             errors: 1
-        })).toBe('2 uploaded / 3 already present / 4 queued / 1 errors');
+        })).toBe('2 uploaded / 3 already present / 4 queued total / 0 pending / 1 errors');
+        expect(formatR2BackupDetails({ queued: 4 })).toContain('unknown pending');
     });
 
-    test('labels canary completion distinctly', () => {
-        expect(getR2BackupDoneStatusLabel({ stopReason: 'canary_complete' })).toBe('Canary complete');
+    test('labels only a durable canary completion distinctly', () => {
+        expect(getR2BackupDoneStatusLabel({
+            stopReason: 'canary_complete',
+            pendingTransfers: 0,
+            errors: 0
+        })).toBe('Canary complete');
+        expect(getR2BackupDoneStatusLabel({ stopReason: 'canary_complete' })).toBe('Incomplete');
     });
 
-    test('labels incomplete canary distinctly', () => {
-        expect(getR2BackupDoneStatusLabel({ stopReason: 'canary_incomplete' })).toBe('Canary incomplete');
+    test('keeps non-complete canary reasons out of the Complete state', () => {
+        expect(getR2BackupDoneStatusLabel({ stopReason: 'canary_incomplete' })).toBe('Stopped');
     });
 });

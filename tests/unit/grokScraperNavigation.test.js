@@ -2494,6 +2494,7 @@ describe('Grok run durability completion', () => {
     });
 
     afterEach(() => {
+        jest.useRealTimers();
         delete global.chrome;
         jest.restoreAllMocks();
     });
@@ -2546,6 +2547,142 @@ describe('Grok run durability completion', () => {
         ))).toHaveLength(3);
         expect(scraper.backupStats).toMatchObject({ queued: 1, pendingTransfers: 0 });
         expect(scraper.persistBackupProgress).toHaveBeenCalledTimes(3);
+    });
+
+    test('durability polling times out a query that never settles at the absolute deadline', async () => {
+        jest.useFakeTimers();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'durability-query-timeout';
+        scraper.runEpoch = 17;
+        const queryStarted = deferred();
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'GET_SCRAPE_DURABILITY') {
+                queryStarted.resolve();
+                return new Promise(() => {});
+            }
+            return Promise.resolve({ status: 'ok' });
+        });
+
+        const resultPromise = scraper.waitForRunDurability('durability-query-timeout', {
+            timeoutMs: 1000,
+            pollMs: 250
+        });
+        let settled = false;
+        resultPromise.finally(() => { settled = true; });
+        await queryStarted.promise;
+        await jest.advanceTimersByTimeAsync(1000);
+        await flushAsyncTurns();
+
+        expect(settled).toBe(true);
+        await expect(resultPromise).resolves.toMatchObject({ status: 'timeout' });
+    });
+
+    test('durability polling times out progress persistence at the same absolute deadline', async () => {
+        jest.useFakeTimers();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.backupMode = true;
+        scraper.runToken = 'durability-progress-timeout';
+        scraper.runEpoch = 18;
+        const progressStarted = deferred();
+        scraper.persistBackupProgress = jest.fn(() => {
+            progressStarted.resolve();
+            return new Promise(() => {});
+        });
+        chrome.runtime.sendMessage.mockResolvedValue({
+            status: 'pending',
+            inFlightTasks: 1,
+            pendingDownloads: 0,
+            pendingOperations: 0,
+            pendingQueueItems: 0,
+            failedItems: 0
+        });
+
+        const resultPromise = scraper.waitForRunDurability('durability-progress-timeout', {
+            timeoutMs: 1000,
+            pollMs: 250
+        });
+        let settled = false;
+        resultPromise.finally(() => { settled = true; });
+        await progressStarted.promise;
+        await jest.advanceTimersByTimeAsync(1000);
+        await flushAsyncTurns();
+
+        expect(settled).toBe(true);
+        await expect(resultPromise).resolves.toMatchObject({ status: 'timeout' });
+    });
+
+    test('durability polling ignores stale authority when Stop wins during its query', async () => {
+        jest.useFakeTimers();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'durability-query-stop';
+        scraper.runEpoch = 19;
+        const query = deferred();
+        const queryStarted = deferred();
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'GET_SCRAPE_DURABILITY') {
+                queryStarted.resolve();
+                return query.promise;
+            }
+            return Promise.resolve({ status: 'ok' });
+        });
+
+        const resultPromise = scraper.waitForRunDurability('durability-query-stop', {
+            timeoutMs: 1000,
+            pollMs: 250
+        });
+        await queryStarted.promise;
+        scraper.invalidateRunMemory();
+        query.resolve({
+            status: 'durable',
+            inFlightTasks: 0,
+            pendingDownloads: 0,
+            pendingOperations: 0,
+            pendingQueueItems: 0,
+            failedItems: 0
+        });
+
+        await expect(resultPromise).resolves.toEqual({
+            status: 'ignored',
+            reason: 'stale_authority'
+        });
+    });
+
+    test('durability polling ignores stale authority when Stop wins during sleep', async () => {
+        jest.useFakeTimers();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'durability-sleep-stop';
+        scraper.runEpoch = 20;
+        const sleep = deferred();
+        const sleepStarted = deferred();
+        scraper.sleep = jest.fn(() => {
+            sleepStarted.resolve();
+            return sleep.promise;
+        });
+        chrome.runtime.sendMessage.mockResolvedValue({
+            status: 'pending',
+            inFlightTasks: 1,
+            pendingDownloads: 0,
+            pendingOperations: 0,
+            pendingQueueItems: 0,
+            failedItems: 0
+        });
+
+        const resultPromise = scraper.waitForRunDurability('durability-sleep-stop', {
+            timeoutMs: 1000,
+            pollMs: 250
+        });
+        await sleepStarted.promise;
+        scraper.invalidateRunMemory();
+        sleep.resolve();
+
+        await expect(resultPromise).resolves.toEqual({
+            status: 'ignored',
+            reason: 'stale_authority'
+        });
     });
 
     test.each([
@@ -4904,6 +5041,173 @@ describe('background scrape lease authority', () => {
         await expect(owner).resolves.toBe(true);
         await expect(completion).resolves.toEqual({ status: 'ok' });
         expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('58');
+    });
+
+    test('completion preserves a cloud queue record enqueued while a run-owned finalizer is blocked', async () => {
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891060';
+        const { background, harness, lease } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 60,
+            mediaId,
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+        const processedWrite = deferred();
+        const processedWriteStarted = deferred();
+        const gateWrite = deferred();
+        const gateWriteStarted = deferred();
+        const completionWrite = deferred();
+        const completionWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let processedIntercepted = false;
+        let gateIntercepted = false;
+        let completionIntercepted = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!processedIntercepted && Object.prototype.hasOwnProperty.call(values, 'processedIds')) {
+                processedIntercepted = true;
+                processedWriteStarted.resolve();
+                return processedWrite.promise.then(() => baseSet(values));
+            }
+            if (!gateIntercepted
+                && !values.scrapeCompletionTxn
+                && values.cloudSyncQueue?.some((item) => item.id === 'completion-cloud-gate')) {
+                gateIntercepted = true;
+                gateWriteStarted.resolve();
+                return gateWrite.promise.then(() => baseSet(values));
+            }
+            if (!completionIntercepted && values.scrapeCompletionTxn?.phase === 'prepared') {
+                completionIntercepted = true;
+                completionWriteStarted.resolve();
+                return completionWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+
+        const owner = background.markDownloadOperationR2Present(60, { status: 'uploaded' });
+        await processedWriteStarted.promise;
+        const completion = dispatchBackgroundMessage(harness.chromeApi, {
+            action: 'SCRAPE_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await flushAsyncTurns(20);
+
+        const gateItem = {
+            id: 'completion-cloud-gate',
+            dedupeKey: 'completion-cloud-gate',
+            type: 'media',
+            sourceUrl: 'https://assets.grok.com/generated/completion-cloud-gate.jpg',
+            scrapeLease: { ...lease }
+        };
+        const newerItem = {
+            id: 'completion-cloud-newer',
+            dedupeKey: 'completion-cloud-newer',
+            type: 'media',
+            sourceUrl: 'https://assets.grok.com/generated/completion-cloud-newer.jpg',
+            scrapeLease: { ...lease }
+        };
+        const gateEnqueue = background.enqueueCloudItemForTest(gateItem, gateItem.dedupeKey);
+        await gateWriteStarted.promise;
+        const newerEnqueue = background.enqueueCloudItemForTest(newerItem, newerItem.dedupeKey);
+
+        processedWrite.resolve();
+        await expect(owner).resolves.toBe(true);
+        await flushAsyncTurns(100);
+        const completionWriteStartedBeforeCloudQueueSettled = completionIntercepted;
+
+        gateWrite.resolve();
+        await gateEnqueue;
+        await newerEnqueue;
+        await completionWriteStarted.promise;
+        completionWrite.resolve();
+        await expect(completion).resolves.toEqual({ status: 'ok' });
+
+        const preserved = background.getCloudSyncQueueForTest()
+            .find((item) => item.id === newerItem.id);
+        expect(completionWriteStartedBeforeCloudQueueSettled).toBe(false);
+        expect(preserved).toMatchObject({
+            id: newerItem.id,
+            completionTxnId: expect.any(String),
+            revocationLease: expect.objectContaining({ token: lease.token })
+        });
+        expect(preserved).not.toHaveProperty('scrapeLease');
+    });
+
+    test('completion preserves a newer pending-operation revision started during snapshot persistence', async () => {
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891061';
+        const newerMediaId = '73e5e137-1334-49ea-b06b-a9d9ba891062';
+        const { background, harness, lease } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 61,
+            mediaId,
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+        await seedUnrelatedDownloadOperation({
+            background,
+            harness,
+            lease,
+            downloadId: 62,
+            mediaId: newerMediaId
+        });
+        const originalRevision = background.getPendingDownloadOperationsForTest()['62'].operationRevision;
+        const processedWrite = deferred();
+        const processedWriteStarted = deferred();
+        const completionWrite = deferred();
+        const completionWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let processedIntercepted = false;
+        let completionIntercepted = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!processedIntercepted && Object.prototype.hasOwnProperty.call(values, 'processedIds')) {
+                processedIntercepted = true;
+                processedWriteStarted.resolve();
+                return processedWrite.promise.then(() => baseSet(values));
+            }
+            if (!completionIntercepted && values.scrapeCompletionTxn?.phase === 'prepared') {
+                completionIntercepted = true;
+                completionWriteStarted.resolve();
+                return completionWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+
+        const owner = background.markDownloadOperationR2Present(61, { status: 'uploaded' });
+        await processedWriteStarted.promise;
+        const completion = dispatchBackgroundMessage(harness.chromeApi, {
+            action: 'SCRAPE_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        processedWrite.resolve();
+        await expect(owner).resolves.toBe(true);
+        await completionWriteStarted.promise;
+
+        let newerUpdateSettled = false;
+        const newerUpdate = background.updateDownloadOperation(62, { attempts: 9 }).then((value) => {
+            newerUpdateSettled = true;
+            return value;
+        });
+        await flushAsyncTurns(100);
+        const newerUpdateSettledBeforeCompletionWrite = newerUpdateSettled;
+
+        completionWrite.resolve();
+        await expect(completion).resolves.toEqual({ status: 'ok' });
+        await expect(newerUpdate).resolves.toMatchObject({ attempts: 9 });
+
+        expect(newerUpdateSettledBeforeCompletionWrite).toBe(false);
+        expect(background.getPendingDownloadOperationsForTest()['62']).toMatchObject({
+            attempts: 9,
+            operationRevision: expect.any(Number),
+            completionTxnId: expect.any(String),
+            revocationLease: expect.objectContaining({ token: lease.token })
+        });
+        expect(background.getPendingDownloadOperationsForTest()['62'].operationRevision)
+            .toBeGreaterThan(originalRevision);
     });
 
     test('Stop during finalizer handoff prevents a stale prepared completion transaction', async () => {

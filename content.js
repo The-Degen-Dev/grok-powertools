@@ -6246,35 +6246,88 @@ class GrokScraper {
         timeoutMs = 60000,
         pollMs = 250
     } = {}) {
-        const startedAt = Date.now();
-        while (this.isRunActive(runToken) && Date.now() - startedAt < timeoutMs) {
-            let result;
+        const runEpoch = this.runEpoch;
+        const invalidationVersion = this.getRunInvalidationVersion();
+        const backupMode = this.backupMode;
+        const kind = backupMode ? 'r2_backup' : 'sync';
+        const deadline = Date.now() + Math.max(0, timeoutMs);
+        const isCurrentRun = () => (
+            this.getRunInvalidationVersion() === invalidationVersion
+            && this.isRunActive(runToken, runEpoch)
+        );
+        const ignored = () => ({ status: 'ignored', reason: 'stale_authority' });
+        const timedOut = () => ({ status: 'timeout', reason: 'deadline_exceeded' });
+        const awaitBeforeDeadline = async (promise) => {
+            const remainingMs = deadline - Date.now();
+            if (remainingMs <= 0) return { expired: true };
+            let timeoutId = null;
+            const settled = Promise.resolve(promise).then(
+                (value) => ({ value }),
+                (error) => ({ error })
+            );
+            const expired = new Promise((resolve) => {
+                timeoutId = setTimeout(() => resolve({ expired: true }), remainingMs);
+            });
+            const result = await Promise.race([settled, expired]);
+            if (timeoutId !== null) clearTimeout(timeoutId);
+            return result;
+        };
+
+        while (isCurrentRun()) {
+            if (Date.now() >= deadline) return timedOut();
+            let query;
             try {
-                result = await safeChromeRuntimeSendMessage({
+                query = safeChromeRuntimeSendMessage({
                     action: 'GET_SCRAPE_DURABILITY',
                     runToken,
-                    runEpoch: this.runEpoch,
-                    kind: this.backupMode ? 'r2_backup' : 'sync'
+                    runEpoch,
+                    kind
                 }, 'check scrape durability');
             } catch {
                 return { status: 'failed', reason: 'query_failed' };
             }
+            const queryResult = await awaitBeforeDeadline(query);
+            if (!isCurrentRun()) return ignored();
+            if (queryResult.expired) return timedOut();
+            if (queryResult.error) return { status: 'failed', reason: 'query_failed' };
+            const result = queryResult.value;
             if (result.invalidated) return { status: 'ignored', reason: 'context_invalidated' };
             const snapshot = result.value && typeof result.value === 'object'
                 ? result.value
                 : { status: 'failed', reason: 'missing_response' };
-            if (this.backupMode) {
+            if (backupMode) {
                 this.backupStats.pendingTransfers = Number(snapshot.pendingDownloads || 0)
                     + Number(snapshot.pendingOperations || 0)
                     + Number(snapshot.pendingQueueItems || 0)
                     + Number(snapshot.inFlightTasks || 0);
-                await this.persistBackupProgress(runToken);
-                if (!this.isRunActive(runToken)) return { status: 'ignored' };
+                if (Date.now() >= deadline) return timedOut();
+                let progress;
+                try {
+                    progress = this.persistBackupProgress(runToken);
+                } catch {
+                    return { status: 'failed', reason: 'progress_persist_failed' };
+                }
+                const progressResult = await awaitBeforeDeadline(progress);
+                if (!isCurrentRun()) return ignored();
+                if (progressResult.expired) return timedOut();
+                if (progressResult.error) return { status: 'failed', reason: 'progress_persist_failed' };
             }
             if (snapshot.status !== 'pending') return snapshot;
-            await this.sleep(pollMs);
+            if (Date.now() >= deadline) return timedOut();
+            let sleep;
+            try {
+                sleep = this.sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+            } catch {
+                return { status: 'failed', reason: 'poll_sleep_failed' };
+            }
+            const sleepResult = await awaitBeforeDeadline(sleep);
+            if (!isCurrentRun()) return ignored();
+            if (sleepResult.expired) return timedOut();
+            if (sleepResult.error) return { status: 'failed', reason: 'poll_sleep_failed' };
         }
-        return { status: this.isRunActive(runToken) ? 'timeout' : 'ignored' };
+        return isCurrentRun()
+            ? timedOut()
+            : ignored();
     }
 
     async getDurableCompletionStopReason(stopReason, runToken = this.runToken) {
