@@ -4113,7 +4113,8 @@ async function processCompletedDownloadOperation(downloadId, downloadItem = null
     const item = downloadItem || (await chrome.downloads.search({ id: downloadId }))[0];
     if (authorityGuard) await authorityGuard();
 
-    if (operation.allowLocal && operation.mediaId && !operation.localIdentityPersisted) {
+    const localOnly = operation.allowLocal && !operation.cloudRequired;
+    if (localOnly && operation.mediaId && !operation.localIdentityPersisted) {
         await mutateProcessedIds({ ids: [operation.mediaId] }, authorityGuard);
         operation = await updateDownloadOperation(downloadId, { localIdentityPersisted: true });
         if (!operation) return;
@@ -4135,33 +4136,29 @@ async function processCompletedDownloadOperation(downloadId, downloadItem = null
 
 async function reconcileMissingDownloadOperation(operation, assertAuthorized = null) {
     if (assertAuthorized) await assertAuthorized();
-    if (operation.strategy === 'public_queue' && operation.r2State !== 'present') {
-        const queueItem = await linkPublicQueueOperation(operation);
-        if (assertAuthorized) await assertAuthorized();
-        if (operation.allowLocal && operation.localIdentityPersisted && queueItem) return;
 
-        let queueChanged = false;
-        cloudSyncQueue.forEach((item) => {
-            if (item.type === 'media' && item.cleanupDownloadId === operation.downloadId) {
-                item.cleanupDownloadId = null;
-                queueChanged = true;
-            }
+    if (operation.downloadState === 'complete' && operation.r2State === 'present') {
+        await finalizeDownloadOperation(operation.downloadId, {
+            historyMissing: true,
+            assertAuthorized
         });
-        if (queueChanged) await persistCloudState();
-        if (assertAuthorized) await assertAuthorized();
+        return;
+    }
+    if (operation.downloadState === 'complete' && operation.allowLocal && !operation.cloudRequired) {
+        if (operation.mediaId && !operation.localIdentityPersisted) {
+            await mutateProcessedIds({ ids: [operation.mediaId] }, assertAuthorized);
+        }
         await removeDownloadOperation(operation.downloadId);
         return;
     }
 
-    if (operation.downloadState === 'complete') {
-        if (!operation.allowLocal && operation.r2State === 'present') {
-            await finalizeDownloadOperation(operation.downloadId, { historyMissing: true, assertAuthorized });
-            return;
-        }
-        if (operation.allowLocal && operation.mediaId && !operation.localIdentityPersisted) {
-            await mutateProcessedIds({ ids: [operation.mediaId] }, assertAuthorized);
-        }
+    if (operation.strategy === 'public_queue' && operation.r2State !== 'present') {
+        await linkPublicQueueOperation(operation);
+        if (assertAuthorized) await assertAuthorized();
+        return;
     }
+
+    if (operation.cloudRequired && operation.r2State !== 'present') return;
 
     if (assertAuthorized) await assertAuthorized();
     await removeDownloadOperation(operation.downloadId);
@@ -4463,7 +4460,10 @@ if (typeof module !== 'undefined') {
         RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS,
         requestPresignedUrl,
         parseFilenameInfo,
+        processCompletedDownloadOperation,
         processCloudQueue,
+        markDownloadOperationR2Present,
+        reconcileMissingDownloadOperation,
         setCloudSyncQueueForTest: (items) => {
             cloudSyncQueue = items.map((item) => ({ ...item }));
             cloudQueueRevision = cloudSyncQueue.reduce(
@@ -4473,6 +4473,7 @@ if (typeof module !== 'undefined') {
         },
         setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); },
         testCloudConnection,
+        updateDownloadOperation,
         uploadMetadataQueueItem,
         verifyR2Object
     };
