@@ -3325,6 +3325,84 @@ test.describe('Grok Power Tools E2E', () => {
         }));
     });
 
+    test('targeted R2 canary immediately transfers the mounted exact Saved image and returns', async ({ page }) => {
+        const accountUuid = '12121212-1212-4212-8212-121212121212';
+        const decoyUuid = '34343434-3434-4434-8434-343434343434';
+        const targetUuid = '56565656-5656-4656-8656-565656565656';
+        const targetSavedUrl = `https://assets.grok.com/users/${accountUuid}/generated/${targetUuid}/image.jpg`;
+        const targetUrl = `https://assets.grok.com/users/${accountUuid}/generated/${targetUuid}/preview.jpg`;
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids: [decoyUuid, targetUuid],
+            responseByAction: {
+                VALIDATE_CLOUD_CONFIG: { valid: true },
+                R2_BACKUP_CHECK_PRESENT: {
+                    status: 'already_present',
+                    assetId: `media_${targetUuid}`
+                }
+            },
+            runToken: 'e2e-targeted-r2-canary',
+            stopAfterNavigationClear: false
+        });
+        await page.evaluate((targetUuid) => {
+            const targetImage = Array.from(document.querySelectorAll('img')).find(
+                (image) => image.src.includes(targetUuid)
+            );
+            const mediaTypeControl = document.createElement('button');
+            mediaTypeControl.setAttribute('aria-label', 'Make video');
+            targetImage.closest('[role="listitem"]').appendChild(mediaTypeControl);
+        }, targetUuid);
+
+        await expect(page.evaluate((targetUuid) => window.__gptE2e.scraper.startBackupMode({
+            ...window.__gptE2eRunLease,
+            mode: 'canary',
+            limit: 1,
+            options: {
+                stopAfterMediaAttempt: true,
+                targetIdentity: targetUuid,
+                targetMediaType: 'image'
+            },
+            acceptance: {
+                runId: 'e2e-targeted-run',
+                correlationId: 'e2e-targeted-correlation',
+                keyPrefix: 'acceptance/e2e-targeted-run'
+            }
+        }), targetUuid)).resolves.toMatchObject({ status: 'started' });
+
+        await expect.poll(async () => page.evaluate(() => (
+            window.__chromeStorageLocalState.r2BackupState?.stopReason || null
+        ))).toBe('canary_complete');
+        expect(await page.evaluate(() => window.__savedOpenedIdentities)).toEqual([targetUuid]);
+        expect(await page.evaluate(() => window.__historyBackCalls)).toBe(1);
+        expect(await page.evaluate(() => window.__savedScrollByCalls)).toEqual([]);
+        expect(await page.evaluate(() => window.__agentScrollCalls)).toEqual([]);
+        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual({
+            action: 'R2_BACKUP_CHECK_PRESENT',
+            runToken: 'e2e-targeted-r2-canary',
+            runEpoch: 1,
+            kind: 'r2_backup',
+            url: targetUrl,
+            isVideo: false
+        });
+        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual({
+            action: 'SCRAPE_PROCESSED_IDS_ADD',
+            ids: [targetSavedUrl, targetUrl, `media_${targetUuid}`],
+            runToken: 'e2e-targeted-r2-canary',
+            runEpoch: 1,
+            kind: 'r2_backup'
+        });
+        expect(await page.evaluate(() => window.__chromeStorageLocalState.processedIds)).toEqual([
+            targetSavedUrl,
+            targetUrl,
+            `media_${targetUuid}`
+        ]);
+        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).not.toContainEqual(
+            expect.objectContaining({ url: expect.stringContaining(decoyUuid) })
+        );
+    });
+
     test('R2 presence skips Grok bytes and persists only after the read-only proof', async ({ page }) => {
         const accountUuid = '01234567-89ab-4cde-8fab-0123456789ab';
         const mediaUuid = 'fedcba98-7654-4cba-8fed-cba987654321';

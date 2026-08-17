@@ -1088,7 +1088,7 @@ describe('Grok scrape surface transitions', () => {
         );
     });
 
-    test('targeted canary treats an overlap-aligned remount as one logical card', async () => {
+    test('targeted canary accepts one mounted target without scanning for later virtualized occurrences', async () => {
         mockContentChrome();
         const scraper = createScraper();
         const beforeUrl = 'https://assets.grok.com/users/u/generated/34010000-0000-4000-8000-000000000001/image.jpg';
@@ -1098,7 +1098,7 @@ describe('Grok scrape surface transitions', () => {
         const afterTwoUrl = 'https://assets.grok.com/users/u/generated/34010000-0000-4000-8000-000000000004/image.jpg';
         const tailUrl = 'https://assets.grok.com/users/u/generated/34010000-0000-4000-8000-000000000005/image.jpg';
         const { scroller, list } = mountSemanticSavedImage(beforeUrl);
-        appendSemanticSavedEntry(list, targetUrl, 'image');
+        const target = appendSemanticSavedEntry(list, targetUrl, 'image');
         appendSemanticSavedEntry(list, afterOneUrl, 'image');
         appendSemanticSavedEntry(list, afterTwoUrl, 'image');
         Object.defineProperties(scroller, {
@@ -1140,12 +1140,12 @@ describe('Grok scrape surface transitions', () => {
             dateSpy.mockRestore();
         }
 
-        expect(remountedTarget).not.toBeNull();
+        expect(remountedTarget).toBeNull();
         expect(scraper.failRun).not.toHaveBeenCalled();
         expect(scraper.processItem).toHaveBeenCalledTimes(1);
-        expect(scrollCallsAtProcess).toBeGreaterThanOrEqual(8);
+        expect(scrollCallsAtProcess).toBe(0);
         expect(scraper.processItem).toHaveBeenCalledWith(
-            remountedTarget.image,
+            target.image,
             targetUrl,
             'run-1',
             1,
@@ -1197,16 +1197,13 @@ describe('Grok scrape surface transitions', () => {
         );
     });
 
-    test('targeted canary detects duplicate identities in non-overlapping virtualized windows', async () => {
+    test('targeted canary fails closed when a later virtualized window mounts duplicate target cards', async () => {
         mockContentChrome();
         const scraper = createScraper();
         const targetIdentity = '34200000-0000-4000-8000-000000000099';
         const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/image.jpg`;
         const decoyUrl = 'https://assets.grok.com/users/u/generated/34200000-0000-4000-8000-000000000001/image.jpg';
-        const { scroller, list, card } = mountSemanticSavedImage(targetUrl);
-        const firstControl = document.createElement('button');
-        firstControl.setAttribute('aria-label', 'Make video');
-        card.appendChild(firstControl);
+        const { scroller, list } = mountSemanticSavedImage(decoyUrl);
         Object.defineProperties(scroller, {
             scrollHeight: { configurable: true, value: 1600 },
             clientHeight: { configurable: true, value: 800 }
@@ -1217,7 +1214,7 @@ describe('Grok scrape surface transitions', () => {
             if (renderedSecondWindow) return;
             renderedSecondWindow = true;
             list.textContent = '';
-            appendSemanticSavedEntry(list, decoyUrl, 'image');
+            appendSemanticSavedEntry(list, targetUrl, 'image');
             appendSemanticSavedEntry(list, `${targetUrl}?second-card=1`, 'image');
         });
         scraper.state.isRunning = true;
@@ -1291,12 +1288,12 @@ describe('Grok scrape surface transitions', () => {
         );
     });
 
-    test('targeted canary does not process a found target before the Saved scan safety limit', async () => {
+    test('targeted canary processes one mounted unique target without exhaustively scanning Saved', async () => {
         mockContentChrome();
         const scraper = createScraper();
         const targetIdentity = '34400000-0000-4000-8000-000000000099';
         const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/image.jpg`;
-        const { scroller, card } = mountSemanticSavedImage(targetUrl);
+        const { scroller, card, image } = mountSemanticSavedImage(targetUrl);
         const control = document.createElement('button');
         control.setAttribute('aria-label', 'Make video');
         card.appendChild(control);
@@ -1327,11 +1324,16 @@ describe('Grok scrape surface transitions', () => {
             dateSpy.mockRestore();
         }
 
-        expect(scraper.processItem).not.toHaveBeenCalled();
-        expect(scraper.failRun).toHaveBeenCalledWith(
-            expect.stringMatching(/^Canary target \.\.\.[a-f0-9]{8} was not found before the Saved scan safety limit\.$/),
-            'canary_target_scan_limit'
+        expect(scraper.processItem).toHaveBeenCalledTimes(1);
+        expect(scraper.processItem).toHaveBeenCalledWith(
+            image,
+            targetUrl,
+            'run-1',
+            1,
+            null
         );
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(scroller.scrollBy).not.toHaveBeenCalled();
     });
 
     test('targeted canary fails closed when the matching card has the wrong media type', async () => {
