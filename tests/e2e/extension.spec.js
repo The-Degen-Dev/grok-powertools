@@ -145,6 +145,7 @@ async function setupMockSavedAgentSync(page, {
         };
 
         const renderAgent = (mediaUuid) => {
+            window.__savedOpenedIdentities.push(mediaUuid);
             window.history.pushState({}, '', `/imagine/agent/mock-agent?conversation=${mediaUuid}`);
             document.body.innerHTML = '';
             const agentScroller = document.createElement('div');
@@ -234,6 +235,7 @@ async function setupMockSavedAgentSync(page, {
         };
 
         window.__agentScrollCalls = [];
+        window.__savedOpenedIdentities = [];
         window.__agentRenderedMediaUrls = [];
         window.__savedScrollByCalls = [];
         window.__savedScrollWrites = [];
@@ -453,6 +455,243 @@ async function setupVirtualizedSavedBackup(page, { accountUuid, mediaUuids, runT
         window.history.replaceState({}, '', savedUrl);
         renderSaved();
     }, { accountUuid, mediaUuids, runToken });
+}
+
+async function setupVirtualizedSavedSync(page, {
+    accountUuid,
+    mediaUuids,
+    runToken,
+    transferMode = 'cloud_only'
+}) {
+    await page.evaluate(({ accountUuid, mediaUuids, runToken, transferMode }) => {
+        const { scraper } = window.__gptE2e;
+        const savedUrl = 'https://grok.com/imagine/saved';
+        const pageSize = 6;
+        let windowIndex = 0;
+        let renderGeneration = 0;
+        let clock = 1810000000000;
+        const originalDateNow = Date.now;
+        Date.now = () => clock;
+        scraper.Config = { actionWait: 0, navWait: 0, surfaceWait: 100, historyWait: 0 };
+        scraper.sleep = async (delay = 0) => {
+            clock += Number(delay) || 0;
+        };
+        window.__restoreVirtualSyncDateNow = () => { Date.now = originalDateNow; };
+        window.__virtualSyncEvidence = {
+            openedIdentities: [],
+            transferredIdentities: [],
+            mediaTypes: [],
+            agentGalleryScrollCalls: 0,
+            savedRenderGenerations: [],
+            validReceiptReturns: 0,
+            processedBeforeDurability: null,
+            processedAfterDurability: [],
+            dualWriteTransitions: [],
+            completionReason: null
+        };
+        window.__gptE2eRunLease = { runToken, runEpoch: 1 };
+
+        const sourceUrlFor = (identity) => (
+            `https://assets.grok.com/users/${accountUuid}/generated/${identity}/image.jpg`
+        );
+        const currentWindowIdentities = () => mediaUuids.slice(
+            windowIndex * pageSize,
+            (windowIndex + 1) * pageSize
+        );
+        const dualWriteOperations = new Map();
+        let dualWriteFinalized = false;
+
+        window.__chromeRuntimeResponseByAction = {
+            GET_CLOUD_CONFIG: { config: { mode: transferMode } },
+            DOWNLOAD_MEDIA: (message) => {
+                const identity = message.url.match(/generated\/([^/]+)/)?.[1] || '';
+                window.__virtualSyncEvidence.transferredIdentities.push(identity);
+                window.__virtualSyncEvidence.mediaTypes.push(message.isVideo ? 'video' : 'image');
+                if (transferMode !== 'dual_write') return { status: 'uploaded' };
+                dualWriteOperations.set(identity, {
+                    identity,
+                    sourceUrl: sourceUrlFor(identity),
+                    downloadStatus: 'queued',
+                    r2Status: 'pending'
+                });
+                window.__virtualSyncEvidence.dualWriteTransitions.push(`queued:${identity}`);
+                return { status: 'queued', operationId: `operation-${identity}` };
+            },
+            GET_SCRAPE_DURABILITY: async () => {
+                if (transferMode !== 'dual_write') {
+                    return {
+                        status: 'durable',
+                        inFlightTasks: 0,
+                        pendingDownloads: 0,
+                        pendingOperations: 0,
+                        pendingQueueItems: 0,
+                        failedItems: 0
+                    };
+                }
+                if (dualWriteOperations.size < mediaUuids.length) {
+                    return {
+                        status: 'pending',
+                        inFlightTasks: 0,
+                        pendingDownloads: mediaUuids.length - dualWriteOperations.size,
+                        pendingOperations: dualWriteOperations.size,
+                        pendingQueueItems: 0,
+                        failedItems: 0
+                    };
+                }
+                if (!dualWriteFinalized) {
+                    dualWriteFinalized = true;
+                    window.__virtualSyncEvidence.processedBeforeDurability = [
+                        ...(window.__chromeStorageLocalState.processedIds || [])
+                    ];
+                    for (const operation of dualWriteOperations.values()) {
+                        operation.downloadStatus = 'complete';
+                        window.__virtualSyncEvidence.dualWriteTransitions.push(
+                            `download_complete:${operation.identity}`
+                        );
+                        operation.r2Status = 'uploaded';
+                        window.__virtualSyncEvidence.dualWriteTransitions.push(
+                            `r2_uploaded:${operation.identity}`
+                        );
+                    }
+                    const processedIds = Array.from(dualWriteOperations.values(), (operation) => (
+                        operation.sourceUrl
+                    ));
+                    await window.chrome.storage.local.set({ processedIds });
+                    window.__virtualSyncEvidence.processedAfterDurability = [...processedIds];
+                    processedIds.forEach((sourceUrl) => {
+                        const identity = sourceUrl.match(/generated\/([^/]+)/)?.[1] || '';
+                        window.__virtualSyncEvidence.dualWriteTransitions.push(`processed:${identity}`);
+                    });
+                }
+                return {
+                    status: 'durable',
+                    inFlightTasks: 0,
+                    pendingDownloads: 0,
+                    pendingOperations: 0,
+                    pendingQueueItems: 0,
+                    failedItems: 0
+                };
+            }
+        };
+
+        const appendScope = () => {
+            const toolbar = document.createElement('div');
+            const all = document.createElement('button');
+            const liked = document.createElement('button');
+            all.textContent = 'All';
+            all.className = 'bg-primary text-background hover:bg-primary';
+            liked.textContent = 'Liked';
+            toolbar.append(all, liked);
+            document.body.appendChild(toolbar);
+        };
+        const validatePendingReceipt = () => {
+            const receipt = window.__chromeStorageLocalState.scrapeNavigation?.savedViewportReceipt;
+            if (!receipt) return;
+            const identities = currentWindowIdentities();
+            const sourceIndex = identities.indexOf(receipt.sourceIdentity);
+            const expectedNext = sourceIndex >= 0 ? identities[sourceIndex + 1] || null : null;
+            if (receipt.version === 3
+                && sourceIndex >= 0
+                && receipt.expectedNextIdentity === expectedNext
+                && receipt.origin?.pathname === '/imagine/saved'
+                && receipt.origin?.scope === 'all') {
+                window.__virtualSyncEvidence.validReceiptReturns++;
+            }
+        };
+        const renderAgent = (identity) => {
+            window.__virtualSyncEvidence.openedIdentities.push(identity);
+            window.history.pushState({}, '', `/imagine/agent/virtual-sync?conversation=${identity}`);
+            document.body.innerHTML = '';
+            const scroller = document.createElement('div');
+            scroller.className = 'overflow-scroll';
+            scroller.id = 'virtual-sync-agent-gallery';
+            scroller.scrollBy = () => { window.__virtualSyncEvidence.agentGalleryScrollCalls++; };
+            const node = document.createElement('div');
+            node.className = 'react-flow__node-asset';
+            const isVideo = mediaUuids.indexOf(identity) % 2 === 1;
+            const media = document.createElement(isVideo ? 'video' : 'img');
+            if (!isVideo) media.alt = 'Agent media';
+            media.src = `https://assets.grok.com/users/${accountUuid}/generated/${identity}/${
+                isVideo ? 'video.mp4' : 'preview.jpg'
+            }`;
+            node.appendChild(media);
+            scroller.appendChild(node);
+            document.body.appendChild(scroller);
+        };
+        const renderSaved = () => {
+            document.body.innerHTML = '';
+            renderGeneration++;
+            window.__virtualSyncEvidence.savedRenderGenerations.push(renderGeneration);
+            appendScope();
+            const scroller = document.createElement('div');
+            scroller.className = 'overflow-scroll';
+            scroller.id = `virtual-sync-saved-gallery-${renderGeneration}`;
+            let scrollTop = windowIndex * 600;
+            Object.defineProperties(scroller, {
+                scrollTop: {
+                    configurable: true,
+                    get: () => scrollTop,
+                    set: (value) => { scrollTop = Number(value); }
+                },
+                scrollHeight: { configurable: true, value: Math.max(600, Math.ceil(mediaUuids.length / 6) * 600) },
+                clientHeight: { configurable: true, value: 600 }
+            });
+            const list = document.createElement('div');
+            list.setAttribute('role', 'list');
+            currentWindowIdentities().forEach((identity) => {
+                const card = document.createElement('article');
+                card.setAttribute('role', 'listitem');
+                card.dataset.renderGeneration = String(renderGeneration);
+                const image = document.createElement('img');
+                image.alt = 'Generated image';
+                image.src = sourceUrlFor(identity);
+                image.addEventListener('click', () => renderAgent(identity));
+                card.appendChild(image);
+                list.appendChild(card);
+            });
+            scroller.appendChild(list);
+            scroller.scrollBy = (_x, y) => {
+                const maxWindowIndex = Math.max(0, Math.ceil(mediaUuids.length / pageSize) - 1);
+                const maxScrollTop = maxWindowIndex * 600;
+                scrollTop = Math.min(maxScrollTop, scrollTop + Number(y || 0));
+                const nextWindowIndex = Math.min(maxWindowIndex, Math.floor(scrollTop / 600));
+                if (nextWindowIndex !== windowIndex) {
+                    windowIndex = nextWindowIndex;
+                    renderSaved();
+                }
+            };
+            document.body.appendChild(scroller);
+            validatePendingReceipt();
+        };
+
+        document.addEventListener('__gpt_fetch_media', (event) => {
+            const isVideo = String(event.detail.url || '').endsWith('.mp4');
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+                detail: {
+                    requestId: event.detail.requestId,
+                    dataUrl: isVideo
+                        ? 'data:video/mp4;base64,dmlkZW8='
+                        : 'data:image/jpeg;base64,aW1hZ2U=',
+                    size: 5,
+                    type: isVideo ? 'video/mp4' : 'image/jpeg'
+                }
+            }));
+        });
+        Object.defineProperty(window.history, 'back', {
+            configurable: true,
+            value: () => {
+                window.history.replaceState({}, '', savedUrl);
+                renderSaved();
+                window.dispatchEvent(new PopStateEvent('popstate'));
+            }
+        });
+        window.__chromeStorageSetObservers.push((values) => {
+            const completionReason = values.scrapeStopReason;
+            if (completionReason) window.__virtualSyncEvidence.completionReason = completionReason;
+        });
+        window.history.replaceState({}, '', savedUrl);
+        renderSaved();
+    }, { accountUuid, mediaUuids, runToken, transferMode });
 }
 
 async function setupMockSavedLegacyDetailSync(page, {
@@ -1000,17 +1239,19 @@ async function setupMockPromptedBatch(page, {
 async function setupMockPromptedResultsBatch(page, {
     accountUuid,
     mediaUuids,
+    insertVideoBeforeSource = false,
     insertGeneratedBeforeSource = false,
     deferGeneratedResult = false
 }) {
     await page.evaluate(({
         accountUuid,
         mediaUuids,
-        insertGeneratedBeforeSource,
+        insertVideoBeforeSource,
         deferGeneratedResult
     }) => {
         const { retry } = window.__gptE2e;
-        const resultsUrl = 'https://grok.com/imagine';
+        const conversationId = 'prompted-batch-conversation';
+        const resultsUrl = `https://grok.com/imagine?conversation=${conversationId}`;
         const promptText = 'slow orbit through warm afternoon light';
         const makeVisible = (element, top = 20, left = 20, width = 100) => {
             element.getBoundingClientRect = () => ({
@@ -1049,10 +1290,26 @@ async function setupMockPromptedResultsBatch(page, {
             preciseEditClicks: 0,
             promptWrites: []
         };
+        window.__promptedResultsItemEvents = mediaUuids.map((sourceIdentity, index) => ({
+            sourceIdentity,
+            makeVideoClicks: 0,
+            addPromptClicks: 0,
+            preciseEditClicks: 0,
+            promptWrites: [],
+            submitClicks: 0,
+            acceptedConversationId: null,
+            returnStatus: null,
+            nextIdentity: mediaUuids[index + 1] || null
+        }));
+        const getItemEvents = (sourceIdentity) => window.__promptedResultsItemEvents.find((item) => (
+            item.sourceIdentity === sourceIdentity
+        ));
+        let activeDetailIdentity = null;
         window.__promptedResultsReplacements = {};
         window.__promptedResultsCompleted = {};
         document.addEventListener('__gpt_set_prompted_video_content', (event) => {
             window.__promptedResultsEvents.promptWrites.push(event.detail.text);
+            getItemEvents(activeDetailIdentity)?.promptWrites.push(event.detail.text);
         });
 
         const createRadioGroup = (label, options, selected) => {
@@ -1071,7 +1328,8 @@ async function setupMockPromptedResultsBatch(page, {
         };
 
         const renderDetail = (mediaUuid) => {
-            window.history.pushState({}, '', `/imagine/post/${mediaUuid}`);
+            activeDetailIdentity = mediaUuid;
+            window.history.pushState({}, '', `/imagine/post/${mediaUuid}?conversation=${conversationId}`);
             document.body.innerHTML = '';
 
             const preciseEdit = makeVisible(document.createElement('button'));
@@ -1079,6 +1337,7 @@ async function setupMockPromptedResultsBatch(page, {
             preciseEdit.textContent = 'Precise Edit';
             preciseEdit.addEventListener('click', () => {
                 window.__promptedResultsEvents.preciseEditClicks++;
+                getItemEvents(mediaUuid).preciseEditClicks++;
             });
 
             const makeVideo = makeVisible(document.createElement('button'));
@@ -1091,6 +1350,7 @@ async function setupMockPromptedResultsBatch(page, {
             makeVideo.setAttribute('aria-expanded', 'false');
             makeVideo.setAttribute('data-state', 'closed');
             makeVideo.addEventListener('click', () => {
+                getItemEvents(mediaUuid).makeVideoClicks++;
                 makeVideo.setAttribute('aria-expanded', 'true');
                 makeVideo.setAttribute('data-state', 'open');
                 const menu = makeVisible(document.createElement('div'));
@@ -1102,6 +1362,7 @@ async function setupMockPromptedResultsBatch(page, {
                 addPrompt.setAttribute('role', 'menuitem');
                 addPrompt.textContent = 'Add Prompt';
                 addPrompt.addEventListener('click', () => {
+                    getItemEvents(mediaUuid).addPromptClicks++;
                     window.__promptedResultsEvents.menuChoices.push(mediaUuid);
                     const composer = document.createElement('div');
                     const input = makeVisible(document.createElement('div'));
@@ -1116,13 +1377,17 @@ async function setupMockPromptedResultsBatch(page, {
                         submit.disabled = !input.textContent.trim();
                     });
                     submit.addEventListener('click', () => {
+                        const itemEvents = getItemEvents(mediaUuid);
+                        itemEvents.submitClicks++;
+                        itemEvents.acceptedConversationId = new URLSearchParams(window.location.search)
+                            .get('conversation');
                         window.__promptedResultsEvents.submitted.push({
                             mediaUuid,
                             prompt: input.textContent
                         });
                         submit.disabled = true;
                         if (!deferGeneratedResult) {
-                            if (insertGeneratedBeforeSource) {
+                            if (insertVideoBeforeSource) {
                                 window.__promptedResultsCompleted[mediaUuid] = `a${mediaUuid.slice(1)}`;
                             } else {
                                 window.__promptedResultsReplacements[mediaUuid] = `a${mediaUuid.slice(1)}`;
@@ -1161,6 +1426,7 @@ async function setupMockPromptedResultsBatch(page, {
                     event.preventDefault();
                     if (backEvents.join(',') !== 'pointerdown,mousedown,pointerup,mouseup,click') return;
                     window.__promptedResultsEvents.returned.push(mediaUuid);
+                    getItemEvents(mediaUuid).returnStatus = 'returned';
                     window.history.replaceState({}, '', resultsUrl);
                     renderResults();
                 });
@@ -1193,7 +1459,7 @@ async function setupMockPromptedResultsBatch(page, {
                 }
                 const currentMediaUuid = window.__promptedResultsReplacements[mediaUuid] || mediaUuid;
                 const wasConverted = currentMediaUuid !== mediaUuid;
-                const cardTop = insertGeneratedBeforeSource
+                const cardTop = insertVideoBeforeSource
                     ? index * 280 + (insertedMediaUuid ? 140 : 0)
                     : index * 140;
                 const card = makeVisible(document.createElement('article'), cardTop, 20);
@@ -1221,7 +1487,12 @@ async function setupMockPromptedResultsBatch(page, {
 
         window.history.replaceState({}, '', resultsUrl);
         renderResults();
-    }, { accountUuid, mediaUuids, insertGeneratedBeforeSource, deferGeneratedResult });
+    }, {
+        accountUuid,
+        mediaUuids,
+        insertVideoBeforeSource: insertVideoBeforeSource || insertGeneratedBeforeSource,
+        deferGeneratedResult
+    });
 }
 
 async function dispatchRuntimeMessage(page, message) {
@@ -1249,6 +1520,33 @@ async function dispatchRuntimeMessage(page, message) {
 
         return responses;
     }, message);
+}
+
+async function readSavedNegativeEvidence(page) {
+    return page.evaluate(() => ({
+        openedIdentities: [...(window.__savedOpenedIdentities || [])],
+        processedIds: [...(window.__chromeStorageLocalState.processedIds || [])],
+        processedWrites: window.__chromeEvents.filter((event) => (
+            event.type === 'storage_set'
+            && event.area === 'local'
+            && Object.prototype.hasOwnProperty.call(event.values || {}, 'processedIds')
+        )),
+        transferCount: window.__chromeRuntimeMessages.filter((message) => (
+            message.action === 'DOWNLOAD_MEDIA'
+        )).length
+    }));
+}
+
+async function expectNoLateSavedMutation(page, expectedOpenedIdentities, expectedTransferCount) {
+    const before = await readSavedNegativeEvidence(page);
+    await page.waitForTimeout(20);
+    const after = await readSavedNegativeEvidence(page);
+    expect(after.openedIdentities).toEqual(expectedOpenedIdentities);
+    expect(after.openedIdentities).toEqual(before.openedIdentities);
+    expect(after.transferCount).toBe(expectedTransferCount);
+    expect(after.transferCount).toBe(before.transferCount);
+    expect(after.processedIds).toEqual([]);
+    expect(after.processedWrites).toEqual([]);
 }
 
 test.describe('Grok Power Tools E2E', () => {
@@ -1628,6 +1926,103 @@ test.describe('Grok Power Tools E2E', () => {
         ]);
         expect(Object.values(result.scan).every(Number.isFinite)).toBe(true);
         expect(Object.values(result.scan).some(Array.isArray)).toBe(false);
+    });
+
+    test('virtualized Saved Cloud-only sync durably transfers thirty alternating Agent assets', async ({ page }) => {
+        const accountUuid = 'abababab-abab-4bab-8bab-abababababab';
+        const mediaUuids = Array.from({ length: 30 }, (_, index) => (
+            `30000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`
+        ));
+
+        await evaluateExtensionContent(page);
+        await setupVirtualizedSavedSync(page, {
+            accountUuid,
+            mediaUuids,
+            runToken: 'e2e-virtualized-cloud-only-sync'
+        });
+        await expect(page.evaluate(() => window.__gptE2e.scraper.start(
+            window.__gptE2eRunLease
+        ))).resolves.toMatchObject({ status: 'started' });
+
+        await expect.poll(() => page.evaluate(() => (
+            window.__virtualSyncEvidence.completionReason
+        )), { timeout: 15000 }).toBe('complete');
+        const evidence = await page.evaluate(() => {
+            const result = {
+                ...window.__virtualSyncEvidence,
+                processedIds: [...(window.__chromeStorageLocalState.processedIds || [])]
+            };
+            window.__restoreVirtualSyncDateNow();
+            return result;
+        });
+        const expectedProcessedIds = mediaUuids.map((identity) => (
+            `https://assets.grok.com/users/${accountUuid}/generated/${identity}/image.jpg`
+        ));
+
+        expect(new Set(evidence.transferredIdentities).size).toBe(30);
+        expect(evidence.transferredIdentities).toHaveLength(30);
+        expect(evidence.transferredIdentities).toEqual(mediaUuids);
+        expect(evidence.mediaTypes).toEqual(Array.from(
+            { length: 30 },
+            (_, index) => index % 2 === 1 ? 'video' : 'image'
+        ));
+        expect(evidence.agentGalleryScrollCalls).toBe(0);
+        expect(evidence.openedIdentities).toEqual(mediaUuids);
+        expect(evidence.validReceiptReturns).toBe(30);
+        expect(new Set(evidence.savedRenderGenerations).size).toBe(
+            evidence.savedRenderGenerations.length
+        );
+        expect(evidence.savedRenderGenerations.length).toBeGreaterThan(30);
+        expect(evidence.processedIds).toEqual(expectedProcessedIds);
+        expect(evidence.completionReason).toBe('complete');
+    });
+
+    test('virtualized Saved Dual-write sync persists three IDs only after downloads become R2-present', async ({ page }) => {
+        const accountUuid = 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc';
+        const mediaUuids = [
+            '30000000-0000-4000-8000-000000000003',
+            '30000000-0000-4000-8000-000000000014',
+            '30000000-0000-4000-8000-000000000025'
+        ];
+        const dualWriteIds = mediaUuids.map((identity) => (
+            `https://assets.grok.com/users/${accountUuid}/generated/${identity}/image.jpg`
+        ));
+
+        await evaluateExtensionContent(page);
+        await setupVirtualizedSavedSync(page, {
+            accountUuid,
+            mediaUuids,
+            runToken: 'e2e-virtualized-dual-write-sync',
+            transferMode: 'dual_write'
+        });
+        await expect(page.evaluate(() => window.__gptE2e.scraper.start(
+            window.__gptE2eRunLease
+        ))).resolves.toMatchObject({ status: 'started' });
+
+        await expect.poll(() => page.evaluate(() => (
+            window.__virtualSyncEvidence.completionReason
+        )), { timeout: 15000 }).toBe('complete');
+        const evidence = await page.evaluate(() => {
+            const result = { ...window.__virtualSyncEvidence };
+            window.__restoreVirtualSyncDateNow();
+            return result;
+        });
+
+        expect(evidence.transferredIdentities).toEqual(mediaUuids);
+        expect(evidence.processedBeforeDurability).toEqual([]);
+        expect(evidence.processedAfterDurability).toEqual(expect.arrayContaining(dualWriteIds));
+        expect(evidence.processedAfterDurability).toHaveLength(3);
+        expect(evidence.completionReason).toBe('complete');
+        for (const identity of mediaUuids) {
+            const queuedIndex = evidence.dualWriteTransitions.indexOf(`queued:${identity}`);
+            const downloadIndex = evidence.dualWriteTransitions.indexOf(`download_complete:${identity}`);
+            const r2Index = evidence.dualWriteTransitions.indexOf(`r2_uploaded:${identity}`);
+            const processedIndex = evidence.dualWriteTransitions.indexOf(`processed:${identity}`);
+            expect(queuedIndex).toBeGreaterThanOrEqual(0);
+            expect(downloadIndex).toBeGreaterThan(queuedIndex);
+            expect(r2Index).toBeGreaterThan(downloadIndex);
+            expect(processedIndex).toBeGreaterThan(r2Index);
+        }
     });
 
     test('virtualized Saved backup reports scan_limit after all one thousand guarded attempts', async ({ page }) => {
@@ -2144,6 +2539,251 @@ test.describe('Grok Power Tools E2E', () => {
             `https://assets.grok.com/users/${accountUuid}/generated/${expectedMediaUuid}/preview_image.jpg`
         ]);
         expect(await page.evaluate(() => window.__agentScrollCalls)).toEqual([]);
+        await expectNoLateSavedMutation(page, [expectedMediaUuid], 0);
+    });
+
+    test('gallery return timeout causes no late next-item action or processed-ID mutation', async ({ page }) => {
+        const accountUuid = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+        const mediaUuids = [
+            '40000000-0000-4000-8000-000000000001',
+            '40000000-0000-4000-8000-000000000002'
+        ];
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids,
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'dual_write' } },
+                DOWNLOAD_MEDIA: { status: 'queued' }
+            },
+            runToken: 'e2e-gallery-return-timeout',
+            stopAfterNavigationClear: false
+        });
+        await page.evaluate(() => {
+            const { scraper } = window.__gptE2e;
+            scraper.Config.historyWait = 1;
+            const waitForSurface = scraper.waitForSurface.bind(scraper);
+            let waitCalls = 0;
+            scraper.waitForSurface = (...args) => {
+                waitCalls++;
+                return waitCalls === 2 ? Promise.resolve(null) : waitForSurface(...args);
+            };
+            scraper.navigateToGalleryUrl = () => {
+                throw new Error('mock gallery return timeout');
+            };
+        });
+        await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
+
+        await expect.poll(() => page.evaluate(() => (
+            window.__chromeStorageLocalState.scrapeStopReason
+        ))).toBe('gallery_return_failed');
+        await expectNoLateSavedMutation(page, [mediaUuids[0]], 1);
+    });
+
+    test('durability failure causes no late next-item action or processed-ID mutation', async ({ page }) => {
+        const accountUuid = 'dededede-dede-4ede-8ede-dededededede';
+        const mediaUuid = '40000000-0000-4000-8000-000000000003';
+
+        await evaluateExtensionContent(page);
+        await setupVirtualizedSavedSync(page, {
+            accountUuid,
+            mediaUuids: [mediaUuid],
+            runToken: 'e2e-sync-durability-failure',
+            transferMode: 'dual_write'
+        });
+        await page.evaluate(() => {
+            window.__savedOpenedIdentities = window.__virtualSyncEvidence.openedIdentities;
+            let durabilityChecks = 0;
+            window.__chromeRuntimeResponseByAction.GET_SCRAPE_DURABILITY = () => ({
+                ...(++durabilityChecks <= 8 ? {
+                    status: 'durable',
+                    inFlightTasks: 0,
+                    pendingDownloads: 0,
+                    pendingOperations: 0,
+                    pendingQueueItems: 0,
+                    failedItems: 0
+                } : {
+                    status: 'failed',
+                    inFlightTasks: 0,
+                    pendingDownloads: 0,
+                    pendingOperations: 1,
+                    pendingQueueItems: 0,
+                    failedItems: 1
+                })
+            });
+        });
+        await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
+
+        await expect.poll(() => page.evaluate(() => (
+            window.__virtualSyncEvidence.completionReason
+        ))).toBe('durability_failed');
+        await expectNoLateSavedMutation(page, [mediaUuid], 1);
+        await page.evaluate(() => window.__restoreVirtualSyncDateNow());
+    });
+
+    test('Stop after source click causes no late next-item action or processed-ID mutation', async ({ page }) => {
+        const accountUuid = 'efefefef-efef-4fef-8fef-efefefefefef';
+        const mediaUuids = [
+            '40000000-0000-4000-8000-000000000004',
+            '40000000-0000-4000-8000-000000000005'
+        ];
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids,
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'cloud_only' } },
+                DOWNLOAD_MEDIA: { status: 'uploaded' }
+            },
+            runToken: 'e2e-stop-after-source-click',
+            stopAfterNavigationClear: false
+        });
+        await page.evaluate(() => {
+            const { scraper } = window.__gptE2e;
+            const waitForSurface = scraper.waitForSurface.bind(scraper);
+            let stopped = false;
+            scraper.waitForSurface = async (...args) => {
+                if (!stopped && window.location.pathname.startsWith('/imagine/agent/')) {
+                    stopped = true;
+                    await scraper.stop('e2e_stop_after_source_click');
+                    return null;
+                }
+                return waitForSurface(...args);
+            };
+        });
+        await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
+
+        await expect.poll(() => page.evaluate(() => (
+            window.__chromeStorageLocalState.scrapeStopReason
+        ))).toBe('e2e_stop_after_source_click');
+        await expectNoLateSavedMutation(page, [mediaUuids[0]], 0);
+    });
+
+    test('Stop during transfer causes no late next-item action or processed-ID mutation', async ({ page }) => {
+        const accountUuid = 'fafafafa-fafa-4afa-8afa-fafafafafafa';
+        const mediaUuids = [
+            '40000000-0000-4000-8000-000000000006',
+            '40000000-0000-4000-8000-000000000007'
+        ];
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids,
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'cloud_only' } }
+            },
+            runToken: 'e2e-stop-during-transfer',
+            stopAfterNavigationClear: false,
+            bridgeResponse: {
+                dataUrl: 'data:image/jpeg;base64,c3RvcC1kdXJpbmctdHJhbnNmZXI=',
+                size: 20,
+                type: 'image/jpeg'
+            }
+        });
+        await page.evaluate(() => {
+            window.__chromeRuntimeResponseByAction.DOWNLOAD_MEDIA = () => new Promise((resolve) => {
+                window.__resolveStoppedTransfer = resolve;
+            });
+        });
+        await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
+        await expect.poll(() => page.evaluate(() => (
+            typeof window.__resolveStoppedTransfer === 'function'
+        ))).toBe(true);
+        await page.evaluate(() => {
+            const { scraper } = window.__gptE2e;
+            window.__stopDuringTransfer = scraper.stop('e2e_stop_during_transfer');
+            window.__resolveStoppedTransfer({ status: 'uploaded' });
+        });
+        await page.evaluate(() => window.__stopDuringTransfer);
+
+        await expectNoLateSavedMutation(page, [mediaUuids[0]], 1);
+    });
+
+    test('Stop during return causes no late next-item action or processed-ID mutation', async ({ page }) => {
+        const accountUuid = 'acacacac-acac-4cac-8cac-acacacacacac';
+        const mediaUuids = [
+            '40000000-0000-4000-8000-000000000008',
+            '40000000-0000-4000-8000-000000000009'
+        ];
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids,
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'dual_write' } },
+                DOWNLOAD_MEDIA: { status: 'queued' }
+            },
+            runToken: 'e2e-stop-during-return',
+            stopAfterNavigationClear: false
+        });
+        await page.evaluate(() => {
+            const { scraper } = window.__gptE2e;
+            const historyBack = window.history.back.bind(window.history);
+            let stopped = false;
+            Object.defineProperty(window.history, 'back', {
+                configurable: true,
+                value: () => {
+                    if (!stopped) {
+                        stopped = true;
+                        window.__stopDuringReturn = scraper.stop('e2e_stop_during_return');
+                    }
+                    historyBack();
+                }
+            });
+        });
+        await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
+        await expect.poll(() => page.evaluate(() => Boolean(window.__stopDuringReturn))).toBe(true);
+        await page.evaluate(() => window.__stopDuringReturn);
+
+        await expectNoLateSavedMutation(page, [mediaUuids[0]], 1);
+    });
+
+    test('extension-context invalidation causes no late next-item action or processed-ID mutation', async ({ page }) => {
+        const accountUuid = 'bdbdbdbd-bdbd-4dbd-8dbd-bdbdbdbdbdbd';
+        const mediaUuids = [
+            '40000000-0000-4000-8000-000000000010',
+            '40000000-0000-4000-8000-000000000011'
+        ];
+
+        await evaluateExtensionContent(page);
+        await setupMockSavedAgentSync(page, {
+            accountUuid,
+            mediaUuids,
+            responseByAction: {
+                GET_CLOUD_CONFIG: { config: { mode: 'cloud_only' } }
+            },
+            runToken: 'e2e-extension-context-invalidation',
+            stopAfterNavigationClear: false,
+            bridgeResponse: {
+                dataUrl: 'data:image/jpeg;base64,aW52YWxpZGF0ZWQtY29udGV4dA==',
+                size: 19,
+                type: 'image/jpeg'
+            }
+        });
+        await page.evaluate(() => {
+            const sendMessage = window.chrome.runtime.sendMessage.bind(window.chrome.runtime);
+            window.chrome.runtime.sendMessage = (message, callback) => {
+                if (message?.action === 'DOWNLOAD_MEDIA') {
+                    window.__invalidatedTransferAttempts = (
+                        window.__invalidatedTransferAttempts || 0
+                    ) + 1;
+                    throw new Error('Extension context invalidated.');
+                }
+                return sendMessage(message, callback);
+            };
+        });
+        await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
+
+        await expect.poll(() => page.evaluate(() => window.__gptE2e.scraper.state.isRunning)).toBe(false);
+        await expectNoLateSavedMutation(page, [mediaUuids[0]], 0);
+        expect(await page.evaluate(() => window.__invalidatedTransferAttempts)).toBe(1);
+        expect(await page.evaluate(() => (
+            window.__gptE2e.overlay.el.querySelector('#gptStatusBadge')?.textContent
+        ))).toBe('Grok Power Tools reloaded. Refresh this Grok tab before continuing.');
     });
 
     test('Cloud-only Start Sync sends bridge media before persisting the upload', async ({ page }) => {
@@ -2597,6 +3237,101 @@ test.describe('Grok Power Tools E2E', () => {
         expect(await page.evaluate(() => window.__chromeRuntimeMessages
             .filter((message) => message.action === 'GPT_PROMPTED_VIDEO_NATIVE_CLICK')))
             .toHaveLength(4);
+    });
+
+    test('Prompted Batch completes five generated results with trusted controls and returns', async ({ page }) => {
+        const accountUuid = '71717171-7171-4717-8717-717171717171';
+        const mediaUuids = [
+            '72727272-7272-4727-8727-727272727272',
+            '73737373-7373-4737-8737-737373737373',
+            '74747474-7474-4747-8747-747474747474',
+            '75757575-7575-4757-8757-757575757575',
+            '76767676-7676-4767-8767-767676767676'
+        ];
+
+        await evaluateExtensionContent(page);
+        await page.evaluate(bridgeJs);
+        await setupMockPromptedResultsBatch(page, {
+            accountUuid,
+            mediaUuids,
+            insertVideoBeforeSource: true
+        });
+
+        await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
+            'prompted',
+            'Subtle natural movement with a slow steady camera push.',
+            { galleryLimit: 5, videoGoal: 5 }
+        ))).resolves.toBe(true);
+
+        const evidence = await page.evaluate(() => ({
+            events: {
+                ...window.__promptedResultsEvents,
+                items: window.__promptedResultsItemEvents
+            },
+            status: window.__gptE2e.overlay.el.querySelector('#gptStatusBadge')?.textContent
+        }));
+        expect(evidence.events.opened).toHaveLength(5);
+        expect(evidence.events.submitted).toHaveLength(5);
+        expect(evidence.events.returned).toHaveLength(5);
+        expect(evidence.events.preciseEditClicks).toBe(0);
+        expect(evidence.events.items).toEqual(mediaUuids.map((sourceIdentity, index) => ({
+            sourceIdentity,
+            makeVideoClicks: 1,
+            addPromptClicks: 1,
+            preciseEditClicks: 0,
+            promptWrites: ['Subtle natural movement with a slow steady camera push.'],
+            submitClicks: 1,
+            acceptedConversationId: 'prompted-batch-conversation',
+            returnStatus: 'returned',
+            nextIdentity: mediaUuids[index + 1] || null
+        })));
+        expect(evidence.status).toBe('Prompted Batch [results]: Complete (5/5)');
+    });
+
+    test('Stop during prompt write causes no late next-item action or processed-ID mutation', async ({ page }) => {
+        const accountUuid = 'cececece-cece-4ece-8ece-cececececece';
+        const mediaUuids = [
+            '50000000-0000-4000-8000-000000000001',
+            '50000000-0000-4000-8000-000000000002'
+        ];
+
+        await evaluateExtensionContent(page);
+        await page.evaluate(bridgeJs);
+        await setupMockPromptedResultsBatch(page, { accountUuid, mediaUuids });
+        await page.evaluate(() => {
+            document.addEventListener('__gpt_set_prompted_video_content', () => {
+                window.__gptE2e.retry.stopBatch();
+            }, { once: true });
+        });
+
+        await page.evaluate(() => window.__gptE2e.retry.startBatch(
+            'prompted',
+            'this write revokes the active prompted batch',
+            { galleryLimit: 2, videoGoal: 2 }
+        ));
+        const before = await page.evaluate(() => ({
+            events: window.__promptedResultsEvents,
+            processedWrites: window.__chromeEvents.filter((event) => (
+                event.type === 'storage_set'
+                && Object.prototype.hasOwnProperty.call(event.values || {}, 'processedIds')
+            ))
+        }));
+        await page.waitForTimeout(20);
+        const after = await page.evaluate(() => ({
+            events: window.__promptedResultsEvents,
+            processedWrites: window.__chromeEvents.filter((event) => (
+                event.type === 'storage_set'
+                && Object.prototype.hasOwnProperty.call(event.values || {}, 'processedIds')
+            ))
+        }));
+
+        expect(after).toEqual(before);
+        expect(after.events.opened).toEqual([mediaUuids[0]]);
+        expect(after.events.promptWrites).toEqual(['this write revokes the active prompted batch']);
+        expect(after.events.submitted).toEqual([]);
+        expect(after.events.returned).toEqual([]);
+        expect(after.events.preciseEditClicks).toBe(0);
+        expect(after.processedWrites).toEqual([]);
     });
 
     test('Prompted Batch returns and advances while accepted videos generate in the background', async ({ page }) => {
