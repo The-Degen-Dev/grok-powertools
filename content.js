@@ -527,7 +527,125 @@ function dispatchFullPointerClick(element) {
     return true;
 }
 
-const SAVED_VIEWPORT_RECEIPT_VERSION = 2;
+const GALLERY_RECEIPT_VERSION = 3;
+
+function captureGalleryReceipt({ identities, sourceIdentity, origin, scrollTop = 0 }) {
+    const normalized = identities.map(getGrokMediaIdentity).filter(Boolean);
+    const source = getGrokMediaIdentity(sourceIdentity);
+    const sourceIndexes = normalized.flatMap((value, index) => value === source ? [index] : []);
+    if (!source || sourceIndexes.length !== 1) return null;
+    const index = sourceIndexes[0];
+    return {
+        version: GALLERY_RECEIPT_VERSION,
+        sourceIdentity: source,
+        expectedNextIdentity: normalized[index + 1] || null,
+        beforeIdentities: normalized.slice(Math.max(0, index - 2), index),
+        afterIdentities: normalized.slice(index + 1, index + 3),
+        visibleIdentities: normalized.slice(0, 16),
+        origin: {
+            pathname: String(origin?.pathname || ''),
+            conversationId: String(origin?.conversationId || ''),
+            scope: String(origin?.scope || '')
+        },
+        scrollTop: Math.max(0, Number(scrollTop) || 0)
+    };
+}
+
+function evaluateGalleryReceipt({
+    identities,
+    receipt,
+    currentOrigin,
+    allowSourceReplacement = false
+} = {}) {
+    if (receipt?.version !== GALLERY_RECEIPT_VERSION) {
+        return { status: 'different', reason: 'receipt_version' };
+    }
+    if (!receipt.origin
+        || !Array.isArray(receipt.beforeIdentities)
+        || !Array.isArray(receipt.afterIdentities)
+        || !Array.isArray(receipt.visibleIdentities)) {
+        return { status: 'different', reason: 'invalid_receipt' };
+    }
+
+    const sourceIdentity = getGrokMediaIdentity(receipt.sourceIdentity);
+    const expectedNextIdentity = getGrokMediaIdentity(receipt.expectedNextIdentity) || null;
+    const beforeIdentities = receipt.beforeIdentities.map(getGrokMediaIdentity).filter(Boolean);
+    const afterIdentities = receipt.afterIdentities.map(getGrokMediaIdentity).filter(Boolean);
+    if (!sourceIdentity) return { status: 'different', reason: 'invalid_receipt' };
+
+    const capturedOrigin = {
+        pathname: String(receipt.origin.pathname || ''),
+        conversationId: String(receipt.origin.conversationId || ''),
+        scope: String(receipt.origin.scope || '')
+    };
+    const normalizedCurrentOrigin = {
+        pathname: String(currentOrigin?.pathname || ''),
+        conversationId: String(currentOrigin?.conversationId || ''),
+        scope: String(currentOrigin?.scope || '')
+    };
+    if (normalizedCurrentOrigin.pathname !== capturedOrigin.pathname
+        || normalizedCurrentOrigin.scope !== capturedOrigin.scope
+        || (capturedOrigin.conversationId
+            && normalizedCurrentOrigin.conversationId !== capturedOrigin.conversationId)) {
+        return { status: 'different', reason: 'origin_mismatch' };
+    }
+
+    const anchors = [...beforeIdentities, ...afterIdentities];
+    const capturedIdentities = [sourceIdentity, ...anchors];
+    if (new Set(capturedIdentities).size !== capturedIdentities.length) {
+        return { status: 'ambiguous', reason: 'duplicate_identity' };
+    }
+    if (expectedNextIdentity !== (afterIdentities[0] || null)) {
+        return { status: 'different', reason: 'invalid_receipt' };
+    }
+
+    const normalized = (Array.isArray(identities) ? identities : [])
+        .map(getGrokMediaIdentity)
+        .filter(Boolean);
+    const relevantIdentities = new Set(capturedIdentities);
+    const counts = new Map();
+    for (const identity of normalized) {
+        if (relevantIdentities.has(identity)) {
+            counts.set(identity, (counts.get(identity) || 0) + 1);
+        }
+    }
+    if (Array.from(counts.values()).some((count) => count > 1)) {
+        return { status: 'ambiguous', reason: 'duplicate_identity' };
+    }
+
+    const sourceIndex = normalized.indexOf(sourceIdentity);
+    if (sourceIndex >= 0) {
+        if (expectedNextIdentity && normalized[sourceIndex + 1] !== expectedNextIdentity) {
+            return { status: 'different', reason: 'expected_next_mismatch' };
+        }
+        const capturedOrder = [...beforeIdentities, sourceIdentity, ...afterIdentities];
+        const currentCapturedOrder = normalized.filter((identity) => relevantIdentities.has(identity));
+        let previousIndex = -1;
+        for (const identity of currentCapturedOrder) {
+            const capturedIndex = capturedOrder.indexOf(identity);
+            if (capturedIndex <= previousIndex) {
+                return { status: 'different', reason: 'anchor_order_mismatch' };
+            }
+            previousIndex = capturedIndex;
+        }
+        return { status: 'matched', reason: 'source_identity' };
+    }
+
+    if (!allowSourceReplacement) return { status: 'different', reason: 'source_missing' };
+    const currentAnchors = normalized.filter((identity) => anchors.includes(identity));
+    if (currentAnchors.length < 2) {
+        return { status: 'ambiguous', reason: 'insufficient_stable_anchors' };
+    }
+    let previousAnchorIndex = -1;
+    for (const identity of currentAnchors) {
+        const anchorIndex = anchors.indexOf(identity);
+        if (anchorIndex <= previousAnchorIndex) {
+            return { status: 'ambiguous', reason: 'anchor_order_mismatch' };
+        }
+        previousAnchorIndex = anchorIndex;
+    }
+    return { status: 'matched', reason: 'source_replaced_with_stable_anchors' };
+}
 
 function getSavedGalleryEntries(root = document) {
     return Array.from(root.querySelectorAll('img[alt="Generated image"]'))
@@ -559,19 +677,16 @@ function getSavedGalleryList(entries) {
 }
 
 function hasOrderedSavedNeighborhood(entries, receipt) {
-    const sourceIdentity = getGrokMediaIdentity(receipt?.sourceIdentity);
-    const expectedNextIdentity = getGrokMediaIdentity(receipt?.expectedNextIdentity) || null;
-    if (!sourceIdentity || sourceIdentity === expectedNextIdentity) return false;
-    const identities = entries.map((entry) => getGrokMediaIdentity(entry?.sourceIdentity));
-    const sourceIndices = identities
-        .map((identity, index) => identity === sourceIdentity ? index : -1)
-        .filter((index) => index >= 0);
-    if (sourceIndices.length !== 1) return false;
-    if (!expectedNextIdentity) return true;
-    const nextIndices = identities
-        .map((identity, index) => identity === expectedNextIdentity ? index : -1)
-        .filter((index) => index >= 0);
-    return nextIndices.length === 1 && nextIndices[0] === sourceIndices[0] + 1;
+    return evaluateGalleryReceipt({
+        identities: entries.map((entry) => entry?.sourceIdentity),
+        receipt,
+        currentOrigin: {
+            pathname: window.location.pathname,
+            conversationId: new URLSearchParams(window.location.search).get('conversation') || '',
+            scope: SAVED_GALLERY_SCOPES.all
+        },
+        allowSourceReplacement: false
+    }).status === 'matched';
 }
 
 function isSavedGalleryScrollableElement(element) {
@@ -647,27 +762,46 @@ function captureSavedViewportReceipt({
     const derivedNextIdentity = context.entries[sourceIndices[0] + 1]?.sourceIdentity || null;
     const requestedNextIdentity = getGrokMediaIdentity(expectedNextIdentity) || null;
     if (requestedNextIdentity && requestedNextIdentity !== derivedNextIdentity) return null;
-    const receipt = {
-        version: SAVED_VIEWPORT_RECEIPT_VERSION,
+    const receipt = captureGalleryReceipt({
+        identities: context.entries.map((entry) => entry.sourceIdentity),
         sourceIdentity: normalizedSource,
-        expectedNextIdentity: derivedNextIdentity,
+        origin: {
+            pathname: window.location.pathname,
+            conversationId: new URLSearchParams(window.location.search).get('conversation') || '',
+            scope: SAVED_GALLERY_SCOPES.all
+        },
         scrollTop: getSavedScrollerSnapshot(context.scroller || fallbackScroller).scrollTop
-    };
+    });
     return hasOrderedSavedNeighborhood(context.entries, receipt) ? receipt : null;
 }
 
 function normalizeSavedViewportReceipt(value = {}) {
     const receipt = value.savedViewportReceipt || value.viewportReceipt || value;
-    if (receipt.version !== SAVED_VIEWPORT_RECEIPT_VERSION) return null;
+    if (receipt.version !== GALLERY_RECEIPT_VERSION
+        || !receipt.origin
+        || !Array.isArray(receipt.beforeIdentities)
+        || !Array.isArray(receipt.afterIdentities)
+        || !Array.isArray(receipt.visibleIdentities)) return null;
     const sourceIdentity = getGrokMediaIdentity(
         receipt.sourceIdentity || value.expectedIdentity || value.sourceId || value.currentItemId
     );
     if (!sourceIdentity) return null;
     return {
-        version: SAVED_VIEWPORT_RECEIPT_VERSION,
+        version: GALLERY_RECEIPT_VERSION,
         sourceIdentity,
         expectedNextIdentity: getGrokMediaIdentity(receipt.expectedNextIdentity) || null,
-        scrollTop: Number(receipt.scrollTop ?? value.galleryScrollTop ?? value.scrollY) || 0
+        beforeIdentities: receipt.beforeIdentities.map(getGrokMediaIdentity).filter(Boolean),
+        afterIdentities: receipt.afterIdentities.map(getGrokMediaIdentity).filter(Boolean),
+        visibleIdentities: receipt.visibleIdentities.map(getGrokMediaIdentity).filter(Boolean),
+        origin: {
+            pathname: String(receipt.origin.pathname || ''),
+            conversationId: String(receipt.origin.conversationId || ''),
+            scope: String(receipt.origin.scope || '')
+        },
+        scrollTop: Math.max(
+            0,
+            Number(receipt.scrollTop ?? value.galleryScrollTop ?? value.scrollY) || 0
+        )
     };
 }
 
@@ -2668,6 +2802,7 @@ class GrokOverlay {
 const PROMPTED_VIDEO_FOCUS_POLL_MS = 100;
 const PROMPTED_VIDEO_FOCUS_WAIT_ATTEMPTS = 20;
 const PROMPTED_VIDEO_FOCUS_QUIESCENCE_MS = 500;
+const PROMPTED_VIDEO_SUBMIT_ACCEPTANCE_TIMEOUT_MS = 3000;
 const AGENT_ACTION_QUIESCENCE_MS = 500;
 const PROMPTED_VIDEO_INPUT_SELECTOR =
     'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]';
@@ -3539,22 +3674,155 @@ class VideoRetryManager {
         return true;
     }
 
-    // Clicks only a proven video query-bar submit. Never fall back to Edit.
-    clickPromptedVideoSubmitButton(runToken, agentBinding = null) {
+    _getPromptedBatchNativeClickPoint(target) {
+        const rect = target?.getBoundingClientRect?.();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+        const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+        const visibleLeft = Math.max(0, rect.left);
+        const visibleTop = Math.max(0, rect.top);
+        const visibleRight = Math.min(viewportWidth, rect.right);
+        const visibleBottom = Math.min(viewportHeight, rect.bottom);
+        if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) return null;
+        return {
+            x: visibleLeft + ((visibleRight - visibleLeft) / 2),
+            y: visibleTop + ((visibleBottom - visibleTop) / 2)
+        };
+    }
+
+    async _clickPromptedBatchNativeControl(target, runToken, operation, validateTarget) {
+        if (!this.isPromptedBatchTokenActive(runToken) || !target) return false;
+        const click = this._getPromptedBatchNativeClickPoint(target);
+        if (!click) return false;
+
+        const overlay = document.querySelector('#grok-powertools-overlay');
+        const previousPointerEvents = overlay?.style.pointerEvents;
+        if (overlay && !overlay.contains(target)) overlay.style.pointerEvents = 'none';
+        try {
+            if (!this.isPromptedBatchTokenActive(runToken)) return false;
+            if (validateTarget && !validateTarget()) return false;
+            if (typeof document.elementFromPoint === 'function') {
+                const hitTarget = document.elementFromPoint(click.x, click.y);
+                if (hitTarget && hitTarget !== target && !target.contains(hitTarget)) return false;
+            }
+
+            const response = await safeChromeRuntimeSendMessage({
+                action: 'GPT_PROMPTED_VIDEO_NATIVE_CLICK',
+                click
+            }, operation);
+            if (!response.ok || response.invalidated || response.value?.ok !== true) {
+                if (response.invalidated) showExtensionContextRefreshed(this.overlay);
+                return false;
+            }
+            return this.isPromptedBatchTokenActive(runToken);
+        } catch (error) {
+            if (isExtensionContextInvalidatedError(error)) showExtensionContextRefreshed(this.overlay);
+            return false;
+        } finally {
+            if (overlay && !overlay.contains(target)) overlay.style.pointerEvents = previousPointerEvents;
+        }
+    }
+
+    // Clicks only a proven video query-bar submit. Current Grok rejects untrusted
+    // synthetic submit events, so dispatch through the sender tab's native click channel.
+    async clickPromptedVideoSubmitButton(runToken, agentBinding = null) {
         if (!this.isPromptedBatchTokenActive(runToken)) return false;
         if (agentBinding && !this._resolveCurrentAgentMediaBinding(agentBinding)) return false;
         const button = this._findPromptedVideoSubmitButton();
         if (!button || button.disabled) return false;
-        if (!this.isPromptedBatchTokenActive(runToken)) return false;
-        if (agentBinding && !this._resolveCurrentAgentMediaBinding(agentBinding)) return false;
-        this.simulateClick(button);
-        return true;
+        const clicked = await this._clickPromptedBatchNativeControl(
+            button,
+            runToken,
+            'click prompted video submit',
+            () => this._findPromptedVideoSubmitButton() === button
+                && (!agentBinding || !!this._resolveCurrentAgentMediaBinding(agentBinding))
+        );
+        if (!clicked || !this.isPromptedBatchTokenActive(runToken)) return false;
+        return !agentBinding || !!this._resolveCurrentAgentMediaBinding(agentBinding);
+    }
+
+    _capturePromptedVideoSubmissionReceipt(agentBinding = null) {
+        const composer = this._getVerifiedPromptedVideoComposer(
+            this.promptedVideoComposerRoot,
+            false
+        );
+        if (!composer) return null;
+        const inputValue = composer.input instanceof HTMLTextAreaElement
+            ? composer.input.value
+            : composer.input.textContent;
+        return {
+            composerRoot: composer.root,
+            input: composer.input,
+            inputValue: String(inputValue || '').trim(),
+            submitButton: composer.submitButton,
+            postId: this._getImaginePostId(window.location.href),
+            conversationId: this._getImagineConversationId(window.location.href),
+            progressCount: document.querySelectorAll(this.PROGRESS_SELECTOR).length,
+            videoResultBaseline: this.capturePromptedVideoResultBaseline(document, agentBinding)
+        };
+    }
+
+    async _waitForPromptedVideoSubmissionAccepted(
+        receipt,
+        runToken,
+        timeoutMs = PROMPTED_VIDEO_SUBMIT_ACCEPTANCE_TIMEOUT_MS
+    ) {
+        if (!receipt?.composerRoot || !receipt.submitButton || !receipt.input) return false;
+        const attempts = Math.max(1, Math.ceil(timeoutMs / PROMPTED_VIDEO_FOCUS_POLL_MS));
+
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            if (!this.isBatchRunActive(runToken)) return false;
+            const inputValue = receipt.input instanceof HTMLTextAreaElement
+                ? receipt.input.value
+                : receipt.input.textContent;
+            const inputChanged = !!receipt.inputValue
+                && String(inputValue || '').trim() !== receipt.inputValue;
+            const composerClosed = !receipt.composerRoot.isConnected;
+            const submitSettled = !receipt.submitButton.isConnected
+                || receipt.submitButton.disabled
+                || receipt.submitButton.getAttribute('aria-disabled') === 'true';
+            const progressStarted = document.querySelectorAll(this.PROGRESS_SELECTOR).length
+                > receipt.progressCount;
+            const resultAppeared = this._hasNewPromptedVideoResult(
+                document,
+                receipt.videoResultBaseline
+            );
+            const currentPostId = this._getImaginePostId(window.location.href);
+            const currentConversationId = this._getImagineConversationId(window.location.href);
+            const acceptedPostOpened = !!receipt.postId
+                && !!currentPostId
+                && currentPostId !== receipt.postId
+                && !!currentConversationId
+                && (!receipt.conversationId || currentConversationId === receipt.conversationId);
+
+            if (
+                inputChanged
+                || composerClosed
+                || submitSettled
+                || progressStarted
+                || resultAppeared
+                || acceptedPostOpened
+            ) {
+                return true;
+            }
+            await this.sleep(PROMPTED_VIDEO_FOCUS_POLL_MS);
+        }
+
+        return false;
     }
 
     _getImaginePostId(url) {
         try {
             const pathname = new URL(url, window.location.origin).pathname;
             return pathname.match(/^\/imagine\/post\/([^/]+)/)?.[1] || null;
+        } catch {
+            return null;
+        }
+    }
+
+    _getImagineConversationId(url) {
+        try {
+            return new URL(url, window.location.origin).searchParams.get('conversation') || null;
         } catch {
             return null;
         }
@@ -3877,51 +4145,51 @@ class VideoRetryManager {
     }
 
     _hasOrderedResultsNeighborhood(entries, receipt) {
-        if (!receipt?.sourceId
-            || !Number.isInteger(receipt.sourceIndex)
-            || !Array.isArray(receipt.orderedIds)
-            || receipt.orderedIds[receipt.sourceIndex] !== receipt.sourceId) {
-            return false;
-        }
-        const identities = entries.map((entry) => entry.sourceId);
-        const originalIds = new Set(receipt.orderedIds);
-        const currentIds = new Set(identities);
-        if (originalIds.size !== receipt.orderedIds.length || currentIds.size !== identities.length) {
-            return false;
-        }
-
-        const stableIds = receipt.orderedIds.filter((identity) => identity !== receipt.sourceId);
-        if (stableIds.some((identity) => !currentIds.has(identity))) return false;
-
-        const sourceStillPresent = currentIds.has(receipt.sourceId);
-        const insertedIds = identities.filter((identity) => !originalIds.has(identity));
-        if (sourceStillPresent) return insertedIds.length <= 1;
-
-        // Grok may either replace the source result or insert the generated video beside it.
-        // In both cases every non-source result must remain present and only one new ID is allowed.
-        return receipt.orderedIds.length >= 2 && insertedIds.length === 1;
+        const capturedIdentities = new Set([
+            receipt?.sourceIdentity,
+            ...(receipt?.beforeIdentities || []),
+            ...(receipt?.afterIdentities || []),
+            ...(receipt?.visibleIdentities || [])
+        ].filter(Boolean));
+        const identities = entries
+            .filter((entry) => {
+                if (capturedIdentities.has(entry.sourceId)) return true;
+                const actions = Array.from(entry.container?.querySelectorAll?.(this.BUTTON_SELECTOR) || [])
+                    .filter((button) => findMediaCardRoot(button) === entry.container);
+                return actions.length === 1;
+            })
+            .map((entry) => entry.sourceId);
+        return evaluateGalleryReceipt({
+            identities,
+            receipt,
+            currentOrigin: {
+                pathname: window.location.pathname,
+                conversationId: new URLSearchParams(window.location.search).get('conversation') || '',
+                scope: 'results'
+            },
+            allowSourceReplacement: true
+        }).status === 'matched';
     }
 
     _captureResultsGalleryReceipt(item) {
         const context = this._getResultsGalleryContext();
         const sourceId = this._getResultsCardSourceId(item?.container);
         if (!context || !sourceId || sourceId !== item?.sourceId) return null;
-        const sourceIndices = context.entries
-            .map((entry, index) => entry.sourceId === sourceId ? index : -1)
-            .filter((index) => index >= 0);
-        if (sourceIndices.length !== 1) return null;
         const qualifiedItems = this._getQualifiedResultsGalleryItems();
         const qualifiedSourceIndices = qualifiedItems
             .map((entry, index) => entry.sourceId === sourceId ? index : -1)
             .filter((index) => index >= 0);
         if (qualifiedSourceIndices.length !== 1) return null;
-        const receipt = {
-            sourceId,
-            sourceIndex: sourceIndices[0],
-            orderedIds: context.entries.map((entry) => entry.sourceId),
-            expectedNextId: qualifiedItems[qualifiedSourceIndices[0] + 1]?.sourceId || null,
+        const receipt = captureGalleryReceipt({
+            identities: qualifiedItems.map((entry) => entry.sourceId),
+            sourceIdentity: sourceId,
+            origin: {
+                pathname: window.location.pathname,
+                conversationId: new URLSearchParams(window.location.search).get('conversation') || '',
+                scope: 'results'
+            },
             scrollTop: getSavedScrollerSnapshot(context.scroller).scrollTop
-        };
+        });
         return this._hasOrderedResultsNeighborhood(context.entries, receipt) ? receipt : null;
     }
 
@@ -3953,17 +4221,13 @@ class VideoRetryManager {
             .filter((item) => !item.container.querySelector(this.PROGRESS_SELECTOR)
                 && !this.isCensoredCard(item.container)
                 && !this.batchProcessedSrcs?.has(item.sourceId));
-        if (receipt.expectedNextId) {
-            const queueById = new Map(queue.map((item) => [item.sourceId, item]));
-            const expectedNextIndex = receipt.orderedIds.indexOf(receipt.expectedNextId);
-            if (expectedNextIndex < 0 || !queueById.has(receipt.expectedNextId)) return false;
-            this.batchQueue = receipt.orderedIds
-                .slice(expectedNextIndex)
-                .map((sourceId) => queueById.get(sourceId))
-                .filter(Boolean);
-        } else {
-            this.batchQueue = [];
-        }
+        const queueById = new Map(queue.map((item) => [item.sourceId, item]));
+        const nextQueueIdentity = receipt.afterIdentities
+            .find((sourceId) => queueById.has(sourceId));
+        const nextQueueIndex = nextQueueIdentity
+            ? queue.findIndex((item) => item.sourceId === nextQueueIdentity)
+            : -1;
+        this.batchQueue = nextQueueIndex >= 0 ? queue.slice(nextQueueIndex) : [];
         this.batchIndex = 0;
         this.targetContext = null;
         this._clearPromptedVideoComposerRoot();
@@ -3973,28 +4237,20 @@ class VideoRetryManager {
     async _returnToPromptedBatchResults(receipt, runToken) {
         if (!this.isBatchRunActive(runToken)) return 'cancelled';
         const backControl = this._findPromptedBatchBackControl();
-        if (backControl) {
-            backControl.click();
-            const returned = await this._waitForPromptedBatchResultsSurface(receipt, runToken);
-            if (!this.isBatchRunActive(runToken)) return 'cancelled';
-            if (returned) {
-                return this._restorePromptedBatchResultsState(receipt, runToken)
-                    ? 'returned'
-                    : 'failed';
-            }
-            if (this._isResultsGallerySurface()) return 'failed';
-        }
-
+        if (!backControl) return 'failed';
+        const clicked = await this._clickPromptedBatchNativeControl(
+            backControl,
+            runToken,
+            'return to prompted batch results',
+            () => this._findPromptedBatchBackControl() === backControl
+        );
+        if (!clicked) return this.isBatchRunActive(runToken) ? 'failed' : 'cancelled';
+        const returned = await this._waitForPromptedBatchResultsSurface(receipt, runToken);
         if (!this.isBatchRunActive(runToken)) return 'cancelled';
-        if (window.history.length > 1) {
-            window.history.back();
-            const returned = await this._waitForPromptedBatchResultsSurface(receipt, runToken);
-            if (!this.isBatchRunActive(runToken)) return 'cancelled';
-            if (returned) {
-                return this._restorePromptedBatchResultsState(receipt, runToken)
-                    ? 'returned'
-                    : 'failed';
-            }
+        if (returned) {
+            return this._restorePromptedBatchResultsState(receipt, runToken)
+                ? 'returned'
+                : 'failed';
         }
         return this.isBatchRunActive(runToken) ? 'failed' : 'cancelled';
     }
@@ -4048,7 +4304,7 @@ class VideoRetryManager {
         if (!this.isBatchRunActive(runToken)) return false;
         openTarget.click();
 
-        const editorReady = await this.waitForPromptedBatchEditorReady(receipt.sourceId, runToken);
+        const editorReady = await this.waitForPromptedBatchEditorReady(receipt.sourceIdentity, runToken);
         if (!this.isBatchRunActive(runToken)) return false;
         if (editorReady.status !== 'ready') {
             return this._stopPromptedResultsItem(
@@ -4092,11 +4348,17 @@ class VideoRetryManager {
             );
         }
 
-        const videoResultBaseline = this.capturePromptedVideoResultBaseline(
-            document,
+        const submissionReceipt = this._capturePromptedVideoSubmissionReceipt(
             editorReady.agentBinding || null
         );
-        if (!this.clickPromptedVideoSubmitButton(runToken, editorReady.agentBinding || null)) {
+        if (!submissionReceipt) {
+            return this._stopPromptedResultsItem(
+                'Prompted Batch [results]: Video submit state could not be verified',
+                receipt,
+                runToken
+            );
+        }
+        if (!await this.clickPromptedVideoSubmitButton(runToken, editorReady.agentBinding || null)) {
             return this._stopPromptedResultsItem(
                 'Prompted Batch [results]: Video submit button not ready',
                 receipt,
@@ -4105,21 +4367,19 @@ class VideoRetryManager {
         }
         this.lastClickTime = Date.now();
 
-        const result = await this.awaitBatchItemCompletion(document, {
-            allowRetry: false,
-            labelPrefix: 'Prompted Batch [results]',
-            videoResultBaseline,
+        const submissionAccepted = await this._waitForPromptedVideoSubmissionAccepted(
+            submissionReceipt,
             runToken
-        });
+        );
         if (!this.isBatchRunActive(runToken)) return false;
-        if (result !== 'success') {
+        if (!submissionAccepted) {
             return this._stopPromptedResultsItem(
-                'Prompted Batch [results]: No new video result was confirmed for the selected image',
+                'Prompted Batch [results]: Video submission was not accepted',
                 receipt,
                 runToken
             );
         }
-        this.batchProcessedSrcs?.add(receipt.sourceId);
+        this.batchProcessedSrcs?.add(receipt.sourceIdentity);
 
         const returnStatus = await this._returnToPromptedBatchResults(receipt, runToken);
         if (returnStatus !== 'returned' || !this.isBatchRunActive(runToken)) {
@@ -4279,8 +4539,8 @@ class VideoRetryManager {
                 : this.capturePromptedVideoResultBaseline(document);
             this.preClickButtonCount = document.querySelectorAll(this.PROGRESS_SELECTOR).length;
             const submitted = agentBinding
-                ? this.clickPromptedVideoSubmitButton(runToken, agentBinding)
-                : this.clickPromptedVideoSubmitButton(runToken);
+                ? await this.clickPromptedVideoSubmitButton(runToken, agentBinding)
+                : await this.clickPromptedVideoSubmitButton(runToken);
             if (!submitted) {
                 this.batchFailureMessage = 'Prompted Batch [detail]: Video submit button not ready';
                 this.safeStatus(this.batchFailureMessage, 'warning');
@@ -4707,11 +4967,17 @@ class VideoRetryManager {
         }
 
         if (!this.isBatchRunActive(runToken)) return false;
-        const videoResultBaseline = this.capturePromptedVideoResultBaseline(
-            document,
+        const submissionReceipt = this._capturePromptedVideoSubmissionReceipt(
             editorReady.agentBinding || null
         );
-        const submitted = this.clickPromptedVideoSubmitButton(
+        if (!submissionReceipt) {
+            return this.stopPromptedBatchItem(
+                'Prompted Batch [gallery]: Video submit state could not be verified',
+                snapshot,
+                runToken
+            );
+        }
+        const submitted = await this.clickPromptedVideoSubmitButton(
             runToken,
             editorReady.agentBinding || null
         );
@@ -4727,16 +4993,14 @@ class VideoRetryManager {
         this.lastClickTime = Date.now();
         console.log(`Prompted Batch [gallery]: Submitted video for item ${this.batchIndex + 1}.`);
 
-        const result = await this.awaitBatchItemCompletion(document, {
-            allowRetry: false,
-            labelPrefix: 'Prompted Batch [gallery]',
-            videoResultBaseline,
+        const submissionAccepted = await this._waitForPromptedVideoSubmissionAccepted(
+            submissionReceipt,
             runToken
-        });
+        );
         if (!this.isBatchRunActive(runToken)) return false;
-        if (result !== 'success') {
+        if (!submissionAccepted) {
             return this.stopPromptedBatchItem(
-                'Prompted Batch [gallery]: No new video result was confirmed for the selected image',
+                'Prompted Batch [gallery]: Video submission was not accepted',
                 snapshot,
                 runToken
             );
@@ -4758,12 +5022,17 @@ class VideoRetryManager {
         if (!this.isBatchRunActive(runToken)) return 'cancelled';
         const backBtn = this._findPromptedBatchBackControl();
         if (backBtn) {
-            if (!this.isBatchRunActive(runToken)) return 'cancelled';
-            backBtn.click();
+            const clicked = await this._clickPromptedBatchNativeControl(
+                backBtn,
+                runToken,
+                'return to prompted batch saved gallery',
+                () => this._findPromptedBatchBackControl() === backBtn
+            );
+            if (!clicked) return this.isBatchRunActive(runToken) ? 'failed' : 'cancelled';
             const returned = await this.waitForPromptedBatchSavedSurface(snapshot, runToken);
             if (!this.isBatchRunActive(runToken)) return 'cancelled';
             if (returned) return this.restorePromptedBatchSavedState(snapshot, runToken) ? 'returned' : 'cancelled';
-            if (detectGrokScrapeSurface(document, window.location) === SCRAPE_SURFACES.savedGallery) return 'failed';
+            return 'failed';
         }
 
         if (!this.isBatchRunActive(runToken)) return 'cancelled';
@@ -7078,9 +7347,12 @@ if (typeof module === 'undefined') {
         getBackupMediaElementSrc,
         SCRAPE_SURFACES,
         SAVED_GALLERY_SCOPES,
+        GALLERY_RECEIPT_VERSION,
+        captureGalleryReceipt,
         captureSavedViewportReceipt,
         detectSavedGalleryScope,
         detectGrokScrapeSurface,
+        evaluateGalleryReceipt,
         findMatchingAgentMedia,
         dispatchFullPointerClick,
         getSavedGalleryContext,

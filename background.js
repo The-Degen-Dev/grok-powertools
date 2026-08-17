@@ -2727,7 +2727,7 @@ async function finalizeScrapeStart(lease, initResponse) {
     });
 }
 
-async function initializeScrapeInActiveTab(initMessage, { backup = false } = {}) {
+async function initializeScrapeInActiveTab(initMessage, { backup = false, sourceTab = null } = {}) {
     let intent = null;
     let lease = null;
     try {
@@ -2739,8 +2739,8 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false } = {})
         if (!await scrapeStartIntentOwnsAuthority(intent)) {
             return { status: 'error', surface: 'unsupported', error: 'Start was cancelled.' };
         }
-        const tab = await queryActiveTab();
-        if (!tab || !isGrokSavedUrl(tab.url)) {
+        const tab = sourceTab || await queryActiveTab();
+        if (!Number.isInteger(tab?.id) || !isGrokSavedUrl(tab.url)) {
             await cancelPreparedScrapeStart(intent, 'invalid_context');
             return {
                 status: 'invalid_context',
@@ -2950,7 +2950,10 @@ function handleRuntimeMessage(request, sender, sendResponse) {
 
     if (request.action === 'START_SCRAPE') {
         log('Background: Received START_SCRAPE.');
-        initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' }).then(sendResponse);
+        initializeScrapeInActiveTab(
+            { action: 'INIT_SCRAPE' },
+            { sourceTab: sender?.tab || null }
+        ).then(sendResponse);
         return true;
     }
 
@@ -2967,7 +2970,7 @@ function handleRuntimeMessage(request, sender, sendResponse) {
             const initMessage = buildR2BackupInitMessageForConfig(request, config);
             log(initMessage.mode === 'canary' ? 'Starting R2 Canary Backup...' : 'Starting Full R2 Media Backup...');
             return initMessage;
-        }, { backup: true }).then(sendResponse).catch((e) => {
+        }, { backup: true, sourceTab: sender?.tab || null }).then(sendResponse).catch((e) => {
             sendResponse({ status: 'error', error: e.message });
         });
         return true;
@@ -3289,7 +3292,8 @@ function handleRuntimeMessage(request, sender, sendResponse) {
         return true;
     }
 
-    if (request.action === 'GPT_RECREATE_NATIVE_CLICK') {
+    if (request.action === 'GPT_RECREATE_NATIVE_CLICK'
+        || request.action === 'GPT_PROMPTED_VIDEO_NATIVE_CLICK') {
         (async () => {
             try {
                 const tabId = sender && sender.tab ? sender.tab.id : null;

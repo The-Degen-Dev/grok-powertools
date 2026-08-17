@@ -212,4 +212,23 @@ describe('background recreate workflow wiring', () => {
         expect(sendResponse).toHaveBeenCalledWith({ ok: true });
         expect(global.chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 321 }, '1.3', expect.any(Function));
     });
+
+    test('handles prompted-video native clicks from the sender tab', async () => {
+        global.chrome = mockChromeForBackground();
+
+        require('../../background.js');
+        const listener = global.chrome.runtime.onMessage.addListener.mock.calls[0][0];
+        const sendResponse = jest.fn();
+        const keepAlive = listener(
+            { action: 'GPT_PROMPTED_VIDEO_NATIVE_CLICK', click: { x: 24, y: 48 } },
+            { tab: { id: 654 } },
+            sendResponse
+        );
+
+        expect(keepAlive).toBe(true);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+        expect(global.chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 654 }, '1.3', expect.any(Function));
+    });
 });

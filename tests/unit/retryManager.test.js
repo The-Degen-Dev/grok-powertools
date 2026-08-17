@@ -225,6 +225,7 @@ describe('VideoRetryManager', () => {
     let historyManager;
     let setIntervalSpy;
     let promptedVideoBridgeHandler;
+    let nativeControlClickSpy;
 
     beforeEach(() => {
         if (!global.PointerEvent) global.PointerEvent = MouseEvent;
@@ -260,6 +261,17 @@ describe('VideoRetryManager', () => {
 
         setIntervalSpy = jest.spyOn(global, 'setInterval').mockImplementation(() => 1);
         retryManager = new VideoRetryManager(mockOverlay, settingsManager, historyManager);
+        nativeControlClickSpy = jest.spyOn(retryManager, '_clickPromptedBatchNativeControl')
+            .mockImplementation(async (target, runToken, _operation, validateTarget) => {
+                if (!retryManager.isPromptedBatchTokenActive(runToken) || !target) return false;
+                if (validateTarget && !validateTarget()) return false;
+                target.click();
+                return retryManager.isPromptedBatchTokenActive(runToken);
+            });
+        chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message?.action !== 'GPT_PROMPTED_VIDEO_NATIVE_CLICK') return undefined;
+            return { ok: false, error: 'native_click_not_stubbed' };
+        });
     });
 
     afterEach(() => {
@@ -474,8 +486,9 @@ describe('VideoRetryManager', () => {
         const receipt = retryManager._captureResultsGalleryReceipt(firstItem);
 
         expect(receipt).toEqual(expect.objectContaining({
-            sourceId: '11111111-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-            expectedNextId: '33333333-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+            version: 3,
+            sourceIdentity: '11111111-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+            expectedNextIdentity: '33333333-bbbb-4ccc-8ddd-eeeeeeeeeeee'
         }));
     });
 
@@ -632,6 +645,9 @@ describe('VideoRetryManager', () => {
         const sourceUrl = 'https://assets.grok.com/users/example/generated/a1a1a1a1-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
         window.history.pushState({}, '', '/imagine');
         const { card, makeVideo } = createSavedBatchCard(sourceUrl);
+        const receipt = retryManager._captureResultsGalleryReceipt(
+            retryManager._getQualifiedResultsGalleryItems()[0]
+        );
         makeVideo.remove();
         const progress = document.createElement('button');
         progress.setAttribute('aria-label', 'Video Options');
@@ -644,22 +660,19 @@ describe('VideoRetryManager', () => {
         retryManager.batchContext = 'results_gallery';
         retryManager.sleep = jest.fn().mockResolvedValue();
 
-        await expect(retryManager._waitForPromptedBatchResultsSurface({
-            sourceId: 'a1a1a1a1-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-            sourceIndex: 0,
-            orderedIds: ['a1a1a1a1-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
-            expectedNextId: null,
-            scrollTop: 0
-        }, token, 200)).resolves.toBe(true);
+        await expect(retryManager._waitForPromptedBatchResultsSurface(receipt, token, 200))
+            .resolves.toBe(true);
     });
 
     test('results return accepts one in-place source replacement while preserving the anchored grid', async () => {
         const sourcePostId = 'b253dd6b-aa00-4e93-a84d-89954d826d78';
         const nextPostId = '495f114a-bb00-4e93-a84d-89954d826d78';
+        const afterPostId = '6a70115b-cc00-4e93-a84d-89954d826d78';
         window.history.pushState({}, '', '/imagine');
         window.scrollTo = jest.fn();
         const source = createSavedBatchCard('data:image/jpeg;base64,source-before');
         const next = createSavedBatchCard('data:image/jpeg;base64,next-before');
+        const after = createSavedBatchCard('data:image/jpeg;base64,after-before');
         const sourceLink = document.createElement('a');
         sourceLink.href = `/imagine/post/${sourcePostId}`;
         source.card.insertBefore(sourceLink, source.image);
@@ -668,15 +681,21 @@ describe('VideoRetryManager', () => {
         nextLink.href = `/imagine/post/${nextPostId}`;
         next.card.insertBefore(nextLink, next.image);
         nextLink.appendChild(next.image);
+        const afterLink = document.createElement('a');
+        afterLink.href = `/imagine/post/${afterPostId}`;
+        after.card.insertBefore(afterLink, after.image);
+        afterLink.appendChild(after.image);
         makeVisible(source.card, { top: 0, left: 0 });
         makeVisible(next.card, { top: 100, left: 0 });
+        makeVisible(after.card, { top: 200, left: 0 });
 
         const sourceItem = retryManager._getQualifiedResultsGalleryItems()[0];
         const receipt = retryManager._captureResultsGalleryReceipt(sourceItem);
 
         expect(receipt).toEqual(expect.objectContaining({
-            sourceId: sourcePostId,
-            expectedNextId: nextPostId
+            sourceIdentity: sourcePostId,
+            expectedNextIdentity: nextPostId,
+            afterIdentities: [nextPostId, afterPostId]
         }));
 
         source.image.src = `https://assets.grok.com/users/example/generated/${sourcePostId}/preview_image.jpg?cache=1`;
@@ -717,8 +736,8 @@ describe('VideoRetryManager', () => {
             retryManager._getQualifiedResultsGalleryItems()[0]
         );
         expect(receipt).toEqual(expect.objectContaining({
-            sourceId: sourcePostId,
-            expectedNextId: nextPostId
+            sourceIdentity: sourcePostId,
+            expectedNextIdentity: nextPostId
         }));
 
         source.card.getBoundingClientRect.mockReturnValue({
@@ -809,7 +828,9 @@ describe('VideoRetryManager', () => {
         retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(true);
         retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
         retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(true);
-        retryManager.capturePromptedVideoResultBaseline = jest.fn().mockReturnValue(new Set());
+        retryManager._capturePromptedVideoSubmissionReceipt = jest.fn().mockReturnValue({
+            composerRoot: document.createElement('div')
+        });
         retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(false);
         const stopSpy = jest.spyOn(retryManager, '_stopPromptedResultsItem').mockResolvedValue(false);
 
@@ -820,6 +841,53 @@ describe('VideoRetryManager', () => {
             expect.any(Object),
             token
         );
+    });
+
+    test('results batch returns after an accepted submit without waiting for video generation', async () => {
+        window.history.pushState({}, '', '/imagine');
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/d1d1d1d1-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/d2d2d2d2-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const token = 'results-submit-accepted';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        retryManager.batchProcessedSrcs = new Set();
+        retryManager.waitForPromptedBatchEditorReady = jest.fn().mockResolvedValue({
+            status: 'ready',
+            makeVideoTrigger: document.createElement('button'),
+            agentBinding: null
+        });
+        retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(true);
+        retryManager._capturePromptedVideoSubmissionReceipt = jest.fn().mockReturnValue({
+            composerRoot: document.createElement('div')
+        });
+        retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmissionAccepted = jest.fn().mockResolvedValue(true);
+        retryManager.awaitBatchItemCompletion = jest.fn(() => {
+            throw new Error('results batches must not wait for generated video output');
+        });
+        retryManager._returnToPromptedBatchResults = jest.fn().mockResolvedValue('returned');
+
+        await expect(retryManager._processPromptedResultsItem(item, token)).resolves.toBe(true);
+
+        expect(retryManager.awaitBatchItemCompletion).not.toHaveBeenCalled();
+        expect(retryManager._returnToPromptedBatchResults).toHaveBeenCalledWith(
+            expect.objectContaining({
+                sourceIdentity: 'd1d1d1d1-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+                expectedNextIdentity: 'd2d2d2d2-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+            }),
+            token
+        );
+        expect(retryManager.goalCount).toBe(1);
     });
 
     test('Stop during results-card targeting prevents navigation and submission', async () => {
@@ -1346,7 +1414,7 @@ describe('VideoRetryManager', () => {
         expect(retryManager.goalCount).toBe(1);
     });
 
-    test('a dispatched Prompted Batch click without a confirmed result stays eligible and does not advance', async () => {
+    test('a dispatched Prompted Batch click without an acceptance signal stays eligible and does not advance', async () => {
         const sourceUrl = 'https://assets.grok.com/users/example/generated/acacacac-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
         window.history.pushState({}, '', '/imagine/saved');
         const first = createSavedBatchCard(sourceUrl, () => {
@@ -1362,20 +1430,25 @@ describe('VideoRetryManager', () => {
             });
         });
         primePromptedGalleryBatch(retryManager, { button: first.makeVideo, container: first.card });
-        retryManager.awaitBatchItemCompletion = jest.fn().mockResolvedValue('failed');
+        retryManager.awaitBatchItemCompletion = jest.fn();
+        const acceptanceSpy = jest.spyOn(retryManager, '_waitForPromptedVideoSubmissionAccepted');
         retryManager.sleep = jest.fn().mockResolvedValue();
+        const runToken = retryManager.batchRunToken;
+        const processedSrcs = retryManager.batchProcessedSrcs;
 
         await retryManager.processBatchItemPrompted(
             { button: first.makeVideo, container: first.card },
-            retryManager.batchRunToken
+            runToken
         );
 
-        expect(retryManager.awaitBatchItemCompletion).toHaveBeenCalledWith(document, expect.objectContaining({
-            allowRetry: false,
-            labelPrefix: 'Prompted Batch [gallery]',
-            videoResultBaseline: expect.objectContaining({ surface: 'agent_media' })
-        }));
-        expect(retryManager.batchProcessedSrcs.has('acacacac-bbbb-4ccc-8ddd-eeeeeeeeeeee')).toBe(false);
+        expect(acceptanceSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                videoResultBaseline: expect.objectContaining({ surface: 'agent_media' })
+            }),
+            runToken
+        );
+        expect(retryManager.awaitBatchItemCompletion).not.toHaveBeenCalled();
+        expect(processedSrcs.has('acacacac-bbbb-4ccc-8ddd-eeeeeeeeeeee')).toBe(false);
         expect(retryManager.goalCount).toBe(0);
         expect(retryManager.batchRunning).toBe(false);
         expect(window.location.pathname).toBe('/imagine/saved');
@@ -1677,9 +1750,13 @@ describe('VideoRetryManager', () => {
             galleryUrl: 'http://localhost/imagine/saved',
             sourceId: '05050505-bbbb-4ccc-8ddd-eeeeeeeeeeee',
             savedViewportReceipt: {
-                version: 2,
+                version: 3,
                 sourceIdentity: '05050505-bbbb-4ccc-8ddd-eeeeeeeeeeee',
                 expectedNextIdentity: null,
+                beforeIdentities: [],
+                afterIdentities: [],
+                visibleIdentities: ['05050505-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
                 scrollTop: 420
             },
             scrollY: 420
@@ -1735,9 +1812,13 @@ describe('VideoRetryManager', () => {
             galleryUrl: 'http://localhost/imagine/saved',
             sourceId,
             savedViewportReceipt: {
-                version: 2,
+                version: 3,
                 sourceIdentity: sourceId,
                 expectedNextIdentity: nextId,
+                beforeIdentities: [],
+                afterIdentities: [nextId],
+                visibleIdentities: [sourceId, nextId],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
                 scrollTop: 420
             }
         };
@@ -1872,14 +1953,14 @@ describe('VideoRetryManager', () => {
         await expect(retryManager.selectMakeVideoMode(undefined, makeVideoTrigger)).resolves.toBe(true);
 
         expect(retryManager.promptedVideoComposerRoot).toBe(mountedComposer.composer);
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(false);
         retryManager.sleep.mockImplementation(async () => {
             mountedComposer.submit.disabled = false;
         });
         await expect(retryManager._waitForPromptedVideoSubmitButton()).resolves.toBe(
             mountedComposer.submit
         );
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(true);
         expect(videoSubmitClicks).toBe(1);
         expect(chatSubmit.click).not.toHaveBeenCalled();
 
@@ -1890,7 +1971,7 @@ describe('VideoRetryManager', () => {
             radio.setAttribute('aria-checked', radio.textContent === 'Image' ? 'true' : 'false');
         });
 
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(false);
         expect(videoSubmitClicks).toBe(1);
         expect(chatSubmit.click).not.toHaveBeenCalled();
     });
@@ -1907,7 +1988,7 @@ describe('VideoRetryManager', () => {
         await expect(retryManager._waitForLegacyPromptedVideoSubmitButton()).resolves.toBeNull();
 
         expect(retryManager.promptedVideoComposerRoot).toBeNull();
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(false);
         expect(retryManager.simulateClick).not.toHaveBeenCalled();
         expect(mounted.submit.disabled).toBe(false);
     });
@@ -2019,7 +2100,7 @@ describe('VideoRetryManager', () => {
 
         await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(true);
         expect(retryManager.injectPromptedVideoText('selected prompt')).toBe(true);
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(true);
 
         expect(decoyMenuClicks).toBe(0);
         expect(decoyInputs.map((input) => input.textContent)).toEqual(['', '']);
@@ -2066,7 +2147,7 @@ describe('VideoRetryManager', () => {
 
         await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(true);
         expect(retryManager.injectPromptedVideoText('selected after delayed focus')).toBe(true);
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(true);
 
         expect(decoy.input.textContent).toBe('');
         expect(decoySubmitClicks).toBe(0);
@@ -2114,7 +2195,7 @@ describe('VideoRetryManager', () => {
         const selected = await retryManager.selectMakeVideoMode(undefined, selectedTrigger);
         if (selected) {
             retryManager.injectPromptedVideoText('must not be written');
-            retryManager.clickPromptedVideoSubmitButton();
+            await retryManager.clickPromptedVideoSubmitButton();
         }
 
         expect(selected).toBe(false);
@@ -2175,7 +2256,7 @@ describe('VideoRetryManager', () => {
         const selected = await retryManager.selectMakeVideoMode(undefined, selectedTrigger);
         if (selected) {
             retryManager.injectPromptedVideoText('must not survive late focus');
-            retryManager.clickPromptedVideoSubmitButton();
+            await retryManager.clickPromptedVideoSubmitButton();
         }
 
         expect(selected).toBe(false);
@@ -2227,7 +2308,7 @@ describe('VideoRetryManager', () => {
         const selected = await retryManager.selectMakeVideoMode(undefined, selectedTrigger);
         if (selected) {
             retryManager.injectPromptedVideoText('must not survive transient duplicate input');
-            retryManager.clickPromptedVideoSubmitButton();
+            await retryManager.clickPromptedVideoSubmitButton();
             await new Promise((resolve) => setTimeout(resolve, 0));
         }
 
@@ -2276,7 +2357,7 @@ describe('VideoRetryManager', () => {
         const selected = await retryManager.selectMakeVideoMode(undefined, selectedTrigger);
         if (selected) {
             retryManager.injectPromptedVideoText('must not survive transient duplicate submit');
-            retryManager.clickPromptedVideoSubmitButton();
+            await retryManager.clickPromptedVideoSubmitButton();
             await new Promise((resolve) => setTimeout(resolve, 0));
         }
 
@@ -2336,7 +2417,7 @@ describe('VideoRetryManager', () => {
 
         await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(true);
         expect(retryManager.injectPromptedVideoText('accepted after irrelevant mutations')).toBe(true);
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(true);
 
         expect(mutationsDelivered).toBe(true);
         expect(quiescenceSleeps).toBe(5);
@@ -2390,7 +2471,7 @@ describe('VideoRetryManager', () => {
 
         expect(recordFocusSpy).not.toHaveBeenCalled();
         expect(retryManager.injectPromptedVideoText('must remain blocked after Stop')).toBe(false);
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(false);
         expect(lateComposer.input.textContent).toBe('');
         expect(lateSubmitClicks).toBe(0);
     });
@@ -2529,7 +2610,7 @@ describe('VideoRetryManager', () => {
 
         await expect(retryManager.selectMakeVideoMode(undefined, selectedTrigger)).resolves.toBe(true);
         expect(retryManager.injectPromptedVideoText('pre-existing composer prompt')).toBe(true);
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(true);
 
         expect(menuClicks).toBe(1);
         expect(retryManager.promptedVideoComposerRoot).toBe(selectedComposer);
@@ -2790,11 +2871,138 @@ describe('VideoRetryManager', () => {
 
         await expect(retryManager._waitForLegacyPromptedVideoSubmitButton()).resolves.toBe(verifiedSubmit);
         expect(retryManager.promptedVideoComposerRoot).toBe(verifiedComposer);
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(true);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(true);
         expect(verifiedSubmitClicks).toBe(1);
     });
 
-    test('prompted video submit never falls back to the Precise Edit submit', () => {
+    test('submits a verified prompted video through the native sender-tab click channel', async () => {
+        const { composer, submit } = mountFocusedPromptedVideoComposer();
+        let submitClicks = 0;
+        submit.addEventListener('click', () => { submitClicks++; });
+        retryManager.promptedVideoComposerRoot = composer;
+        retryManager.simulateClick = jest.fn();
+        nativeControlClickSpy.mockRestore();
+        chrome.runtime.sendMessage.mockImplementationOnce(async (message) => {
+            if (message.action === 'GPT_PROMPTED_VIDEO_NATIVE_CLICK') submit.click();
+            return { ok: true };
+        });
+
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(true);
+
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            action: 'GPT_PROMPTED_VIDEO_NATIVE_CLICK',
+            click: { x: 20, y: 20 }
+        });
+        expect(retryManager.simulateClick).not.toHaveBeenCalled();
+        expect(submitClicks).toBe(1);
+    });
+
+    test('prompted video submission is accepted when the verified submit settles', async () => {
+        const { composer, input, submit } = mountFocusedPromptedVideoComposer();
+        input.textContent = 'slow camera push in';
+        retryManager.promptedVideoComposerRoot = composer;
+        const token = 'submission-disabled';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        const receipt = retryManager._capturePromptedVideoSubmissionReceipt();
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            submit.disabled = true;
+        });
+
+        await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
+            .resolves.toBe(true);
+    });
+
+    test('prompted video submission is accepted when the verified composer closes', async () => {
+        const { composer, input } = mountFocusedPromptedVideoComposer();
+        input.textContent = 'slow camera push in';
+        retryManager.promptedVideoComposerRoot = composer;
+        const token = 'submission-composer-closed';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        const receipt = retryManager._capturePromptedVideoSubmissionReceipt();
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            composer.remove();
+        });
+
+        await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
+            .resolves.toBe(true);
+    });
+
+    test('prompted video submission is accepted when Grok opens a new post in the same conversation', async () => {
+        window.history.pushState({}, '', '/imagine/post/source-post?conversation=conversation-1');
+        const { composer, input } = mountFocusedPromptedVideoComposer();
+        input.textContent = 'slow camera push in';
+        retryManager.promptedVideoComposerRoot = composer;
+        const token = 'submission-same-conversation-post';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        const receipt = retryManager._capturePromptedVideoSubmissionReceipt();
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            window.history.pushState({}, '', '/imagine/post/generated-post?conversation=conversation-1');
+        });
+
+        await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
+            .resolves.toBe(true);
+    });
+
+    test('prompted video submission rejects a new post from a different conversation', async () => {
+        window.history.pushState({}, '', '/imagine/post/source-post?conversation=conversation-1');
+        const { composer, input } = mountFocusedPromptedVideoComposer();
+        input.textContent = 'slow camera push in';
+        retryManager.promptedVideoComposerRoot = composer;
+        const token = 'submission-different-conversation-post';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        const receipt = retryManager._capturePromptedVideoSubmissionReceipt();
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            window.history.pushState({}, '', '/imagine/post/generated-post?conversation=conversation-2');
+        });
+
+        await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
+            .resolves.toBe(false);
+    });
+
+    test('prompted video submission ignores unrelated navigation and DOM mutations', async () => {
+        const { composer, input } = mountFocusedPromptedVideoComposer();
+        input.textContent = 'slow camera push in';
+        retryManager.promptedVideoComposerRoot = composer;
+        const token = 'submission-unrelated-change';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        const receipt = retryManager._capturePromptedVideoSubmissionReceipt();
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            window.history.pushState({}, '', '/imagine/post/unrelated-route-change');
+            document.body.appendChild(document.createElement('aside'));
+        });
+
+        await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
+            .resolves.toBe(false);
+    });
+
+    test('prompted video submission wait stops when its batch token is cancelled', async () => {
+        const { composer, input } = mountFocusedPromptedVideoComposer();
+        input.textContent = 'slow camera push in';
+        retryManager.promptedVideoComposerRoot = composer;
+        const token = 'submission-cancelled';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        const receipt = retryManager._capturePromptedVideoSubmissionReceipt();
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            retryManager.batchAborted = true;
+        });
+
+        await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
+            .resolves.toBe(false);
+    });
+
+    test('prompted video submit never falls back to the Precise Edit submit', async () => {
         const queryBar = document.createElement('div');
         queryBar.className = 'query-bar';
         const editSubmit = makeVisible(document.createElement('button'));
@@ -2804,7 +3012,7 @@ describe('VideoRetryManager', () => {
         document.body.appendChild(queryBar);
         retryManager.simulateClick = jest.fn();
 
-        expect(retryManager.clickPromptedVideoSubmitButton()).toBe(false);
+        await expect(retryManager.clickPromptedVideoSubmitButton()).resolves.toBe(false);
         expect(retryManager.simulateClick).not.toHaveBeenCalled();
         expect(editSubmit.click).not.toHaveBeenCalled();
     });

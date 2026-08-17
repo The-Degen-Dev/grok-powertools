@@ -2,9 +2,12 @@ const {
     SCRAPE_SURFACES,
     SAVED_GALLERY_SCOPES,
     GrokScraper,
+    GALLERY_RECEIPT_VERSION,
+    captureGalleryReceipt,
     captureSavedViewportReceipt,
     detectSavedGalleryScope,
     detectGrokScrapeSurface,
+    evaluateGalleryReceipt,
     findMatchingAgentMedia,
     getSavedGalleryContext,
     getGrokMediaIdentity,
@@ -686,35 +689,109 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
         expect(getSavedGalleryContext(document)).toBeNull();
     });
 
+    test('matches V3 results receipts only from the captured origin and stable neighborhood', () => {
+        const before1 = '11111111-1111-4111-8111-111111111111';
+        const before2 = '22222222-2222-4222-8222-222222222222';
+        const source = '33333333-3333-4333-8333-333333333333';
+        const next = '44444444-4444-4444-8444-444444444444';
+        const after2 = '55555555-5555-4555-8555-555555555555';
+        const generatedVideo = '66666666-6666-4666-8666-666666666666';
+        const unrelated1 = '77777777-7777-4777-8777-777777777777';
+        const unrelated2 = '88888888-8888-4888-8888-888888888888';
+        const receipt = captureGalleryReceipt({
+            identities: [before1, before2, source, next, after2],
+            sourceIdentity: source,
+            origin: { pathname: '/imagine', conversationId: 'conv-a', scope: 'results' }
+        });
+
+        expect(receipt).toMatchObject({ version: GALLERY_RECEIPT_VERSION });
+        expect(evaluateGalleryReceipt({
+            identities: [before1, before2, source, next, after2],
+            receipt,
+            currentOrigin: { pathname: '/imagine', conversationId: 'conv-a', scope: 'results' },
+            allowSourceReplacement: true
+        })).toMatchObject({ status: 'matched' });
+
+        expect(evaluateGalleryReceipt({
+            identities: [before1, before2, generatedVideo, next, after2],
+            receipt,
+            currentOrigin: { pathname: '/imagine', conversationId: 'conv-a', scope: 'results' },
+            allowSourceReplacement: true
+        })).toMatchObject({ status: 'matched', reason: 'source_replaced_with_stable_anchors' });
+
+        expect(evaluateGalleryReceipt({
+            identities: [unrelated1, next, unrelated2],
+            receipt,
+            currentOrigin: { pathname: '/imagine', conversationId: 'conv-a', scope: 'results' },
+            allowSourceReplacement: true
+        })).toMatchObject({ status: 'ambiguous' });
+
+        expect(evaluateGalleryReceipt({
+            identities: [before1, before2, source, next, after2],
+            receipt,
+            currentOrigin: { pathname: '/imagine', conversationId: 'conv-b', scope: 'results' },
+            allowSourceReplacement: true
+        })).toMatchObject({ status: 'different', reason: 'origin_mismatch' });
+    });
+
+    test('fails Saved receipts closed for replacement, duplicates, order drift, and V2', () => {
+        const before = '11111111-1111-4111-8111-111111111111';
+        const source = '22222222-2222-4222-8222-222222222222';
+        const next = '33333333-3333-4333-8333-333333333333';
+        const after = '44444444-4444-4444-8444-444444444444';
+        const replacement = '55555555-5555-4555-8555-555555555555';
+        const origin = { pathname: '/imagine/saved', conversationId: 'conv-a', scope: 'all' };
+        const receipt = captureGalleryReceipt({
+            identities: [before, source, next, after],
+            sourceIdentity: source,
+            origin
+        });
+
+        expect(evaluateGalleryReceipt({
+            identities: [before, replacement, next, after],
+            receipt,
+            currentOrigin: origin,
+            allowSourceReplacement: false
+        })).toMatchObject({ status: 'different', reason: 'source_missing' });
+        expect(evaluateGalleryReceipt({
+            identities: [before, source, source, next, after],
+            receipt,
+            currentOrigin: origin,
+            allowSourceReplacement: false
+        })).toMatchObject({ status: 'ambiguous', reason: 'duplicate_identity' });
+        expect(evaluateGalleryReceipt({
+            identities: [before, source, after, next],
+            receipt,
+            currentOrigin: origin,
+            allowSourceReplacement: false
+        })).toMatchObject({ status: 'different', reason: 'expected_next_mismatch' });
+        expect(evaluateGalleryReceipt({
+            identities: [before, source, next, after],
+            receipt: { ...receipt, version: 2 },
+            currentOrigin: origin,
+            allowSourceReplacement: false
+        })).toMatchObject({ status: 'different', reason: 'receipt_version' });
+    });
+
     test('requires one source and one immediately adjacent expected-next identity', () => {
         const source = '11111111-1111-4111-8111-111111111111';
         const middle = '22222222-2222-4222-8222-222222222222';
         const next = '33333333-3333-4333-8333-333333333333';
         const entries = [source, middle, next].map((sourceIdentity) => ({ sourceIdentity }));
+        const receipt = captureGalleryReceipt({
+            identities: [source, middle, next],
+            sourceIdentity: source,
+            origin: { pathname: window.location.pathname, conversationId: '', scope: 'all' }
+        });
 
-        expect(hasOrderedSavedNeighborhood(entries, {
-            sourceIdentity: source,
-            expectedNextIdentity: middle
-        })).toBe(true);
-        expect(hasOrderedSavedNeighborhood(entries, {
-            sourceIdentity: source,
-            expectedNextIdentity: next
-        })).toBe(false);
-        expect(hasOrderedSavedNeighborhood([...entries, { sourceIdentity: middle }], {
-            sourceIdentity: source,
-            expectedNextIdentity: middle
-        })).toBe(false);
-        expect(hasOrderedSavedNeighborhood([...entries, { sourceIdentity: source }], {
-            sourceIdentity: source,
-            expectedNextIdentity: middle
-        })).toBe(false);
-        expect(hasOrderedSavedNeighborhood([...entries].reverse(), {
-            sourceIdentity: source,
-            expectedNextIdentity: middle
-        })).toBe(false);
+        expect(hasOrderedSavedNeighborhood(entries, receipt)).toBe(true);
+        expect(hasOrderedSavedNeighborhood([entries[0], entries[2], entries[1]], receipt)).toBe(false);
+        expect(hasOrderedSavedNeighborhood([...entries, { sourceIdentity: middle }], receipt)).toBe(false);
+        expect(hasOrderedSavedNeighborhood([...entries, { sourceIdentity: source }], receipt)).toBe(false);
+        expect(hasOrderedSavedNeighborhood([...entries].reverse(), receipt)).toBe(false);
     });
 
-    test('captures the literal semantic neighbor and rejects stale v1 receipts', () => {
+    test('captures the literal semantic neighbor and rejects stale V2 receipts', () => {
         const list = document.createElement('div');
         list.setAttribute('role', 'list');
         const source = '11111111-1111-4111-8111-111111111111';
@@ -724,12 +801,13 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
         document.body.appendChild(list);
 
         expect(captureSavedViewportReceipt({ root: document, sourceIdentity: source })).toMatchObject({
-            version: 2,
+            version: 3,
             sourceIdentity: source,
-            expectedNextIdentity: next
+            expectedNextIdentity: next,
+            origin: { scope: 'all' }
         });
         expect(normalizeSavedViewportReceipt({
-            version: 1,
+            version: 2,
             sourceIdentity: source,
             expectedNextIdentity: next,
             scrollTop: 0
@@ -832,9 +910,13 @@ describe('Grok scrape surface transitions', () => {
             currentItemId: 'gallery-clean-id',
             expectedIdentity: sourceId,
             savedViewportReceipt: {
-                version: 2,
+                version: 3,
                 sourceIdentity: sourceId,
                 expectedNextIdentity: null,
+                beforeIdentities: [],
+                afterIdentities: [],
+                visibleIdentities: [sourceId],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
                 scrollTop: 840
             }
         };
@@ -1003,9 +1085,13 @@ describe('Grok scrape surface transitions', () => {
             values: expect.objectContaining({
                 scrapeNavigation: expect.objectContaining({
                     savedViewportReceipt: {
-                        version: 2,
+                        version: 3,
                         sourceIdentity: sourceId,
                         expectedNextIdentity: nextId,
+                        beforeIdentities: [],
+                        afterIdentities: [nextId],
+                        visibleIdentities: [sourceId, nextId],
+                        origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
                         scrollTop: 640
                     }
                 })
@@ -1461,9 +1547,13 @@ describe('Grok scrape surface transitions', () => {
             galleryScrollTop: 840,
             currentItemId: 'gallery-clean-id',
             savedViewportReceipt: {
-                version: 2,
+                version: 3,
                 sourceIdentity: sourceId,
                 expectedNextIdentity: null,
+                beforeIdentities: [],
+                afterIdentities: [],
+                visibleIdentities: [sourceId],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
                 scrollTop: 840
             }
         };
@@ -1493,9 +1583,13 @@ describe('Grok scrape surface transitions', () => {
             expectedIdentity: sourceId,
             galleryUrl: 'https://grok.com/imagine/saved',
             savedViewportReceipt: {
-                version: 2,
+                version: 3,
                 sourceIdentity: sourceId,
                 expectedNextIdentity: nextId,
+                beforeIdentities: [],
+                afterIdentities: [nextId],
+                visibleIdentities: [sourceId, nextId],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
                 scrollTop: 840
             }
         };
@@ -1570,9 +1664,13 @@ describe('Grok scrape surface transitions', () => {
             runEpoch: 1,
             currentItemId: 'gallery-clean-id',
             savedViewportReceipt: {
-                version: 2,
+                version: 3,
                 sourceIdentity: sourceId,
                 expectedNextIdentity: nextId,
+                beforeIdentities: [],
+                afterIdentities: [nextId],
+                visibleIdentities: [sourceId, nextId],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
                 scrollTop: 730
             }
         };
@@ -3037,7 +3135,16 @@ describe('background scrape lease authority', () => {
             runToken: lease.token,
             runEpoch: lease.epoch,
             galleryUrl: 'https://grok.com/imagine/saved',
-            savedViewportReceipt: { version: 2, sourceIdentity: 'asset-1', scrollTop: 420 }
+            savedViewportReceipt: {
+                version: 3,
+                sourceIdentity: 'asset-1',
+                expectedNextIdentity: null,
+                beforeIdentities: [],
+                afterIdentities: [],
+                visibleIdentities: ['asset-1'],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
+                scrollTop: 420
+            }
         };
         const harness = createLeaseBackgroundHarness({
             lease,
@@ -4549,7 +4656,7 @@ describe('background scrape lease authority', () => {
             const startDispatch = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
                 action: kind === 'r2_backup' ? 'START_R2_BACKUP' : 'START_SCRAPE',
                 ...(kind === 'r2_backup' ? { mode: 'full' } : {})
-            });
+            }, { tab: { id: 42, url: 'https://grok.com/imagine/saved' } });
             expect(startDispatch.returnValue).toBe(true);
             await expect(startDispatch.response).resolves.toMatchObject({ status: 'started' });
             expect(harness.storedLocal).toMatchObject({
@@ -4641,6 +4748,73 @@ describe('background scrape start handshake', () => {
         });
         expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
         expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({ isScraping: true }));
+    });
+
+    test.each([
+        ['sync', 'START_SCRAPE', 'INIT_SCRAPE'],
+        ['R2 backup', 'START_R2_BACKUP', 'INIT_R2_BACKUP']
+    ])('starts %s from the authenticated Saved sender tab without active-tab discovery', async (
+        _label,
+        startAction,
+        initAction
+    ) => {
+        global.chrome = createBackgroundChrome({ url: 'https://grok.com/imagine/agent/unrelated' });
+        require('../../background.js');
+
+        const response = await dispatchBackgroundMessage(
+            chrome,
+            { action: startAction, mode: 'full' },
+            { tab: { id: 77, url: 'https://grok.com/imagine/saved' } }
+        );
+
+        expect(response.status).toBe('started');
+        expect(chrome.tabs.query).not.toHaveBeenCalled();
+        expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            77,
+            expect.objectContaining({ action: initAction }),
+            expect.any(Function)
+        );
+    });
+
+    test('popup Start still falls back to active-tab discovery when no sender tab exists', async () => {
+        global.chrome = createBackgroundChrome();
+        require('../../background.js');
+
+        const response = await dispatchBackgroundMessage(
+            chrome,
+            { action: 'START_SCRAPE' },
+            {}
+        );
+
+        expect(response.status).toBe('started');
+        expect(chrome.tabs.query).toHaveBeenCalledWith(
+            { active: true, currentWindow: true },
+            expect.any(Function)
+        );
+        expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            42,
+            expect.objectContaining({ action: 'INIT_SCRAPE' }),
+            expect.any(Function)
+        );
+    });
+
+    test('a non-Saved sender tab fails closed instead of falling back to another active tab', async () => {
+        global.chrome = createBackgroundChrome();
+        require('../../background.js');
+
+        const response = await dispatchBackgroundMessage(
+            chrome,
+            { action: 'START_SCRAPE' },
+            { tab: { id: 77, url: 'https://grok.com/imagine/agent/not-saved' } }
+        );
+
+        expect(response).toEqual({
+            status: 'invalid_context',
+            surface: 'unsupported',
+            error: 'Open Grok Imagine Saved before starting sync.'
+        });
+        expect(chrome.tabs.query).not.toHaveBeenCalled();
+        expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
     });
 
     test('does not persist running state when content preflight rejects the page', async () => {
