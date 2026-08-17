@@ -3197,6 +3197,10 @@ function dispatchBackgroundMessage(chromeApi, request, sender = { tab: { id: 42 
 function dispatchBackgroundMessageThroughPort(chromeApi, request, sender = { tab: { id: 42 } }) {
     const listener = chromeApi.runtime.onMessage.addListener.mock.calls[0]?.[0];
     if (!listener) throw new Error('Background message listener was not registered.');
+    return dispatchBackgroundListenerThroughPort(listener, request, sender);
+}
+
+function dispatchBackgroundListenerThroughPort(listener, request, sender = { tab: { id: 42 } }) {
     let resolveResponse;
     const response = new Promise((resolve) => { resolveResponse = resolve; });
     let portOpen = true;
@@ -3629,9 +3633,10 @@ describe('background scrape lease authority', () => {
         });
         global.chrome = harness.chromeApi;
         const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
 
         const start = background.initializeScrapeInActiveTab(initMessage, { backup });
-        await flushAsyncTurns();
+        await waitForCondition(() => harness.sessionState.activeScrapeRunToken?.status === 'starting');
 
         const intent = harness.sessionState.activeScrapeRunToken;
         expect(intent).toMatchObject({
@@ -4753,6 +4758,228 @@ describe('background scrape lease authority', () => {
         expect(Object.values(harness.storedLocal).filter((value) => (
             value?.kind === 'scrape_persistence_writer'
         ))).toHaveLength(1);
+    });
+
+    test('concurrent workers from one snapshot deterministically retain one same-tuple run-state writer across restarts', async () => {
+        const lease = createLeaseRecord({ token: 'concurrent-writer-claims' });
+        const initialLocalState = {
+            scraperState: 'running',
+            currentIndex: 1,
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            scrapeNavigation: { currentItemId: 'unversioned-stale-item' },
+            isScraping: true,
+            isR2Backup: false
+        };
+        const harness = createLeaseBackgroundHarness({ lease, localState: initialLocalState });
+        const frozenPreClaimSnapshot = JSON.parse(JSON.stringify(initialLocalState));
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        let frozenReadsRemaining = 2;
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (keys === null && frozenReadsRemaining > 0) {
+                frozenReadsRemaining -= 1;
+                return Promise.resolve(JSON.parse(JSON.stringify(frozenPreClaimSnapshot)));
+            }
+            return baseGet(keys);
+        });
+        const writerIds = [
+            '00000000-0000-4000-8000-000000000001',
+            '00000000-0000-4000-8000-000000000002',
+            '00000000-0000-4000-8000-000000000003',
+            '00000000-0000-4000-8000-000000000004'
+        ];
+        const randomUuid = jest.spyOn(global.crypto, 'randomUUID');
+        writerIds.forEach((writerId) => randomUuid.mockReturnValueOnce(writerId));
+        global.chrome = harness.chromeApi;
+
+        try {
+            const firstWorker = require('../../background.js');
+            jest.resetModules();
+            const secondWorker = require('../../background.js');
+            await Promise.all([
+                firstWorker.ensureBackgroundStateReady(),
+                secondWorker.ensureBackgroundStateReady()
+            ]);
+            await Promise.all([
+                firstWorker.ensureScrapeLeaseHydrated(),
+                secondWorker.ensureScrapeLeaseHydrated()
+            ]);
+
+            const workerListeners = harness.chromeApi.runtime.onMessage.addListener.mock.calls
+                .slice(0, 2)
+                .map(([listener]) => listener);
+            const firstWrite = dispatchBackgroundListenerThroughPort(workerListeners[0], {
+                action: 'SCRAPE_RUN_STATE_WRITE',
+                runToken: lease.token,
+                runEpoch: lease.epoch,
+                kind: lease.kind,
+                values: {
+                    currentIndex: 11,
+                    scrapeNavigation: { currentItemId: 'first-concurrent-item' }
+                }
+            }, { tab: { id: lease.tabId } });
+            const secondWrite = dispatchBackgroundListenerThroughPort(workerListeners[1], {
+                action: 'SCRAPE_RUN_STATE_WRITE',
+                runToken: lease.token,
+                runEpoch: lease.epoch,
+                kind: lease.kind,
+                values: {
+                    currentIndex: 22,
+                    scrapeNavigation: { currentItemId: 'second-concurrent-item' }
+                }
+            }, { tab: { id: lease.tabId } });
+
+            await expect(Promise.all([firstWrite.response, secondWrite.response])).resolves.toEqual([
+                { status: 'ok' },
+                { status: 'ok' }
+            ]);
+            const completedClaims = harness.chromeApi.storage.local.set.mock.calls
+                .map(([values]) => findStoredRecord(values, 'scrape_persistence_writer'))
+                .filter(Boolean)
+                .slice(0, 2);
+            expect(completedClaims).toHaveLength(2);
+            expect(new Set(completedClaims.map((record) => record.writerEpoch))).toEqual(new Set([1]));
+            expect(new Set(completedClaims.map((record) => record.writerId))).toEqual(new Set(writerIds.slice(0, 2)));
+
+            const completedStateWrites = harness.chromeApi.storage.local.set.mock.calls
+                .map(([values]) => findStoredRecord(values, 'scrape_run_state_record'))
+                .filter((record) => record?.lease?.token === lease.token);
+            expect(completedStateWrites).toHaveLength(2);
+            expect(new Set(completedStateWrites.map((record) => record.revision))).toEqual(new Set([1]));
+            const orderedWrites = [...completedStateWrites].sort((left, right) => (
+                left.writerId.localeCompare(right.writerId)
+            ));
+            const losingRecord = JSON.parse(JSON.stringify(orderedWrites[0]));
+            const winningRecord = orderedWrites[1];
+            const winningState = winningRecord.mirror;
+
+            jest.resetModules();
+            let restarted = require('../../background.js');
+            await restarted.ensureBackgroundStateReady();
+            await restarted.ensureScrapeLeaseHydrated();
+            const active = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'GET_ACTIVE_SCRAPE_RUN_STATE'
+            }, { tab: { id: lease.tabId } });
+            await expect(active.response).resolves.toMatchObject({
+                status: 'ok',
+                state: {
+                    currentIndex: winningState.currentIndex,
+                    scrapeNavigation: winningState.scrapeNavigation
+                }
+            });
+            await flushAsyncTurns(30);
+            expect(getStoredRunStateRecords(harness.storedLocal, lease.token)).toEqual([
+                expect.objectContaining({
+                    writerId: winningRecord.writerId,
+                    mirror: expect.objectContaining({ currentIndex: winningState.currentIndex })
+                })
+            ]);
+
+            harness.storedLocal['scrapeRunStateRecord:late-concurrent-loser'] = losingRecord;
+            jest.resetModules();
+            restarted = require('../../background.js');
+            await restarted.ensureBackgroundStateReady();
+            await restarted.ensureScrapeLeaseHydrated();
+            const activeAfterLateLoser = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'GET_ACTIVE_SCRAPE_RUN_STATE'
+            }, { tab: { id: lease.tabId } });
+            await expect(activeAfterLateLoser.response).resolves.toMatchObject({
+                status: 'ok',
+                state: { currentIndex: winningState.currentIndex }
+            });
+            await flushAsyncTurns(30);
+            expect(getStoredRunStateRecords(harness.storedLocal, lease.token)).toEqual([
+                expect.objectContaining({ writerId: winningRecord.writerId })
+            ]);
+            expect(Object.values(harness.storedLocal).filter((value) => (
+                value?.kind === 'scrape_persistence_writer'
+            ))).toHaveLength(1);
+        } finally {
+            randomUuid.mockRestore();
+        }
+    });
+
+    test.each([
+        [
+            'malformed',
+            () => ({
+                'scrapeRunStateRecord:malformed-current-run': {
+                    kind: 'scrape_run_state_record',
+                    version: 3,
+                    writerEpoch: 1,
+                    writerId: '',
+                    revision: 1,
+                    lease: createLeaseRecord({ token: 'fail-closed-run-state', kind: 'r2_backup' }),
+                    mirror: { currentIndex: 7 }
+                }
+            })
+        ],
+        [
+            'genuinely ambiguous',
+            () => ({
+                'scrapeRunStateRecord:ambiguous-a': {
+                    kind: 'scrape_run_state_record',
+                    version: 3,
+                    writerEpoch: 1,
+                    writerId: 'writer-collision',
+                    revision: 1,
+                    lease: createLeaseRecord({ token: 'fail-closed-run-state', kind: 'r2_backup' }),
+                    mirror: { currentIndex: 4 }
+                },
+                'scrapeRunStateRecord:ambiguous-b': {
+                    kind: 'scrape_run_state_record',
+                    version: 3,
+                    writerEpoch: 1,
+                    writerId: 'writer-collision',
+                    revision: 1,
+                    lease: createLeaseRecord({ token: 'fail-closed-run-state', kind: 'r2_backup' }),
+                    mirror: { currentIndex: 9 }
+                }
+            })
+        ]
+    ])('%s run-state records fail closed without hydrating stale unversioned progress', async (_label, records) => {
+        const lease = createLeaseRecord({ token: 'fail-closed-run-state', kind: 'r2_backup' });
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                currentIndex: 99,
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                scrapeNavigation: { currentItemId: 'stale-unversioned-item' },
+                isScraping: true,
+                isR2Backup: true,
+                r2BackupState: { isRunning: true, totalSeen: 99, uploaded: 88 },
+                ...records()
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+
+        const active = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'GET_ACTIVE_SCRAPE_RUN_STATE'
+        }, { tab: { id: lease.tabId } });
+        await expect(active.response).resolves.toEqual({
+            status: 'ignored',
+            reason: 'stale_authority'
+        });
+        expect(harness.sessionState.activeScrapeRunToken).toMatchObject({
+            status: 'idle',
+            token: null
+        });
+        expect(harness.storedLocal).toMatchObject({
+            scraperState: 'idle',
+            currentIndex: 0,
+            scrapeNavigation: null,
+            isScraping: false,
+            isR2Backup: false,
+            r2BackupState: expect.objectContaining({
+                isRunning: false,
+                stopReason: 'invalid_persisted_run_state'
+            })
+        });
     });
 
     test('rejects an unleased media transfer before Chrome accepts a download', async () => {
@@ -6211,6 +6438,260 @@ describe('background scrape lease authority', () => {
         expect(background.getPendingDownloadOperationsForTest()['64']).toMatchObject({ attempts: 2 });
     });
 
+    test.each(['marker persistence', 'marker cleanup'])(
+        'background readiness fails closed when writer %s never settles, while Stop and a healthy replacement remain operable',
+        async (failureMode) => {
+            jest.useFakeTimers();
+            const lease = createLeaseRecord({ token: `startup-${failureMode.replace(' ', '-')}` });
+            const priorWriterKey = 'scrapePersistenceWriter:prior-startup-writer';
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: false,
+                    ...(failureMode === 'marker cleanup'
+                        ? {
+                            [priorWriterKey]: {
+                                kind: 'scrape_persistence_writer',
+                                version: 1,
+                                writerEpoch: 1
+                            }
+                        }
+                        : {})
+                }
+            });
+            const markerOperationStarted = deferred();
+            const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+            const baseRemove = harness.chromeApi.storage.local.remove.getMockImplementation();
+            let intercepted = false;
+            if (failureMode === 'marker persistence') {
+                harness.chromeApi.storage.local.set.mockImplementation((values) => {
+                    if (!intercepted && findStoredRecord(values, 'scrape_persistence_writer')) {
+                        intercepted = true;
+                        markerOperationStarted.resolve();
+                        return new Promise(() => {});
+                    }
+                    return baseSet(values);
+                });
+            } else {
+                harness.chromeApi.storage.local.remove.mockImplementation((keys) => {
+                    const removals = Array.isArray(keys) ? keys : [keys];
+                    if (!intercepted && removals.includes(priorWriterKey)) {
+                        intercepted = true;
+                        markerOperationStarted.resolve();
+                        return new Promise(() => {});
+                    }
+                    return baseRemove(keys);
+                });
+            }
+            global.chrome = harness.chromeApi;
+            let background = require('../../background.js');
+            const ready = background.ensureBackgroundStateReady();
+            const start = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'START_SCRAPE'
+            }, { tab: { id: lease.tabId, url: 'https://grok.com/imagine/saved' } });
+            await markerOperationStarted.promise;
+            const readyOutcome = Promise.race([
+                ready.then(
+                    () => ({ status: 'resolved' }),
+                    (error) => ({ status: 'rejected', error: error.message })
+                ),
+                new Promise((resolve) => setTimeout(() => resolve({ status: 'watchdog_timeout' }), 3000))
+            ]);
+            await jest.advanceTimersByTimeAsync(3100);
+
+            await expect(readyOutcome).resolves.toEqual({
+                status: 'rejected',
+                error: 'background_initialization_timeout'
+            });
+            expect(background.getBackgroundStateForTest()).toEqual({
+                status: 'failed',
+                error: 'background_initialization_timeout'
+            });
+            await expect(start.response).resolves.toEqual({
+                status: 'error',
+                error: 'background_initialization_timeout'
+            });
+
+            const stop = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'STOP_SCRAPE'
+            }, { tab: { id: lease.tabId } });
+            await jest.advanceTimersByTimeAsync(2100);
+            await expect(stop.response).resolves.toMatchObject({ status: 'stopped' });
+
+            jest.resetModules();
+            background = require('../../background.js');
+            await background.ensureBackgroundStateReady();
+            const replacement = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'START_SCRAPE'
+            }, { tab: { id: lease.tabId, url: 'https://grok.com/imagine/saved' } });
+            await expect(replacement.response).resolves.toMatchObject({
+                status: 'started',
+                runToken: expect.any(String)
+            });
+        }
+    );
+
+    test.each(['checkpoint write', 'compaction remove'])(
+        'prepared startup recovery releases both mutation barriers and fails closed when %s never settles',
+        async (failureMode) => {
+            jest.useFakeTimers();
+            const lease = createLeaseRecord({ token: `recovery-${failureMode.replace(' ', '-')}` });
+            const priorJournalKey = 'scrapeCompletionJournal:prior-recovery-checkpoint';
+            const txn = {
+                id: `prepared-${failureMode.replace(' ', '-')}`,
+                phase: 'prepared',
+                lease,
+                createdAt: 1780000000000
+            };
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: false,
+                    scrapeCompletionTxn: txn,
+                    cloudSyncQueue: [{
+                        id: 'prepared-recovery-owned-item',
+                        dedupeKey: 'prepared-recovery-owned-item',
+                        queueRevision: 1,
+                        type: 'media',
+                        scrapeLease: lease
+                    }],
+                    pendingDownloadOperations: {
+                        131: {
+                            downloadId: 131,
+                            mediaId: '73e5e137-1334-49ea-b06b-a9d9ba891131',
+                            operationRevision: 1,
+                            allowLocal: true,
+                            cloudRequired: true,
+                            downloadState: 'in_progress',
+                            r2State: 'pending',
+                            attempts: 0,
+                            scrapeLease: lease
+                        }
+                    },
+                    [priorJournalKey]: {
+                        kind: 'scrape_completion_journal',
+                        version: 2,
+                        writerEpoch: 0,
+                        revision: 1,
+                        phase: 'revoked',
+                        lease: createLeaseRecord({ token: 'prior-recovery-lease', epoch: 1 }),
+                        txn: null,
+                        checkpoint: {
+                            version: 1,
+                            retiredThroughWriterEpoch: 0,
+                            retiredThroughEpoch: 1,
+                            committed: [],
+                            fence: { writerEpoch: 0, revision: 1 }
+                        }
+                    }
+                }
+            });
+            const recoveryOperationStarted = deferred();
+            const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+            const baseRemove = harness.chromeApi.storage.local.remove.getMockImplementation();
+            let intercepted = false;
+            if (failureMode === 'checkpoint write') {
+                harness.chromeApi.storage.local.set.mockImplementation((values) => {
+                    if (!intercepted && isCompletionPersistence(values, 'committed')) {
+                        intercepted = true;
+                        recoveryOperationStarted.resolve();
+                        return new Promise(() => {});
+                    }
+                    return baseSet(values);
+                });
+            } else {
+                harness.chromeApi.storage.local.remove.mockImplementation((keys) => {
+                    const removals = Array.isArray(keys) ? keys : [keys];
+                    if (!intercepted && removals.includes(priorJournalKey)) {
+                        intercepted = true;
+                        recoveryOperationStarted.resolve();
+                        return new Promise(() => {});
+                    }
+                    return baseRemove(keys);
+                });
+            }
+            global.chrome = harness.chromeApi;
+            let background = require('../../background.js');
+            const ready = background.ensureBackgroundStateReady();
+            const start = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'START_SCRAPE'
+            }, { tab: { id: lease.tabId, url: 'https://grok.com/imagine/saved' } });
+            await recoveryOperationStarted.promise;
+            const readyOutcome = Promise.race([
+                ready.then(
+                    () => ({ status: 'resolved' }),
+                    (error) => ({ status: 'rejected', error: error.message })
+                ),
+                new Promise((resolve) => setTimeout(() => resolve({ status: 'watchdog_timeout' }), 3000))
+            ]);
+            await jest.advanceTimersByTimeAsync(3100);
+
+            await expect(readyOutcome).resolves.toEqual({
+                status: 'rejected',
+                error: 'background_initialization_timeout'
+            });
+            await expect(start.response).resolves.toEqual({
+                status: 'error',
+                error: 'background_initialization_timeout'
+            });
+
+            const cloudMutation = background.enqueueCloudItemForTest({
+                id: `cloud-after-${failureMode.replace(' ', '-')}`,
+                dedupeKey: `cloud-after-${failureMode.replace(' ', '-')}`,
+                type: 'media'
+            }, `cloud-after-${failureMode.replace(' ', '-')}`);
+            const pendingMutation = background.reserveDownloadOperationForTest({
+                downloadId: 132,
+                mediaId: '73e5e137-1334-49ea-b06b-a9d9ba891132',
+                allowLocal: true,
+                cloudRequired: false,
+                downloadState: 'in_progress',
+                r2State: 'not_required',
+                attempts: 0
+            });
+            await expect(cloudMutation).resolves.toMatchObject({
+                dedupeKey: `cloud-after-${failureMode.replace(' ', '-')}`
+            });
+            await expect(pendingMutation).resolves.toBe(true);
+
+            const stop = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'STOP_SCRAPE'
+            }, { tab: { id: lease.tabId } });
+            await jest.advanceTimersByTimeAsync(2100);
+            await expect(stop.response).resolves.toMatchObject({ status: 'stopped' });
+
+            harness.chromeApi.downloads.search.mockResolvedValue([{
+                id: 131,
+                state: 'in_progress',
+                filename: '/tmp/GrokVault/recovery-owned.jpg',
+                url: 'https://assets.grok.com/generated/recovery-owned.jpg'
+            }, {
+                id: 132,
+                state: 'in_progress',
+                filename: '/tmp/GrokVault/recovery-new.jpg',
+                url: 'https://assets.grok.com/generated/recovery-new.jpg'
+            }]);
+            jest.resetModules();
+            background = require('../../background.js');
+            await background.ensureBackgroundStateReady();
+            const replacement = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'START_SCRAPE'
+            }, { tab: { id: lease.tabId, url: 'https://grok.com/imagine/saved' } });
+            await expect(replacement.response).resolves.toMatchObject({
+                status: 'started',
+                runToken: expect.any(String)
+            });
+        }
+    );
+
     test('a permanently unsettled completion write releases safely after revocation and cannot freeze either mutation stream', async () => {
         jest.useFakeTimers();
         const lease = createLeaseRecord({ token: 'completion-never-settles' });
@@ -6359,6 +6840,131 @@ describe('background scrape lease authority', () => {
         const nextRun = await background.initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' });
         expect(nextRun).toMatchObject({ status: 'started', runToken: expect.any(String) });
         expect(nextRun.runToken).not.toBe(lease.token);
+    });
+
+    test('a late timed-out revocation cannot regress a newer retained retry checkpoint across compaction and restart', async () => {
+        jest.useFakeTimers();
+        const oldLease = createLeaseRecord({ token: 'late-revocation-old-run' });
+        const harness = createLeaseBackgroundHarness({
+            lease: oldLease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: oldLease.token,
+                scrapeRunEpoch: oldLease.epoch,
+                isScraping: true,
+                isR2Backup: false
+            }
+        });
+        global.chrome = harness.chromeApi;
+        let background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+        const oldRevocationWrite = deferred();
+        const oldRevocationStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let interceptedOldRevocation = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!interceptedOldRevocation && isCompletionPersistence(values, 'revoked')) {
+                interceptedOldRevocation = true;
+                const captured = JSON.parse(JSON.stringify(values));
+                oldRevocationStarted.resolve();
+                return oldRevocationWrite.promise.then(() => baseSet(captured));
+            }
+            return baseSet(values);
+        });
+
+        const stoppingOldRun = background.stopScrapeRun('sync');
+        stoppingOldRun.catch(() => {});
+        await oldRevocationStarted.promise;
+        await jest.advanceTimersByTimeAsync(1100);
+        await expect(stoppingOldRun).rejects.toThrow('scrape_revocation_persist_timeout');
+        expect(harness.chromeApi.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_COMPLETE'
+        }));
+
+        const replacement = await background.initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' });
+        expect(replacement).toMatchObject({ status: 'started' });
+        const replacementLease = { ...harness.sessionState.activeScrapeRunToken };
+        const retainedQueueItem = {
+            id: 'retained-retry-queue-item',
+            dedupeKey: 'retained-retry-queue-item',
+            type: 'media',
+            attempts: 1,
+            scrapeLease: replacementLease
+        };
+        await background.enqueueCloudItemForTest(retainedQueueItem, retainedQueueItem.dedupeKey);
+        await background.reserveDownloadOperationForTest({
+            downloadId: 121,
+            mediaId: '73e5e137-1334-49ea-b06b-a9d9ba891121',
+            allowLocal: true,
+            cloudRequired: true,
+            downloadState: 'in_progress',
+            r2State: 'pending',
+            attempts: 1,
+            scrapeLease: replacementLease
+        });
+
+        const replacementCompletion = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_COMPLETE',
+            runToken: replacement.runToken,
+            runEpoch: replacement.runEpoch,
+            kind: 'sync',
+            stats: { stopReason: 'complete' }
+        }, { tab: { id: replacementLease.tabId } });
+        await expect(replacementCompletion.response).resolves.toEqual({ status: 'ok' });
+        expect(background.getCloudSyncQueueForTest()).toEqual([
+            expect.objectContaining({
+                id: retainedQueueItem.id,
+                completionTxnId: expect.any(String),
+                revocationLease: expect.objectContaining({ token: replacement.runToken })
+            })
+        ]);
+        expect(background.getPendingDownloadOperationsForTest()['121']).toMatchObject({
+            completionTxnId: expect.any(String),
+            revocationLease: expect.objectContaining({ token: replacement.runToken })
+        });
+
+        oldRevocationWrite.resolve();
+        await flushAsyncTurns(60);
+
+        const compactionRun = await background.initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' });
+        expect(compactionRun).toMatchObject({ status: 'started' });
+        const compactionCompletion = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_COMPLETE',
+            runToken: compactionRun.runToken,
+            runEpoch: compactionRun.runEpoch,
+            kind: 'sync',
+            stats: { stopReason: 'complete' }
+        }, { tab: { id: oldLease.tabId } });
+        await expect(compactionCompletion.response).resolves.toEqual({ status: 'ok' });
+        expect(getStoredCompletionJournalEntries(harness.storedLocal)).toHaveLength(1);
+
+        harness.chromeApi.downloads.search.mockResolvedValue([{
+            id: 121,
+            state: 'in_progress',
+            filename: '/tmp/GrokVault/retained-retry.jpg',
+            url: 'https://assets.grok.com/generated/retained-retry.jpg'
+        }]);
+        jest.resetModules();
+        background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+
+        expect(background.getCloudSyncQueueForTest()).toEqual([
+            expect.objectContaining({
+                id: retainedQueueItem.id,
+                completionTxnId: expect.any(String),
+                revocationLease: expect.objectContaining({ token: replacement.runToken })
+            })
+        ]);
+        expect(background.getPendingDownloadOperationsForTest()['121']).toMatchObject({
+            completionTxnId: expect.any(String),
+            revocationLease: expect.objectContaining({ token: replacement.runToken })
+        });
+        expect(harness.storedLocal.cloudSyncQueue).toEqual([
+            expect.objectContaining({ id: retainedQueueItem.id })
+        ]);
+        expect(harness.storedLocal.pendingDownloadOperations).toHaveProperty('121');
     });
 
     test('a terminal checkpoint cannot revoke a replacement run after its session epoch resets', async () => {
@@ -7472,7 +8078,7 @@ describe('background scrape lease authority', () => {
             const stopping = background.stopScrapeRun('sync');
             await cleanupWriteStarted.promise;
             await jest.advanceTimersByTimeAsync(2500);
-            await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+            await expect(stopping).rejects.toThrow('scrape_revocation_persist_timeout');
 
             const nextRun = await background.initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' });
             Object.assign(harness.storedLocal, {
@@ -7656,7 +8262,8 @@ describe('background scrape lease authority', () => {
         jest.useFakeTimers();
         const harness = createLeaseBackgroundHarness();
         global.chrome = harness.chromeApi;
-        const { withTimeout } = require('../../background.js');
+        const { ensureBackgroundStateReady, withTimeout } = require('../../background.js');
+        await ensureBackgroundStateReady();
 
         await expect(withTimeout(Promise.resolve('ack'), 2000, null)).resolves.toBe('ack');
         expect(jest.getTimerCount()).toBe(0);

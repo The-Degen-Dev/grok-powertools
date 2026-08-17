@@ -1936,7 +1936,6 @@ describe('cloud-only download proof and cleanup ordering', () => {
         expect(upload).not.toHaveBeenCalled();
 
         jest.useRealTimers();
-        findStoredRecord(lateValues, 'scrape_completion_journal').revision = 1000;
         lateWrite.resolve();
         await lateWrite.promise;
         await Promise.resolve();
