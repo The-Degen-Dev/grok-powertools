@@ -950,6 +950,88 @@ describe('Grok scrape surface transitions', () => {
         );
     });
 
+    test('ignores a visible loader outside Saved when proving list exhaustion', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const sourceUrl = 'https://assets.grok.com/users/u/generated/32000000-0000-4000-8000-000000000001/image.jpg';
+        const { scroller, list } = mountSemanticSavedImage(sourceUrl);
+        document.body.appendChild(list);
+        scroller.remove();
+        const outsideLoader = document.createElement('div');
+        outsideLoader.setAttribute('role', 'progressbar');
+        outsideLoader.getClientRects = () => [{ width: 20, height: 20 }];
+        document.body.appendChild(outsideLoader);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.processedIds = new Set([sourceUrl]);
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.waitForRunDurability = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.stop = jest.fn().mockResolvedValue();
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => {
+            now += delay;
+        });
+        const scrollSpy = jest.spyOn(window, 'scrollBy').mockImplementation(() => {});
+
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+
+            expect(scraper.processItem).not.toHaveBeenCalled();
+            expect(scraper.waitForRunDurability).toHaveBeenCalledWith('run-1');
+            expect(scraper.stop).toHaveBeenCalledWith('complete');
+            expect(scraper.stop).not.toHaveBeenCalledWith('scan_limit');
+        } finally {
+            scrollSpy.mockRestore();
+            dateSpy.mockRestore();
+        }
+    });
+
+    test('treats a missing post-scroll Saved root as unstable without querying document loaders', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const sourceUrl = 'https://assets.grok.com/users/u/generated/32000000-0000-4000-8000-000000000002/image.jpg';
+        const { scroller, list } = mountSemanticSavedImage(sourceUrl);
+        document.body.appendChild(list);
+        scroller.remove();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.processedIds = new Set([sourceUrl]);
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.waitForRunDurability = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.failRun = jest.fn().mockResolvedValue();
+        scraper.stop = jest.fn().mockResolvedValue();
+        scraper.sleep = jest.fn(async (delay) => {
+            if (delay === 750) list.remove();
+        });
+        const originalQuerySelectorAll = document.querySelectorAll.bind(document);
+        const querySpy = jest.spyOn(document, 'querySelectorAll').mockImplementation((selector) => {
+            if (selector === '[aria-busy="true"], [role="progressbar"]') {
+                throw new Error('global loader query');
+            }
+            return originalQuerySelectorAll(selector);
+        });
+        const scrollSpy = jest.spyOn(window, 'scrollBy').mockImplementation(() => {});
+
+        try {
+            await expect(GrokScraper.prototype.executeListView.call(scraper, 'run-1'))
+                .resolves.toBeUndefined();
+
+            expect(scraper._savedScanLedger.stableBottomRounds).toBe(0);
+            expect(scraper.waitForRunDurability).not.toHaveBeenCalled();
+            expect(scraper.stop).not.toHaveBeenCalled();
+            expect(scraper.failRun).toHaveBeenCalledWith(
+                'Could not identify one semantic Saved gallery. Refresh Saved before restarting.',
+                'gallery_context_missing'
+            );
+        } finally {
+            scrollSpy.mockRestore();
+            querySpy.mockRestore();
+        }
+    });
+
     test('stops on a post-return Saved scope drift before receipt cleanup or list continuation', async () => {
         mockContentChrome();
         const scraper = createScraper();
@@ -5210,7 +5292,7 @@ describe('background scrape lease authority', () => {
                 }
             })
         ]
-    ])('%s run-state records fail closed without hydrating stale unversioned progress', async (_label, records) => {
+    ])('%s run-state records fail closed without hydrating stale unversioned progress', async (label, records) => {
         const lease = createLeaseRecord({ token: 'fail-closed-run-state', kind: 'r2_backup' });
         const harness = createLeaseBackgroundHarness({
             lease,
@@ -5222,7 +5304,21 @@ describe('background scrape lease authority', () => {
                 scrapeNavigation: { currentItemId: 'stale-unversioned-item' },
                 isScraping: true,
                 isR2Backup: true,
-                r2BackupState: { isRunning: true, totalSeen: 99, uploaded: 88 },
+                r2BackupState: {
+                    isRunning: true,
+                    totalSeen: 99,
+                    uploaded: 88,
+                    alreadyPresent: 77,
+                    queued: 66,
+                    pendingTransfers: 55,
+                    errors: 44,
+                    error: 'stale backup error',
+                    scan: {
+                        totalUniqueSeen: 33,
+                        stableBottomRounds: 8,
+                        scanAttempts: 1000
+                    }
+                },
                 ...records()
             }
         });
@@ -5247,12 +5343,17 @@ describe('background scrape lease authority', () => {
             currentIndex: 0,
             scrapeNavigation: null,
             isScraping: false,
-            isR2Backup: false,
-            r2BackupState: expect.objectContaining({
-                isRunning: false,
-                stopReason: 'invalid_persisted_run_state'
-            })
+            isR2Backup: false
         });
+        const terminalBackupState = {
+            isRunning: false,
+            stopReason: 'invalid_persisted_run_state'
+        };
+        if (label === 'malformed') {
+            expect(harness.storedLocal.r2BackupState).toEqual(expect.objectContaining(terminalBackupState));
+        } else {
+            expect(harness.storedLocal.r2BackupState).toEqual(terminalBackupState);
+        }
     });
 
     test('rejects an unleased media transfer before Chrome accepts a download', async () => {

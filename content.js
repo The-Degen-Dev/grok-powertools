@@ -713,10 +713,12 @@ function getSavedGalleryContext(root = document) {
     if (!entries.length) return null;
     const list = getSavedGalleryList(entries);
     if (!list) return null;
+    const scroller = getSavedGalleryScroller(list);
     return {
         entries: entries.filter((entry) => list.contains(entry.card)),
         list,
-        scroller: getSavedGalleryScroller(list)
+        scroller,
+        savedSurfaceRoot: scroller === window ? list : scroller
     };
 }
 
@@ -1036,7 +1038,8 @@ function getSavedScanSummary(ledger) {
     };
 }
 
-function isSavedGalleryLoading(root = document) {
+function isSavedGalleryLoading(root) {
+    if (!root || typeof root.querySelectorAll !== 'function') return false;
     return Array.from(root.querySelectorAll('[aria-busy="true"], [role="progressbar"]'))
         .some((element) => element.getClientRects().length > 0);
 }
@@ -1048,6 +1051,7 @@ function resolveBackupScrollAttempt({
     afterSignature,
     newIdentityCount = 0,
     loading = false,
+    contextStable = true,
     transferPending = false,
     stableBottomRounds,
     lastNewIdentityAt = Date.now(),
@@ -1077,6 +1081,9 @@ function resolveBackupScrollAttempt({
 
     if (scanAttempts >= maxScrollAttempts) {
         return { progressed, atBottom, stableBottomRounds, exhausted: false, reason: 'scan_limit' };
+    }
+    if (!contextStable) {
+        return { progressed, atBottom, stableBottomRounds: 0, exhausted: false, reason: 'saved_context_missing' };
     }
     if (newIdentityCount > 0) {
         return { progressed, atBottom, stableBottomRounds: 0, exhausted: false, reason: 'new_identity' };
@@ -7053,9 +7060,7 @@ class GrokScraper {
             const afterScan = recordSavedScan(scanLedger, {
                 identities: (afterContext?.entries || []).map((entry) => entry.sourceIdentity || entry.sourceUrl)
             });
-            const loadingRoot = afterContext?.scroller && afterContext.scroller !== window
-                ? afterContext.scroller
-                : (afterContext?.list?.parentElement || afterContext?.list || document);
+            const savedSurfaceRoot = afterContext?.savedSurfaceRoot || null;
             scrollAttempts++;
             const outcome = resolveBackupScrollAttempt({
                 before,
@@ -7063,7 +7068,8 @@ class GrokScraper {
                 beforeSignature,
                 afterSignature,
                 newIdentityCount: scan.newIdentityCount + afterScan.newIdentityCount,
-                loading: isSavedGalleryLoading(loadingRoot),
+                loading: savedSurfaceRoot ? isSavedGalleryLoading(savedSurfaceRoot) : false,
+                contextStable: Boolean(savedSurfaceRoot),
                 transferPending,
                 stableBottomRounds: scanLedger.stableBottomRounds,
                 lastNewIdentityAt: scanLedger.lastNewIdentityAt,

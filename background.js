@@ -2287,7 +2287,11 @@ function hasStaleLocalRunState(stored = {}) {
         || stored.r2BackupState?.isRunning === true;
 }
 
-function buildAuthoritativeIdleLocalState(stored = {}, stopReason = 'stopped') {
+function buildAuthoritativeIdleLocalState(
+    stored = {},
+    stopReason = 'stopped',
+    { clearBackupProgress = false } = {}
+) {
     const values = {
         scraperState: 'idle',
         currentIndex: 0,
@@ -2301,11 +2305,13 @@ function buildAuthoritativeIdleLocalState(stored = {}, stopReason = 'stopped') {
         scrapeStopReason: stopReason
     };
     if (stored.r2BackupState && typeof stored.r2BackupState === 'object') {
-        values.r2BackupState = {
-            ...stored.r2BackupState,
-            isRunning: false,
-            stopReason
-        };
+        values.r2BackupState = clearBackupProgress
+            ? { isRunning: false, stopReason }
+            : {
+                ...stored.r2BackupState,
+                isRunning: false,
+                stopReason
+            };
     }
     return values;
 }
@@ -2704,7 +2710,9 @@ async function hydrateScrapeLeaseAuthority() {
             || runStateSelection.status === 'conflict'
             ? 'invalid_persisted_run_state'
             : 'stale_session';
-        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
+        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason, {
+            clearBackupProgress: runStateSelection.status === 'conflict'
+        }));
     }
     return tombstone;
 }
