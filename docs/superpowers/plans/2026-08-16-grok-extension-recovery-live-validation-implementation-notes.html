@@ -65,7 +65,7 @@
             <h1>Grok Extension Recovery Implementation Notes</h1>
             <p class="stamp">Initialized 2026-08-16 23:10:16 EDT</p>
             <section class="lede">
-                <div><strong>Status:</strong> <span class="status">Task 3 of 15 in progress</span></div>
+                <div><strong>Status:</strong> <span class="status">Task 4 of 15 in progress</span></div>
                 <div><strong>Branch:</strong> <code>codex/grok-extension-recovery</code></div>
                 <div><strong>Plan:</strong> <code>2026-08-16-grok-extension-recovery-live-validation.md</code></div>
                 <div><strong>Proof boundary:</strong> No runtime edit or live lane has run yet. Existing automated and two-item evidence is not being treated as Sync, Dual-write, or full-backup proof.</div>
@@ -78,8 +78,9 @@
                     <tr><td>Preflight</td><td class="ok">Complete</td><td>Branch and approved dirty baseline match the preserved checkpoint. The spec exists and the 15-task plan was scanned for cross-task conflicts.</td></tr>
                     <tr><td>Task 1</td><td class="ok">Complete</td><td>Evidence contract, serialized atomic lane recording, secret-shape redaction, exact NUL-delimited Git status capture, and authoritative dirty-patch baseline passed review after one fix round.</td></tr>
                     <tr><td>Task 2</td><td class="ok">Complete</td><td>GalleryReceiptV3 now binds route, conversation, native scope, source, expected next item, and stable anchors. Prompted Batch route acceptance requires the captured same conversation; Saved return and Stop restore fail closed on scope drift.</td></tr>
-                    <tr><td>Task 3</td><td class="status">In progress</td><td>Preparing mode-aware processed-ID durability for Dual-write.</td></tr>
-                    <tr><td>Tasks 4-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
+                    <tr><td>Task 3</td><td class="ok">Closed with ruling</td><td>Dual-write no longer persists after local completion alone. Worker-local single-flight ownership provides exactly-once finalization without durable claim markers. One load-bearing completion-handoff race is explicitly carried into Task 4.</td></tr>
+                    <tr><td>Task 4</td><td class="status">In progress</td><td>Building the run-owned durability barrier and closing the carried finalizer/handoff race before completion can proceed.</td></tr>
+                    <tr><td>Tasks 5-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
                 </tbody>
             </table>
 
@@ -93,11 +94,13 @@
                     <tr><td>Serialize lane updates with a bounded same-directory lock.</td><td>An atomic rename prevents torn JSON but does not prevent two recorders from dropping each other's updates.</td><td>Concurrent lane evidence survives; a stale lock may be reclaimed only after the bounded stale threshold.</td></tr>
                     <tr><td>Remove document-global video progress as a Prompted Batch acceptance signal.</td><td>Unrelated Grok video activity could otherwise satisfy acceptance for the selected source.</td><td>Acceptance now comes only from the verified composer controls or a captured same-conversation changed post.</td></tr>
                     <tr><td>Treat unknown Saved scope as temporary only during return polling.</td><td>React may briefly leave native scope unrendered during navigation, while a detected Liked scope is definite drift.</td><td>Polling can wait through loading, but restoration cannot succeed until exact All scope is positively detected.</td></tr>
+                    <tr><td>Use worker-local single-flight ownership for download finalization.</td><td>Persisted ownership turned an in-worker concurrency concern into a chain of uncancelable storage writes and repair races.</td><td>Concurrent callbacks remain exactly once; restart clears ownership naturally, while durable phase markers support crash recovery.</td></tr>
+                    <tr><td>Carry the breaker-round completion-handoff finding into Task 4.</td><td>Task 4 owns completion snapshots, durability barriers, and retry classification, and its files overlap the exact race.</td><td>Task 4 cannot pass until active finalizers are protected from revision handoff and incomplete complete/R2-present Dual-write operations have a retry path.</td></tr>
                 </tbody>
             </table>
 
             <h2>Deviations</h2>
-            <div class="panel"><p class="empty">None. Task 1 required one review-driven hardening round, but it did not change the approved product or validation scope.</p></div>
+            <div class="panel"><p>Task 3 intentionally used all five review rounds. Its original persisted-claim defect is closed. A newly exposed completion-handoff race is not deferred to release: it is a binding first requirement of Task 4 because that task owns the completion barrier.</p></div>
 
             <h2>Tradeoffs</h2>
             <table>
@@ -125,6 +128,9 @@
                     <tr><td>Task 2 Prompted Batch E2E</td><td class="ok">4 passed</td><td>Make Video/Add Prompt native path remains covered; Precise Edit receives zero clicks.</td></tr>
                     <tr><td>Task 2 lint, syntax, and diff checks</td><td class="ok">Passed</td><td>Only the approved six runtime/test files were committed; the protected untracked files remain untouched.</td></tr>
                     <tr><td>Task 2 independent review</td><td class="ok">Approved after fix</td><td>Initial review found two fail-closed controller gaps. Scoped re-review confirmed both addressed with no new breakage.</td></tr>
+                    <tr><td>Task 3 required suites</td><td class="ok">298 passed</td><td>Covers mode-specific persistence, concurrent duplicates, storage rejection/timeout, cleanup retry, authority revocation, hydration, Stop, and missing history.</td></tr>
+                    <tr><td>Task 3 lint, syntax, diff, and secret checks</td><td class="ok">Passed</td><td>Changes stayed within <code>background.js</code> and its focused unit suite.</td></tr>
+                    <tr><td>Task 3 breaker review</td><td class="status">One ruling carried</td><td>Persisted ownership is removed and exactly-once behavior is proven. Completion handoff can still invalidate an active finalizer; Task 4 owns and must close it.</td></tr>
                     <tr><td>Runtime validation</td><td>Not run</td><td>No behavior claim yet.</td></tr>
                     <tr><td>Live Chrome/cloud validation</td><td>Not run</td><td>No output, R2, or full-backup claim yet.</td></tr>
                 </tbody>
@@ -139,6 +145,8 @@
                     <tr><td><code>8e8cce3</code></td><td>Harden evidence recording, redaction, concurrency, and Git status parsing.</td><td>Scoped re-review: all findings addressed.</td></tr>
                     <tr><td><code>d6ba8ec</code></td><td>Restore trusted gallery workflow receipts and commit the preserved recovery baseline.</td><td>Initial task review found two controller-level gaps.</td></tr>
                     <tr><td><code>2cdc989</code></td><td>Bind Prompted Batch acceptance and Saved restoration to exact origin state.</td><td>Scoped re-review: both findings addressed.</td></tr>
+                    <tr><td><code>81d07aa</code> through <code>a7bd020</code></td><td>Defer Dual-write processing, add finalization ownership, and pressure-test storage timeout ordering.</td><td>Five review rounds exposed that persisted ownership was unnecessary complexity.</td></tr>
+                    <tr><td><code>fcbae44</code></td><td>Replace persisted claims with worker-local single-flight finalization.</td><td>Original claim defect closed; one completion-handoff race carried into Task 4.</td></tr>
                 </tbody>
             </table>
 
