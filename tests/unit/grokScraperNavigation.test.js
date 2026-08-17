@@ -4337,7 +4337,7 @@ describe('background scrape lease authority', () => {
         expect(operationBeforeR2).toMatchObject({ r2State: 'pending' });
     });
 
-    test('dual-write persists once after local completion and R2 presence', async () => {
+    test('concurrent duplicate R2 acknowledgements claim dual-write finalization exactly once', async () => {
         const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891042';
         const { background, harness } = await seedRunOwnedDownloadOperation({
             mode: 'dual_write',
@@ -4348,15 +4348,140 @@ describe('background scrape lease authority', () => {
         });
         const processedWritesBefore = harness.chromeApi.storage.local.set.mock.calls
             .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
+        const operationRemovalsBefore = harness.chromeApi.storage.local.set.mock.calls
+            .filter(([values]) => values.pendingDownloadOperations
+                && !Object.prototype.hasOwnProperty.call(values.pendingDownloadOperations, '42')).length;
+        const processedWrite = deferred();
+        const processedWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let intercepted = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!intercepted && Object.prototype.hasOwnProperty.call(values, 'processedIds')) {
+                intercepted = true;
+                processedWriteStarted.resolve();
+                return processedWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
 
-        await expect(background.markDownloadOperationR2Present(42, { status: 'uploaded' })).resolves.toBe(true);
-        await expect(background.markDownloadOperationR2Present(42, { status: 'already_present' })).resolves.toBe(false);
+        const first = background.markDownloadOperationR2Present(42, { status: 'uploaded' });
+        await processedWriteStarted.promise;
+        let duplicateSettled = false;
+        const duplicate = background.markDownloadOperationR2Present(42, { status: 'already_present' })
+            .then((value) => {
+                duplicateSettled = true;
+                return value;
+            });
+        await flushAsyncTurns(100);
+        const duplicateSettledBeforeRelease = duplicateSettled;
+        const operationDuringFinalization = background.getPendingDownloadOperationsForTest()['42'];
+        processedWrite.resolve();
+        const results = await Promise.all([first, duplicate]);
 
         const processedWritesAfter = harness.chromeApi.storage.local.set.mock.calls
             .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
+        const operationRemovalsAfter = harness.chromeApi.storage.local.set.mock.calls
+            .filter(([values]) => values.pendingDownloadOperations
+                && !Object.prototype.hasOwnProperty.call(values.pendingDownloadOperations, '42')).length;
+        expect(duplicateSettledBeforeRelease).toBe(true);
+        expect(results).toEqual([true, false]);
+        expect(operationDuringFinalization).toMatchObject({
+            finalizationClaim: {
+                ownerId: expect.any(String),
+                token: expect.any(String)
+            }
+        });
         expect(harness.storedLocal.processedIds).toEqual(expect.arrayContaining([mediaId]));
         expect(processedWritesAfter - processedWritesBefore).toBe(1);
+        expect(operationRemovalsAfter - operationRemovalsBefore).toBe(1);
         expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('42');
+    });
+
+    test('retryable finalization failure releases its claim without repeating identity persistence', async () => {
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891049';
+        const { background, harness } = await seedRunOwnedDownloadOperation({
+            mode: 'cloud_only',
+            downloadId: 49,
+            mediaId,
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+        const processedWritesBefore = harness.chromeApi.storage.local.set.mock.calls
+            .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
+        harness.chromeApi.downloads.removeFile.mockImplementation(() => {
+            throw new Error('temporary cleanup failure');
+        });
+
+        await expect(background.markDownloadOperationR2Present(49, { status: 'uploaded' })).resolves.toBe(false);
+
+        const retryable = background.getPendingDownloadOperationsForTest()['49'];
+        expect(retryable).toMatchObject({
+            r2State: 'present',
+            finalIdentityPersisted: true,
+            attempts: 1,
+            lastError: expect.stringContaining('code=download_cleanup_failed')
+        });
+        expect(retryable).not.toHaveProperty('finalizationClaim');
+        expect(harness.storedLocal.processedIds).toEqual([mediaId]);
+
+        harness.chromeApi.downloads.removeFile.mockImplementation((_downloadId, callback) => callback());
+        await expect(background.markDownloadOperationR2Present(49, { status: 'already_present' })).resolves.toBe(true);
+
+        const processedWritesAfter = harness.chromeApi.storage.local.set.mock.calls
+            .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
+        expect(processedWritesAfter - processedWritesBefore).toBe(1);
+        expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('49');
+    });
+
+    test('authority revocation after finalization claim releases dual-write for retry', async () => {
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891050';
+        const { background, harness } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 50,
+            mediaId,
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+        const claimWrite = deferred();
+        const claimWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let blocked = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!blocked && values.pendingDownloadOperations?.['50']?.finalizationClaim) {
+                blocked = true;
+                claimWriteStarted.resolve();
+                return claimWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+        let revoked = false;
+        const assertAuthorized = async () => {
+            if (!revoked) return;
+            const error = new Error('revoked');
+            error.code = 'scrape_authority_revoked';
+            throw error;
+        };
+
+        const finalization = background.markDownloadOperationR2Present(
+            50,
+            { status: 'uploaded' },
+            assertAuthorized
+        );
+        await claimWriteStarted.promise;
+        revoked = true;
+        claimWrite.resolve();
+
+        await expect(finalization).rejects.toMatchObject({ code: 'scrape_authority_revoked' });
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(background.getPendingDownloadOperationsForTest()['50']).toMatchObject({
+            downloadState: 'complete',
+            r2State: 'present'
+        });
+        expect(background.getPendingDownloadOperationsForTest()['50']).not.toHaveProperty('finalizationClaim');
+
+        await expect(background.markDownloadOperationR2Present(50, { status: 'already_present' })).resolves.toBe(true);
+        expect(harness.storedLocal.processedIds).toEqual([mediaId]);
+        expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('50');
     });
 
     test('dual-write R2 failure remains retryable without persisting identity', async () => {
@@ -4462,6 +4587,36 @@ describe('background scrape lease authority', () => {
             downloadState: 'complete',
             r2State: 'pending'
         });
+    });
+
+    test('service-worker hydration reclaims a stale finalization claim', async () => {
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891051';
+        const seeded = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 51,
+            mediaId,
+            downloadState: 'complete',
+            r2State: 'present'
+        });
+        const restartState = JSON.parse(JSON.stringify(seeded.harness.storedLocal));
+        restartState.processedIds = [mediaId];
+        restartState.pendingDownloadOperations['51'].finalizationClaim = {
+            ownerId: 'stale-worker',
+            token: 'stale-claim'
+        };
+        jest.resetModules();
+
+        const harness = createLeaseBackgroundHarness({ lease: seeded.lease, localState: restartState });
+        harness.chromeApi.downloads.search.mockResolvedValue([]);
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+
+        const processedWrites = harness.chromeApi.storage.local.set.mock.calls
+            .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
+        expect(harness.storedLocal.processedIds).toEqual([mediaId]);
+        expect(processedWrites).toBe(0);
+        expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('51');
     });
 
     test('missing Local-only history persists known completion and removes the operation', async () => {

@@ -261,6 +261,7 @@ let pendingDownloadOperations = new Map();
 let pendingDownloadOperationsMutationQueue = Promise.resolve();
 let pendingDownloadOperationsRevision = 0;
 let pendingDownloadOperationRevision = 0;
+const downloadFinalizationOwnerId = makeQueueId('download_finalizer');
 const activeDownloadOperations = new Set();
 const pendingScrapeDownloadReceiptsByUrl = new Map();
 const pendingScrapeDownloadReceiptsById = new Map();
@@ -3547,6 +3548,60 @@ function updateDownloadOperation(downloadId, update) {
     });
 }
 
+function downloadFinalizationClaimMatches(operation, claim) {
+    return Boolean(
+        operation?.finalizationClaim
+        && claim
+        && operation.finalizationClaim.ownerId === claim.ownerId
+        && operation.finalizationClaim.token === claim.token
+    );
+}
+
+function claimDownloadOperationFinalization(downloadId) {
+    const claim = {
+        ownerId: downloadFinalizationOwnerId,
+        token: makeQueueId('download_finalize')
+    };
+    return mutatePendingDownloadOperations((operations) => {
+        const existing = operations.get(downloadId);
+        if (!existing || existing.downloadState !== 'complete') return null;
+        if (existing.cloudRequired && existing.r2State !== 'present') return null;
+        if (existing.finalizationClaim?.ownerId === downloadFinalizationOwnerId) return null;
+        const claimed = { ...existing, finalizationClaim: claim };
+        operations.set(downloadId, claimed);
+        return { claim: { ...claim }, operation: { ...claimed } };
+    });
+}
+
+function updateClaimedDownloadOperation(downloadId, claim, update) {
+    return mutatePendingDownloadOperations((operations) => {
+        const existing = operations.get(downloadId);
+        if (!downloadFinalizationClaimMatches(existing, claim)) return null;
+        const next = { ...existing, ...update };
+        operations.set(downloadId, next);
+        return { ...next };
+    });
+}
+
+function releaseDownloadOperationFinalization(downloadId, claim) {
+    return mutatePendingDownloadOperations((operations) => {
+        const existing = operations.get(downloadId);
+        if (!downloadFinalizationClaimMatches(existing, claim)) return false;
+        const { finalizationClaim: _finalizationClaim, ...released } = existing;
+        operations.set(downloadId, released);
+        return true;
+    });
+}
+
+function removeClaimedDownloadOperation(downloadId, claim) {
+    return mutatePendingDownloadOperations((operations) => {
+        const existing = operations.get(downloadId);
+        if (!downloadFinalizationClaimMatches(existing, claim)) return null;
+        operations.delete(downloadId);
+        return { ...existing };
+    });
+}
+
 function updateDownloadOperationRevision(downloadId, operationRevision, update) {
     return mutatePendingDownloadOperations((operations) => {
         const existing = operations.get(downloadId);
@@ -3901,32 +3956,49 @@ function getDownloadOperationAuthorityGuard(operation) {
 
 async function finalizeDownloadOperation(downloadId, { historyMissing = false, assertAuthorized = null } = {}) {
     if (assertAuthorized) await assertAuthorized();
-    const operation = await getDownloadOperation(downloadId);
-    if (!operation || operation.downloadState !== 'complete') return false;
-    if (operation.cloudRequired && operation.r2State !== 'present') return false;
+    const claimed = await claimDownloadOperationFinalization(downloadId);
+    if (!claimed) return false;
+    const { claim } = claimed;
+    let operation = claimed.operation;
+    let finalized = false;
     const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
-    if (authorityGuard) await authorityGuard();
 
-    if (operation.mediaId && (!operation.allowLocal || !operation.localIdentityPersisted)) {
-        await mutateProcessedIds({ ids: [operation.mediaId] }, authorityGuard);
-    }
-    if (!operation.allowLocal) {
+    try {
         if (authorityGuard) await authorityGuard();
-        if (!historyMissing) {
-            try {
-                await removeDownloadedFile(downloadId);
-                if (authorityGuard) await authorityGuard();
-            } catch (error) {
-                if (isScrapeAuthorityRevokedError(error)) throw error;
-                await recordDownloadOperationError(downloadId, error, 'download_cleanup_failed');
-                return false;
+
+        if (operation.mediaId
+            && !operation.finalIdentityPersisted
+            && (!operation.allowLocal || !operation.localIdentityPersisted)) {
+            if (!processedUUIDs.has(operation.mediaId)) {
+                await mutateProcessedIds({ ids: [operation.mediaId] }, authorityGuard);
             }
-            console.log('[CloudQueue]', formatRedactedMediaLog('local_file_deleted', operation.mediaId));
+            operation = await updateClaimedDownloadOperation(downloadId, claim, {
+                finalIdentityPersisted: true
+            });
+            if (!operation) return false;
+            if (authorityGuard) await authorityGuard();
         }
+        if (!operation.allowLocal) {
+            if (authorityGuard) await authorityGuard();
+            if (!historyMissing) {
+                try {
+                    await removeDownloadedFile(downloadId);
+                    if (authorityGuard) await authorityGuard();
+                } catch (error) {
+                    if (isScrapeAuthorityRevokedError(error)) throw error;
+                    await recordDownloadOperationError(downloadId, error, 'download_cleanup_failed');
+                    return false;
+                }
+                console.log('[CloudQueue]', formatRedactedMediaLog('local_file_deleted', operation.mediaId));
+            }
+        }
+        if (authorityGuard) await authorityGuard();
+        const removed = await removeClaimedDownloadOperation(downloadId, claim);
+        finalized = Boolean(removed);
+        return finalized;
+    } finally {
+        if (!finalized) await releaseDownloadOperationFinalization(downloadId, claim).catch(() => {});
     }
-    if (authorityGuard) await authorityGuard();
-    await removeDownloadOperation(downloadId);
-    return true;
 }
 
 async function markDownloadOperationR2Present(downloadId, result, assertAuthorized = null) {
@@ -3943,7 +4015,7 @@ async function markDownloadOperationR2Present(downloadId, result, assertAuthoriz
     if (authorityGuard) await authorityGuard();
 
     if (operation.downloadState === 'complete') {
-        await finalizeDownloadOperation(downloadId, { assertAuthorized: authorityGuard });
+        return finalizeDownloadOperation(downloadId, { assertAuthorized: authorityGuard });
     }
     return true;
 }
