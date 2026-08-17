@@ -3473,44 +3473,75 @@ function serializeDownloadOperations(operations) {
     }, {});
 }
 
-function mutatePendingDownloadOperations(mutator, {
-    installAfterPersist = false,
-    repairTimedOutWrite = true
-} = {}) {
-    const execute = async () => {
-        const revision = ++pendingDownloadOperationsRevision;
-        const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
-        const result = await mutator(operations);
-        if (!installAfterPersist) pendingDownloadOperations = operations;
-        const write = chrome.storage.local.set({
-            [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(operations)
+async function persistAuthoritativePendingDownloadOperations() {
+    while (true) {
+        const revision = pendingDownloadOperationsRevision;
+        await chrome.storage.local.set({
+            [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(pendingDownloadOperations)
         });
-        const persisted = await withTimeout(
-            Promise.resolve(write).then(() => true),
+        if (revision === pendingDownloadOperationsRevision) return;
+    }
+}
+
+async function repairTimedOutPendingDownloadOperationsWrite() {
+    try {
+        const repairRevision = pendingDownloadOperationsRevision;
+        const repairWrite = Promise.resolve(chrome.storage.local.set({
+            [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(pendingDownloadOperations)
+        }));
+        const repaired = await withTimeout(
+            repairWrite.then(() => true),
             PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS,
             false
         );
-        if (!persisted) {
-            if (repairTimedOutWrite) {
-                Promise.resolve(write).then(() => {
-                    if (!installAfterPersist && revision === pendingDownloadOperationsRevision) return;
-                    return mutatePendingDownloadOperations(
-                        () => undefined,
-                        { repairTimedOutWrite: false }
-                    );
-                }).catch(() => {
-                    console.warn(
-                        '[CloudQueue] status=pending_download_operations_repair_failed'
-                    );
-                });
+        if (repaired && repairRevision === pendingDownloadOperationsRevision) return;
+        if (!repaired) await repairWrite;
+        await persistAuthoritativePendingDownloadOperations();
+    } catch {
+        console.warn(
+            '[CloudQueue] status=pending_download_operations_repair_failed'
+        );
+    }
+}
+
+function mutatePendingDownloadOperations(mutator, { installAfterPersist = false } = {}) {
+    let resolveMutation;
+    let rejectMutation;
+    const mutation = new Promise((resolve, reject) => {
+        resolveMutation = resolve;
+        rejectMutation = reject;
+    });
+    const execute = async () => {
+        try {
+            const revision = ++pendingDownloadOperationsRevision;
+            const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
+            const result = await mutator(operations);
+            if (!installAfterPersist) pendingDownloadOperations = operations;
+            const write = Promise.resolve(chrome.storage.local.set({
+                [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(operations)
+            }));
+            const persisted = await withTimeout(
+                write.then(() => true),
+                PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS,
+                false
+            );
+            if (persisted) {
+                if (installAfterPersist) pendingDownloadOperations = operations;
+                resolveMutation(result);
+                return;
             }
-            throw new Error('pending_download_operations_persist_timeout');
+            rejectMutation(new Error('pending_download_operations_persist_timeout'));
+            await write;
+            if (!installAfterPersist && revision === pendingDownloadOperationsRevision) return;
+            await repairTimedOutPendingDownloadOperationsWrite();
+        } catch (error) {
+            rejectMutation(error);
+            throw error;
         }
-        if (installAfterPersist) pendingDownloadOperations = operations;
-        return result;
     };
-    const mutation = pendingDownloadOperationsMutationQueue.then(execute, execute);
-    pendingDownloadOperationsMutationQueue = mutation.catch(() => {});
+    // A caller timeout must not release the queue while an uncancelable storage write is still live.
+    const queueBarrier = pendingDownloadOperationsMutationQueue.then(execute, execute);
+    pendingDownloadOperationsMutationQueue = queueBarrier.catch(() => {});
     return mutation;
 }
 
