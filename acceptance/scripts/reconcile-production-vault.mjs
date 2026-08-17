@@ -5,11 +5,19 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-    const {
+const {
+    normalizeSavedAssetIdentity,
     reconcileSavedVaultInventory,
     redactInventoryItem,
-    redactReconciliationOutput
+    redactReconciliationOutput,
+    sortRedactedInventory
 } = require('../lib/saved-vault-reconciliation.js');
+const INVENTORY_ERROR_CODES = new Set([
+    'inventory_cursor_invalid',
+    'inventory_cursor_repeated',
+    'inventory_request_failed',
+    'inventory_response_invalid'
+]);
 
 function parseArguments(args) {
     const values = {};
@@ -22,8 +30,8 @@ function parseArguments(args) {
     return values;
 }
 
-function blocked(message) {
-    process.stderr.write(`blocked: ${message}\n`);
+function blocked(code) {
+    process.stderr.write(`blocked: ${code}\n`);
     process.exitCode = 1;
 }
 
@@ -36,7 +44,26 @@ function workerUrl(value) {
     }
 }
 
-async function fetchInventory({ worker, apiKey }) {
+function hasValidObserverEvidence(observer) {
+    return Boolean(observer)
+        && observer.schemaVersion === 1
+        && observer.exhausted === true
+        && !Object.prototype.hasOwnProperty.call(observer, 'blocked')
+        && Array.isArray(observer.identities)
+        && observer.identities.every((identity) => normalizeSavedAssetIdentity(identity) === identity);
+}
+
+function inventoryError(code) {
+    const error = new Error(code);
+    error.code = code;
+    return error;
+}
+
+function inventoryErrorCode(error) {
+    return INVENTORY_ERROR_CODES.has(error?.code) ? error.code : 'inventory_request_failed';
+}
+
+async function fetchInventory({ worker, apiKey, fetchImpl = fetch }) {
     const items = [];
     const cursors = new Set();
     let cursor = null;
@@ -44,43 +71,57 @@ async function fetchInventory({ worker, apiKey }) {
         const requestUrl = new URL('/v1/vault/inventory', worker);
         requestUrl.searchParams.set('limit', '1000');
         if (cursor) requestUrl.searchParams.set('cursor', cursor);
-        const response = await fetch(requestUrl, {
-            method: 'GET',
-            headers: { Authorization: `Bearer ${apiKey}` }
-        });
-        if (!response.ok) throw new Error(`inventory_request_failed_${response.status}`);
-        const page = await response.json();
-        if (!Array.isArray(page.items)) throw new Error('inventory_items_invalid');
+        let response;
+        try {
+            response = await fetchImpl(requestUrl, {
+                method: 'GET',
+                headers: { Authorization: `Bearer ${apiKey}` }
+            });
+        } catch {
+            throw inventoryError('inventory_request_failed');
+        }
+        if (!response.ok) throw inventoryError('inventory_request_failed');
+
+        let page;
+        try {
+            page = await response.json();
+        } catch {
+            throw inventoryError('inventory_response_invalid');
+        }
+        if (!page || !Array.isArray(page.items)) throw inventoryError('inventory_response_invalid');
+        if (page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor.trim())) {
+            throw inventoryError('inventory_cursor_invalid');
+        }
         items.push(...page.items);
-        cursor = page.nextCursor === null ? null : page.nextCursor;
-        if (cursor && (typeof cursor !== 'string' || cursors.has(cursor))) throw new Error('inventory_cursor_repeated');
+        cursor = page.nextCursor;
+        if (cursor && cursors.has(cursor)) throw inventoryError('inventory_cursor_repeated');
         if (cursor) cursors.add(cursor);
-    } while (cursor);
+    } while (cursor !== null);
     return items;
 }
 
 async function main() {
     const args = parseArguments(process.argv.slice(2));
-    if (!args.observer || !args.output) return blocked('required --observer and --output arguments');
+    if (!args.observer || !args.output) return blocked('required_arguments');
 
     const worker = workerUrl(process.env.WORKER_URL);
-    if (!worker) return blocked('WORKER_URL must be an HTTPS URL');
+    if (!worker) return blocked('worker_url_invalid');
     const apiKey = process.env.WORKER_API_KEY || process.env.CLIENT_API_KEY;
-    if (!apiKey) return blocked('worker API credential is required');
+    if (!apiKey) return blocked('worker_credential_missing');
 
     let observer;
     try {
         observer = JSON.parse(fs.readFileSync(args.observer, 'utf8'));
     } catch {
-        return blocked('observer JSON is unreadable');
+        return blocked('observer_json_unreadable');
     }
-    if (!Array.isArray(observer.identities)) return blocked('observer JSON does not contain identities');
+    if (!hasValidObserverEvidence(observer)) return blocked('observer_evidence_invalid');
 
     let inventoryItems;
     try {
         inventoryItems = await fetchInventory({ worker, apiKey });
     } catch (error) {
-        return blocked(error instanceof Error ? error.message : 'inventory_request_failed');
+        return blocked(inventoryErrorCode(error));
     }
 
     const reconciliation = reconcileSavedVaultInventory({
@@ -90,11 +131,15 @@ async function main() {
     const output = redactReconciliationOutput({
         schemaVersion: 1,
         ...reconciliation,
-        inventory: inventoryItems.map(redactInventoryItem)
+        inventory: sortRedactedInventory(inventoryItems.map(redactInventoryItem))
     });
-    fs.mkdirSync(path.dirname(args.output), { recursive: true });
-    fs.writeFileSync(args.output, `${JSON.stringify(output, null, 2)}\n`);
-    process.stdout.write(`${args.output}\n`);
+    try {
+        fs.mkdirSync(path.dirname(args.output), { recursive: true });
+        fs.writeFileSync(args.output, `${JSON.stringify(output, null, 2)}\n`);
+    } catch {
+        return blocked('output_write_failed');
+    }
+    process.stdout.write('reconciliation_complete\n');
     if (reconciliation.missing.length || reconciliation.duplicateCanonical.length || reconciliation.unverified.length) {
         process.exitCode = 1;
     }
@@ -104,4 +149,4 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     main();
 }
 
-export { fetchInventory, parseArguments, workerUrl };
+export { fetchInventory, hasValidObserverEvidence, inventoryErrorCode, parseArguments, workerUrl };

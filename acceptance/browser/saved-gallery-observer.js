@@ -8,10 +8,26 @@
     const MAX_PROBES = 1000;
     const PROBE_DELAY_MS = 750;
     const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+    const GENERATED_IMAGE_HOSTS = new Set(['assets.grok.com', 'imagine-public.x.ai']);
+    const GENERATED_IMAGE_EXTENSION_RE = /\.(?:gif|jpe?g|png|webp)$/i;
+    const SELECTED_SCOPE_SELECTOR = '[role="tab"][aria-selected="true"], [role="button"][aria-pressed="true"]';
+    const GALLERY_SELECTOR = '[role="list"], [role="grid"]';
+    const LOADER_SELECTOR = '[aria-busy="true"], [role="progressbar"], [data-loading="true"]';
 
     function normalizeIdentity(value) {
         const match = String(value || '').match(UUID_RE);
         return match ? match[0].toLowerCase() : null;
+    }
+
+    function normalizeGeneratedImageIdentity(value) {
+        try {
+            const mediaUrl = new URL(String(value || ''));
+            if (mediaUrl.protocol !== 'https:' || !GENERATED_IMAGE_HOSTS.has(mediaUrl.hostname)) return null;
+            if (!GENERATED_IMAGE_EXTENSION_RE.test(mediaUrl.pathname)) return null;
+            return normalizeIdentity(mediaUrl.pathname);
+        } catch {
+            return null;
+        }
     }
 
     function createSavedGalleryObserver({ now = Date.now } = {}) {
@@ -63,39 +79,58 @@
         };
     }
 
-    function selectedScope(document) {
-        const selected = document.querySelector('[role="tab"][aria-selected="true"], [role="button"][aria-pressed="true"]');
-        return selected && selected.textContent.trim().toLowerCase();
+    function isVisible(element) {
+        return Boolean(element) && !element.hidden && (!element.getAttribute || element.getAttribute('aria-hidden') !== 'true');
     }
 
     function findSemanticGallery(document) {
-        const galleries = Array.from(document.querySelectorAll('[role="list"], [role="grid"]'))
+        const galleries = Array.from(document.querySelectorAll(GALLERY_SELECTOR))
             .filter((gallery) => gallery.querySelector('img[alt="Generated image"]'));
         if (galleries.length !== 1) throw new Error('observer_gallery_missing');
         return galleries[0];
     }
 
-    function findScroller(gallery) {
+    function findGalleryOwner(gallery) {
         let current = gallery;
         while (current) {
-            if (current.scrollHeight > current.clientHeight) return current;
+            if (Array.from(current.querySelectorAll(SELECTED_SCOPE_SELECTOR)).some(isVisible)) return current;
             current = current.parentElement;
         }
-        throw new Error('observer_scroller_missing');
+        throw new Error('observer_scope_owner_missing');
+    }
+
+    function resolveSavedScope(gallery) {
+        const owner = findGalleryOwner(gallery);
+        const selected = Array.from(owner.querySelectorAll(SELECTED_SCOPE_SELECTOR)).filter(isVisible);
+        if (selected.length !== 1) throw new Error('observer_scope_ambiguous');
+        if (selected[0].textContent.trim().toLowerCase() !== 'all') throw new Error('observer_scope_mismatch');
+        return owner;
+    }
+
+    function findGalleryScroller(gallery, owner) {
+        const candidates = [];
+        let current = gallery;
+        while (current) {
+            if (current.scrollHeight > current.clientHeight) candidates.push(current);
+            if (current === owner) break;
+            current = current.parentElement;
+        }
+        if (current !== owner) throw new Error('observer_scroller_missing');
+        if (candidates.length !== 1) {
+            throw new Error(candidates.length ? 'observer_scroller_ambiguous' : 'observer_scroller_missing');
+        }
+        return candidates[0];
     }
 
     function imageIdentities(gallery) {
         return Array.from(gallery.querySelectorAll('img[alt="Generated image"]'))
-            .map((image) => normalizeIdentity(image.currentSrc || image.src))
+            .map((image) => normalizeGeneratedImageIdentity(image.currentSrc || image.src))
             .filter(Boolean);
     }
 
-    function gallerySignature(gallery) {
-        return imageIdentities(gallery).sort().join(',');
-    }
-
     function isGalleryLoading(gallery) {
-        return Boolean(gallery.querySelector('[aria-busy="true"], [role="progressbar"], [data-loading="true"]'));
+        if (gallery.matches && gallery.matches(LOADER_SELECTOR)) return true;
+        return Array.from(gallery.querySelectorAll(LOADER_SELECTOR)).length > 0;
     }
 
     function atBottom(scroller) {
@@ -106,13 +141,15 @@
         const document = options.document || globalThis.document;
         const location = options.location || globalThis.location;
         const sleep = options.sleep || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
-        const maxProbes = Math.min(Number(options.maxProbes) || MAX_PROBES, MAX_PROBES);
+        const requestedProbes = Number(options.maxProbes);
+        const maxProbes = Math.min(Number.isFinite(requestedProbes) && requestedProbes > 0
+            ? Math.floor(requestedProbes)
+            : MAX_PROBES, MAX_PROBES);
         if (!location || location.pathname !== '/imagine/saved') throw new Error('observer_route_mismatch');
-        if (selectedScope(document) !== 'all') throw new Error('observer_scope_mismatch');
 
         const gallery = findSemanticGallery(document);
-        const scroller = options.getScroller ? options.getScroller(gallery) : findScroller(gallery);
-        if (!scroller) throw new Error('observer_scroller_missing');
+        const owner = resolveSavedScope(gallery);
+        const scroller = findGalleryScroller(gallery, owner);
         const initialScrollTop = scroller.scrollTop;
         const observer = createSavedGalleryObserver({ now: options.now || Date.now });
 
@@ -125,8 +162,7 @@
                     scope: 'all',
                     identities: imageIdentities(gallery),
                     atBottom: atBottom(scroller),
-                    loading: isGalleryLoading(gallery),
-                    signature: gallerySignature(gallery)
+                    loading: isGalleryLoading(gallery)
                 });
                 if (snapshot.exhausted) return snapshot;
                 scroller.scrollBy({ top: scroller.clientHeight, behavior: 'auto' });
@@ -143,6 +179,7 @@
         MINIMUM_STABLE_BOTTOM_MS,
         MAX_PROBES,
         normalizeIdentity,
+        normalizeGeneratedImageIdentity,
         createSavedGalleryObserver,
         observeSavedGallery
     };

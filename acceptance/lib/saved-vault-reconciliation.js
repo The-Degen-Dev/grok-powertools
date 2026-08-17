@@ -1,8 +1,22 @@
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+const MEDIA_TYPE_BY_EXTENSION = Object.freeze({
+    gif: 'image/gif',
+    jpeg: 'image/jpeg',
+    jpg: 'image/jpeg',
+    mp4: 'video/mp4',
+    png: 'image/png',
+    webm: 'video/webm',
+    webp: 'image/webp'
+});
+const VERIFICATION_STATUSES = new Set(['blocked', 'failed', 'unproven', 'verified']);
 
 function normalizeSavedAssetIdentity(value) {
     const match = String(value || '').match(UUID_RE);
     return match ? match[0].toLowerCase() : null;
+}
+
+function sorted(values) {
+    return [...values].sort();
 }
 
 function reconcileSavedVaultInventory({ savedIdentities = [], inventoryItems = [] }) {
@@ -37,12 +51,12 @@ function reconcileSavedVaultInventory({ savedIdentities = [], inventoryItems = [
     return {
         savedCount: saved.size,
         inventoryCount: inventoryItems.length,
-        verified,
-        missing,
-        duplicateCanonical,
-        unverified,
-        legacyDuplicates,
-        extra: Array.from(byIdentity.keys()).filter((identity) => !saved.has(identity))
+        verified: sorted(verified),
+        missing: sorted(missing),
+        duplicateCanonical: sorted(duplicateCanonical),
+        unverified: sorted(unverified),
+        legacyDuplicates: sorted(legacyDuplicates),
+        extra: sorted(Array.from(byIdentity.keys()).filter((identity) => !saved.has(identity)))
     };
 }
 
@@ -53,18 +67,26 @@ function redactIdentity(value) {
 
 function redactObjectKey(value) {
     if (typeof value !== 'string') return null;
-    const finalSegment = value.split('/').pop() || '';
-    const extension = finalSegment.includes('.') ? finalSegment.slice(finalSegment.lastIndexOf('.')) : '';
-    return { suffix: extension || '[redacted]' };
+    const extension = value.match(/\.([A-Za-z0-9]+)$/)?.[1]?.toLowerCase();
+    const mediaType = extension && MEDIA_TYPE_BY_EXTENSION[extension];
+    return mediaType ? { mediaType } : null;
+}
+
+function redactVerificationStatus(value) {
+    return VERIFICATION_STATUSES.has(value) ? value : 'unknown';
 }
 
 function redactInventoryItem(item) {
     return {
         identity: redactIdentity(item.assetId || item.canonicalObjectKey),
-        verificationStatus: typeof item.verificationStatus === 'string' ? item.verificationStatus : 'unknown',
+        verificationStatus: redactVerificationStatus(item.verificationStatus),
         canonicalObjectKey: redactObjectKey(item.canonicalObjectKey),
         legacyObjectKeys: Array.isArray(item.legacyObjectKeys) ? item.legacyObjectKeys.map(redactObjectKey) : []
     };
+}
+
+function sortRedactedInventory(items) {
+    return [...items].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 }
 
 function redactReconciliationOutput(value, key = '') {
@@ -90,5 +112,6 @@ module.exports = {
     redactIdentity,
     redactObjectKey,
     redactInventoryItem,
+    sortRedactedInventory,
     redactReconciliationOutput
 };
