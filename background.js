@@ -3473,7 +3473,10 @@ function serializeDownloadOperations(operations) {
     }, {});
 }
 
-function mutatePendingDownloadOperations(mutator, { installAfterPersist = false } = {}) {
+function mutatePendingDownloadOperations(mutator, {
+    installAfterPersist = false,
+    repairTimedOutWrite = true
+} = {}) {
     const execute = async () => {
         const revision = ++pendingDownloadOperationsRevision;
         const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
@@ -3488,12 +3491,19 @@ function mutatePendingDownloadOperations(mutator, { installAfterPersist = false 
             false
         );
         if (!persisted) {
-            Promise.resolve(write).then(() => {
-                if (!installAfterPersist && revision === pendingDownloadOperationsRevision) return;
-                return chrome.storage.local.set({
-                    [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(pendingDownloadOperations)
+            if (repairTimedOutWrite) {
+                Promise.resolve(write).then(() => {
+                    if (!installAfterPersist && revision === pendingDownloadOperationsRevision) return;
+                    return mutatePendingDownloadOperations(
+                        () => undefined,
+                        { repairTimedOutWrite: false }
+                    );
+                }).catch(() => {
+                    console.warn(
+                        '[CloudQueue] status=pending_download_operations_repair_failed'
+                    );
                 });
-            }).catch(() => {});
+            }
             throw new Error('pending_download_operations_persist_timeout');
         }
         if (installAfterPersist) pendingDownloadOperations = operations;

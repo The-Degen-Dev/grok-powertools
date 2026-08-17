@@ -4505,6 +4505,103 @@ describe('background scrape lease authority', () => {
         }
     });
 
+    test('late claim timeout repair serializes with newer unrelated operation updates', async () => {
+        jest.useFakeTimers();
+        const stalledClaimWrite = deferred();
+        const stalledRepairWrite = deferred();
+        try {
+            const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891054';
+            const unrelatedMediaId = '73e5e137-1334-49ea-b06b-a9d9ba891055';
+            const { background, harness, lease } = await seedRunOwnedDownloadOperation({
+                mode: 'dual_write',
+                downloadId: 54,
+                mediaId,
+                downloadState: 'complete',
+                r2State: 'pending'
+            });
+            const unrelatedUrl = `https://assets.grok.com/users/account/generated/${unrelatedMediaId}/image.jpg`;
+            let acceptUnrelatedDownload;
+            harness.chromeApi.downloads.download.mockImplementation((_options, callback) => {
+                acceptUnrelatedDownload = callback;
+            });
+            const unrelatedQueued = background.queueChromeDownload({ url: unrelatedUrl }, lease);
+            await waitForCondition(() => typeof acceptUnrelatedDownload === 'function');
+            const unrelatedFilename = background.handleDownloadFilename(
+                { id: 55, url: unrelatedUrl, filename: 'unrelated.jpg' },
+                jest.fn()
+            );
+            acceptUnrelatedDownload(55);
+            await unrelatedQueued;
+            await unrelatedFilename;
+            await background.updateDownloadOperation(55, {
+                downloadState: 'in_progress',
+                r2State: 'pending',
+                attempts: 0
+            });
+
+            const claimWriteStarted = deferred();
+            const repairWriteStarted = deferred();
+            const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+            let claimStalled = false;
+            let awaitRepair = false;
+            let repairStalled = false;
+            harness.chromeApi.storage.local.set.mockImplementation((values) => {
+                const operations = values.pendingDownloadOperations;
+                if (!claimStalled && operations?.['54']?.finalizationClaim) {
+                    claimStalled = true;
+                    claimWriteStarted.resolve();
+                    return stalledClaimWrite.promise.then(() => baseSet(values));
+                }
+                if (awaitRepair && !repairStalled && operations?.['55']
+                    && !Object.prototype.hasOwnProperty.call(operations, '54')) {
+                    repairStalled = true;
+                    repairWriteStarted.resolve();
+                    return stalledRepairWrite.promise.then(() => baseSet(values));
+                }
+                return baseSet(values);
+            });
+
+            const timedOut = background.markDownloadOperationR2Present(54, { status: 'uploaded' });
+            await claimWriteStarted.promise;
+            await jest.advanceTimersByTimeAsync(1000);
+            await expect(timedOut).rejects.toThrow('pending_download_operations_persist_timeout');
+            await expect(background.markDownloadOperationR2Present(54, { status: 'already_present' }))
+                .resolves.toBe(true);
+
+            awaitRepair = true;
+            stalledClaimWrite.resolve();
+            await repairWriteStarted.promise;
+
+            let newerUpdateSettled = false;
+            const newerUpdate = background.updateDownloadOperation(55, { attempts: 7 })
+                .then((operation) => {
+                    newerUpdateSettled = true;
+                    return operation;
+                });
+            await flushAsyncTurns(20);
+            const newerUpdateSettledBeforeRepair = newerUpdateSettled;
+
+            stalledRepairWrite.resolve();
+            await expect(newerUpdate).resolves.toMatchObject({ attempts: 7 });
+            await flushAsyncTurns(20);
+
+            const authoritative = background.getPendingDownloadOperationsForTest();
+            expect(harness.storedLocal.pendingDownloadOperations).toEqual(authoritative);
+            expect(authoritative).not.toHaveProperty('54');
+            expect(authoritative['55']).toMatchObject({
+                mediaId: unrelatedMediaId,
+                attempts: 7
+            });
+            expect(harness.storedLocal.processedIds).toEqual([mediaId]);
+            expect(newerUpdateSettledBeforeRepair).toBe(false);
+        } finally {
+            stalledClaimWrite.resolve();
+            stalledRepairWrite.resolve();
+            await jest.runOnlyPendingTimersAsync();
+            jest.useRealTimers();
+        }
+    });
+
     test('retryable finalization failure releases its claim without repeating identity persistence', async () => {
         const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891049';
         const { background, harness } = await seedRunOwnedDownloadOperation({
