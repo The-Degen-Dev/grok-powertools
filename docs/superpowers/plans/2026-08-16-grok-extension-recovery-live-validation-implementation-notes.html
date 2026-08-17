@@ -65,7 +65,7 @@
             <h1>Grok Extension Recovery Implementation Notes</h1>
             <p class="stamp">Initialized 2026-08-16 23:10:16 EDT</p>
             <section class="lede">
-                <div><strong>Status:</strong> <span class="status">Task 4 of 15 in progress</span></div>
+                <div><strong>Status:</strong> <span class="status">Task 5 of 15 starting</span></div>
                 <div><strong>Branch:</strong> <code>codex/grok-extension-recovery</code></div>
                 <div><strong>Plan:</strong> <code>2026-08-16-grok-extension-recovery-live-validation.md</code></div>
                 <div><strong>Proof boundary:</strong> No runtime edit or live lane has run yet. Existing automated and two-item evidence is not being treated as Sync, Dual-write, or full-backup proof.</div>
@@ -79,8 +79,9 @@
                     <tr><td>Task 1</td><td class="ok">Complete</td><td>Evidence contract, serialized atomic lane recording, secret-shape redaction, exact NUL-delimited Git status capture, and authoritative dirty-patch baseline passed review after one fix round.</td></tr>
                     <tr><td>Task 2</td><td class="ok">Complete</td><td>GalleryReceiptV3 now binds route, conversation, native scope, source, expected next item, and stable anchors. Prompted Batch route acceptance requires the captured same conversation; Saved return and Stop restore fail closed on scope drift.</td></tr>
                     <tr><td>Task 3</td><td class="ok">Closed with ruling</td><td>Dual-write no longer persists after local completion alone. Worker-local single-flight ownership provides exactly-once finalization without durable claim markers. One load-bearing completion-handoff race is explicitly carried into Task 4.</td></tr>
-                    <tr><td>Task 4</td><td class="status">In progress</td><td>Building the run-owned durability barrier and closing the carried finalizer/handoff race before completion can proceed.</td></tr>
-                    <tr><td>Tasks 5-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
+                    <tr><td>Task 4</td><td class="ok">Closed with ruling</td><td>Run completion now waits for durable run-owned work, uses immutable fenced persistence, bounds startup and recovery waits, preserves retry decisions across late writes and restarts, and fails closed on timeout. One writer-authority ambiguity is explicitly carried into Task 5.</td></tr>
+                    <tr><td>Task 5</td><td class="status">Starting</td><td>First gate: close the carried writer-authority ambiguity. Then add the conservative Saved scan ledger and exhaustion proof.</td></tr>
+                    <tr><td>Tasks 6-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
                 </tbody>
             </table>
 
@@ -96,11 +97,13 @@
                     <tr><td>Treat unknown Saved scope as temporary only during return polling.</td><td>React may briefly leave native scope unrendered during navigation, while a detected Liked scope is definite drift.</td><td>Polling can wait through loading, but restoration cannot succeed until exact All scope is positively detected.</td></tr>
                     <tr><td>Use worker-local single-flight ownership for download finalization.</td><td>Persisted ownership turned an in-worker concurrency concern into a chain of uncancelable storage writes and repair races.</td><td>Concurrent callbacks remain exactly once; restart clears ownership naturally, while durable phase markers support crash recovery.</td></tr>
                     <tr><td>Carry the breaker-round completion-handoff finding into Task 4.</td><td>Task 4 owns completion snapshots, durability barriers, and retry classification, and its files overlap the exact race.</td><td>Task 4 cannot pass until active finalizers are protected from revision handoff and incomplete complete/R2-present Dual-write operations have a retry path.</td></tr>
+                    <tr><td>Replace shared-key completion snapshots with immutable records and bounded terminal checkpoints.</td><td>Chrome storage writes cannot be cancelled. A timed-out shared-key write can settle late and overwrite newer state.</td><td>Late writes are fenced by authority instead of assumed cancelled; checkpoints compact retained evidence before finite local storage can grow without bound.</td></tr>
+                    <tr><td>Carry the final writer-authority ambiguity into Task 5 as its first gate.</td><td>After five Task 4 review rounds, one narrow hydration conflict remains real and load-bearing. The protocol forbids a sixth hidden fix round.</td><td>Task 5 must fail closed on duplicate claims and lease-writer mismatch before adding traversal state that depends on hydrated run authority.</td></tr>
                 </tbody>
             </table>
 
             <h2>Deviations</h2>
-            <div class="panel"><p>Task 3 intentionally used all five review rounds. Its original persisted-claim defect is closed. A newly exposed completion-handoff race is not deferred to release: it is a binding first requirement of Task 4 because that task owns the completion barrier.</p></div>
+            <div class="panel"><p>Task 3 intentionally used all five review rounds and carried one completion-handoff race into Task 4. Task 4 also used all five rounds because uncancelable Chrome storage writes required a broader immutable-record and terminal-checkpoint protocol than the original snapshot design. Its remaining narrow writer-authority ambiguity is not deferred to release; it is the binding first gate of Task 5.</p></div>
 
             <h2>Tradeoffs</h2>
             <table>
@@ -108,6 +111,7 @@
                 <tbody>
                     <tr><td>Track public implementation notes in Git and keep detailed worker artifacts in the ignored SDD workspace.</td><td>Put all coordination detail in one tracked HTML file.</td><td>The HTML stays readable and secret-safe; briefs, reports, and review packages remain recoverable without bloating the branch.</td></tr>
                     <tr><td>Execute deterministic Tasks 1-9 before any live Chrome lane.</td><td>Patch and test directly against production first.</td><td>This keeps cloud and credit-bearing actions behind source-bound deterministic gates.</td></tr>
+                    <tr><td>Use immutable uniquely keyed records plus retained terminal fences.</td><td>Hold mutation queues until every storage promise settles, or release timed-out same-key writes.</td><td>The chosen design keeps Stop and replacement runs operable while making late writes non-authoritative. It costs more local protocol code and requires bounded compaction tests.</td></tr>
                 </tbody>
             </table>
 
@@ -131,6 +135,8 @@
                     <tr><td>Task 3 required suites</td><td class="ok">298 passed</td><td>Covers mode-specific persistence, concurrent duplicates, storage rejection/timeout, cleanup retry, authority revocation, hydration, Stop, and missing history.</td></tr>
                     <tr><td>Task 3 lint, syntax, diff, and secret checks</td><td class="ok">Passed</td><td>Changes stayed within <code>background.js</code> and its focused unit suite.</td></tr>
                     <tr><td>Task 3 breaker review</td><td class="status">One ruling carried</td><td>Persisted ownership is removed and exactly-once behavior is proven. Completion handoff can still invalidate an active finalizer; Task 4 owns and must close it.</td></tr>
+                    <tr><td>Task 4 deterministic gates</td><td class="ok">757 unit and 35 E2E passed</td><td>Includes permanent non-settlement, late prepare/revocation, true module restart, bounded checkpoint retention, failed compaction, exact deadlines, Stop, replacement runs, retry hydration, and fail-closed completion labels.</td></tr>
+                    <tr><td>Task 4 breaker review</td><td class="status">One ruling carried</td><td>Late checkpoint regression and unbounded readiness are closed. Duplicate writer authority and lease-writer mismatch must fail closed before Task 5 traversal work.</td></tr>
                     <tr><td>Runtime validation</td><td>Not run</td><td>No behavior claim yet.</td></tr>
                     <tr><td>Live Chrome/cloud validation</td><td>Not run</td><td>No output, R2, or full-backup claim yet.</td></tr>
                 </tbody>
@@ -147,6 +153,7 @@
                     <tr><td><code>2cdc989</code></td><td>Bind Prompted Batch acceptance and Saved restoration to exact origin state.</td><td>Scoped re-review: both findings addressed.</td></tr>
                     <tr><td><code>81d07aa</code> through <code>a7bd020</code></td><td>Defer Dual-write processing, add finalization ownership, and pressure-test storage timeout ordering.</td><td>Five review rounds exposed that persisted ownership was unnecessary complexity.</td></tr>
                     <tr><td><code>fcbae44</code></td><td>Replace persisted claims with worker-local single-flight finalization.</td><td>Original claim defect closed; one completion-handoff race carried into Task 4.</td></tr>
+                    <tr><td><code>56b73de</code> through <code>d34e9ba</code></td><td>Add run-owned durability snapshots, immutable persistence fences, restart-safe authority, bounded terminal checkpoints, and bounded readiness/recovery.</td><td>Five review rounds closed completion, timeout, late-write, restart, and quota risks. One hydration ambiguity is carried into Task 5.</td></tr>
                 </tbody>
             </table>
 
