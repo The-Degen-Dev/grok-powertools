@@ -663,6 +663,27 @@ function getSavedGalleryEntries(root = document) {
         .filter((entry) => entry?.sourceIdentity);
 }
 
+function getSavedGalleryEntryMediaType(entry) {
+    const card = entry?.card;
+    if (!card) return null;
+    const explicitType = String(
+        card.getAttribute('data-media-type')
+        || card.querySelector('[data-media-type]')?.getAttribute('data-media-type')
+        || ''
+    ).trim().toLowerCase();
+    if (explicitType === 'image' || explicitType === 'video') return explicitType;
+    if (card.querySelector('video')) return 'video';
+
+    const labels = Array.from(card.querySelectorAll('[aria-label]'))
+        .map((element) => String(element.getAttribute('aria-label') || '').trim().toLowerCase());
+    if (labels.some((label) => label === 'play' || label.includes('play video'))) return 'video';
+    if (labels.some((label) => label === 'make video' || label.startsWith('make video '))) return 'image';
+
+    const sourceUrl = String(entry.sourceUrl || '').split('?')[0].toLowerCase();
+    if (/\.(?:mp4|webm)$/.test(sourceUrl)) return 'video';
+    return null;
+}
+
 function getSavedGalleryList(entries) {
     const listCounts = new Map();
     for (const entry of entries) {
@@ -1173,6 +1194,14 @@ function getR2BackupCanaryStopReason(options = {}, stats = {}) {
 
 function getR2BackupPageCommandOptions(detail = {}) {
     const command = detail && typeof detail === 'object' ? detail : {};
+    const targetIdentity = getGrokMediaIdentity(command.targetIdentity);
+    const targetMediaType = command.targetMediaType === 'image' || command.targetMediaType === 'video'
+        ? command.targetMediaType
+        : null;
+    const targetOptions = {
+        ...(targetIdentity ? { targetIdentity } : {}),
+        ...(targetMediaType ? { targetMediaType } : {})
+    };
     const acceptance = command.runId && command.correlationId && command.keyPrefix
         ? {
             runId: String(command.runId),
@@ -1184,7 +1213,7 @@ function getR2BackupPageCommandOptions(detail = {}) {
         return {
             mode: 'canary',
             limit: 1,
-            options: { stopAfterMediaAttempt: true },
+            options: { stopAfterMediaAttempt: true, ...targetOptions },
             ...(acceptance ? { acceptance } : {})
         };
     }
@@ -1195,7 +1224,7 @@ function getR2BackupPageCommandOptions(detail = {}) {
     return {
         mode: 'canary',
         limit: 1,
-        options: { ...options, stopAfterMediaAttempt: true },
+        options: { ...options, ...targetOptions, stopAfterMediaAttempt: true },
         ...(acceptance ? { acceptance } : {})
     };
 }
@@ -6959,6 +6988,17 @@ class GrokScraper {
             ? BACKUP_MAX_SCROLL_ATTEMPTS
             : SYNC_MAX_SCROLL_ATTEMPTS;
         const scanLedger = this.getSavedScanLedger();
+        const canaryOptions = this.backupMode && this.backupOptions?.mode === 'canary'
+            ? this.backupOptions.options || {}
+            : {};
+        const canaryTargetIdentity = getGrokMediaIdentity(canaryOptions.targetIdentity);
+        const canaryTargetMediaType = canaryOptions.targetMediaType === 'image'
+            || canaryOptions.targetMediaType === 'video'
+            ? canaryOptions.targetMediaType
+            : null;
+        const canaryTargetLabel = canaryTargetIdentity
+            ? `...${canaryTargetIdentity.slice(-8)}`
+            : '';
         let exhausted = false;
         let scanLimitReached = false;
 
@@ -6995,25 +7035,64 @@ class GrokScraper {
             // Find Unprocessed
             let targetItem = null;
             let expectedNextIdentity = null;
-            for (let i = 0; i < semanticItems.length; i++) {
-                const entry = semanticItems[i];
-                const cleanId = this.getCleanId(entry.sourceUrl);
-                const alreadyDone = this.backupMode
-                    ? this._backupVisited.has(cleanId)
-                    : this.isMediaProcessed(entry.sourceUrl) || this._runVisited.has(cleanId);
-                if (cleanId && !alreadyDone) {
-                    targetItem = entry.image;
-                    expectedNextIdentity = semanticItems[i + 1]?.sourceIdentity || null;
-                    this.log(`new item: ...${cleanId.slice(-6)}`, 'success');
-                    await this.processItem(
-                        targetItem,
-                        cleanId,
-                        runToken,
-                        this.runEpoch,
-                        expectedNextIdentity
+            let targetCleanId = null;
+            if (canaryTargetIdentity) {
+                const targetMatches = semanticItems
+                    .map((entry, index) => ({ entry, index }))
+                    .filter(({ entry }) => entry.sourceIdentity === canaryTargetIdentity);
+                if (targetMatches.length > 1) {
+                    await this.failRun(
+                        `Canary target ${canaryTargetLabel} is ambiguous in Saved.`,
+                        'canary_target_ambiguous'
                     );
-                    return; // Action Taken
+                    return;
                 }
+                if (targetMatches.length === 1) {
+                    const { entry, index } = targetMatches[0];
+                    const actualMediaType = getSavedGalleryEntryMediaType(entry);
+                    if (canaryTargetMediaType && !actualMediaType) {
+                        await this.failRun(
+                            `Could not verify whether canary target ${canaryTargetLabel} is an image or video.`,
+                            'canary_target_type_unknown'
+                        );
+                        return;
+                    }
+                    if (canaryTargetMediaType && actualMediaType !== canaryTargetMediaType) {
+                        await this.failRun(
+                            `Canary target ${canaryTargetLabel} is ${actualMediaType}, expected ${canaryTargetMediaType}.`,
+                            'canary_target_type_mismatch'
+                        );
+                        return;
+                    }
+                    targetCleanId = this.getCleanId(entry.sourceUrl);
+                    targetItem = entry.image;
+                    expectedNextIdentity = semanticItems[index + 1]?.sourceIdentity || null;
+                }
+            } else {
+                for (let i = 0; i < semanticItems.length; i++) {
+                    const entry = semanticItems[i];
+                    const cleanId = this.getCleanId(entry.sourceUrl);
+                    const alreadyDone = this.backupMode
+                        ? this._backupVisited.has(cleanId)
+                        : this.isMediaProcessed(entry.sourceUrl) || this._runVisited.has(cleanId);
+                    if (cleanId && !alreadyDone) {
+                        targetCleanId = cleanId;
+                        targetItem = entry.image;
+                        expectedNextIdentity = semanticItems[i + 1]?.sourceIdentity || null;
+                        break;
+                    }
+                }
+            }
+            if (targetItem && targetCleanId) {
+                this.log(`new item: ...${targetCleanId.slice(-6)}`, 'success');
+                await this.processItem(
+                    targetItem,
+                    targetCleanId,
+                    runToken,
+                    this.runEpoch,
+                    expectedNextIdentity
+                );
+                return; // Action Taken
             }
 
             // Scroll if no action
@@ -7094,6 +7173,20 @@ class GrokScraper {
         if (exhausted || scanLimitReached || scrollAttempts >= MAX_SCROLL_ATTEMPTS) {
             if (!this.isRunActive(runToken)) return;
             if (!await this.ensureSavedGalleryAllScope(runToken)) return;
+            if (canaryTargetIdentity) {
+                if (exhausted) {
+                    await this.failRun(
+                        `Canary target ${canaryTargetLabel} was not found before Saved was exhausted.`,
+                        'canary_target_not_found'
+                    );
+                } else {
+                    await this.failRun(
+                        `Canary target ${canaryTargetLabel} was not found before the Saved scan safety limit.`,
+                        'canary_target_scan_limit'
+                    );
+                }
+                return;
+            }
             if (!exhausted) {
                 this.log('Saved scan paused: safety limit reached before confirming the gallery end.', 'warning');
                 if (this.backupMode) await this.stopBackupMode('scan_limit');

@@ -141,6 +141,20 @@ function mountSemanticSavedImage(sourceUrl, scrollTop = 0) {
     return { scroller, list, card, image };
 }
 
+function appendSemanticSavedEntry(list, sourceUrl, mediaType) {
+    const card = document.createElement('article');
+    card.setAttribute('role', 'listitem');
+    const image = document.createElement('img');
+    image.alt = 'Generated image';
+    image.src = sourceUrl;
+    card.appendChild(image);
+    const mediaControl = document.createElement('button');
+    mediaControl.setAttribute('aria-label', mediaType === 'video' ? 'Play video' : 'Make video');
+    card.appendChild(mediaControl);
+    list.appendChild(card);
+    return { card, image, mediaControl };
+}
+
 const FULL_POINTER_ACTIVATION_EVENTS = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
 
 function recordPointerActivationEvents(element) {
@@ -950,6 +964,190 @@ describe('Grok scrape surface transitions', () => {
             1,
             expectedIndex === 0 ? '31000000-0000-4000-8000-000000000002' : null
         );
+    });
+
+    test.each([
+        ['image', 'Play video'],
+        ['video', 'Make video']
+    ])('targeted canary selects a later %s by exact identity', async (targetMediaType, decoyLabel) => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const decoyUrl = 'https://assets.grok.com/users/u/generated/33000000-0000-4000-8000-000000000001/image.jpg';
+        const targetUrl = 'https://assets.grok.com/users/u/generated/33000000-0000-4000-8000-000000000002/image.jpg';
+        const nextUrl = 'https://assets.grok.com/users/u/generated/33000000-0000-4000-8000-000000000003/image.jpg';
+        const { list, card } = mountSemanticSavedImage(decoyUrl);
+        const decoyControl = document.createElement('button');
+        decoyControl.setAttribute('aria-label', decoyLabel);
+        card.appendChild(decoyControl);
+        const target = appendSemanticSavedEntry(list, targetUrl, targetMediaType);
+        appendSemanticSavedEntry(list, nextUrl, 'image');
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: {
+                stopAfterMediaAttempt: true,
+                targetIdentity: '33000000-0000-4000-8000-000000000002',
+                targetMediaType
+            }
+        };
+        scraper.sleep = jest.fn().mockResolvedValue();
+        scraper.processItem = jest.fn().mockResolvedValue();
+
+        await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+
+        expect(scraper.processItem).toHaveBeenCalledTimes(1);
+        expect(scraper.processItem).toHaveBeenCalledWith(
+            target.image,
+            targetUrl,
+            'run-1',
+            1,
+            '33000000-0000-4000-8000-000000000003'
+        );
+    });
+
+    test('targeted canary traverses virtualized Saved entries without processing non-target cards', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const decoyUrl = 'https://assets.grok.com/users/u/generated/34000000-0000-4000-8000-000000000001/image.jpg';
+        const targetUrl = 'https://assets.grok.com/users/u/generated/34000000-0000-4000-8000-000000000099/image.jpg';
+        const { image, card } = mountSemanticSavedImage(decoyUrl);
+        const mediaControl = document.createElement('button');
+        mediaControl.setAttribute('aria-label', 'Make video');
+        card.appendChild(mediaControl);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: {
+                stopAfterMediaAttempt: true,
+                targetIdentity: '34000000-0000-4000-8000-000000000099',
+                targetMediaType: 'video'
+            }
+        };
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
+        scraper.processItem = jest.fn().mockResolvedValue();
+        let replaced = false;
+        scraper.sleep = jest.fn(async (delay) => {
+            if (delay === 750 && !replaced) {
+                replaced = true;
+                image.src = targetUrl;
+                mediaControl.setAttribute('aria-label', 'Play video');
+            }
+        });
+
+        await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+
+        expect(replaced).toBe(true);
+        expect(scraper.processItem).toHaveBeenCalledTimes(1);
+        expect(scraper.processItem).toHaveBeenCalledWith(
+            image,
+            targetUrl,
+            'run-1',
+            1,
+            null
+        );
+        expect(scraper.processItem).not.toHaveBeenCalledWith(
+            expect.anything(),
+            decoyUrl,
+            expect.anything(),
+            expect.anything(),
+            expect.anything()
+        );
+    });
+
+    test('targeted canary fails closed when the matching card has the wrong media type', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '35000000-0000-4000-8000-000000000002';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/image.jpg`;
+        const { list, card } = mountSemanticSavedImage(targetUrl);
+        const imageControl = document.createElement('button');
+        imageControl.setAttribute('aria-label', 'Make video');
+        card.appendChild(imageControl);
+        appendSemanticSavedEntry(list, 'https://assets.grok.com/users/u/generated/35000000-0000-4000-8000-000000000003/image.jpg', 'video');
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: {
+                stopAfterMediaAttempt: true,
+                targetIdentity,
+                targetMediaType: 'video'
+            }
+        };
+        scraper.sleep = jest.fn().mockResolvedValue();
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+
+        await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            expect.stringMatching(/^Canary target \.\.\.[a-f0-9]{8} is image, expected video\.$/),
+            'canary_target_type_mismatch'
+        );
+        expect(JSON.stringify(scraper.failRun.mock.calls)).not.toContain(targetIdentity);
+    });
+
+    test('targeted canary fails closed after bounded traversal exhausts Saved', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '36000000-0000-4000-8000-000000000099';
+        const decoyUrl = 'https://assets.grok.com/users/u/generated/36000000-0000-4000-8000-000000000001/image.jpg';
+        const { scroller, card } = mountSemanticSavedImage(decoyUrl);
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 800 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        scroller.scrollBy = jest.fn();
+        const imageControl = document.createElement('button');
+        imageControl.setAttribute('aria-label', 'Make video');
+        card.appendChild(imageControl);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: {
+                stopAfterMediaAttempt: true,
+                targetIdentity,
+                targetMediaType: 'image'
+            }
+        };
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        scraper.waitForRunDurability = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.stopBackupMode = jest.fn().mockResolvedValue();
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => {
+            now += delay;
+        });
+
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
+
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            expect.stringMatching(/^Canary target \.\.\.[a-f0-9]{8} was not found before Saved was exhausted\.$/),
+            'canary_target_not_found'
+        );
+        expect(JSON.stringify(scraper.failRun.mock.calls)).not.toContain(targetIdentity);
+        expect(scraper.stopBackupMode).not.toHaveBeenCalled();
     });
 
     test('ignores a visible loader outside Saved when proving list exhaustion', async () => {

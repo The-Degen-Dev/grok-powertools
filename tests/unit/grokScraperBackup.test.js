@@ -3103,11 +3103,41 @@ describe('Grok backup canary flow', () => {
         });
     });
 
+    test('propagates optional exact target fields only for page-origin canaries', () => {
+        const targetIdentity = '31000000-0000-4000-8000-000000000002';
+
+        expect(getR2BackupPageCommandOptions({
+            action: 'INIT_R2_CANARY',
+            targetIdentity,
+            targetMediaType: 'video'
+        })).toEqual({
+            mode: 'canary',
+            limit: 1,
+            options: {
+                stopAfterMediaAttempt: true,
+                targetIdentity,
+                targetMediaType: 'video'
+            }
+        });
+
+        expect(getR2BackupPageCommandOptions({
+            action: 'INIT_R2_BACKUP',
+            mode: 'full',
+            targetIdentity,
+            targetMediaType: 'video'
+        })).toBeNull();
+    });
+
     test('rejects page-origin full backup commands', () => {
         expect(getR2BackupPageCommandOptions(null)).toBeNull();
         expect(getR2BackupPageCommandOptions({})).toBeNull();
         expect(getR2BackupPageCommandOptions({ action: 'INIT_R2_BACKUP' })).toBeNull();
-        expect(getR2BackupPageCommandOptions({ action: 'INIT_R2_BACKUP', mode: 'full' })).toBeNull();
+        expect(getR2BackupPageCommandOptions({
+            action: 'INIT_R2_BACKUP',
+            mode: 'full',
+            targetIdentity: '31000000-0000-4000-8000-000000000002',
+            targetMediaType: 'image'
+        })).toBeNull();
     });
 
     test('does not start backup from unsafe page-origin full backup commands', () => {
@@ -3347,6 +3377,244 @@ describe('Grok backup acceptance context propagation', () => {
             correlationId: 'corr-1',
             keyPrefix: 'acceptance/run-20260609-001'
         })).toBeNull();
+    });
+});
+
+describe('acceptance cloud isolation', () => {
+    const acceptanceRunId = 'run-20260817-001';
+    const acceptanceKeyPrefix = `acceptance/${acceptanceRunId}`;
+
+    function cloudConfig(keyPrefix = acceptanceKeyPrefix) {
+        return {
+            mode: 'cloud_only',
+            workerUrl: 'https://acceptance-worker.example.workers.dev',
+            apiKey: 'test-only-value',
+            keyPrefix
+        };
+    }
+
+    function mediaQueueItem(id, acceptance = null, attempts = 0) {
+        return {
+            id,
+            dedupeKey: `media:${id}`,
+            type: 'media',
+            sourceUrl: `https://imagine-public.x.ai/media/${id}.jpg`,
+            finalPath: `GrokVault/test/${id}.jpg`,
+            objectKey: `grok-powertools/v1/users/test/media/${id}.jpg`,
+            assetId: id,
+            sourceUrlHash: `url_${id}`,
+            contentType: 'image/jpeg',
+            attempts,
+            lastError: attempts ? 'existing-error' : null,
+            ...(acceptance ? { acceptance } : {})
+        };
+    }
+
+    function metadataQueueItem(kind, acceptance) {
+        return {
+            id: `metadata-${kind}`,
+            dedupeKey: `metadata:test-user:${kind}`,
+            type: 'metadata',
+            kind,
+            userId: 'test-user',
+            payload: { schemaVersion: 1, data: ['private-canonical-value'] },
+            attempts: 0,
+            acceptance
+        };
+    }
+
+    afterEach(() => {
+        jest.useRealTimers();
+        delete global.chrome;
+        delete global.fetch;
+        jest.resetModules();
+    });
+
+    test('drains only the matching acceptance item from a mixed queue', async () => {
+        const harness = createDurableBackgroundHarness({ cloudConfig: cloudConfig() });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        const productionItem = mediaQueueItem('production-item', null, 3);
+        const acceptanceItem = mediaQueueItem('acceptance-item', {
+            runId: acceptanceRunId,
+            correlationId: 'corr-acceptance',
+            keyPrefix: acceptanceKeyPrefix
+        });
+        background.setCloudSyncQueueForTest([productionItem, acceptanceItem]);
+        const productionBefore = JSON.stringify(productionItem);
+        const upload = jest.fn().mockResolvedValue({ status: 'already_present', bytes: 10 });
+
+        await background.processCloudQueue('manual', {
+            force: true,
+            uploadMediaQueueItem: upload
+        });
+
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(upload.mock.calls[0][1].id).toBe('acceptance-item');
+        expect(background.getCloudSyncQueueForTest()).toHaveLength(1);
+        expect(JSON.stringify(background.getCloudSyncQueueForTest()[0])).toBe(productionBefore);
+    });
+
+    test('manual force retry is a no-op when acceptance config has only production queue items', async () => {
+        const harness = createDurableBackgroundHarness({
+            cloudConfig: cloudConfig(),
+            cloudSyncQueue: [mediaQueueItem('production-only', null, 5)]
+        });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        const before = JSON.stringify(background.getCloudSyncQueueForTest());
+        const upload = jest.fn().mockResolvedValue({ status: 'uploaded', bytes: 10 });
+
+        await background.processCloudQueue('manual', {
+            force: true,
+            uploadMediaQueueItem: upload
+        });
+
+        expect(upload).not.toHaveBeenCalled();
+        expect(JSON.stringify(background.getCloudSyncQueueForTest())).toBe(before);
+    });
+
+    test('acceptance config leaves pre-existing canonical metadata snapshots untouched', async () => {
+        const acceptance = {
+            runId: acceptanceRunId,
+            correlationId: 'corr-metadata',
+            keyPrefix: acceptanceKeyPrefix
+        };
+        const metadataItem = metadataQueueItem('processedIds', acceptance);
+        const harness = createDurableBackgroundHarness({ cloudConfig: cloudConfig() });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        background.setCloudSyncQueueForTest([metadataItem]);
+        const before = JSON.stringify(background.getCloudSyncQueueForTest());
+        global.fetch = jest.fn();
+
+        await background.processCloudQueue('manual', { force: true });
+
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(JSON.stringify(background.getCloudSyncQueueForTest())).toBe(before);
+    });
+
+    test('alarm drain cannot process production queue items while acceptance config is active', async () => {
+        const productionItem = mediaQueueItem('alarm-production', null, 1);
+        const harness = createDurableBackgroundHarness({
+            cloudConfig: cloudConfig(),
+            cloudSyncQueue: [productionItem]
+        });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        const before = JSON.stringify(background.getCloudSyncQueueForTest());
+        global.fetch = jest.fn(() => Promise.reject(new Error('production queue must not be attempted')));
+
+        harness.getAlarmListener()({ name: 'gptCloudRetry' });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(JSON.stringify(background.getCloudSyncQueueForTest())).toBe(before);
+    });
+
+    test('config-change drain cannot process a pre-existing production queue under acceptance config', async () => {
+        const productionItem = mediaQueueItem('config-change-production', null, 2);
+        const harness = createDurableBackgroundHarness({
+            cloudConfig: cloudConfig('grok-powertools/v1'),
+            cloudSyncQueue: [productionItem]
+        });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        const before = JSON.stringify(background.getCloudSyncQueueForTest());
+        global.fetch = jest.fn(() => Promise.reject(new Error('production queue must not be attempted')));
+
+        await harness.chromeApi.storage.local.set({ cloudConfig: cloudConfig() });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(JSON.stringify(background.getCloudSyncQueueForTest())).toBe(before);
+    });
+
+    test('processedIds changes do not enqueue or transmit canonical metadata in acceptance mode', async () => {
+        const harness = createDurableBackgroundHarness({
+            cloudConfig: cloudConfig(),
+            activeGrokUserId: 'test-user',
+            processedIds: ['existing-id']
+        });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: async () => ({ ok: true }) }));
+        jest.useFakeTimers();
+        const storageListener = harness.chromeApi.storage.onChanged.addListener.mock.calls.at(-1)[0];
+
+        storageListener({
+            processedIds: { oldValue: ['existing-id'], newValue: ['existing-id', 'new-id'] }
+        }, 'local');
+        await jest.advanceTimersByTimeAsync(2000);
+
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
+    });
+
+    test('backfill does not enqueue or transmit canonical metadata in acceptance mode', async () => {
+        const harness = createDurableBackgroundHarness({
+            cloudConfig: cloudConfig(),
+            activeGrokUserId: 'test-user',
+            savedPrompts: [{ id: 'prompt-1' }],
+            promptHistory: [{ id: 'history-1' }],
+            processedIds: ['processed-1']
+        });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: async () => ({ ok: true }) }));
+        const request = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'CLOUD_RUN_BACKFILL'
+        });
+
+        await expect(request.response).resolves.toEqual(expect.objectContaining({ ok: true }));
+
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
+    });
+
+    test('production config still drains ordinary queue items', async () => {
+        const harness = createDurableBackgroundHarness({
+            cloudConfig: cloudConfig('grok-powertools/v1')
+        });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        background.setCloudSyncQueueForTest([mediaQueueItem('production-drain')]);
+        const upload = jest.fn().mockResolvedValue({ status: 'already_present', bytes: 10 });
+
+        await background.processCloudQueue('manual', {
+            force: true,
+            uploadMediaQueueItem: upload
+        });
+
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
+    });
+
+    test('production backfill still syncs canonical metadata', async () => {
+        const harness = createDurableBackgroundHarness({
+            cloudConfig: cloudConfig('grok-powertools/v1'),
+            activeGrokUserId: 'test-user',
+            savedPrompts: [{ id: 'prompt-1' }],
+            promptHistory: [{ id: 'history-1' }],
+            processedIds: ['processed-1']
+        });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: async () => ({ ok: true }) }));
+        const request = dispatchRuntimeMessage(harness.getRuntimeListener(), {
+            action: 'CLOUD_RUN_BACKFILL'
+        });
+
+        await expect(request.response).resolves.toEqual(expect.objectContaining({ ok: true }));
+
+        expect(global.fetch).toHaveBeenCalledTimes(4);
+        expect(global.fetch.mock.calls.map((call) => JSON.parse(call[1].body).kind)).toEqual([
+            'savedPrompts',
+            'promptHistory',
+            'processedIds',
+            'backfillManifest'
+        ]);
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
     });
 });
 

@@ -96,6 +96,17 @@
         };
     }
 
+    function getAcceptanceCloudConfigContext(config) {
+        const normalized = normalizeCloudConfig(config);
+        const match = normalized.keyPrefix.match(/^acceptance\/([^/]+)$/);
+        if (!match) return null;
+        return { runId: match[1], keyPrefix: normalized.keyPrefix };
+    }
+
+    function isAcceptanceCloudConfig(config) {
+        return getAcceptanceCloudConfigContext(config) !== null;
+    }
+
     function normalizeAcceptanceContext(context) {
         if (!context) return null;
         const runId = String(context.runId || '').trim();
@@ -451,6 +462,8 @@
         normalizeWorkerUrl,
         validateWorkersDevUrl,
         normalizeCloudConfig,
+        getAcceptanceCloudConfigContext,
+        isAcceptanceCloudConfig,
         normalizeAcceptanceContext,
         buildAcceptanceHeaders,
         buildMediaObjectKey,

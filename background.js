@@ -76,6 +76,15 @@ const CloudSync = (typeof self !== 'undefined' && self.CloudSyncUtils)
             merged.keyPrefix = String(merged.keyPrefix || 'grok-powertools/v1').trim().replace(/^\/+/, '').replace(/\/+$/, '');
             return merged;
         },
+        getAcceptanceCloudConfigContext(config) {
+            const normalized = this.normalizeCloudConfig(config);
+            const match = normalized.keyPrefix.match(/^acceptance\/([^/]+)$/);
+            if (!match) return null;
+            return { runId: match[1], keyPrefix: normalized.keyPrefix };
+        },
+        isAcceptanceCloudConfig(config) {
+            return this.getAcceptanceCloudConfigContext(config) !== null;
+        },
         normalizeAcceptanceContext(context) {
             if (!context) return null;
             const runId = String(context.runId || '').trim();
@@ -466,17 +475,32 @@ function buildR2BackupInitMessage(request = {}) {
 }
 
 function buildAcceptanceContextFromCloudConfig(config, source = 'extension') {
-    const keyPrefix = CloudSync.sanitizeKeyPrefix
-        ? CloudSync.sanitizeKeyPrefix(config?.keyPrefix || '')
-        : String(config?.keyPrefix || '').trim().replace(/^\/+/, '').replace(/\/+$/, '');
-    const match = keyPrefix.match(/^acceptance\/([^/]+)(?:\/|$)/);
-    if (!match) return null;
+    const acceptanceConfig = CloudSync.getAcceptanceCloudConfigContext(config);
+    if (!acceptanceConfig) return null;
 
     return {
-        runId: match[1],
+        runId: acceptanceConfig.runId,
         correlationId: `${source}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-        keyPrefix
+        keyPrefix: acceptanceConfig.keyPrefix
     };
+}
+
+function cloudQueueItemMatchesAcceptanceConfig(item, config) {
+    const acceptanceConfig = CloudSync.getAcceptanceCloudConfigContext(config);
+    if (!acceptanceConfig || item?.type !== 'media') return false;
+    const itemRunId = String(item.acceptance?.runId || '').trim();
+    const itemKeyPrefix = CloudSync.sanitizeKeyPrefix
+        ? CloudSync.sanitizeKeyPrefix(item.acceptance?.keyPrefix || '')
+        : String(item.acceptance?.keyPrefix || '').trim().replace(/^\/+/, '').replace(/\/+$/, '');
+    const correlationId = String(item.acceptance?.correlationId || '').trim();
+    return itemRunId === acceptanceConfig.runId
+        && itemKeyPrefix === acceptanceConfig.keyPrefix
+        && Boolean(correlationId);
+}
+
+function cloudQueueItemIsEligibleForConfig(item, config) {
+    if (!CloudSync.isAcceptanceCloudConfig(config)) return true;
+    return cloudQueueItemMatchesAcceptanceConfig(item, config);
 }
 
 function buildR2BackupInitMessageForConfig(request = {}, config = null) {
@@ -702,8 +726,13 @@ async function clearCloudUiStatus() {
     await persistCloudState();
 }
 
-async function scheduleCloudRetryAlarm() {
-    const retryableItems = cloudSyncQueue.filter((item) => (item.attempts || 0) < CloudSync.MAX_RETRY_ATTEMPTS);
+async function scheduleCloudRetryAlarm(configOverride = null) {
+    const config = configOverride || await getCloudConfig();
+    const acceptanceMode = CloudSync.isAcceptanceCloudConfig(config);
+    const retryableItems = cloudSyncQueue.filter((item) => (
+        cloudQueueItemIsEligibleForConfig(item, config)
+        && (item.attempts || 0) < CloudSync.MAX_RETRY_ATTEMPTS
+    ));
     const queueOwnedDownloadIds = new Set(cloudSyncQueue
         .filter((item) => item.type === 'media' && Number.isInteger(item.cleanupDownloadId))
         .map((item) => item.cleanupDownloadId));
@@ -712,7 +741,7 @@ async function scheduleCloudRetryAlarm() {
             queueOwnedDownloadIds.add(operation.downloadId);
         }
     }
-    const retryableDownloads = Array.from(pendingDownloadOperations.values()).filter((operation) => (
+    const retryableDownloads = acceptanceMode ? [] : Array.from(pendingDownloadOperations.values()).filter((operation) => (
         operation.cloudRequired
         && !(operation.strategy === 'public_queue'
             && operation.r2State === 'pending'
@@ -997,15 +1026,13 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', ac
 
 async function enqueueMetadataSnapshot(kind, userId, payload) {
     const config = await getCloudConfig();
-    if (!CloudSync.isCloudEnabled(config)) return;
-    const acceptance = buildAcceptanceContextFromCloudConfig(config, 'metadata');
+    if (!CloudSync.isCloudEnabled(config) || CloudSync.isAcceptanceCloudConfig(config)) return false;
 
     const queueItem = {
         id: makeQueueId('metadata'),
         type: 'metadata',
         kind,
         userId,
-        acceptance,
         payload: {
             schemaVersion: CLOUD_SCHEMA_VERSION,
             data: payload,
@@ -1014,6 +1041,7 @@ async function enqueueMetadataSnapshot(kind, userId, payload) {
     };
 
     await enqueueCloudItem(queueItem, `metadata:${userId}:${kind}`);
+    return true;
 }
 
 function toHex(buffer) {
@@ -1658,7 +1686,8 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
 
     const force = !!options.force;
     const uploadMediaOverride = options.uploadMediaQueueItem || null;
-    const queueSnapshot = await snapshotCloudQueueItems();
+    const queueSnapshot = (await snapshotCloudQueueItems())
+        .filter((item) => cloudQueueItemIsEligibleForConfig(item, config));
     let authorityError = null;
 
     try {
@@ -1774,10 +1803,13 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
     if (authorityError) throw authorityError;
 
     // If new items were queued while we were processing, drain immediately
-    if (cloudSyncQueue.length > 0 && cloudSyncQueue.some(i => (i.attempts || 0) === 0)) {
+    if (cloudSyncQueue.some((item) => (
+        cloudQueueItemIsEligibleForConfig(item, config)
+        && (item.attempts || 0) === 0
+    ))) {
         setTimeout(() => processCloudQueue('drain'), 100);
     } else {
-        await scheduleCloudRetryAlarm();
+        await scheduleCloudRetryAlarm(config);
     }
 
     if (reason === 'manual') {
@@ -1803,6 +1835,7 @@ async function runCloudBackfill() {
     if (!CloudSync.isCloudEnabled(config)) {
         throw new Error('Enable Cloud Backup before running backfill.');
     }
+    if (CloudSync.isAcceptanceCloudConfig(config)) return;
 
     const stored = await chrome.storage.local.get([
         'savedPrompts',
@@ -1849,7 +1882,7 @@ function scheduleMetadataSyncForChanges(changes) {
 
 async function flushMetadataSync() {
     const config = await getCloudConfig();
-    if (!CloudSync.isCloudEnabled(config)) {
+    if (!CloudSync.isCloudEnabled(config) || CloudSync.isAcceptanceCloudConfig(config)) {
         pendingMetadataKinds.clear();
         return;
     }
@@ -2039,13 +2072,15 @@ async function initializeBackgroundState(context = null) {
 
     await recoverPreparedScrapeCompletionTransfer(context?.deadlineAt);
     assertBackgroundInitializationCurrent(context);
-    await ensureCloudConfigExists();
+    const startupCloudConfig = await ensureCloudConfigExists();
     assertBackgroundInitializationCurrent(context);
     await persistCloudState();
     assertBackgroundInitializationCurrent(context);
     await scheduleCloudRetryAlarm();
     assertBackgroundInitializationCurrent(context);
-    await reconcilePendingDownloadOperations(startupDownloadOperations);
+    if (!CloudSync.isAcceptanceCloudConfig(startupCloudConfig)) {
+        await reconcilePendingDownloadOperations(startupDownloadOperations);
+    }
     assertBackgroundInitializationCurrent(context);
 }
 
@@ -2095,7 +2130,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === CLOUD_ALARM_NAME) {
         (async () => {
             await ensureBackgroundStateReady();
-            await reconcilePendingDownloadOperations();
+            const config = await getCloudConfig();
+            if (!CloudSync.isAcceptanceCloudConfig(config)) {
+                await reconcilePendingDownloadOperations();
+            }
             await processCloudQueue('alarm');
         })().catch((e) => {
             updateCloudError(sanitizeErrorToken(getUploadFailureStage(e), 'runtime'));
