@@ -28,11 +28,20 @@ function mockContentChrome() {
             sendMessage: jest.fn((message) => Promise.resolve(
                 message?.action === 'VALIDATE_SCRAPE_RESUME'
                     ? { valid: true, reason: 'active_owner' }
+                    : (message?.action === 'GET_SCRAPE_DURABILITY'
+                        ? {
+                            status: 'durable',
+                            inFlightTasks: 0,
+                            pendingDownloads: 0,
+                            pendingOperations: 0,
+                            pendingQueueItems: 0,
+                            failedItems: 0
+                        }
                     : (message?.action === 'SCRAPE_RUN_STATE_WRITE'
                         ? { status: 'ok' }
                         : (message?.action === 'SCRAPE_PROCESSED_IDS_ADD'
                             ? { status: 'ok', processedIds: message.ids || [] }
-                            : undefined))
+                            : undefined)))
             )),
             onMessage: { addListener: jest.fn() }
         },
@@ -51,7 +60,14 @@ function createScraper(surface = SCRAPE_SURFACES.savedGallery) {
     scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
     scraper.backupMode = false;
     scraper.backupOptions = { mode: 'full', limit: null, options: {} };
-    scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+    scraper.backupStats = {
+        totalSeen: 0,
+        uploaded: 0,
+        alreadyPresent: 0,
+        queued: 0,
+        pendingTransfers: 0,
+        errors: 0
+    };
     scraper.processedIds = new Set();
     scraper._backupVisited = new Set();
     scraper._runVisited = new Set();
@@ -2472,6 +2488,116 @@ describe('media transfer success statuses', () => {
     );
 });
 
+describe('Grok run durability completion', () => {
+    beforeEach(() => {
+        mockContentChrome();
+    });
+
+    afterEach(() => {
+        delete global.chrome;
+        jest.restoreAllMocks();
+    });
+
+    test('durability polling preserves queued telemetry and clears current pending work only on durable', async () => {
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.backupMode = true;
+        scraper.runToken = 'durability-run';
+        scraper.runEpoch = 14;
+        scraper.backupStats.queued = 1;
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
+        scraper.sleep = jest.fn().mockResolvedValue();
+        const responses = [
+            {
+                status: 'pending',
+                inFlightTasks: 1,
+                pendingDownloads: 0,
+                pendingOperations: 1,
+                pendingQueueItems: 0,
+                failedItems: 0
+            },
+            {
+                status: 'pending',
+                inFlightTasks: 0,
+                pendingDownloads: 0,
+                pendingOperations: 0,
+                pendingQueueItems: 1,
+                failedItems: 0
+            },
+            {
+                status: 'durable',
+                inFlightTasks: 0,
+                pendingDownloads: 0,
+                pendingOperations: 0,
+                pendingQueueItems: 0,
+                failedItems: 0
+            }
+        ];
+        chrome.runtime.sendMessage.mockImplementation((message) => {
+            if (message.action === 'GET_SCRAPE_DURABILITY') return Promise.resolve(responses.shift());
+            return Promise.resolve({ status: 'ok' });
+        });
+
+        await expect(scraper.waitForRunDurability('durability-run', { timeoutMs: 1000, pollMs: 0 }))
+            .resolves.toMatchObject({ status: 'durable' });
+
+        expect(chrome.runtime.sendMessage.mock.calls.filter(([message]) => (
+            message.action === 'GET_SCRAPE_DURABILITY'
+        ))).toHaveLength(3);
+        expect(scraper.backupStats).toMatchObject({ queued: 1, pendingTransfers: 0 });
+        expect(scraper.persistBackupProgress).toHaveBeenCalledTimes(3);
+    });
+
+    test.each([
+        ['failed', 'durability_failed'],
+        ['timeout', 'durability_timeout'],
+        ['ignored', 'stale_authority'],
+        ['unexpected', 'durability_failed']
+    ])('durability status %s maps to non-complete reason %s', async (status, expectedReason) => {
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'durability-map';
+        scraper.runEpoch = 15;
+        scraper.waitForRunDurability = jest.fn().mockResolvedValue({ status });
+
+        await expect(scraper.getDurableCompletionStopReason('complete', 'durability-map'))
+            .resolves.toBe(expectedReason);
+    });
+
+    test('nonzero durability pending work keeps queued cumulative and fails backup completion closed', async () => {
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.backupMode = true;
+        scraper.runToken = 'durability-failed';
+        scraper.runEpoch = 16;
+        scraper.backupStats.queued = 1;
+        scraper.waitForRunDurability = jest.fn().mockImplementation(async () => {
+            scraper.backupStats.pendingTransfers = 1;
+            return {
+                status: 'failed',
+                inFlightTasks: 0,
+                pendingDownloads: 0,
+                pendingOperations: 1,
+                pendingQueueItems: 0,
+                failedItems: 1
+            };
+        });
+        scraper.returnToSavedAfterStop = jest.fn().mockResolvedValue(false);
+
+        await scraper.stopBackupMode('complete');
+
+        const completion = chrome.runtime.sendMessage.mock.calls
+            .map(([message]) => message)
+            .find((message) => message.action === 'R2_BACKUP_COMPLETE');
+        expect(completion.stats).toMatchObject({
+            stopReason: 'durability_failed',
+            queued: 1,
+            pendingTransfers: 1
+        });
+        expect(completion.stats.stopReason).not.toBe('complete');
+    });
+});
+
 describe('storage stop signals', () => {
     test('normal Sync ignores backup-only state initialization', () => {
         expect(shouldStopScraperForStorageChanges({
@@ -2751,6 +2877,12 @@ function dispatchBackgroundMessageThroughPort(chromeApi, request, sender = { tab
     });
     portOpen = returnValue === true;
     return { returnValue, response };
+}
+
+function dispatchDurabilityMessage(chromeApi, request, sender = { tab: { id: 42 } }) {
+    const dispatched = dispatchBackgroundMessageThroughPort(chromeApi, request, sender);
+    expect(dispatched.returnValue).toBe(true);
+    return dispatched.response;
 }
 
 async function seedRunOwnedDownloadOperation({
@@ -3389,6 +3521,302 @@ describe('background scrape lease authority', () => {
             action: expect.stringMatching(/UPDATE_R2_BACKUP_PROGRESS|R2_BACKUP_DONE/)
         }));
         expect(harness.sessionState.activeScrapeRunToken).toEqual(lease);
+    });
+
+    test('durability ignores stale or cross-tab requests and reads an empty owner snapshot without side effects', async () => {
+        const lease = createLeaseRecord();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        const storageWritesBefore = harness.chromeApi.storage.local.set.mock.calls.length;
+        const runtimeMessagesBefore = harness.chromeApi.runtime.sendMessage.mock.calls.length;
+
+        const stale = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch - 1,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+        const crossTab = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: 99 } });
+        const owner = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+
+        expect(stale.returnValue).toBe(true);
+        expect(crossTab.returnValue).toBe(true);
+        expect(owner.returnValue).toBe(true);
+        await expect(stale.response).resolves.toEqual({ status: 'ignored' });
+        await expect(crossTab.response).resolves.toEqual({ status: 'ignored' });
+        await expect(owner.response).resolves.toEqual({
+            status: 'durable',
+            inFlightTasks: 0,
+            pendingDownloads: 0,
+            pendingOperations: 0,
+            pendingQueueItems: 0,
+            failedItems: 0
+        });
+        expect(harness.chromeApi.storage.local.set).toHaveBeenCalledTimes(storageWritesBefore);
+        expect(harness.chromeApi.runtime.sendMessage).toHaveBeenCalledTimes(runtimeMessagesBefore);
+    });
+
+    test('durability counts one active owner transfer without counting its own query', async () => {
+        const lease = createLeaseRecord();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false,
+                processedIds: []
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        const processedWrite = deferred();
+        const processedWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (Array.isArray(values.processedIds) && values.processedIds.includes('durability-media')) {
+                processedWriteStarted.resolve();
+                return processedWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+        const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_PROCESSED_IDS_ADD',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            ids: ['durability-media']
+        }, { tab: { id: lease.tabId } });
+        await processedWriteStarted.promise;
+
+        const response = await dispatchDurabilityMessage(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+
+        expect(response).toMatchObject({ status: 'pending', inFlightTasks: 1 });
+        processedWrite.resolve();
+        await expect(transfer.response).resolves.toMatchObject({ status: 'ok' });
+    });
+
+    test('durability deduplicates one owner download receipt across URL and download ID indexes', async () => {
+        const lease = createLeaseRecord();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false
+            }
+        });
+        harness.chromeApi.downloads.download.mockImplementation((_options, callback) => callback(61));
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        await background.queueChromeDownload({
+            url: 'https://assets.grok.com/generated/durability-receipt.jpg'
+        }, lease);
+
+        const response = await dispatchDurabilityMessage(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+
+        expect(response).toMatchObject({
+            status: 'pending',
+            pendingDownloads: 1,
+            pendingOperations: 0
+        });
+    });
+
+    test('durability counts a run-owned R2-pending download operation', async () => {
+        const { background, harness, lease } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 62,
+            mediaId: '73e5e137-1334-49ea-b06b-a9d9ba891062',
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+
+        const response = await dispatchDurabilityMessage(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+
+        expect(response).toMatchObject({ status: 'pending', pendingOperations: 1 });
+        expect(background.getPendingDownloadOperationsForTest()).toHaveProperty('62');
+    });
+
+    test('durability keeps a complete R2-present operation pending until final identity and cleanup settle', async () => {
+        const { harness, lease } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 65,
+            mediaId: '73e5e137-1334-49ea-b06b-a9d9ba891065',
+            downloadState: 'complete',
+            r2State: 'present'
+        });
+
+        const response = await dispatchDurabilityMessage(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+
+        expect(response).toMatchObject({ status: 'pending', pendingOperations: 1 });
+    });
+
+    test('durability counts a retryable run-owned cloud queue item', async () => {
+        const lease = createLeaseRecord({ kind: 'r2_backup' });
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: true
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        background.setCloudSyncQueueForTest([{
+            id: 'durability-queue',
+            type: 'media',
+            attempts: 1,
+            scrapeLease: { ...lease }
+        }]);
+
+        const response = await dispatchDurabilityMessage(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+
+        expect(response).toMatchObject({ status: 'pending', pendingQueueItems: 1, failedItems: 0 });
+    });
+
+    test('durability fails for terminal run-owned queue and operation records', async () => {
+        const { background, harness, lease } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 63,
+            mediaId: '73e5e137-1334-49ea-b06b-a9d9ba891063',
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+        const maxAttempts = background.getCloudSyncForTest().MAX_RETRY_ATTEMPTS;
+        await background.updateDownloadOperation(63, {
+            attempts: maxAttempts,
+            lastError: 'code=durability_operation_failed'
+        });
+        background.setCloudSyncQueueForTest([{
+            id: 'durability-terminal-queue',
+            type: 'media',
+            attempts: maxAttempts,
+            lastError: 'code=durability_queue_failed',
+            scrapeLease: { ...lease }
+        }]);
+
+        const response = await dispatchDurabilityMessage(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+
+        expect(response).toMatchObject({
+            status: 'failed',
+            pendingOperations: 1,
+            pendingQueueItems: 1,
+            failedItems: 2
+        });
+    });
+
+    test('durability excludes operation and queue records owned by another lease', async () => {
+        const { background, harness, lease } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 64,
+            mediaId: '73e5e137-1334-49ea-b06b-a9d9ba891064',
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+        const otherLease = createLeaseRecord({ token: 'other-run', epoch: lease.epoch + 1, tabId: 77 });
+        await background.updateDownloadOperation(64, { scrapeLease: otherLease });
+        background.setCloudSyncQueueForTest([{
+            id: 'other-run-queue',
+            type: 'media',
+            attempts: 0,
+            scrapeLease: otherLease
+        }]);
+
+        const response = await dispatchDurabilityMessage(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+
+        expect(response).toEqual({
+            status: 'durable',
+            inFlightTasks: 0,
+            pendingDownloads: 0,
+            pendingOperations: 0,
+            pendingQueueItems: 0,
+            failedItems: 0
+        });
+    });
+
+    test.each([
+        [{ stopReason: 'complete', pendingTransfers: 0, errors: 0 }, true, 'complete'],
+        [{ stopReason: 'canary_complete', pendingTransfers: 0, errors: 0 }, true, 'canary complete'],
+        [{ pendingTransfers: 0, errors: 0 }, false, 'stopped'],
+        [{ stopReason: 'complete', errors: 0 }, false, 'incomplete'],
+        [{ stopReason: 'complete', pendingTransfers: 1, errors: 0 }, false, 'incomplete'],
+        [{ stopReason: 'complete', pendingTransfers: 0, errors: 1 }, false, 'incomplete'],
+        [{ stopReason: 'durability_timeout', pendingTransfers: 0, errors: 0 }, false, 'stopped'],
+        [{ stopReason: 'durability_failed', pendingTransfers: 1, errors: 0 }, false, 'stopped'],
+        [{ stopReason: 'scan_limit', pendingTransfers: 0, errors: 0 }, false, 'paused']
+    ])('durability completion predicate fails closed for %#', async (stats, successful, label) => {
+        const harness = createLeaseBackgroundHarness();
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+
+        expect(background.isR2BackupCompletionSuccessful(stats)).toBe(successful);
+        expect(background.getR2BackupCompletionStatusLabel(stats)).toBe(label);
     });
 
     test('returns reasoned resume validation for the owner, a non-owner tab, and stale authority', async () => {
@@ -4420,6 +4848,107 @@ describe('background scrape lease authority', () => {
         expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('42');
     });
 
+    test('completion handoff waits for a run-owned finalizer before snapshotting its operation revision', async () => {
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891058';
+        const { background, harness, lease } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 58,
+            mediaId,
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+        const originalRevision = background.getPendingDownloadOperationsForTest()['58'].operationRevision;
+        const processedWrite = deferred();
+        const processedWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let intercepted = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!intercepted && Object.prototype.hasOwnProperty.call(values, 'processedIds')) {
+                intercepted = true;
+                processedWriteStarted.resolve();
+                return processedWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+
+        const owner = background.markDownloadOperationR2Present(58, { status: 'uploaded' });
+        await processedWriteStarted.promise;
+        let completionSettled = false;
+        const completion = dispatchBackgroundMessage(harness.chromeApi, {
+            action: 'SCRAPE_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } }).then((response) => {
+            completionSettled = true;
+            return response;
+        });
+        await flushAsyncTurns(100);
+
+        await expect(background.markDownloadOperationR2Present(
+            58,
+            { status: 'already_present' }
+        )).resolves.toBe(false);
+
+        const operationDuringFinalization = background.getPendingDownloadOperationsForTest()['58'];
+        expect(completionSettled).toBe(false);
+        expect(operationDuringFinalization).toMatchObject({
+            operationRevision: originalRevision,
+            downloadState: 'complete',
+            r2State: 'present'
+        });
+        expect(operationDuringFinalization).not.toHaveProperty('completionTxnId');
+
+        processedWrite.resolve();
+        await expect(owner).resolves.toBe(true);
+        await expect(completion).resolves.toEqual({ status: 'ok' });
+        expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('58');
+    });
+
+    test('Stop during finalizer handoff prevents a stale prepared completion transaction', async () => {
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891059';
+        const { background, harness, lease } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 59,
+            mediaId,
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+        const processedWrite = deferred();
+        const processedWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let intercepted = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!intercepted && Object.prototype.hasOwnProperty.call(values, 'processedIds')) {
+                intercepted = true;
+                processedWriteStarted.resolve();
+                return processedWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+
+        const owner = background.markDownloadOperationR2Present(59, { status: 'uploaded' })
+            .catch((error) => error);
+        await processedWriteStarted.promise;
+        const completion = dispatchBackgroundMessage(harness.chromeApi, {
+            action: 'SCRAPE_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            stats: { stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await flushAsyncTurns(100);
+
+        await expect(background.stopScrapeRun('sync')).resolves.toMatchObject({ status: 'stopped' });
+        processedWrite.resolve();
+
+        await expect(owner).resolves.toMatchObject({ code: 'scrape_authority_revoked' });
+        await expect(completion).resolves.toMatchObject({ status: 'ignored' });
+        expect(harness.storedLocal.scrapeCompletionTxn).toBeNull();
+        expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('59');
+    });
+
     test('final identity phase persistence rejection releases ownership without repeating the ID write', async () => {
         const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891052';
         const { background, harness } = await seedRunOwnedDownloadOperation({
@@ -4962,7 +5491,7 @@ describe('background scrape lease authority', () => {
         });
     });
 
-    test('service-worker hydration ignores legacy ownership and resumes the persisted identity phase', async () => {
+    test('service-worker hydration ignores legacy ownership and finishes after identity persisted before its phase', async () => {
         const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891051';
         const seeded = await seedRunOwnedDownloadOperation({
             mode: 'dual_write',
@@ -4973,7 +5502,7 @@ describe('background scrape lease authority', () => {
         });
         const restartState = JSON.parse(JSON.stringify(seeded.harness.storedLocal));
         restartState.processedIds = [mediaId];
-        restartState.pendingDownloadOperations['51'].finalIdentityPersisted = true;
+        delete restartState.pendingDownloadOperations['51'].finalIdentityPersisted;
         restartState.pendingDownloadOperations['51'].finalizationClaim = {
             ownerId: 'stale-worker',
             token: 'stale-claim'
@@ -4990,6 +5519,10 @@ describe('background scrape lease authority', () => {
             .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
         expect(harness.storedLocal.processedIds).toEqual([mediaId]);
         expect(processedWrites).toBe(0);
+        expect(harness.chromeApi.alarms.create).toHaveBeenCalledWith(
+            'gptCloudRetry',
+            expect.objectContaining({ delayInMinutes: expect.any(Number) })
+        );
         expect(harness.chromeApi.storage.local.set.mock.calls.some(([values]) => (
             Boolean(values.pendingDownloadOperations?.['51']?.finalizationClaim)
         ))).toBe(false);

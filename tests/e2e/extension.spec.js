@@ -1145,6 +1145,16 @@ test.describe('Grok Power Tools E2E', () => {
                     const configured = responseByAction[action];
                     return typeof configured === 'function' ? configured(message) : configured;
                 }
+                if (action === 'GET_SCRAPE_DURABILITY') {
+                    return {
+                        status: 'durable',
+                        inFlightTasks: 0,
+                        pendingDownloads: 0,
+                        pendingOperations: 0,
+                        pendingQueueItems: 0,
+                        failedItems: 0
+                    };
+                }
                 if (action === 'VALIDATE_CLOUD_CONFIG') return { valid: true };
                 if (action === 'VALIDATE_SCRAPE_RESUME') return { valid: true, reason: 'active_owner' };
                 if (action === 'SCRAPE_RUN_STATE_WRITE') {
@@ -1286,6 +1296,101 @@ test.describe('Grok Power Tools E2E', () => {
 
         // Check text
         await expect(overlay).toContainText('Grok Power Tools');
+    });
+
+    test('Saved completion waits through pending durability responses before reporting complete', async ({ page }) => {
+        await evaluateExtensionContent(page);
+        await page.evaluate(() => {
+            const { scraper } = window.__gptE2e;
+            scraper.state.isRunning = true;
+            scraper.runToken = 'e2e-durability-sync';
+            scraper.runEpoch = 41;
+            scraper.backupMode = false;
+            scraper.sleep = () => Promise.resolve();
+            window.__durabilityChecks = [];
+            let checks = 0;
+            window.__chromeRuntimeResponseByAction.GET_SCRAPE_DURABILITY = () => {
+                checks++;
+                window.__durabilityChecks.push({
+                    check: checks,
+                    completionSent: window.__chromeRuntimeMessages.some((message) => (
+                        message.action === 'SCRAPE_COMPLETE' || message.action === 'R2_BACKUP_COMPLETE'
+                    ))
+                });
+                if (checks <= 2) {
+                    return {
+                        status: 'pending',
+                        inFlightTasks: checks === 1 ? 1 : 0,
+                        pendingDownloads: 0,
+                        pendingOperations: checks === 2 ? 1 : 0,
+                        pendingQueueItems: 0,
+                        failedItems: 0
+                    };
+                }
+                return {
+                    status: 'durable',
+                    inFlightTasks: 0,
+                    pendingDownloads: 0,
+                    pendingOperations: 0,
+                    pendingQueueItems: 0,
+                    failedItems: 0
+                };
+            };
+            window.__durabilityCompletion = scraper.stop('complete');
+        });
+
+        await expect.poll(() => page.evaluate(() => window.__durabilityChecks.length)).toBe(3);
+        await page.evaluate(() => window.__durabilityCompletion);
+
+        expect(await page.evaluate(() => window.__durabilityChecks)).toEqual([
+            { check: 1, completionSent: false },
+            { check: 2, completionSent: false },
+            { check: 3, completionSent: false }
+        ]);
+        const actions = await page.evaluate(() => window.__chromeRuntimeMessages.map((message) => message.action));
+        expect(actions.filter((action) => action === 'GET_SCRAPE_DURABILITY')).toHaveLength(3);
+        expect(actions.filter((action) => action === 'SCRAPE_COMPLETE')).toHaveLength(1);
+        expect(actions.indexOf('SCRAPE_COMPLETE')).toBeGreaterThan(actions.lastIndexOf('GET_SCRAPE_DURABILITY'));
+    });
+
+    test('failed durability keeps Saved backup pending telemetry and never reports Complete', async ({ page }) => {
+        await evaluateExtensionContent(page);
+        await page.evaluate(() => {
+            const { scraper } = window.__gptE2e;
+            scraper.state.isRunning = true;
+            scraper.runToken = 'e2e-durability-backup';
+            scraper.runEpoch = 42;
+            scraper.backupMode = true;
+            scraper.backupStats = {
+                totalSeen: 1,
+                uploaded: 0,
+                alreadyPresent: 0,
+                queued: 1,
+                pendingTransfers: 0,
+                errors: 0
+            };
+            window.__chromeRuntimeResponseByAction.GET_SCRAPE_DURABILITY = {
+                status: 'failed',
+                inFlightTasks: 0,
+                pendingDownloads: 0,
+                pendingOperations: 1,
+                pendingQueueItems: 0,
+                failedItems: 1
+            };
+            window.__durabilityCompletion = scraper.stopBackupMode('complete');
+        });
+
+        await page.evaluate(() => window.__durabilityCompletion);
+        const completion = await page.evaluate(() => window.__chromeRuntimeMessages.find((message) => (
+            message.action === 'R2_BACKUP_COMPLETE'
+        )));
+
+        expect(completion.stats).toMatchObject({
+            stopReason: 'durability_failed',
+            queued: 1,
+            pendingTransfers: 1
+        });
+        expect(completion.stats.stopReason).not.toBe('complete');
     });
 
     test('cold reinjection registers one scraper listener before deferred hydration completes', async ({ page }) => {

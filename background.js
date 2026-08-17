@@ -261,7 +261,7 @@ let pendingDownloadOperations = new Map();
 let pendingDownloadOperationsMutationQueue = Promise.resolve();
 let pendingDownloadOperationsRevision = 0;
 let pendingDownloadOperationRevision = 0;
-const activeDownloadOperationFinalizations = new Set();
+const activeDownloadOperationFinalizations = new Map();
 const activeDownloadOperations = new Set();
 const pendingScrapeDownloadReceiptsByUrl = new Map();
 const pendingScrapeDownloadReceiptsById = new Map();
@@ -470,13 +470,21 @@ function buildR2BackupInitMessageForConfig(request = {}, config = null) {
 }
 
 function isR2BackupCompletionSuccessful(stats = {}) {
-    return stats.stopReason === 'complete' || stats.stopReason === 'canary_complete' || !stats.stopReason;
+    const completedReason = stats.stopReason === 'complete'
+        || stats.stopReason === 'canary_complete';
+    return completedReason
+        && Number.isInteger(stats.pendingTransfers)
+        && stats.pendingTransfers === 0
+        && Number(stats.errors || 0) === 0;
 }
 
 function getR2BackupCompletionStatusLabel(stats = {}) {
-    if (stats.stopReason === 'canary_complete') return 'canary complete';
-    if (isR2BackupCompletionSuccessful(stats)) return 'complete';
-    return `stopped (${stats.stopReason})`;
+    if (isR2BackupCompletionSuccessful(stats)) {
+        return stats.stopReason === 'canary_complete' ? 'canary complete' : 'complete';
+    }
+    if (stats.stopReason === 'complete' || stats.stopReason === 'canary_complete') return 'incomplete';
+    if (stats.stopReason === 'scan_limit' || stats.stopReason === 'stalled') return 'paused';
+    return 'stopped';
 }
 
 function makeQueueId(prefix = 'queue') {
@@ -690,7 +698,7 @@ async function scheduleCloudRetryAlarm() {
             && queueOwnedDownloadIds.has(operation.downloadId))
         && (
             operation.r2State === 'pending'
-            || (!operation.allowLocal && operation.downloadState === 'complete' && operation.r2State === 'present')
+            || (operation.downloadState === 'complete' && operation.r2State === 'present')
         )
         && (operation.attempts || 0) < CloudSync.MAX_RETRY_ATTEMPTS
     ));
@@ -2499,6 +2507,49 @@ function claimPendingScrapeDownload(item) {
     return null;
 }
 
+function countPendingScrapeDownloadReceipts(lease) {
+    const receipts = new Set();
+    for (const receiptList of pendingScrapeDownloadReceiptsByUrl.values()) {
+        for (const receipt of receiptList) {
+            if (scrapeLeaseMatches(receipt?.lease, lease)) receipts.add(receipt);
+        }
+    }
+    for (const receipt of pendingScrapeDownloadReceiptsById.values()) {
+        if (scrapeLeaseMatches(receipt?.lease, lease)) receipts.add(receipt);
+    }
+    return receipts.size;
+}
+
+function getScrapeDurabilitySnapshot(lease) {
+    const key = scrapeTransferKey(lease);
+    const inFlightTasks = activeScrapeTransferTasks.get(key)?.size || 0;
+    const pendingDownloads = countPendingScrapeDownloadReceipts(lease);
+    const ownedOperations = Array.from(pendingDownloadOperations.values())
+        .filter((record) => recordOwnedByScrapeLease(record, lease));
+    const ownedQueue = cloudSyncQueue
+        .filter((record) => recordOwnedByScrapeLease(record, lease));
+    const failedItems = [...ownedOperations, ...ownedQueue].filter((record) => (
+        Boolean(record.lastError)
+        && (record.attempts || 0) >= CloudSync.MAX_RETRY_ATTEMPTS
+    )).length;
+    const pendingOperations = ownedOperations.length;
+    const pendingQueueItems = ownedQueue.length;
+    const pendingCount = inFlightTasks
+        + pendingDownloads
+        + pendingOperations
+        + pendingQueueItems;
+    return {
+        status: failedItems > 0
+            ? 'failed'
+            : (pendingCount > 0 ? 'pending' : 'durable'),
+        inFlightTasks,
+        pendingDownloads,
+        pendingOperations,
+        pendingQueueItems,
+        failedItems
+    };
+}
+
 async function revokeScrapeDownloadAuthority(lease) {
     abortScrapeTransferControllers(lease);
     for (const receipts of pendingScrapeDownloadReceiptsByUrl.values()) {
@@ -2840,13 +2891,19 @@ async function handleR2BackupProgress(request, sender) {
 }
 
 async function completeScrapeRun(request, sender, kind) {
-    return enqueueScrapeLeaseOperation(async () => {
+    const prepared = await enqueueScrapeLeaseOperation(async () => {
         const requested = getRunScopedScrapeLease(request, sender?.tab?.id ?? null, kind);
-        if (!scrapeLeaseMatches(activeScrapeLease, requested)) return { status: 'ignored' };
+        if (!scrapeLeaseMatches(activeScrapeLease, requested)) return null;
         const lease = { ...activeScrapeLease };
-        const stored = await chrome.storage.local.get(['r2BackupState']);
+        return { lease };
+    });
+    if (!prepared) return { status: 'ignored' };
+
+    const { lease } = prepared;
+    const completionTransfer = await prepareScrapeCompletionTransfer(lease);
+    return enqueueScrapeLeaseOperation(async () => {
         if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
-        const completionTransfer = await prepareScrapeCompletionTransfer(lease);
+        const stored = await chrome.storage.local.get(['r2BackupState']);
         if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
         await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
         scrapeStartPending = false;
@@ -2859,7 +2916,7 @@ async function completeScrapeRun(request, sender, kind) {
             const stats = request.stats || {};
             const completed = isR2BackupCompletionSuccessful(stats);
             const statusLabel = getR2BackupCompletionStatusLabel(stats);
-            log(`R2 Backup ${statusLabel}. Uploaded: ${stats.uploaded || 0}, Already present: ${stats.alreadyPresent || 0}, Queued: ${stats.queued || 0}, Errors: ${stats.errors || 0}`, completed ? 'success' : 'warning');
+            log(`R2 Backup ${statusLabel}. Uploaded: ${stats.uploaded || 0}, Already present: ${stats.alreadyPresent || 0}, Queued total: ${stats.queued || 0}, Pending: ${stats.pendingTransfers ?? 'unknown'}, Errors: ${stats.errors || 0}`, completed ? 'success' : 'warning');
             chrome.runtime.sendMessage({ action: 'R2_BACKUP_DONE', stats }).catch(() => {});
         } else {
             chrome.runtime.sendMessage({ action: 'SCRAPE_COMPLETE' }).catch(() => {});
@@ -2922,6 +2979,14 @@ function handleRuntimeMessage(request, sender, sendResponse) {
         commitScrapeRunState(request, sender).then(sendResponse).catch(() => {
             sendResponse({ status: 'ignored', reason: 'stale_authority' });
         });
+        return true;
+    }
+
+    if (request.action === 'GET_SCRAPE_DURABILITY') {
+        (async () => {
+            const lease = await getAuthorizedScrapeTransferLease(request, sender);
+            return lease ? getScrapeDurabilitySnapshot(lease) : { status: 'ignored' };
+        })().then(sendResponse).catch(() => sendResponse({ status: 'ignored' }));
         return true;
     }
 
@@ -3342,6 +3407,7 @@ const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
     'PROCESSED_IDS_RESET',
     'SCRAPE_RUN_STATE_WRITE',
     'SCRAPE_PROCESSED_IDS_ADD',
+    'GET_SCRAPE_DURABILITY',
     'START_SCRAPE',
     'STOP_SCRAPE',
     'START_R2_BACKUP',
@@ -3628,6 +3694,38 @@ function buildCompletionRetrySnapshots(lease, txn) {
     return { queue, operations };
 }
 
+function getRunOwnedActiveDownloadFinalizations(lease) {
+    const finalizations = [];
+    for (const [downloadId, finalization] of activeDownloadOperationFinalizations) {
+        const operation = pendingDownloadOperations.get(downloadId);
+        if (scrapeLeaseMatches(finalization.lease, lease)
+            || recordOwnedByScrapeLease(operation, lease)) {
+            finalizations.push(finalization.settled);
+        }
+    }
+    return finalizations;
+}
+
+function assertScrapeCompletionTransferCurrent(lease, transition) {
+    if (transition.revoked
+        || scrapeCompletionTransition !== transition
+        || !scrapeLeaseMatches(activeScrapeLease, lease)) {
+        throw createScrapeAuthorityRevokedError();
+    }
+}
+
+async function buildCompletionRetrySnapshotsAfterFinalization(lease, txn, transition) {
+    while (true) {
+        await pendingDownloadOperationsMutationQueue;
+        const finalizations = getRunOwnedActiveDownloadFinalizations(lease);
+        if (finalizations.length === 0) {
+            assertScrapeCompletionTransferCurrent(lease, transition);
+            return buildCompletionRetrySnapshots(lease, txn);
+        }
+        await Promise.allSettled(finalizations);
+    }
+}
+
 function buildCompletionRetryStorageValues(queue, operations, txn) {
     return {
         [CloudSync.STORAGE_KEYS.cloudSyncQueue]: cloneCloudQueue(queue),
@@ -3761,7 +3859,8 @@ async function prepareScrapeCompletionTransfer(lease) {
         const activeDrain = cloudQueueDrainPromise;
         if (activeDrain) await activeDrain;
         await Promise.all([cloudQueueMutationQueue, pendingDownloadOperationsMutationQueue]);
-        const snapshots = buildCompletionRetrySnapshots(lease, txn);
+        const snapshots = await buildCompletionRetrySnapshotsAfterFinalization(lease, txn, transition);
+        assertScrapeCompletionTransferCurrent(lease, transition);
         await persistCompletionRetrySnapshots(
             snapshots.queue,
             snapshots.operations,
@@ -3915,13 +4014,21 @@ function getDownloadOperationAuthorityGuard(operation) {
 
 async function finalizeDownloadOperation(downloadId, { historyMissing = false, assertAuthorized = null } = {}) {
     if (activeDownloadOperationFinalizations.has(downloadId)) return false;
-    activeDownloadOperationFinalizations.add(downloadId);
+    const initialOperation = pendingDownloadOperations.get(downloadId);
+    if (initialOperation && isCompletionTransitionBlockingRecord(initialOperation)) return false;
+    let settleFinalization;
+    const finalization = {
+        lease: getDownloadOperationScrapeLease(initialOperation),
+        settled: new Promise((resolve) => { settleFinalization = resolve; })
+    };
+    activeDownloadOperationFinalizations.set(downloadId, finalization);
 
     try {
         if (assertAuthorized) await assertAuthorized();
         let operation = await getDownloadOperation(downloadId);
         if (!operation || operation.downloadState !== 'complete') return false;
         if (operation.cloudRequired && operation.r2State !== 'present') return false;
+        finalization.lease = finalization.lease || getDownloadOperationScrapeLease(operation);
         const operationRevision = operation.operationRevision || 0;
         const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
         if (authorityGuard) await authorityGuard();
@@ -3959,7 +4066,10 @@ async function finalizeDownloadOperation(downloadId, { historyMissing = false, a
         );
         return Boolean(removed);
     } finally {
-        activeDownloadOperationFinalizations.delete(downloadId);
+        if (activeDownloadOperationFinalizations.get(downloadId) === finalization) {
+            activeDownloadOperationFinalizations.delete(downloadId);
+        }
+        settleFinalization();
     }
 }
 
@@ -4157,6 +4267,11 @@ async function processCompletedDownloadOperation(downloadId, downloadItem = null
 
     if (!operation.cloudRequired) {
         await removeDownloadOperation(downloadId);
+        return;
+    }
+
+    if (operation.r2State === 'present') {
+        await finalizeDownloadOperation(downloadId, { assertAuthorized: authorityGuard });
         return;
     }
 
@@ -4475,6 +4590,7 @@ if (typeof module !== 'undefined') {
         getCloudSyncQueueForTest: () => cloudSyncQueue.map((item) => ({ ...item })),
         getPendingDownloadOperationsForTest: () => serializeDownloadOperations(pendingDownloadOperations),
         getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
+        getScrapeDurabilitySnapshot,
         generateFilename,
         handleDownloadChanged,
         handleDownloadFilename,

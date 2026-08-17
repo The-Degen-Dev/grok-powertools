@@ -5731,7 +5731,14 @@ class GrokScraper {
         this.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         this.backupMode = false;
         this.backupOptions = { mode: 'full', limit: null, options: {} };
-        this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        this.backupStats = {
+            totalSeen: 0,
+            uploaded: 0,
+            alreadyPresent: 0,
+            queued: 0,
+            pendingTransfers: 0,
+            errors: 0
+        };
         this._backupVisited = new Set();
         this._runVisited = new Set();
         this.runToken = null;
@@ -6235,6 +6242,55 @@ class GrokScraper {
         return { status: 'started', surface, runToken, runEpoch };
     }
 
+    async waitForRunDurability(runToken = this.runToken, {
+        timeoutMs = 60000,
+        pollMs = 250
+    } = {}) {
+        const startedAt = Date.now();
+        while (this.isRunActive(runToken) && Date.now() - startedAt < timeoutMs) {
+            let result;
+            try {
+                result = await safeChromeRuntimeSendMessage({
+                    action: 'GET_SCRAPE_DURABILITY',
+                    runToken,
+                    runEpoch: this.runEpoch,
+                    kind: this.backupMode ? 'r2_backup' : 'sync'
+                }, 'check scrape durability');
+            } catch {
+                return { status: 'failed', reason: 'query_failed' };
+            }
+            if (result.invalidated) return { status: 'ignored', reason: 'context_invalidated' };
+            const snapshot = result.value && typeof result.value === 'object'
+                ? result.value
+                : { status: 'failed', reason: 'missing_response' };
+            if (this.backupMode) {
+                this.backupStats.pendingTransfers = Number(snapshot.pendingDownloads || 0)
+                    + Number(snapshot.pendingOperations || 0)
+                    + Number(snapshot.pendingQueueItems || 0)
+                    + Number(snapshot.inFlightTasks || 0);
+                await this.persistBackupProgress(runToken);
+                if (!this.isRunActive(runToken)) return { status: 'ignored' };
+            }
+            if (snapshot.status !== 'pending') return snapshot;
+            await this.sleep(pollMs);
+        }
+        return { status: this.isRunActive(runToken) ? 'timeout' : 'ignored' };
+    }
+
+    async getDurableCompletionStopReason(stopReason, runToken = this.runToken) {
+        if (stopReason !== 'complete' && stopReason !== 'canary_complete') return stopReason;
+        let snapshot;
+        try {
+            snapshot = await this.waitForRunDurability(runToken);
+        } catch {
+            snapshot = { status: 'failed' };
+        }
+        if (snapshot?.status === 'durable') return stopReason;
+        if (snapshot?.status === 'timeout') return 'durability_timeout';
+        if (snapshot?.status === 'ignored') return 'stale_authority';
+        return 'durability_failed';
+    }
+
     async stop(stopReason = 'stopped', options = {}) {
         const providedNavigation = options.stopNavigation || null;
         if (
@@ -6266,6 +6322,9 @@ class GrokScraper {
                 return { status: 'stopped' };
             }
             return { status: 'ignored' };
+        }
+        if (stopReason === 'complete' || stopReason === 'canary_complete') {
+            stopReason = await this.getDurableCompletionStopReason(stopReason, previousToken);
         }
         const stopNavigation = this.captureStopNavigation(
             previousToken,
@@ -6363,7 +6422,15 @@ class GrokScraper {
             options: options.options && typeof options.options === 'object' ? options.options : {},
             acceptance: options.acceptance || null
         };
-        this.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0, startedAt: Date.now() };
+        this.backupStats = {
+            totalSeen: 0,
+            uploaded: 0,
+            alreadyPresent: 0,
+            queued: 0,
+            pendingTransfers: 0,
+            errors: 0,
+            startedAt: Date.now()
+        };
         this._backupVisited = new Set();
         this._runVisited = new Set();
         this.state.isRunning = true;
@@ -6457,6 +6524,9 @@ class GrokScraper {
             }
             return { status: 'ignored' };
         }
+        if (stopReason === 'complete' || stopReason === 'canary_complete') {
+            stopReason = await this.getDurableCompletionStopReason(stopReason, previousToken);
+        }
         const finalStats = { ...this.backupStats, stopReason };
         const stopNavigation = this.captureStopNavigation(
             previousToken,
@@ -6464,7 +6534,7 @@ class GrokScraper {
             providedNavigation
         );
         this.invalidateRunMemory();
-        this.log(`R2 Backup stopped. Uploaded: ${this.backupStats.uploaded}, Already present: ${this.backupStats.alreadyPresent || 0}, Queued: ${this.backupStats.queued || 0}, Errors: ${this.backupStats.errors}`, 'neutral');
+        this.log(`R2 Backup stopped. Uploaded: ${this.backupStats.uploaded}, Already present: ${this.backupStats.alreadyPresent || 0}, Queued total: ${this.backupStats.queued || 0}, Pending: ${this.backupStats.pendingTransfers ?? 'unknown'}, Errors: ${this.backupStats.errors}`, 'neutral');
         const cleanupPromise = this.returnToSavedAfterStop(stopNavigation);
         this._lastStoppedRun = { runToken: previousToken, runEpoch: previousEpoch, cleanupPromise };
         await cleanupPromise;
@@ -6696,15 +6766,15 @@ class GrokScraper {
             if (!await this.ensureSavedGalleryAllScope(runToken)) return;
             if (this.backupMode) {
                 if (exhausted) {
-                    this.log(`Backup complete. ${this.backupStats.uploaded} uploaded, ${this.backupStats.alreadyPresent || 0} already present, ${this.backupStats.queued || 0} queued, ${this.backupStats.errors} errors.`, 'success');
-                    this.stopBackupMode('complete');
+                    this.log('Saved scan exhausted. Waiting for pending transfers...', 'neutral');
+                    await this.stopBackupMode('complete');
                 } else {
                     this.log('Backup paused: scan safety limit reached before confirming the gallery end.', 'warning');
-                    this.stopBackupMode('scan_limit');
+                    await this.stopBackupMode('scan_limit');
                 }
             } else {
-                this.log('Stopped: No new items found.', 'warning');
-                this.stop();
+                this.log('Saved scan exhausted. Waiting for pending transfers...', 'neutral');
+                await this.stop('complete');
             }
         }
     }

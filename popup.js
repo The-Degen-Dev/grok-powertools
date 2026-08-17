@@ -1,13 +1,23 @@
+function isR2BackupCompletionSuccessful(stats = {}) {
+    const completedReason = stats.stopReason === 'complete'
+        || stats.stopReason === 'canary_complete';
+    return completedReason
+        && Number.isInteger(stats.pendingTransfers)
+        && stats.pendingTransfers === 0
+        && Number(stats.errors || 0) === 0;
+}
+
 function getR2BackupDoneStatusLabel(stats = {}) {
-    if (stats.stopReason === 'canary_complete') return 'Canary complete';
-    if (stats.stopReason === 'canary_incomplete') return 'Canary incomplete';
-    if (stats.stopReason === 'complete') return 'Complete';
+    if (isR2BackupCompletionSuccessful(stats)) {
+        return stats.stopReason === 'canary_complete' ? 'Canary complete' : 'Complete';
+    }
+    if (stats.stopReason === 'complete' || stats.stopReason === 'canary_complete') return 'Incomplete';
     if (stats.stopReason === 'scan_limit' || stats.stopReason === 'stalled') return 'Paused';
-    return stats.stopReason ? 'Stopped' : 'Complete';
+    return 'Stopped';
 }
 
 function formatR2BackupDetails(stats = {}) {
-    return `${stats.uploaded || 0} uploaded / ${stats.alreadyPresent || 0} already present / ${stats.queued || 0} queued / ${stats.errors || 0} errors`;
+    return `${stats.uploaded || 0} uploaded / ${stats.alreadyPresent || 0} already present / ${stats.queued || 0} queued total / ${stats.pendingTransfers ?? 'unknown'} pending / ${stats.errors || 0} errors`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -411,8 +421,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const s = message.stats || {};
             r2BackupStatus.textContent = getR2BackupDoneStatusLabel(s);
             r2BackupDetails.textContent = formatR2BackupDetails(s);
-            const completed = s.stopReason === 'complete' || s.stopReason === 'canary_complete';
-            const logLabel = s.stopReason === 'canary_incomplete' ? 'incomplete' : (completed ? 'complete' : 'stopped');
+            const completed = isR2BackupCompletionSuccessful(s);
+            const logLabel = getR2BackupDoneStatusLabel(s).toLowerCase();
             addLog(`Backup ${logLabel}: ${formatR2BackupDetails(s)}`, completed ? 'success' : 'warning');
         }
     });
@@ -612,6 +622,7 @@ document.addEventListener('DOMContentLoaded', () => {
 if (typeof module !== 'undefined') {
     module.exports = {
         formatR2BackupDetails,
-        getR2BackupDoneStatusLabel
+        getR2BackupDoneStatusLabel,
+        isR2BackupCompletionSuccessful
     };
 }

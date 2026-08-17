@@ -22,6 +22,44 @@ describe('R2 media backup popup guidance', () => {
     });
 });
 
+describe('R2 durability completion labels', () => {
+    afterEach(() => {
+        jest.resetModules();
+    });
+
+    test.each([
+        [{ stopReason: 'complete', pendingTransfers: 0, errors: 0 }, true, 'Complete'],
+        [{ stopReason: 'canary_complete', pendingTransfers: 0, errors: 0 }, true, 'Canary complete'],
+        [{ pendingTransfers: 0, errors: 0 }, false, 'Stopped'],
+        [{ stopReason: 'complete', errors: 0 }, false, 'Incomplete'],
+        [{ stopReason: 'complete', pendingTransfers: 1, errors: 0 }, false, 'Incomplete'],
+        [{ stopReason: 'complete', pendingTransfers: 0, errors: 1 }, false, 'Incomplete'],
+        [{ stopReason: 'durability_timeout', pendingTransfers: 0, errors: 0 }, false, 'Stopped'],
+        [{ stopReason: 'durability_failed', pendingTransfers: 1, errors: 0 }, false, 'Stopped'],
+        [{ stopReason: 'scan_limit', pendingTransfers: 0, errors: 0 }, false, 'Paused']
+    ])('fails closed for completion state %#', (stats, successful, label) => {
+        const {
+            getR2BackupDoneStatusLabel,
+            isR2BackupCompletionSuccessful
+        } = require('../../popup.js');
+
+        expect(isR2BackupCompletionSuccessful(stats)).toBe(successful);
+        expect(getR2BackupDoneStatusLabel(stats)).toBe(label);
+    });
+
+    test('distinguishes cumulative queued transfers from current pending work', () => {
+        const { formatR2BackupDetails } = require('../../popup.js');
+
+        expect(formatR2BackupDetails({
+            uploaded: 2,
+            alreadyPresent: 3,
+            queued: 1,
+            pendingTransfers: 0,
+            errors: 0
+        })).toBe('2 uploaded / 3 already present / 1 queued total / 0 pending / 0 errors');
+    });
+});
+
 describe('processed ID reset ownership', () => {
     afterEach(() => {
         document.documentElement.innerHTML = '<head></head><body></body>';
