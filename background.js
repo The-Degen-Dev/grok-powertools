@@ -261,7 +261,7 @@ let pendingDownloadOperations = new Map();
 let pendingDownloadOperationsMutationQueue = Promise.resolve();
 let pendingDownloadOperationsRevision = 0;
 let pendingDownloadOperationRevision = 0;
-const downloadFinalizationOwnerId = makeQueueId('download_finalizer');
+const activeDownloadOperationFinalizations = new Set();
 const activeDownloadOperations = new Set();
 const pendingScrapeDownloadReceiptsByUrl = new Map();
 const pendingScrapeDownloadReceiptsById = new Map();
@@ -3454,6 +3454,7 @@ function deserializeDownloadOperations(value) {
         const downloadId = Number(record?.downloadId ?? key);
         if (!Number.isInteger(downloadId) || !record || typeof record !== 'object') continue;
         const operation = { ...record, downloadId };
+        delete operation.finalizationClaim;
         if (operation.lastError && !isRedactedMediaError(operation.lastError)) {
             operation.lastError = formatRedactedMediaError(
                 new Error(operation.lastError),
@@ -3473,38 +3474,7 @@ function serializeDownloadOperations(operations) {
     }, {});
 }
 
-async function persistAuthoritativePendingDownloadOperations() {
-    while (true) {
-        const revision = pendingDownloadOperationsRevision;
-        await chrome.storage.local.set({
-            [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(pendingDownloadOperations)
-        });
-        if (revision === pendingDownloadOperationsRevision) return;
-    }
-}
-
-async function repairTimedOutPendingDownloadOperationsWrite() {
-    try {
-        const repairRevision = pendingDownloadOperationsRevision;
-        const repairWrite = Promise.resolve(chrome.storage.local.set({
-            [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(pendingDownloadOperations)
-        }));
-        const repaired = await withTimeout(
-            repairWrite.then(() => true),
-            PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS,
-            false
-        );
-        if (repaired && repairRevision === pendingDownloadOperationsRevision) return;
-        if (!repaired) await repairWrite;
-        await persistAuthoritativePendingDownloadOperations();
-    } catch {
-        console.warn(
-            '[CloudQueue] status=pending_download_operations_repair_failed'
-        );
-    }
-}
-
-function mutatePendingDownloadOperations(mutator, { installAfterPersist = false } = {}) {
+function mutatePendingDownloadOperations(mutator) {
     let resolveMutation;
     let rejectMutation;
     const mutation = new Promise((resolve, reject) => {
@@ -3516,7 +3486,7 @@ function mutatePendingDownloadOperations(mutator, { installAfterPersist = false 
             const revision = ++pendingDownloadOperationsRevision;
             const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
             const result = await mutator(operations);
-            if (!installAfterPersist) pendingDownloadOperations = operations;
+            pendingDownloadOperations = operations;
             const write = Promise.resolve(chrome.storage.local.set({
                 [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(operations)
             }));
@@ -3526,20 +3496,21 @@ function mutatePendingDownloadOperations(mutator, { installAfterPersist = false 
                 false
             );
             if (persisted) {
-                if (installAfterPersist) pendingDownloadOperations = operations;
                 resolveMutation(result);
                 return;
             }
             rejectMutation(new Error('pending_download_operations_persist_timeout'));
             await write;
-            if (!installAfterPersist && revision === pendingDownloadOperationsRevision) return;
-            await repairTimedOutPendingDownloadOperationsWrite();
+            if (revision !== pendingDownloadOperationsRevision) {
+                await chrome.storage.local.set({
+                    [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(pendingDownloadOperations)
+                });
+            }
         } catch (error) {
             rejectMutation(error);
             throw error;
         }
     };
-    // A caller timeout must not release the queue while an uncancelable storage write is still live.
     const queueBarrier = pendingDownloadOperationsMutationQueue.then(execute, execute);
     pendingDownloadOperationsMutationQueue = queueBarrier.catch(() => {});
     return mutation;
@@ -3587,60 +3558,6 @@ function updateDownloadOperation(downloadId, update) {
         );
         operations.set(downloadId, next);
         return { ...next };
-    });
-}
-
-function downloadFinalizationClaimMatches(operation, claim) {
-    return Boolean(
-        operation?.finalizationClaim
-        && claim
-        && operation.finalizationClaim.ownerId === claim.ownerId
-        && operation.finalizationClaim.token === claim.token
-    );
-}
-
-function claimDownloadOperationFinalization(downloadId) {
-    const claim = {
-        ownerId: downloadFinalizationOwnerId,
-        token: makeQueueId('download_finalize')
-    };
-    return mutatePendingDownloadOperations((operations) => {
-        const existing = operations.get(downloadId);
-        if (!existing || existing.downloadState !== 'complete') return null;
-        if (existing.cloudRequired && existing.r2State !== 'present') return null;
-        if (existing.finalizationClaim?.ownerId === downloadFinalizationOwnerId) return null;
-        const claimed = { ...existing, finalizationClaim: claim };
-        operations.set(downloadId, claimed);
-        return { claim: { ...claim }, operation: { ...claimed } };
-    }, { installAfterPersist: true });
-}
-
-function updateClaimedDownloadOperation(downloadId, claim, update) {
-    return mutatePendingDownloadOperations((operations) => {
-        const existing = operations.get(downloadId);
-        if (!downloadFinalizationClaimMatches(existing, claim)) return null;
-        const next = { ...existing, ...update };
-        operations.set(downloadId, next);
-        return { ...next };
-    });
-}
-
-function releaseDownloadOperationFinalization(downloadId, claim) {
-    return mutatePendingDownloadOperations((operations) => {
-        const existing = operations.get(downloadId);
-        if (!downloadFinalizationClaimMatches(existing, claim)) return false;
-        const { finalizationClaim: _finalizationClaim, ...released } = existing;
-        operations.set(downloadId, released);
-        return true;
-    });
-}
-
-function removeClaimedDownloadOperation(downloadId, claim) {
-    return mutatePendingDownloadOperations((operations) => {
-        const existing = operations.get(downloadId);
-        if (!downloadFinalizationClaimMatches(existing, claim)) return null;
-        operations.delete(downloadId);
-        return { ...existing };
     });
 }
 
@@ -3997,15 +3914,16 @@ function getDownloadOperationAuthorityGuard(operation) {
 }
 
 async function finalizeDownloadOperation(downloadId, { historyMissing = false, assertAuthorized = null } = {}) {
-    if (assertAuthorized) await assertAuthorized();
-    const claimed = await claimDownloadOperationFinalization(downloadId);
-    if (!claimed) return false;
-    const { claim } = claimed;
-    let operation = claimed.operation;
-    let finalized = false;
-    const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
+    if (activeDownloadOperationFinalizations.has(downloadId)) return false;
+    activeDownloadOperationFinalizations.add(downloadId);
 
     try {
+        if (assertAuthorized) await assertAuthorized();
+        let operation = await getDownloadOperation(downloadId);
+        if (!operation || operation.downloadState !== 'complete') return false;
+        if (operation.cloudRequired && operation.r2State !== 'present') return false;
+        const operationRevision = operation.operationRevision || 0;
+        const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
         if (authorityGuard) await authorityGuard();
 
         if (operation.mediaId
@@ -4014,7 +3932,7 @@ async function finalizeDownloadOperation(downloadId, { historyMissing = false, a
             if (!processedUUIDs.has(operation.mediaId)) {
                 await mutateProcessedIds({ ids: [operation.mediaId] }, authorityGuard);
             }
-            operation = await updateClaimedDownloadOperation(downloadId, claim, {
+            operation = await updateDownloadOperationRevision(downloadId, operationRevision, {
                 finalIdentityPersisted: true
             });
             if (!operation) return false;
@@ -4035,11 +3953,13 @@ async function finalizeDownloadOperation(downloadId, { historyMissing = false, a
             }
         }
         if (authorityGuard) await authorityGuard();
-        const removed = await removeClaimedDownloadOperation(downloadId, claim);
-        finalized = Boolean(removed);
-        return finalized;
+        const removed = await removeDownloadOperationRevision(
+            downloadId,
+            operationRevision
+        );
+        return Boolean(removed);
     } finally {
-        if (!finalized) await releaseDownloadOperationFinalization(downloadId, claim).catch(() => {});
+        activeDownloadOperationFinalizations.delete(downloadId);
     }
 }
 
