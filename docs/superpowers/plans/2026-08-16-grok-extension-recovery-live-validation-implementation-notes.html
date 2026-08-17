@@ -65,10 +65,10 @@
             <h1>Grok Extension Recovery Implementation Notes</h1>
             <p class="stamp">Initialized 2026-08-16 23:10:16 EDT</p>
             <section class="lede">
-                <div><strong>Status:</strong> <span class="status">Task 10 of 15 starting</span></div>
+                <div><strong>Status:</strong> <span class="status">Task 10 correction approved; deterministic rerun next</span></div>
                 <div><strong>Branch:</strong> <code>codex/grok-extension-recovery</code></div>
                 <div><strong>Plan:</strong> <code>2026-08-16-grok-extension-recovery-live-validation.md</code></div>
-                <div><strong>Proof boundary:</strong> No runtime edit or live lane has run yet. Existing automated and two-item evidence is not being treated as Sync, Dual-write, or full-backup proof.</div>
+                <div><strong>Proof boundary:</strong> One acceptance-only video canary and its prompt sidecar were written and read back successfully. This is partial setup evidence, not Sync, Dual-write, full-backup, image, duplicate, rejection, cancellation, or bridge-fetch proof.</div>
             </section>
 
             <h2>Current Status</h2>
@@ -85,7 +85,7 @@
                     <tr><td>Task 7</td><td class="ok">Complete</td><td>An extension-independent Saved observer now proves bounded exhaustion and restores scroll; a GET-only CLI reconciles only complete observer evidence against paginated inventory and emits deterministic redacted results.</td></tr>
                     <tr><td>Task 8</td><td class="ok">Complete</td><td>Deterministic E2E now proves five ordered Prompted Batch submissions, thirty remounted Saved assets, production-backed three-item Dual-write durability, and fail-closed Stop/error transitions.</td></tr>
                     <tr><td>Task 9</td><td class="ok">Complete</td><td>All nine deterministic gates passed; the packaged extension, checksums, exclusions, and 529 classified scan hits were independently verified and recorded.</td></tr>
-                    <tr><td>Task 10</td><td class="status">Starting</td><td>Run the isolated acceptance-cloud lane in the existing visible Chrome session, prove five upload outcomes, and restore production settings exactly.</td></tr>
+                    <tr><td>Task 10</td><td class="status">Deterministic rerun next</td><td>The two-round correction is review-clean at <code>f39a930</code>. Active production drains are fenced across config transitions, acceptance enqueue cannot mutate protected lane records, canonical metadata is suppressed in acceptance mode, and exact canary targeting proves collection-wide uniqueness while tolerating overlap-aligned remounts. Production settings remain restored. Every Task 9 command must now pass before the live lane restarts.</td></tr>
                     <tr><td>Tasks 11-15</td><td>Pending</td><td>No live proof claimed.</td></tr>
                 </tbody>
             </table>
@@ -113,11 +113,13 @@
                     <tr><td>Drive Dual-write E2E through production background code.</td><td>A fixture-owned operation map and direct processed-ID write could pass while production durability was broken.</td><td>The harness now dispatches through the registered <code>background.js</code> listener and drives production download-complete/R2-present hooks; only production code mutates processed IDs.</td></tr>
                     <tr><td>Define negative-workflow quiescence from controller state, not elapsed wall time.</td><td>A 20 ms sleep could miss a late continuation after Stop or failure.</td><td>Tests advance beyond configured deadlines, drain runtime/timer work, and require controller, transfer, return, and batch promises to be idle before stable snapshots.</td></tr>
                     <tr><td>Keep the deterministic lane passed while the overall release gate remains inconclusive.</td><td>Tests and package checks cannot substitute for the eight required live lanes.</td><td>The workbook records actual command exits/counts and package checksum, with failed/blocked empty and all live lanes explicitly missing.</td></tr>
+                    <tr><td>Operate live Tasks 10-14 from the controller and retain fresh subagents for independent review and any code fix.</td><td>The dedicated existing-Chrome tab handle, native extension popup, and exact restoration state cannot be transferred without creating a second session or discovering the user's existing tabs.</td><td>Live actions stay on one source-bound handle and preserve the no-tab-enumeration rule; each lane still receives an independent review before it can pass.</td></tr>
+                    <tr><td>Stop Task 10 after the first video canary and correct acceptance isolation before further writes.</td><td>Independent review found that switching popup cloud settings could wake production-owned queued work, canonical metadata could target the acceptance Worker, and the canary contract could not bind an exact media identity and type.</td><td>No image, duplicate, rejection, cancellation, Sync, or backup canary will run until tests prove acceptance-only queue and metadata isolation plus exact target selection.</td></tr>
                 </tbody>
             </table>
 
             <h2>Deviations</h2>
-            <div class="panel"><p>Task 3 intentionally used all five review rounds and carried one completion-handoff race into Task 4. Task 4 also used all five rounds because uncancelable Chrome storage writes required a broader immutable-record and terminal-checkpoint protocol than the original snapshot design. Its remaining narrow writer-authority ambiguity became Task 5's first gate and is now closed. Task 5 deferred one minor timing-test precision check to final review; the runtime requires both stable rounds and elapsed time.</p></div>
+            <div class="panel"><p>Task 3 intentionally used all five review rounds and carried one completion-handoff race into Task 4. Task 4 also used all five rounds because uncancelable Chrome storage writes required a broader immutable-record and terminal-checkpoint protocol than the original snapshot design. Its remaining narrow writer-authority ambiguity became Task 5's first gate and is now closed. Task 5 deferred one minor timing-test precision check to final review; the runtime requires both stable rounds and elapsed time. Live Tasks 10-14 are controller-operated because their persistent existing-Chrome state cannot be transferred safely to a worker. During Task 10 setup, one broad Chrome accessibility capture and one frontmost Peekaboo capture that landed on Firefox returned more metadata than intended; neither was used for tab discovery or control, and that route is retired. A Peekaboo clipboard restore slot also failed after copying the non-secret Worker URL; the clipboard was later cleared after secret entry. Task 10 changed only isolated acceptance cloud state: one Worker secret rotation, one Worker deploy, and two R2 objects. It intentionally stopped before the planned image and negative canaries when review exposed acceptance-isolation gaps.</p></div>
 
             <h2>Tradeoffs</h2>
             <table>
@@ -134,7 +136,7 @@
             </table>
 
             <h2>Open Questions</h2>
-            <div class="panel"><p class="empty">None requiring user input. Named pause conditions remain account reauthentication, Chrome permission prompts, unavailable acceptance resources or credentials, an unidentifiable competing job, ambiguous low-cost Grok settings, or unexpected dirty-file ownership overlap.</p></div>
+            <div class="panel"><p>No user decision is currently required. The acceptance-only credential rotation was approved and completed. Task 10 remains paused until the code correction and deterministic revalidation pass; any future live action with a local download, R2 write, or credit-bearing generation remains separately approval-gated by the plan.</p></div>
 
             <h2>Verification Evidence</h2>
             <table>
@@ -165,8 +167,13 @@
                     <tr><td>Task 8 independent review</td><td class="ok">Approved after fix</td><td>Initial review rejected self-fulfilled durability, stale-node reuse, seeded ordering, and short quiet waits. Scoped re-review confirmed all four corrected.</td></tr>
                     <tr><td>Task 9 deterministic release gates</td><td class="ok">Passed and recorded</td><td>Jest 819/819, Playwright 47/47, Cloud TAP 26/26, lint, package, syntax, cloud typecheck, and diff checks passed. Package SHA-256: <code>7cea263a630020bbaa259593ab4995e2d896b52afeb040f7228a11d5fff6bd27</code>.</td></tr>
                     <tr><td>Task 9 package/evidence review</td><td class="ok">Approved</td><td>Checksums and eight missing live lanes were independently verified. One unchanged <code>offscreen.js</code> local-path diagnostic is deferred as a minor privacy cleanup.</td></tr>
-                    <tr><td>Runtime validation</td><td>Not run</td><td>No behavior claim yet.</td></tr>
-                    <tr><td>Live Chrome/cloud validation</td><td>Not run</td><td>No output, R2, or full-backup claim yet.</td></tr>
+                    <tr><td>Task 10 environment and reload</td><td class="ok">Passed</td><td>Exact extension ID/version/path, production popup fingerprints, 12,825 processed IDs, 1,420 queued entries, idle run state, zero extension errors, one post-reload overlay, and visible Saved All scope were directly observed.</td></tr>
+                    <tr><td>Task 10 Cloudflare preflight</td><td class="ok">Passed</td><td>OAuth account, R2 access, acceptance bucket, D1 database, Worker reachability, and ignored run-scoped config were verified.</td></tr>
+                    <tr><td>Task 10 acceptance credential and identity</td><td class="ok">Passed</td><td>The acceptance-only client key was rotated with approval, stored in macOS Keychain without printing, deployed only to the acceptance Worker, and verified against the exact run ID and prefix. The unarmed gate refused as expected; the explicitly armed gate passed.</td></tr>
+                    <tr><td>Task 10 video canary</td><td class="ok">Partial live proof</td><td>One authenticated MP4 and one prompt sidecar were uploaded under the acceptance prefix. Full readback returned the expected 1,753,506 bytes and <code>video/mp4</code>; processed-ID count increased by exactly three aliases only after durable proof.</td></tr>
+                    <tr><td>Task 10 isolation audit</td><td class="ok">No observed spill</td><td>The acceptance inventory contains exactly the intended video and prompt sidecar. Saved prompts, prompt history, and processed-ID metadata endpoints each returned zero rows. Production popup settings and production identity were restored and verified read-only.</td></tr>
+                    <tr><td>Runtime validation after isolation correction</td><td class="status">Task 9 rerun required</td><td>Fix round 1 addressed both Critical queue findings, collection-wide duplicate refusal, and missing coverage. Fix round 2 reports one RED remount failure, 296 focused navigation tests, 847 full unit tests, and clean lint/syntax/diff/secret/env checks. Scoped re-review found all findings addressed with no new Critical or Important breakage.</td></tr>
+                    <tr><td>Remaining live Chrome/cloud validation</td><td>Not run</td><td>No image, duplicate, rejection, cancellation, Sync, Dual-write, or full-backup claim yet.</td></tr>
                 </tbody>
             </table>
 
@@ -186,15 +193,18 @@
                     <tr><td><code>6107925</code> through <code>dd364db</code></td><td>Verify R2 presence before full-backup byte fetch and fail closed on every preflight error.</td><td>Review clean after one fix round; metadata/cache-lifecycle coverage expansion is deferred to final review.</td></tr>
                     <tr><td><code>24101dc</code> through <code>71ac7b5</code></td><td>Add and harden the independent Saved observer and redacted read-only reconciliation CLI.</td><td>Review clean after two fix rounds; no live request or credential read occurred.</td></tr>
                     <tr><td><code>a6f9361</code> through <code>d94d1a2</code></td><td>Add long Prompted Batch/Sync workflows and make their evidence production-backed and deterministic.</td><td>Review clean after one fix round; test-only changes, no live or runtime action.</td></tr>
+                    <tr><td><code>c2056ce</code></td><td>Isolate acceptance queue and metadata traffic and add exact page-origin canary targeting.</td><td>Initial review found active-drain, dedupe-collision, virtualized-ambiguity, and coverage gaps; fix round 1 in progress.</td></tr>
+                    <tr><td><code>a16ba6c</code></td><td>Fence cloud-config transitions, isolate acceptance dedupe ownership, and prove collection-wide canary uniqueness.</td><td>Four original findings addressed; one new Important remount false-positive entered fix round 2.</td></tr>
+                    <tr><td><code>f39a930</code></td><td>Track overlap-aligned logical Saved occurrences across DOM remounts.</td><td>Fix round 2 approved; all findings addressed with no new Critical or Important breakage.</td></tr>
                 </tbody>
             </table>
 
             <h2>Safety And Restoration</h2>
             <ul>
                 <li>No processed IDs have been reset, exported, or rewritten.</li>
-                <li>No Chrome tab discovery or whole-profile inspection has occurred.</li>
-                <li>No R2, D1, Worker, OAuth, environment, or cloud object state has changed.</li>
-                <li>No live workflow or resource-intensive job has started.</li>
+                <li>No Chrome tab enumeration or whole-profile manipulation has occurred. Two over-broad accessibility captures during Task 10 setup are recorded above; all subsequent actions used direct URLs, exact prior/last-tab shortcuts, or the selected dedicated tab.</li>
+                <li>Production R2, D1, Worker secrets, OAuth, environment files, and cloud objects were not changed. Isolated acceptance state changed only by the approved key rotation, Worker deploy, one video object, and one prompt sidecar.</li>
+                <li>No Sync, full backup, global queue drain, or resource-intensive job has started. The single acceptance video canary is recorded above.</li>
             </ul>
         </main>
     </body>
