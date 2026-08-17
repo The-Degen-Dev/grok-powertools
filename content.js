@@ -42,6 +42,7 @@ function isChatGptImagesProvider(provider) {
 }
 
 const EXTENSION_CONTEXT_REFRESHED_MESSAGE = 'Grok Power Tools reloaded. Refresh this Grok tab before continuing.';
+const SCRAPE_RUN_STATE_WRITE_TIMEOUT_MS = 1000;
 
 function isExtensionContextInvalidatedError(error) {
     const message = String(error && (error.message || error) || '');
@@ -5792,17 +5793,53 @@ class GrokScraper {
     }
 
     queueRunStateWrite(values, operation, guard = null) {
+        const writeGuard = guard ? {
+            ...guard,
+            invalidationVersion: Number.isInteger(guard.invalidationVersion)
+                ? guard.invalidationVersion
+                : this.getRunInvalidationVersion(),
+            kind: guard.kind || (this.backupMode ? 'r2_backup' : 'sync'),
+            timeoutMs: Number.isFinite(guard.timeoutMs)
+                ? Math.max(0, guard.timeoutMs)
+                : SCRAPE_RUN_STATE_WRITE_TIMEOUT_MS
+        } : null;
+        const isCurrent = () => Boolean(
+            writeGuard
+            && this.getRunInvalidationVersion() === writeGuard.invalidationVersion
+            && this.matchesRunLease(writeGuard.runToken, writeGuard.runEpoch)
+        );
         const write = this.ensureRunStateWriteQueue().then(async () => {
-            if (!guard || !this.matchesRunLease(guard.runToken, guard.runEpoch)) {
+            if (!isCurrent()) {
                 return { ok: false, invalidated: false, skipped: true, operation };
             }
-            const response = await safeChromeRuntimeSendMessage({
+            if (Number.isFinite(writeGuard.deadline) && Date.now() >= writeGuard.deadline) {
+                return { ok: false, invalidated: false, skipped: true, timedOut: true, operation };
+            }
+            const responsePromise = safeChromeRuntimeSendMessage({
                 action: 'SCRAPE_RUN_STATE_WRITE',
-                runToken: guard.runToken,
-                runEpoch: guard.runEpoch,
-                kind: this.backupMode ? 'r2_backup' : 'sync',
+                runToken: writeGuard.runToken,
+                runEpoch: writeGuard.runEpoch,
+                kind: writeGuard.kind,
                 values
             }, operation);
+            let timeoutId = null;
+            const timeout = Symbol('scrape_run_state_write_timeout');
+            const response = await Promise.race([
+                responsePromise,
+                new Promise((resolve) => {
+                    timeoutId = setTimeout(() => resolve(timeout), writeGuard.timeoutMs);
+                })
+            ]);
+            if (timeoutId !== null) clearTimeout(timeoutId);
+            if (!isCurrent()) {
+                return { ok: false, invalidated: false, skipped: true, operation };
+            }
+            if (Number.isFinite(writeGuard.deadline) && Date.now() >= writeGuard.deadline) {
+                return { ok: false, invalidated: false, skipped: true, timedOut: true, operation };
+            }
+            if (response === timeout) {
+                return { ok: false, invalidated: false, skipped: true, timedOut: true, operation };
+            }
             if (response.invalidated) return response;
             return {
                 ok: response.value?.status === 'ok',
@@ -6270,7 +6307,7 @@ class GrokScraper {
             });
             const result = await Promise.race([settled, expired]);
             if (timeoutId !== null) clearTimeout(timeoutId);
-            return result;
+            return Date.now() >= deadline ? { expired: true } : result;
         };
 
         while (isCurrentRun()) {
@@ -6303,7 +6340,12 @@ class GrokScraper {
                 if (Date.now() >= deadline) return timedOut();
                 let progress;
                 try {
-                    progress = this.persistBackupProgress(runToken);
+                    progress = this.persistBackupProgress(runToken, {
+                        runEpoch,
+                        invalidationVersion,
+                        deadline,
+                        timeoutMs: Math.max(0, deadline - Date.now())
+                    });
                 } catch {
                     return { status: 'failed', reason: 'progress_persist_failed' };
                 }
@@ -6311,6 +6353,9 @@ class GrokScraper {
                 if (!isCurrentRun()) return ignored();
                 if (progressResult.expired) return timedOut();
                 if (progressResult.error) return { status: 'failed', reason: 'progress_persist_failed' };
+                if (progressResult.value !== true) {
+                    return { status: 'failed', reason: 'progress_persist_failed' };
+                }
             }
             if (snapshot.status !== 'pending') return snapshot;
             if (Date.now() >= deadline) return timedOut();
@@ -6639,22 +6684,40 @@ class GrokScraper {
         }
     }
 
-    async persistBackupProgress(runToken = this.runToken) {
-        if (!this.backupMode || !this.isRunActive(runToken)) return false;
-        const runEpoch = this.runEpoch;
+    async persistBackupProgress(runToken = this.runToken, {
+        runEpoch = this.runEpoch,
+        invalidationVersion = this.getRunInvalidationVersion(),
+        deadline = Number.POSITIVE_INFINITY,
+        timeoutMs = SCRAPE_RUN_STATE_WRITE_TIMEOUT_MS
+    } = {}) {
+        const isCurrent = () => Boolean(
+            this.backupMode
+            && this.getRunInvalidationVersion() === invalidationVersion
+            && this.matchesRunLease(runToken, runEpoch)
+        );
+        if (!isCurrent() || Date.now() >= deadline) return false;
+        const stats = { ...this.backupStats };
         const result = await this.queueRunStateWrite({
-            r2BackupState: { isRunning: true, ...this.backupStats }
-        }, 'save R2 backup progress', { runToken, runEpoch });
+            r2BackupState: { isRunning: true, ...stats }
+        }, 'save R2 backup progress', {
+            runToken,
+            runEpoch,
+            invalidationVersion,
+            kind: 'r2_backup',
+            deadline,
+            timeoutMs
+        });
         if (result.invalidated) {
-            this.handleExtensionContextInvalidated();
+            if (isCurrent()) this.handleExtensionContextInvalidated();
             return false;
         }
+        if (Date.now() >= deadline || !isCurrent() || !result.ok) return false;
         safeChromeRuntimeSendMessageSoon({
             action: 'R2_BACKUP_PROGRESS',
             runToken,
             runEpoch,
             kind: 'r2_backup',
-            stats: this.backupStats
+            stats
         }, 'send R2 backup progress');
         return true;
     }

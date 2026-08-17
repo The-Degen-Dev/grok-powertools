@@ -731,6 +731,7 @@ async function scheduleCloudRetryAlarm() {
 function enqueueCloudQueueMutation(operation) {
     const timeout = Symbol('cloud_queue_mutation_timeout');
     const operationPromise = cloudQueueMutationQueue.then(operation, operation);
+    cloudQueueMutationQueue = operationPromise.catch(() => {});
     const mutation = withTimeout(
         operationPromise,
         CLOUD_QUEUE_MUTATION_TIMEOUT_MS,
@@ -739,7 +740,6 @@ function enqueueCloudQueueMutation(operation) {
         if (result === timeout) throw new Error('cloud_queue_mutation_persist_timeout');
         return result;
     });
-    cloudQueueMutationQueue = mutation.catch(() => {});
     return mutation;
 }
 
@@ -2387,6 +2387,9 @@ async function commitScrapeRunState(request, sender) {
             return { status: 'ignored', reason: 'stale_authority' };
         }
         await chrome.storage.local.set(buildAuthorizedRunningMirror(requested, request.values));
+        if (!scrapeLeaseMatches(activeScrapeLease, requested)) {
+            return { status: 'ignored', reason: 'stale_authority' };
+        }
         return { status: 'ok' };
     });
 }
@@ -2884,7 +2887,7 @@ async function handleR2BackupProgress(request, sender) {
         if (!scrapeLeaseMatches(activeScrapeLease, requested)) return { status: 'ignored' };
         chrome.runtime.sendMessage({
             action: 'UPDATE_R2_BACKUP_PROGRESS',
-            stats: request.stats
+            stats: request.stats && typeof request.stats === 'object' ? { ...request.stats } : {}
         }).catch(() => {});
         return { status: 'ok' };
     });
@@ -3747,13 +3750,19 @@ async function runWithScrapeCompletionMutationBarrier({
         const barrier = new Promise((resolve) => { releaseBarrier = resolve; });
         cloudQueueMutationQueue = barrier;
         pendingDownloadOperationsMutationQueue = barrier;
-        try {
-            return await operation();
-        } finally {
-            const pendingApply = transition.pendingApplyPromise;
-            if (pendingApply) pendingApply.finally(releaseBarrier).catch(() => {});
-            else releaseBarrier();
+        const operationPromise = Promise.resolve().then(operation);
+        operationPromise.finally(releaseBarrier).catch(() => {});
+        const timeout = Symbol('scrape_completion_mutation_timeout');
+        const result = await withTimeout(
+            operationPromise,
+            CLOUD_QUEUE_MUTATION_TIMEOUT_MS,
+            timeout
+        );
+        if (result === timeout) {
+            transition.status = `${transition.status}_timed_out`;
+            throw new Error('scrape_completion_transfer_persist_timeout');
         }
+        return result;
     }
 }
 
@@ -3827,56 +3836,38 @@ async function recoverPreparedScrapeCompletionTransfer() {
         committedAt: Date.now(),
         recoveredAt: Date.now()
     };
-    const queue = cloneCloudQueue();
-    const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
-    await chrome.storage.local.set(buildCompletionRetryStorageValues(queue, operations, committedTxn));
-    applyCompletionRetrySnapshots(queue, operations, committedTxn);
+    const snapshots = buildCompletionRetrySnapshots(lease, committedTxn);
+    await chrome.storage.local.set(buildCompletionRetryStorageValues(
+        snapshots.queue,
+        snapshots.operations,
+        committedTxn
+    ));
+    applyCompletionRetrySnapshots(snapshots.queue, snapshots.operations, committedTxn);
     return true;
 }
 
 async function persistCompletionRetrySnapshots(queue, operations, txn, transition, stage) {
-    const write = chrome.storage.local.set(buildCompletionRetryStorageValues(queue, operations, txn));
-    const pendingWrite = Promise.resolve(write);
-    transition.pendingWritePromise = pendingWrite;
     transition.status = stage;
-    let persisted;
+    const rawWrite = Promise.resolve(chrome.storage.local.set(
+        buildCompletionRetryStorageValues(queue, operations, txn)
+    ));
+    const pendingWrite = rawWrite.then(async () => {
+        transition.persisted = true;
+        if (transition.revoked) {
+            await revokeScrapeRetryAuthorityAtomically(transition.txn.lease);
+            throw createScrapeAuthorityRevokedError();
+        }
+        applyCompletionRetrySnapshots(queue, operations, txn);
+    });
+    transition.pendingWritePromise = pendingWrite;
     try {
-        persisted = await withTimeout(
-            pendingWrite.then(() => true),
-            CLOUD_QUEUE_MUTATION_TIMEOUT_MS,
-            false
-        );
+        await pendingWrite;
     } catch (error) {
-        if (transition.pendingWritePromise === pendingWrite) transition.pendingWritePromise = null;
         if (scrapeCompletionTransition === transition) scrapeCompletionTransition = null;
         throw error;
+    } finally {
+        if (transition.pendingWritePromise === pendingWrite) transition.pendingWritePromise = null;
     }
-    if (!persisted) {
-        transition.status = `${stage}_timed_out`;
-        const pendingApply = pendingWrite.then(async () => {
-            transition.persisted = true;
-            if (transition.revoked) {
-                await revokeScrapeRetryAuthorityAtomically(transition.txn.lease);
-                if (scrapeCompletionTransition === transition) scrapeCompletionTransition = null;
-                return;
-            }
-            applyCompletionRetrySnapshots(queue, operations, txn);
-            if (txn.phase === 'committed') {
-                transition.status = 'committed';
-                if (scrapeCompletionTransition === transition) scrapeCompletionTransition = null;
-            }
-        }).catch(() => {
-            if (scrapeCompletionTransition === transition) scrapeCompletionTransition = null;
-        }).finally(() => {
-            if (transition.pendingWritePromise === pendingWrite) transition.pendingWritePromise = null;
-            if (transition.pendingApplyPromise === pendingApply) transition.pendingApplyPromise = null;
-        });
-        transition.pendingApplyPromise = pendingApply;
-        throw new Error('scrape_completion_transfer_persist_timeout');
-    }
-    transition.persisted = true;
-    if (transition.pendingWritePromise === pendingWrite) transition.pendingWritePromise = null;
-    applyCompletionRetrySnapshots(queue, operations, txn);
 }
 
 async function prepareScrapeCompletionTransfer(lease) {
@@ -3889,8 +3880,7 @@ async function prepareScrapeCompletionTransfer(lease) {
         status: 'preparing',
         persisted: false,
         revoked: false,
-        pendingWritePromise: null,
-        pendingApplyPromise: null
+        pendingWritePromise: null
     };
     scrapeCompletionTransition = transition;
     try {
@@ -3932,13 +3922,10 @@ async function commitScrapeCompletionTransfer(prepared) {
         transition: prepared.transition,
         operation: async () => {
             assertScrapeCompletionTransitionCurrent(prepared.transition);
-            const queue = cloneCloudQueue();
-            const operations = deserializeDownloadOperations(
-                serializeDownloadOperations(pendingDownloadOperations)
-            );
+            const snapshots = buildCompletionRetrySnapshots(prepared.txn.lease, committedTxn);
             await persistCompletionRetrySnapshots(
-                queue,
-                operations,
+                snapshots.queue,
+                snapshots.operations,
                 committedTxn,
                 prepared.transition,
                 'committing'
@@ -4663,6 +4650,7 @@ if (typeof module !== 'undefined') {
         recreateWorkflowController,
         RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS,
         requestPresignedUrl,
+        reserveDownloadOperationForTest: reserveDownloadOperation,
         parseFilenameInfo,
         processCompletedDownloadOperation,
         processCloudQueue,
