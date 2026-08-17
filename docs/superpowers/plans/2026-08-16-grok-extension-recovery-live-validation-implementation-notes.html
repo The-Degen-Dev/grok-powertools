@@ -65,7 +65,7 @@
             <h1>Grok Extension Recovery Implementation Notes</h1>
             <p class="stamp">Initialized 2026-08-16 23:10:16 EDT</p>
             <section class="lede">
-                <div><strong>Status:</strong> <span class="status">Task 6 of 15 starting</span></div>
+                <div><strong>Status:</strong> <span class="status">Task 7 of 15 starting</span></div>
                 <div><strong>Branch:</strong> <code>codex/grok-extension-recovery</code></div>
                 <div><strong>Plan:</strong> <code>2026-08-16-grok-extension-recovery-live-validation.md</code></div>
                 <div><strong>Proof boundary:</strong> No runtime edit or live lane has run yet. Existing automated and two-item evidence is not being treated as Sync, Dual-write, or full-backup proof.</div>
@@ -81,8 +81,9 @@
                     <tr><td>Task 3</td><td class="ok">Closed with ruling</td><td>Dual-write no longer persists after local completion alone. Worker-local single-flight ownership provides exactly-once finalization without durable claim markers. One load-bearing completion-handoff race is explicitly carried into Task 4.</td></tr>
                     <tr><td>Task 4</td><td class="ok">Closed with ruling</td><td>Run completion now waits for durable run-owned work, uses immutable fenced persistence, bounds startup and recovery waits, preserves retry decisions across late writes and restarts, and fails closed on timeout. One writer-authority ambiguity is explicitly carried into Task 5.</td></tr>
                     <tr><td>Task 5</td><td class="ok">Complete</td><td>Duplicate writer authority and lease-writer mismatch now fail closed. Saved traversal uses an explicit surface root, a per-run scan ledger, conservative semantic loading, and stable-bottom proof before completion.</td></tr>
-                    <tr><td>Task 6</td><td class="status">Starting</td><td>Add read-only paginated inventory and per-object HEAD proof so historical processed IDs cannot substitute for current R2 presence.</td></tr>
-                    <tr><td>Tasks 7-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
+                    <tr><td>Task 6</td><td class="ok">Complete</td><td>Full backup now scans historical processed identities, loads one prefix-validated inventory snapshot per lease, proves each candidate with read-only HEAD, and fetches Grok bytes only for missing objects.</td></tr>
+                    <tr><td>Task 7</td><td class="status">Starting</td><td>Add an extension-independent Saved observer and a read-only Vault reconciliation CLI that emits redacted evidence.</td></tr>
+                    <tr><td>Tasks 8-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
                 </tbody>
             </table>
 
@@ -102,6 +103,8 @@
                     <tr><td>Carry the final writer-authority ambiguity into Task 5 as its first gate.</td><td>After five Task 4 review rounds, one narrow hydration conflict remains real and load-bearing. The protocol forbids a sixth hidden fix round.</td><td>Task 5 must fail closed on duplicate claims and lease-writer mismatch before adding traversal state that depends on hydrated run authority.</td></tr>
                     <tr><td>Prove Saved exhaustion from a run-local identity ledger rather than processed IDs.</td><td>Processed IDs describe prior extension work, not current gallery membership or R2 presence. Virtualized lists can also recycle DOM nodes.</td><td>A run completes only after semantic loading is absent, no new eligible identity appears, and the stable-bottom round and elapsed-time thresholds both pass.</td></tr>
                     <tr><td>Keep loader detection inside the explicit Saved surface root.</td><td>An unrelated page progress bar must not keep a backup running until its scan limit.</td><td>A missing post-scroll Saved root resets stability and fails closed instead of widening the query to a parent or the document.</td></tr>
+                    <tr><td>Treat inventory verification as a per-lease read-only preflight, not as processed-ID proof.</td><td>Historical extension state cannot prove that an object still exists in R2, and an inventory row alone cannot prove readable bytes.</td><td>Each verified canonical row must pass HEAD with positive bytes and matching media type before it can become <code>already_present</code>; otherwise only a 404 continues to upload.</td></tr>
+                    <tr><td>Use one common durable-result recorder for presence hits, uploads, and failures.</td><td>Separate accounting paths allowed legacy-detail presence errors to disappear and later report Complete.</td><td>Both Agent and legacy-detail flows now stop on unsuccessful transfer status, count failure once, persist progress, and leave processed IDs unchanged.</td></tr>
                 </tbody>
             </table>
 
@@ -116,6 +119,7 @@
                     <tr><td>Execute deterministic Tasks 1-9 before any live Chrome lane.</td><td>Patch and test directly against production first.</td><td>This keeps cloud and credit-bearing actions behind source-bound deterministic gates.</td></tr>
                     <tr><td>Use immutable uniquely keyed records plus retained terminal fences.</td><td>Hold mutation queues until every storage promise settles, or release timed-out same-key writes.</td><td>The chosen design keeps Stop and replacement runs operable while making late writes non-authoritative. It costs more local protocol code and requires bounded compaction tests.</td></tr>
                     <tr><td>Require both eight stable rounds and 6000 ms before Saved exhaustion.</td><td>Use only a round count, only elapsed time, or infer completion from processed IDs.</td><td>The combined condition tolerates virtualization and delayed loading at the cost of a bounded quiet period before natural completion.</td></tr>
+                    <tr><td>Cache the inventory Promise by immutable scrape-lease key.</td><td>Cache only a resolved map or paginate independently for every item.</td><td>Concurrent checks share one pagination pass; stop, completion, revocation, and preflight failure evict the cache.</td></tr>
                 </tbody>
             </table>
 
@@ -143,6 +147,8 @@
                     <tr><td>Task 4 breaker review</td><td class="status">One ruling carried</td><td>Late checkpoint regression and unbounded readiness are closed. Duplicate writer authority and lease-writer mismatch must fail closed before Task 5 traversal work.</td></tr>
                     <tr><td>Task 5 deterministic gates</td><td class="ok">769 unit and 37 E2E passed</td><td>Includes duplicate writer claims, lease-writer mismatch, scan-ledger rules, explicit Saved-root loader scoping, 30-item virtualized mixed media, and real scan-limit attempts.</td></tr>
                     <tr><td>Task 5 independent review</td><td class="ok">Approved after fix</td><td>Conflict cleanup now removes inherited progress, outside loaders cannot block exhaustion, and the detailed SDD report remains ignored and untracked.</td></tr>
+                    <tr><td>Task 6 deterministic gates</td><td class="ok">783 unit and 37 E2E passed</td><td>Includes backup-vs-Sync eligibility, paginated inventory, prefix rejection, HEAD outcomes, no-byte-fetch hits, authority revocation during body reads, and Agent/legacy failure accounting.</td></tr>
+                    <tr><td>Task 6 independent review</td><td class="ok">Approved after fix</td><td>Initial review found a legacy false-completion path and one missing catch-path authority check. Scoped re-review confirmed both closed with no new breakage.</td></tr>
                     <tr><td>Runtime validation</td><td>Not run</td><td>No behavior claim yet.</td></tr>
                     <tr><td>Live Chrome/cloud validation</td><td>Not run</td><td>No output, R2, or full-backup claim yet.</td></tr>
                 </tbody>
@@ -161,6 +167,7 @@
                     <tr><td><code>fcbae44</code></td><td>Replace persisted claims with worker-local single-flight finalization.</td><td>Original claim defect closed; one completion-handoff race carried into Task 4.</td></tr>
                     <tr><td><code>56b73de</code> through <code>d34e9ba</code></td><td>Add run-owned durability snapshots, immutable persistence fences, restart-safe authority, bounded terminal checkpoints, and bounded readiness/recovery.</td><td>Five review rounds closed completion, timeout, late-write, restart, and quota risks. One hydration ambiguity is carried into Task 5.</td></tr>
                     <tr><td><code>75a589c</code> through <code>d64c51f</code></td><td>Reject ambiguous persisted writers and prove Saved gallery exhaustion with a scoped scan ledger.</td><td>Review clean after one fix round; one minor boundary-test refinement is deferred to final review.</td></tr>
+                    <tr><td><code>6107925</code> through <code>dd364db</code></td><td>Verify R2 presence before full-backup byte fetch and fail closed on every preflight error.</td><td>Review clean after one fix round; metadata/cache-lifecycle coverage expansion is deferred to final review.</td></tr>
                 </tbody>
             </table>
 
