@@ -975,7 +975,7 @@ describe('Grok scrape surface transitions', () => {
         const decoyUrl = 'https://assets.grok.com/users/u/generated/33000000-0000-4000-8000-000000000001/image.jpg';
         const targetUrl = 'https://assets.grok.com/users/u/generated/33000000-0000-4000-8000-000000000002/image.jpg';
         const nextUrl = 'https://assets.grok.com/users/u/generated/33000000-0000-4000-8000-000000000003/image.jpg';
-        const { list, card } = mountSemanticSavedImage(decoyUrl);
+        const { scroller, list, card } = mountSemanticSavedImage(decoyUrl);
         const decoyControl = document.createElement('button');
         decoyControl.setAttribute('aria-label', decoyLabel);
         card.appendChild(decoyControl);
@@ -993,10 +993,24 @@ describe('Grok scrape surface transitions', () => {
                 targetMediaType
             }
         };
-        scraper.sleep = jest.fn().mockResolvedValue();
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 800 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        scroller.scrollBy = jest.fn();
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
         scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => { now += delay; });
 
-        await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
 
         expect(scraper.processItem).toHaveBeenCalledTimes(1);
         expect(scraper.processItem).toHaveBeenCalledWith(
@@ -1013,7 +1027,7 @@ describe('Grok scrape surface transitions', () => {
         const scraper = createScraper();
         const decoyUrl = 'https://assets.grok.com/users/u/generated/34000000-0000-4000-8000-000000000001/image.jpg';
         const targetUrl = 'https://assets.grok.com/users/u/generated/34000000-0000-4000-8000-000000000099/image.jpg';
-        const { image, card } = mountSemanticSavedImage(decoyUrl);
+        const { scroller, image, card } = mountSemanticSavedImage(decoyUrl);
         const mediaControl = document.createElement('button');
         mediaControl.setAttribute('aria-label', 'Make video');
         card.appendChild(mediaControl);
@@ -1032,8 +1046,17 @@ describe('Grok scrape surface transitions', () => {
         scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
         scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
         scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 800 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        scroller.scrollBy = jest.fn();
         let replaced = false;
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
         scraper.sleep = jest.fn(async (delay) => {
+            now += delay;
             if (delay === 750 && !replaced) {
                 replaced = true;
                 image.src = targetUrl;
@@ -1041,7 +1064,11 @@ describe('Grok scrape surface transitions', () => {
             }
         });
 
-        await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
 
         expect(replaced).toBe(true);
         expect(scraper.processItem).toHaveBeenCalledTimes(1);
@@ -1061,12 +1088,193 @@ describe('Grok scrape surface transitions', () => {
         );
     });
 
+    test('targeted canary fails closed for duplicate identities in one mounted window', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34100000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/image.jpg`;
+        const { scroller, list, card } = mountSemanticSavedImage(targetUrl);
+        const firstControl = document.createElement('button');
+        firstControl.setAttribute('aria-label', 'Make video');
+        card.appendChild(firstControl);
+        appendSemanticSavedEntry(list, `${targetUrl}?duplicate=1`, 'image');
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: { targetIdentity, targetMediaType: 'image', stopAfterMediaAttempt: true }
+        };
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 800 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        scroller.scrollBy = jest.fn();
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => { now += delay; });
+
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
+
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            expect.stringMatching(/^Canary target \.\.\.[a-f0-9]{8} is ambiguous in Saved\.$/),
+            'canary_target_ambiguous'
+        );
+    });
+
+    test('targeted canary detects duplicate identities in non-overlapping virtualized windows', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34200000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/image.jpg`;
+        const decoyUrl = 'https://assets.grok.com/users/u/generated/34200000-0000-4000-8000-000000000001/image.jpg';
+        const { scroller, list, card } = mountSemanticSavedImage(targetUrl);
+        const firstControl = document.createElement('button');
+        firstControl.setAttribute('aria-label', 'Make video');
+        card.appendChild(firstControl);
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 1600 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        let renderedSecondWindow = false;
+        scroller.scrollBy = jest.fn(() => {
+            scroller.scrollTop = 800;
+            if (renderedSecondWindow) return;
+            renderedSecondWindow = true;
+            list.textContent = '';
+            appendSemanticSavedEntry(list, decoyUrl, 'image');
+            appendSemanticSavedEntry(list, `${targetUrl}?second-card=1`, 'image');
+        });
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: { targetIdentity, targetMediaType: 'image', stopAfterMediaAttempt: true }
+        };
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => { now += delay; });
+
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
+
+        expect(renderedSecondWindow).toBe(true);
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            expect.stringMatching(/^Canary target \.\.\.[a-f0-9]{8} is ambiguous in Saved\.$/),
+            'canary_target_ambiguous'
+        );
+        expect(JSON.stringify(scraper.failRun.mock.calls)).not.toContain(targetIdentity);
+    });
+
+    test('targeted canary fails closed when the sole target media type cannot be proven', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34300000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/image.jpg`;
+        const { scroller } = mountSemanticSavedImage(targetUrl);
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 800 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        scroller.scrollBy = jest.fn();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: { targetIdentity, targetMediaType: 'video', stopAfterMediaAttempt: true }
+        };
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => { now += delay; });
+
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
+
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            expect.stringMatching(/^Could not verify whether canary target \.\.\.[a-f0-9]{8} is an image or video\.$/),
+            'canary_target_type_unknown'
+        );
+    });
+
+    test('targeted canary does not process a found target before the Saved scan safety limit', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34400000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/image.jpg`;
+        const { scroller, card } = mountSemanticSavedImage(targetUrl);
+        const control = document.createElement('button');
+        control.setAttribute('aria-label', 'Make video');
+        card.appendChild(control);
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 10000000 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        scroller.scrollBy = jest.fn(() => { scroller.scrollTop += 800; });
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: { targetIdentity, targetMediaType: 'image', stopAfterMediaAttempt: true }
+        };
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => { now += delay; });
+
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
+
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            expect.stringMatching(/^Canary target \.\.\.[a-f0-9]{8} was not found before the Saved scan safety limit\.$/),
+            'canary_target_scan_limit'
+        );
+    });
+
     test('targeted canary fails closed when the matching card has the wrong media type', async () => {
         mockContentChrome();
         const scraper = createScraper();
         const targetIdentity = '35000000-0000-4000-8000-000000000002';
         const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/image.jpg`;
-        const { list, card } = mountSemanticSavedImage(targetUrl);
+        const { scroller, list, card } = mountSemanticSavedImage(targetUrl);
         const imageControl = document.createElement('button');
         imageControl.setAttribute('aria-label', 'Make video');
         card.appendChild(imageControl);
@@ -1083,11 +1291,24 @@ describe('Grok scrape surface transitions', () => {
                 targetMediaType: 'video'
             }
         };
-        scraper.sleep = jest.fn().mockResolvedValue();
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 800 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        scroller.scrollBy = jest.fn();
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
         scraper.processItem = jest.fn().mockResolvedValue();
         scraper.failRun = jest.fn().mockResolvedValue();
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => { now += delay; });
 
-        await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
 
         expect(scraper.processItem).not.toHaveBeenCalled();
         expect(scraper.failRun).toHaveBeenCalledWith(
@@ -3487,6 +3708,24 @@ describe('Saved scan ledger and exhaustion proof', () => {
         expect(ledger.seenIdentities).toEqual(new Set([
             '11111111-1111-4111-8111-111111111111',
             '22222222-2222-4222-8222-222222222222'
+        ]));
+    });
+
+    test('scan ledger tracks card occurrences across overlapping and non-overlapping windows', () => {
+        const ledger = createSavedScanLedger(1000);
+        const first = '11111111-1111-4111-8111-111111111111';
+        const second = '22222222-2222-4222-8222-222222222222';
+        const third = '33333333-3333-4333-8333-333333333333';
+
+        recordSavedScan(ledger, { identities: [first, second], now: 2000 });
+        recordSavedScan(ledger, { identities: [second, third], now: 3000 });
+        recordSavedScan(ledger, { identities: [third, first], now: 4000 });
+        recordSavedScan(ledger, { identities: [third, first], now: 5000 });
+
+        expect(ledger.identityOccurrenceCounts).toEqual(new Map([
+            [first, 2],
+            [second, 1],
+            [third, 1]
         ]));
     });
 

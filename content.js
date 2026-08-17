@@ -1027,19 +1027,71 @@ function createSavedScanLedger(now = Date.now()) {
     return {
         seenIdentities: new Set(),
         durableIdentities: new Set(),
+        identityOccurrenceCounts: new Map(),
+        occurrenceIdentityByElement: new WeakMap(),
+        lastWindowIdentities: [],
         stableBottomRounds: 0,
         lastNewIdentityAt: now,
         scanAttempts: 0
     };
 }
 
-function recordSavedScan(ledger, { identities, now = Date.now() }) {
+function recordSavedScan(ledger, { identities, occurrenceElements = null, now = Date.now() }) {
+    const observations = identities
+        .map((value, index) => ({
+            identity: getGrokMediaIdentity(value),
+            element: Array.isArray(occurrenceElements) ? occurrenceElements[index] : null
+        }))
+        .filter(({ identity }) => Boolean(identity));
+    const normalizedIdentities = observations.map(({ identity }) => identity);
     let newIdentityCount = 0;
-    for (const value of identities.map(getGrokMediaIdentity).filter(Boolean)) {
+    for (const value of normalizedIdentities) {
         if (ledger.seenIdentities.has(value)) continue;
         ledger.seenIdentities.add(value);
         newIdentityCount++;
     }
+
+    if (Array.isArray(occurrenceElements)) {
+        for (const { identity, element } of observations) {
+            if (element && (typeof element === 'object' || typeof element === 'function')) {
+                if (ledger.occurrenceIdentityByElement.get(element) === identity) continue;
+                ledger.occurrenceIdentityByElement.set(element, identity);
+            }
+            ledger.identityOccurrenceCounts.set(
+                identity,
+                (ledger.identityOccurrenceCounts.get(identity) || 0) + 1
+            );
+        }
+    } else {
+        const previousWindow = Array.isArray(ledger.lastWindowIdentities)
+            ? ledger.lastWindowIdentities
+            : [];
+        let overlapLength = 0;
+        let overlapStart = 0;
+        for (let previousStart = 0; previousStart < previousWindow.length; previousStart++) {
+            for (let currentStart = 0; currentStart < normalizedIdentities.length; currentStart++) {
+                let length = 0;
+                while (
+                    previousStart + length < previousWindow.length
+                    && currentStart + length < normalizedIdentities.length
+                    && previousWindow[previousStart + length] === normalizedIdentities[currentStart + length]
+                ) length++;
+                if (length > overlapLength) {
+                    overlapLength = length;
+                    overlapStart = currentStart;
+                }
+            }
+        }
+        normalizedIdentities.forEach((identity, index) => {
+            if (index >= overlapStart && index < overlapStart + overlapLength) return;
+            ledger.identityOccurrenceCounts.set(
+                identity,
+                (ledger.identityOccurrenceCounts.get(identity) || 0) + 1
+            );
+        });
+    }
+    ledger.lastWindowIdentities = normalizedIdentities;
+
     if (newIdentityCount > 0) {
         ledger.lastNewIdentityAt = now;
         ledger.stableBottomRounds = 0;
@@ -6356,6 +6408,89 @@ class GrokScraper {
         return this._savedScanLedger;
     }
 
+    async processUniqueCanaryTarget({
+        runToken,
+        targetIdentity,
+        targetMediaType,
+        targetLabel,
+        targetScrollTop
+    }) {
+        const MAX_TARGET_SEEK_ATTEMPTS = 20;
+        for (let attempt = 0; attempt < MAX_TARGET_SEEK_ATTEMPTS; attempt++) {
+            if (!this.isRunActive(runToken)) return true;
+            if (this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) {
+                await this.failRun(
+                    `Could not return to canary target ${targetLabel} in Saved.`,
+                    'canary_target_seek_failed'
+                );
+                return true;
+            }
+            if (!await this.ensureSavedGalleryAllScope(runToken)) return true;
+            const context = getSavedGalleryContext(document);
+            if (!context) {
+                await this.sleep(SAVED_BOTTOM_PROBE_WAIT_MS);
+                continue;
+            }
+            setSavedGalleryScrollTop(context.scroller, targetScrollTop);
+            await this.sleep(SAVED_BOTTOM_PROBE_WAIT_MS);
+            if (!this.isRunActive(runToken)) return true;
+            const settledContext = getSavedGalleryContext(document);
+            const matches = (settledContext?.entries || [])
+                .map((entry, index) => ({ entry, index }))
+                .filter(({ entry }) => entry.sourceIdentity === targetIdentity);
+            if (matches.length > 1) {
+                await this.failRun(
+                    `Canary target ${targetLabel} is ambiguous in Saved.`,
+                    'canary_target_ambiguous'
+                );
+                return true;
+            }
+            if (matches.length === 0) continue;
+
+            const { entry, index } = matches[0];
+            const actualMediaType = getSavedGalleryEntryMediaType(entry);
+            if (targetMediaType && !actualMediaType) {
+                await this.failRun(
+                    `Could not verify whether canary target ${targetLabel} is an image or video.`,
+                    'canary_target_type_unknown'
+                );
+                return true;
+            }
+            if (targetMediaType && actualMediaType !== targetMediaType) {
+                await this.failRun(
+                    `Canary target ${targetLabel} is ${actualMediaType}, expected ${targetMediaType}.`,
+                    'canary_target_type_mismatch'
+                );
+                return true;
+            }
+
+            const cleanId = this.getCleanId(entry.sourceUrl);
+            if (!cleanId) {
+                await this.failRun(
+                    `Could not identify canary target ${targetLabel} in Saved.`,
+                    'canary_target_seek_failed'
+                );
+                return true;
+            }
+            const expectedNextIdentity = settledContext.entries[index + 1]?.sourceIdentity || null;
+            this.log(`new item: ...${cleanId.slice(-6)}`, 'success');
+            await this.processItem(
+                entry.image,
+                cleanId,
+                runToken,
+                this.runEpoch,
+                expectedNextIdentity
+            );
+            return true;
+        }
+
+        await this.failRun(
+            `Could not return to canary target ${targetLabel} in Saved.`,
+            'canary_target_seek_failed'
+        );
+        return true;
+    }
+
     async queryRunDurabilitySnapshot(runToken = this.runToken) {
         const runEpoch = this.runEpoch;
         const kind = this.backupMode ? 'r2_backup' : 'sync';
@@ -6999,6 +7134,7 @@ class GrokScraper {
         const canaryTargetLabel = canaryTargetIdentity
             ? `...${canaryTargetIdentity.slice(-8)}`
             : '';
+        let canaryTargetScrollTop = null;
         let exhausted = false;
         let scanLimitReached = false;
 
@@ -7026,8 +7162,26 @@ class GrokScraper {
             missingContextRetries = 0;
             const semanticItems = galleryContext.entries;
             const scan = recordSavedScan(scanLedger, {
-                identities: semanticItems.map((entry) => entry.sourceIdentity || entry.sourceUrl)
+                identities: semanticItems.map((entry) => entry.sourceIdentity || entry.sourceUrl),
+                occurrenceElements: semanticItems.map((entry) => entry.card)
             });
+
+            if (canaryTargetIdentity) {
+                const targetMatches = semanticItems.filter(
+                    (entry) => entry.sourceIdentity === canaryTargetIdentity
+                );
+                const targetOccurrences = scanLedger.identityOccurrenceCounts.get(canaryTargetIdentity) || 0;
+                if (targetMatches.length > 1 || targetOccurrences > 1) {
+                    await this.failRun(
+                        `Canary target ${canaryTargetLabel} is ambiguous in Saved.`,
+                        'canary_target_ambiguous'
+                    );
+                    return;
+                }
+                if (targetMatches.length === 1 && canaryTargetScrollTop === null) {
+                    canaryTargetScrollTop = this.getScrollerSnapshot(galleryContext.scroller).scrollTop;
+                }
+            }
 
             console.log(`Scanning ${semanticItems.length} items...`);
             if (scrollAttempts % 5 === 0) this.log(`Scanning... (${semanticItems.length} items visible)`);
@@ -7036,39 +7190,7 @@ class GrokScraper {
             let targetItem = null;
             let expectedNextIdentity = null;
             let targetCleanId = null;
-            if (canaryTargetIdentity) {
-                const targetMatches = semanticItems
-                    .map((entry, index) => ({ entry, index }))
-                    .filter(({ entry }) => entry.sourceIdentity === canaryTargetIdentity);
-                if (targetMatches.length > 1) {
-                    await this.failRun(
-                        `Canary target ${canaryTargetLabel} is ambiguous in Saved.`,
-                        'canary_target_ambiguous'
-                    );
-                    return;
-                }
-                if (targetMatches.length === 1) {
-                    const { entry, index } = targetMatches[0];
-                    const actualMediaType = getSavedGalleryEntryMediaType(entry);
-                    if (canaryTargetMediaType && !actualMediaType) {
-                        await this.failRun(
-                            `Could not verify whether canary target ${canaryTargetLabel} is an image or video.`,
-                            'canary_target_type_unknown'
-                        );
-                        return;
-                    }
-                    if (canaryTargetMediaType && actualMediaType !== canaryTargetMediaType) {
-                        await this.failRun(
-                            `Canary target ${canaryTargetLabel} is ${actualMediaType}, expected ${canaryTargetMediaType}.`,
-                            'canary_target_type_mismatch'
-                        );
-                        return;
-                    }
-                    targetCleanId = this.getCleanId(entry.sourceUrl);
-                    targetItem = entry.image;
-                    expectedNextIdentity = semanticItems[index + 1]?.sourceIdentity || null;
-                }
-            } else {
+            if (!canaryTargetIdentity) {
                 for (let i = 0; i < semanticItems.length; i++) {
                     const entry = semanticItems[i];
                     const cleanId = this.getCleanId(entry.sourceUrl);
@@ -7137,8 +7259,25 @@ class GrokScraper {
             const afterSignature = this.getGalleryCardSignature();
             const afterContext = getSavedGalleryContext(document);
             const afterScan = recordSavedScan(scanLedger, {
-                identities: (afterContext?.entries || []).map((entry) => entry.sourceIdentity || entry.sourceUrl)
+                identities: (afterContext?.entries || []).map((entry) => entry.sourceIdentity || entry.sourceUrl),
+                occurrenceElements: (afterContext?.entries || []).map((entry) => entry.card)
             });
+            if (canaryTargetIdentity) {
+                const afterTargetMatches = (afterContext?.entries || []).filter(
+                    (entry) => entry.sourceIdentity === canaryTargetIdentity
+                );
+                const targetOccurrences = scanLedger.identityOccurrenceCounts.get(canaryTargetIdentity) || 0;
+                if (afterTargetMatches.length > 1 || targetOccurrences > 1) {
+                    await this.failRun(
+                        `Canary target ${canaryTargetLabel} is ambiguous in Saved.`,
+                        'canary_target_ambiguous'
+                    );
+                    return;
+                }
+                if (afterTargetMatches.length === 1 && canaryTargetScrollTop === null) {
+                    canaryTargetScrollTop = this.getScrollerSnapshot(afterContext.scroller).scrollTop;
+                }
+            }
             const savedSurfaceRoot = afterContext?.savedSurfaceRoot || null;
             scrollAttempts++;
             const outcome = resolveBackupScrollAttempt({
@@ -7174,16 +7313,30 @@ class GrokScraper {
             if (!this.isRunActive(runToken)) return;
             if (!await this.ensureSavedGalleryAllScope(runToken)) return;
             if (canaryTargetIdentity) {
-                if (exhausted) {
-                    await this.failRun(
-                        `Canary target ${canaryTargetLabel} was not found before Saved was exhausted.`,
-                        'canary_target_not_found'
-                    );
-                } else {
+                const targetOccurrences = scanLedger.identityOccurrenceCounts.get(canaryTargetIdentity) || 0;
+                if (!exhausted) {
                     await this.failRun(
                         `Canary target ${canaryTargetLabel} was not found before the Saved scan safety limit.`,
                         'canary_target_scan_limit'
                     );
+                } else if (targetOccurrences === 0) {
+                    await this.failRun(
+                        `Canary target ${canaryTargetLabel} was not found before Saved was exhausted.`,
+                        'canary_target_not_found'
+                    );
+                } else if (targetOccurrences > 1) {
+                    await this.failRun(
+                        `Canary target ${canaryTargetLabel} is ambiguous in Saved.`,
+                        'canary_target_ambiguous'
+                    );
+                } else {
+                    await this.processUniqueCanaryTarget({
+                        runToken,
+                        targetIdentity: canaryTargetIdentity,
+                        targetMediaType: canaryTargetMediaType,
+                        targetLabel: canaryTargetLabel,
+                        targetScrollTop: canaryTargetScrollTop
+                    });
                 }
                 return;
             }

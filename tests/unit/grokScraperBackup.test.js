@@ -3530,6 +3530,164 @@ describe('acceptance cloud isolation', () => {
         expect(JSON.stringify(background.getCloudSyncQueueForTest())).toBe(before);
     });
 
+    test('config transition revokes a blocked production drain before later requests or queue mutations', async () => {
+        const harness = createDurableBackgroundHarness({
+            cloudConfig: cloudConfig('grok-powertools/v1')
+        });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        const first = { ...mediaQueueItem('stale-first', null, 2), queueRevision: 31 };
+        const second = { ...mediaQueueItem('stale-second', null, 0), queueRevision: 32 };
+        const metadata = { ...metadataQueueItem('processedIds', null), queueRevision: 33 };
+        const initialQueue = [first, second, metadata];
+        background.setCloudSyncQueueForTest(initialQueue);
+        const before = JSON.stringify(initialQueue);
+        const blockedUpload = createDeferred();
+        const upload = jest.fn()
+            .mockImplementationOnce(() => blockedUpload.promise)
+            .mockResolvedValue({ status: 'already_present', bytes: 10 });
+        global.fetch = jest.fn(() => Promise.resolve({
+            ok: true,
+            json: async () => ({ ok: true })
+        }));
+        harness.chromeApi.alarms.create.mockClear();
+
+        const drain = background.processCloudQueue('manual', {
+            force: true,
+            uploadMediaQueueItem: upload
+        });
+        await waitForAssertion(() => expect(upload).toHaveBeenCalledTimes(1));
+
+        await harness.chromeApi.storage.local.set({ cloudConfig: cloudConfig() });
+        blockedUpload.reject(new Error('blocked production upload failed after config transition'));
+        await drain;
+        await background.processCloudQueue('manual', {
+            force: true,
+            uploadMediaQueueItem: upload
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(JSON.stringify(background.getCloudSyncQueueForTest())).toBe(before);
+        expect(harness.chromeApi.alarms.create).not.toHaveBeenCalled();
+    });
+
+    test('acceptance drain preserves wrong-run, wrong-prefix, and empty-correlation media records', async () => {
+        const harness = createDurableBackgroundHarness({ cloudConfig: cloudConfig() });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        const protectedItems = [
+            {
+                ...mediaQueueItem('wrong-run', {
+                    runId: 'run-20260817-other',
+                    correlationId: 'corr-wrong-run',
+                    keyPrefix: 'acceptance/run-20260817-other'
+                }, 2),
+                queueRevision: 41
+            },
+            {
+                ...mediaQueueItem('wrong-prefix', {
+                    runId: acceptanceRunId,
+                    correlationId: 'corr-wrong-prefix',
+                    keyPrefix: 'acceptance/run-20260817-other-prefix'
+                }, 3),
+                queueRevision: 42
+            },
+            {
+                ...mediaQueueItem('empty-correlation', {
+                    runId: acceptanceRunId,
+                    correlationId: '',
+                    keyPrefix: acceptanceKeyPrefix
+                }, 4),
+                queueRevision: 43
+            }
+        ];
+        const matching = {
+            ...mediaQueueItem('matching-acceptance', {
+                runId: acceptanceRunId,
+                correlationId: 'corr-matching',
+                keyPrefix: acceptanceKeyPrefix
+            }),
+            queueRevision: 44
+        };
+        background.setCloudSyncQueueForTest([...protectedItems, matching]);
+        const before = protectedItems.map((item) => JSON.stringify(item));
+        const upload = jest.fn().mockResolvedValue({ status: 'already_present', bytes: 10 });
+
+        await background.processCloudQueue('manual', {
+            force: true,
+            uploadMediaQueueItem: upload
+        });
+
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(upload.mock.calls[0][1].id).toBe('matching-acceptance');
+        expect(background.getCloudSyncQueueForTest().map((item) => JSON.stringify(item))).toEqual(before);
+    });
+
+    test.each([
+        ['production', null, true],
+        ['legacy', undefined, false],
+        ['wrong-run', {
+            runId: 'run-20260817-other',
+            correlationId: 'corr-wrong-run',
+            keyPrefix: 'acceptance/run-20260817-other'
+        }, true],
+        ['wrong-prefix', {
+            runId: acceptanceRunId,
+            correlationId: 'corr-wrong-prefix',
+            keyPrefix: 'acceptance/run-20260817-other-prefix'
+        }, true]
+    ])('acceptance enqueue preserves a colliding %s queue record byte-for-byte', async (
+        label,
+        existingAcceptance,
+        includeModernFields
+    ) => {
+        const sourceUrl = 'https://imagine-public.x.ai/media/37000000-0000-4000-8000-000000000001.jpg';
+        const finalPath = 'GrokVault/test/collision.jpg';
+        const baseDedupeKey = CloudSyncUtils.buildMediaDedupeKey({
+            fallbackUserId: 'test-user',
+            sourceUrl,
+            finalPath,
+            contentType: 'image/jpeg'
+        });
+        const existing = {
+            id: `${label}-collision`,
+            dedupeKey: baseDedupeKey,
+            type: 'media',
+            sourceUrl,
+            finalPath: `GrokVault/legacy/${label}.jpg`,
+            objectKey: `grok-powertools/v1/users/test/media/${label}.jpg`,
+            assetId: '37000000-0000-4000-8000-000000000001',
+            sourceUrlHash: `source-${label}`,
+            contentType: 'image/jpeg',
+            promptText: `preserve-${label}`,
+            attempts: 5,
+            lastError: `existing-${label}-error`,
+            queueRevision: 71,
+            ...(includeModernFields ? { assetIdentityKind: 'grok_media_id' } : {}),
+            ...(existingAcceptance !== undefined ? { acceptance: existingAcceptance } : {})
+        };
+        const harness = createDurableBackgroundHarness({
+            cloudConfig: cloudConfig(),
+            activeGrokUserId: 'test-user'
+        });
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        background.setCloudSyncQueueForTest([existing]);
+        const before = JSON.stringify(existing);
+        const upload = jest.fn().mockResolvedValue({ status: 'already_present', bytes: 10 });
+
+        const queued = await background.enqueueCloudMediaUpload(sourceUrl, finalPath, 'new acceptance prompt', null, {
+            uploadMediaQueueItem: upload
+        });
+
+        expect(queued).toBe(true);
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(background.getCloudSyncQueueForTest()).toHaveLength(1);
+        expect(JSON.stringify(background.getCloudSyncQueueForTest()[0])).toBe(before);
+    });
+
     test('processedIds changes do not enqueue or transmit canonical metadata in acceptance mode', async () => {
         const harness = createDurableBackgroundHarness({
             cloudConfig: cloudConfig(),

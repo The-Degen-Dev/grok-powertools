@@ -285,6 +285,8 @@ let cloudSyncQueue = [];
 let cloudQueueMutationQueue = Promise.resolve();
 let cloudQueueRevision = 0;
 let cloudQueueDrainPromise = null;
+let cloudConfigEpoch = 0;
+let activeCloudQueueDrainContext = null;
 let cloudStatePersistenceRevision = 0;
 let scrapeCompletionTxn = null;
 let scrapeCompletionTransition = null;
@@ -501,6 +503,77 @@ function cloudQueueItemMatchesAcceptanceConfig(item, config) {
 function cloudQueueItemIsEligibleForConfig(item, config) {
     if (!CloudSync.isAcceptanceCloudConfig(config)) return true;
     return cloudQueueItemMatchesAcceptanceConfig(item, config);
+}
+
+function getCloudConfigFingerprint(config) {
+    return JSON.stringify(CloudSync.normalizeCloudConfig(config));
+}
+
+function createCloudConfigRevokedError() {
+    const error = new Error('Cloud configuration changed during queue processing.');
+    error.code = 'cloud_config_revoked';
+    return error;
+}
+
+function isCloudConfigRevokedError(error) {
+    return error?.code === 'cloud_config_revoked';
+}
+
+function isCloudQueueAuthorityRevokedError(error) {
+    return isCloudConfigRevokedError(error) || isScrapeAuthorityRevokedError(error);
+}
+
+async function assertCloudConfigSnapshotCurrent(snapshot, item = null) {
+    if (!snapshot
+        || snapshot.revoked
+        || snapshot.epoch !== cloudConfigEpoch) {
+        throw createCloudConfigRevokedError();
+    }
+    if (snapshot.revoked
+        || snapshot.epoch !== cloudConfigEpoch
+        || getCloudConfigFingerprint(snapshot.config) !== snapshot.configFingerprint
+        || (item && !cloudQueueItemIsEligibleForConfig(item, snapshot.config))) {
+        throw createCloudConfigRevokedError();
+    }
+    return snapshot.config;
+}
+
+function createCloudConfigSnapshotGuard(snapshot, item = null) {
+    const guard = () => assertCloudConfigSnapshotCurrent(snapshot, item);
+    guard.signal = snapshot.abortController?.signal || null;
+    return guard;
+}
+
+function combineCloudQueueAuthorityGuards(...guards) {
+    const activeGuards = guards.filter(Boolean);
+    if (activeGuards.length === 0) return null;
+    const combined = async () => {
+        for (const guard of activeGuards) await guard();
+    };
+    const signals = activeGuards.map((guard) => guard.signal).filter(Boolean);
+    if (signals.length === 1) {
+        combined.signal = signals[0];
+    } else if (signals.length > 1) {
+        const controller = new AbortController();
+        for (const signal of signals) {
+            if (signal.aborted) controller.abort();
+            else signal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
+        combined.signal = controller.signal;
+    }
+    return combined;
+}
+
+function revokeActiveCloudQueueDrain() {
+    if (!activeCloudQueueDrainContext) return;
+    activeCloudQueueDrainContext.revoked = true;
+    activeCloudQueueDrainContext.abortController?.abort();
+}
+
+function buildCloudMediaQueueDedupeKey(baseDedupeKey, config) {
+    const acceptanceConfig = CloudSync.getAcceptanceCloudConfigContext(config);
+    if (!acceptanceConfig) return baseDedupeKey;
+    return `${baseDedupeKey}:acceptance:${encodeURIComponent(acceptanceConfig.runId)}:${encodeURIComponent(acceptanceConfig.keyPrefix)}`;
 }
 
 function buildR2BackupInitMessageForConfig(request = {}, config = null) {
@@ -726,7 +799,8 @@ async function clearCloudUiStatus() {
     await persistCloudState();
 }
 
-async function scheduleCloudRetryAlarm(configOverride = null) {
+async function scheduleCloudRetryAlarm(configOverride = null, assertConfigCurrent = null) {
+    if (assertConfigCurrent) await assertConfigCurrent();
     const config = configOverride || await getCloudConfig();
     const acceptanceMode = CloudSync.isAcceptanceCloudConfig(config);
     const retryableItems = cloudSyncQueue.filter((item) => (
@@ -754,7 +828,9 @@ async function scheduleCloudRetryAlarm(configOverride = null) {
     ));
 
     if (retryableItems.length === 0 && retryableDownloads.length === 0) {
+        if (assertConfigCurrent) await assertConfigCurrent();
         await chrome.alarms.clear(CLOUD_ALARM_NAME);
+        if (assertConfigCurrent) await assertConfigCurrent();
         cloudSyncState.retryScheduledAt = null;
         await persistCloudState();
         return;
@@ -771,9 +847,12 @@ async function scheduleCloudRetryAlarm(configOverride = null) {
     const minAttempt = Math.min(minQueueAttempt, minDownloadAttempt);
 
     const delayInMinutes = CloudSync.getRetryDelayMinutes(minAttempt);
+    if (assertConfigCurrent) await assertConfigCurrent();
     await chrome.alarms.clear(CLOUD_ALARM_NAME);
+    if (assertConfigCurrent) await assertConfigCurrent();
     chrome.alarms.create(CLOUD_ALARM_NAME, { delayInMinutes });
 
+    if (assertConfigCurrent) await assertConfigCurrent();
     cloudSyncState.retryScheduledAt = new Date(Date.now() + delayInMinutes * 60 * 1000).toISOString();
     await persistCloudState();
 }
@@ -815,8 +894,9 @@ function cloudQueueItemIsCurrent(item) {
     )));
 }
 
-function removeCloudQueueItemRevision(item) {
+function removeCloudQueueItemRevision(item, assertAuthorized = null) {
     return enqueueCloudQueueMutation(async () => {
+        if (assertAuthorized) await assertAuthorized();
         const index = cloudSyncQueue.findIndex((candidate) => (
             candidate.dedupeKey === item.dedupeKey
             && candidate.queueRevision === item.queueRevision
@@ -828,8 +908,9 @@ function removeCloudQueueItemRevision(item) {
     });
 }
 
-function updateCloudQueueItemRevision(item, update) {
+function updateCloudQueueItemRevision(item, update, assertAuthorized = null) {
     return enqueueCloudQueueMutation(async () => {
+        if (assertAuthorized) await assertAuthorized();
         const index = cloudSyncQueue.findIndex((candidate) => (
             candidate.dedupeKey === item.dedupeKey
             && candidate.queueRevision === item.queueRevision
@@ -877,7 +958,7 @@ function hasBlockedScrapeCompletionTransfer() {
         || Boolean(scrapeCompletionTransition && scrapeCompletionTransition.status !== 'committed');
 }
 
-async function enqueueCloudItem(queueItem, dedupeKey, assertAuthorized = null) {
+async function enqueueCloudItem(queueItem, dedupeKey, assertAuthorized = null, options = {}) {
     const key = dedupeKey || queueItem.id;
     if (assertAuthorized) await assertAuthorized();
     let receipt = null;
@@ -885,8 +966,19 @@ async function enqueueCloudItem(queueItem, dedupeKey, assertAuthorized = null) {
         receipt = await enqueueCloudQueueMutation(async () => {
             const existingIndex = cloudSyncQueue.findIndex((item) => item.dedupeKey === key);
             const existing = existingIndex >= 0 ? cloudSyncQueue[existingIndex] : null;
+            if (existing
+                && options.acceptanceConfig
+                && !cloudQueueItemMatchesAcceptanceConfig(existing, options.acceptanceConfig)) {
+                return {
+                    accepted: false,
+                    dedupeKey: key,
+                    previousItem: null,
+                    queueRevision: null
+                };
+            }
             const queueRevision = ++cloudQueueRevision;
             const nextReceipt = {
+                accepted: true,
                 dedupeKey: key,
                 previousItem: existing ? { ...existing } : null,
                 queueRevision
@@ -948,13 +1040,35 @@ async function enqueueCloudItem(queueItem, dedupeKey, assertAuthorized = null) {
 }
 
 async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', acceptance = null, processOptions = {}) {
+    const configEpoch = cloudConfigEpoch;
     const config = await getCloudConfig();
-    if (processOptions.assertAuthorized) await processOptions.assertAuthorized();
+    const configSnapshot = {
+        epoch: configEpoch,
+        config,
+        configFingerprint: getCloudConfigFingerprint(config),
+        revoked: false,
+        abortController: new AbortController()
+    };
+    const enqueueAuthority = combineCloudQueueAuthorityGuards(
+        createCloudConfigSnapshotGuard(configSnapshot),
+        processOptions.assertAuthorized || null
+    );
+    if (enqueueAuthority) await enqueueAuthority();
     if (!CloudSync.isCloudEnabled(config)) return false;
-    const acceptanceContext = acceptance || buildAcceptanceContextFromCloudConfig(config, 'queue-media');
+    let acceptanceContext = acceptance || buildAcceptanceContextFromCloudConfig(config, 'queue-media');
+    const acceptanceConfig = CloudSync.getAcceptanceCloudConfigContext(config);
+    if (acceptanceConfig) {
+        try {
+            acceptanceContext = CloudSync.normalizeAcceptanceContext(acceptanceContext);
+        } catch {
+            return false;
+        }
+        if (acceptanceContext.runId !== acceptanceConfig.runId
+            || acceptanceContext.keyPrefix !== acceptanceConfig.keyPrefix) return false;
+    }
 
     const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
-    if (processOptions.assertAuthorized) await processOptions.assertAuthorized();
+    if (enqueueAuthority) await enqueueAuthority();
     const activeUserId = userInfo.activeGrokUserId || 'Shared_Account';
 
     const objectKey = CloudSync.buildMediaObjectKeyForUpload({
@@ -993,20 +1107,31 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', ac
 
     let queueReceipt = null;
     try {
-        queueReceipt = await enqueueCloudItem(queueItem, CloudSync.buildMediaDedupeKey({
+        const baseDedupeKey = CloudSync.buildMediaDedupeKey({
             fallbackUserId: activeUserId,
             sourceUrl,
             finalPath,
             contentType: queueItem.contentType
-        }), processOptions.assertAuthorized || null);
-        if (processOptions.assertAuthorized) await processOptions.assertAuthorized();
+        });
+        queueReceipt = await enqueueCloudItem(
+            queueItem,
+            buildCloudMediaQueueDedupeKey(baseDedupeKey, config),
+            enqueueAuthority,
+            { acceptanceConfig }
+        );
+        if (!queueReceipt?.accepted) return false;
+        if (enqueueAuthority) await enqueueAuthority();
         await processCloudQueue('media-enqueued', {
             ...processOptions,
             waitForExisting: false
         });
     } catch (e) {
+        if (isCloudConfigRevokedError(e)) {
+            if (queueReceipt?.accepted) await rollbackCloudQueueItem(queueReceipt);
+            return false;
+        }
         if (isScrapeAuthorityRevokedError(e)) {
-            if (queueReceipt) await rollbackCloudQueueItem(queueReceipt);
+            if (queueReceipt?.accepted) await rollbackCloudQueueItem(queueReceipt);
             throw e;
         }
         console.error('[CloudQueue]', formatRedactedMediaLog(
@@ -1299,6 +1424,7 @@ async function fetchWithScrapeAuthority(url, options = {}, assertAuthorized = nu
         if (assertAuthorized) await assertAuthorized();
         return response;
     } catch (error) {
+        if (signal?.aborted && assertAuthorized) await assertAuthorized();
         if (signal?.aborted) throw createScrapeAuthorityRevokedError();
         throw error;
     }
@@ -1456,7 +1582,7 @@ async function uploadPromptSidecar(config, descriptor, assertAuthorized = null) 
         if (assertAuthorized) await assertAuthorized();
         console.log('[CloudQueue]', formatRedactedMediaLog('sidecar_uploaded', descriptor.assetId, { bytes: sidecarBytes }));
     } catch (error) {
-        if (isScrapeAuthorityRevokedError(error)) throw error;
+        if (isCloudQueueAuthorityRevokedError(error)) throw error;
         console.warn('[CloudQueue]', formatRedactedMediaLog('sidecar_failed', descriptor.assetId));
     }
 }
@@ -1481,7 +1607,7 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAutho
         }, assertAuthorized);
         if (assertAuthorized) await assertAuthorized();
     } catch (e) {
-        if (isScrapeAuthorityRevokedError(e)) throw e;
+        if (isCloudQueueAuthorityRevokedError(e)) throw e;
         throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
     }
 
@@ -1525,7 +1651,7 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAutho
         presigned = await requestPresignedUrl(config, descriptor, blob.size, assertAuthorized);
         if (assertAuthorized) await assertAuthorized();
     } catch (e) {
-        if (isScrapeAuthorityRevokedError(e)) throw e;
+        if (isCloudQueueAuthorityRevokedError(e)) throw e;
         throw new Error(`[${CloudSync.UPLOAD_STAGES.presign}] ${e.message}`);
     }
 
@@ -1548,7 +1674,7 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAutho
             throw new Error(`HTTP ${uploadResponse.status}: ${detail}`);
         }
     } catch (e) {
-        if (isScrapeAuthorityRevokedError(e)) throw e;
+        if (isCloudQueueAuthorityRevokedError(e)) throw e;
         if (e.message.startsWith(`[${CloudSync.UPLOAD_STAGES.r2Put}]`)) throw e;
         throw new Error(`[${CloudSync.UPLOAD_STAGES.r2Put}] ${e.message}`);
     }
@@ -1619,7 +1745,7 @@ async function uploadMediaQueueItem(config, queueItem, assertAuthorized = null) 
         contentType = mediaResponse.headers.get('content-type') || queueItem.contentType || 'application/octet-stream';
         queueItem.contentType = contentType;
     } catch (e) {
-        if (isScrapeAuthorityRevokedError(e)) throw e;
+        if (isCloudQueueAuthorityRevokedError(e)) throw e;
         const hint = !CloudSync.isValidMediaSourceUrl(queueItem.sourceUrl)
             ? ' (source host not in known media hosts)'
             : '';
@@ -1632,8 +1758,8 @@ async function uploadMediaQueueItem(config, queueItem, assertAuthorized = null) 
     }, blob, assertAuthorized);
 }
 
-async function uploadMetadataQueueItem(config, queueItem) {
-    const response = await fetch(`${config.workerUrl}/v1/metadata/snapshot`, {
+async function uploadMetadataQueueItem(config, queueItem, assertAuthorized = null) {
+    const response = await fetchWithScrapeAuthority(`${config.workerUrl}/v1/metadata/snapshot`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1645,7 +1771,7 @@ async function uploadMetadataQueueItem(config, queueItem) {
             kind: queueItem.kind,
             payload: queueItem.payload
         })
-    });
+    }, assertAuthorized);
 
     if (!response.ok) {
         const detail = await response.text().catch(() => 'Unknown metadata snapshot error');
@@ -1655,15 +1781,25 @@ async function uploadMetadataQueueItem(config, queueItem) {
     return response.json();
 }
 
-async function drainCloudQueue(reason = 'auto', options = {}) {
+async function drainCloudQueue(reason = 'auto', options = {}, drainContext = null) {
+    if (drainContext?.revoked || drainContext?.epoch !== cloudConfigEpoch) return;
     if (hasBlockedScrapeCompletionTransfer()) {
         await recoverPreparedScrapeCompletionTransfer();
         if (hasBlockedScrapeCompletionTransfer()) return;
     }
     const config = await getCloudConfig();
+    if (drainContext) {
+        drainContext.config = config;
+        drainContext.configFingerprint = getCloudConfigFingerprint(config);
+        if (drainContext.revoked || drainContext.epoch !== cloudConfigEpoch) return;
+    }
+    const drainConfigGuard = drainContext
+        ? createCloudConfigSnapshotGuard(drainContext)
+        : null;
+    if (drainConfigGuard) await drainConfigGuard();
     if (options.assertAuthorized) await options.assertAuthorized();
     if (!CloudSync.isCloudEnabled(config)) {
-        await scheduleCloudRetryAlarm();
+        await scheduleCloudRetryAlarm(config, drainConfigGuard);
         return;
     }
 
@@ -1689,9 +1825,14 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
     const queueSnapshot = (await snapshotCloudQueueItems())
         .filter((item) => cloudQueueItemIsEligibleForConfig(item, config));
     let authorityError = null;
+    let configRevoked = false;
 
     try {
         for (const item of queueSnapshot) {
+            const itemConfigGuard = drainContext
+                ? createCloudConfigSnapshotGuard(drainContext, item)
+                : null;
+            if (itemConfigGuard) await itemConfigGuard();
             if (!await cloudQueueItemIsCurrent(item)) continue;
             const itemLease = normalizeScrapeLease(item.scrapeLease);
             const processLease = normalizeScrapeLease(options.scrapeLease);
@@ -1702,11 +1843,15 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
             const itemAbortController = itemLease && !usesProcessAuthority
                 ? registerScrapeTransferAbortController(itemLease)
                 : null;
-            const itemAssertAuthorized = itemLease
+            const scrapeAssertAuthorized = itemLease
                 ? (usesProcessAuthority
                     ? options.assertAuthorized
                     : createScrapeTransferAuthorityGuard(itemLease, itemAbortController.signal))
                 : (options.assertAuthorized || null);
+            const itemAssertAuthorized = combineCloudQueueAuthorityGuards(
+                itemConfigGuard,
+                scrapeAssertAuthorized
+            );
             const attempts = item.attempts || 0;
             try {
                 if (!force && attempts >= CloudSync.MAX_RETRY_ATTEMPTS) {
@@ -1715,7 +1860,11 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
                             ? `Cloud sync ${formatRedactedMediaLog('permanently_failed', item.backupProcessedId || item.assetId, { count: attempts })}`
                             : `Cloud sync permanently failed (${item.type}): ${item.kind} after ${attempts} attempts`;
                         log(message, 'error');
-                        await updateCloudQueueItemRevision(item, { _permanentFailLogged: true });
+                        await updateCloudQueueItemRevision(
+                            item,
+                            { _permanentFailLogged: true },
+                            itemConfigGuard
+                        );
                     }
                     continue;
                 }
@@ -1737,7 +1886,7 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
                         result.status === 'conflict_uploaded' ? 'warning' : 'success'
                     );
                 } else if (item.type === 'metadata') {
-                    const result = await uploadMetadataQueueItem(config, item);
+                    const result = await uploadMetadataQueueItem(config, item, itemAssertAuthorized);
                     if (result && result.skipped) {
                         cloudSyncState.r2MetadataSnapshotsSkippedUnchanged += 1;
                         log(`Cloud metadata unchanged: ${item.kind}`, 'info');
@@ -1748,13 +1897,26 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
                     throw new Error(`Unknown queue item type: ${item.type}`);
                 }
 
+                if (itemAssertAuthorized) await itemAssertAuthorized();
                 clearCloudError();
                 cloudSyncState.lastSyncAt = new Date().toISOString();
-                await removeCloudQueueItemRevision(item);
+                await removeCloudQueueItemRevision(item, itemAssertAuthorized);
             } catch (e) {
+                if (isCloudConfigRevokedError(e)) {
+                    configRevoked = true;
+                    break;
+                }
                 if (isScrapeAuthorityRevokedError(e)) {
                     if (itemLease) {
-                        await removeCloudQueueItemRevision(item);
+                        try {
+                            await removeCloudQueueItemRevision(item, itemConfigGuard);
+                        } catch (removeError) {
+                            if (isCloudConfigRevokedError(removeError)) {
+                                configRevoked = true;
+                                break;
+                            }
+                            throw removeError;
+                        }
                         continue;
                     }
                     authorityError = e;
@@ -1777,11 +1939,19 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
                         'queue_upload_failed'
                     )
                     : e.message;
-                await updateCloudQueueItemRevision(item, {
-                    attempts: nextAttempts,
-                    lastError: redactedError,
-                    lastAttemptAt: Date.now()
-                });
+                try {
+                    await updateCloudQueueItemRevision(item, {
+                        attempts: nextAttempts,
+                        lastError: redactedError,
+                        lastAttemptAt: Date.now()
+                    }, itemConfigGuard);
+                } catch (updateError) {
+                    if (isCloudConfigRevokedError(updateError)) {
+                        configRevoked = true;
+                        break;
+                    }
+                    throw updateError;
+                }
                 updateCloudError(redactedError);
                 const message = item.type === 'media'
                     ? `Cloud sync ${formatRedactedMediaLog(
@@ -1800,16 +1970,30 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
         await persistCloudState();
     }
 
+    if (configRevoked) return;
     if (authorityError) throw authorityError;
+
+    if (drainConfigGuard) {
+        try {
+            await drainConfigGuard();
+        } catch (error) {
+            if (isCloudConfigRevokedError(error)) return;
+            throw error;
+        }
+    }
 
     // If new items were queued while we were processing, drain immediately
     if (cloudSyncQueue.some((item) => (
         cloudQueueItemIsEligibleForConfig(item, config)
         && (item.attempts || 0) === 0
     ))) {
-        setTimeout(() => processCloudQueue('drain'), 100);
+        const followUpEpoch = drainContext?.epoch ?? cloudConfigEpoch;
+        setTimeout(() => {
+            if (followUpEpoch !== cloudConfigEpoch) return;
+            processCloudQueue('drain');
+        }, 100);
     } else {
-        await scheduleCloudRetryAlarm(config);
+        await scheduleCloudRetryAlarm(config, drainConfigGuard);
     }
 
     if (reason === 'manual') {
@@ -1819,13 +2003,38 @@ async function drainCloudQueue(reason = 'auto', options = {}) {
 
 function processCloudQueue(reason = 'auto', options = {}) {
     if (cloudQueueDrainPromise) {
+        const requestedEpoch = cloudConfigEpoch;
+        if (activeCloudQueueDrainContext?.epoch !== requestedEpoch) {
+            const activeDrain = cloudQueueDrainPromise;
+            const restart = activeDrain.then(
+                () => {
+                    if (requestedEpoch !== cloudConfigEpoch) return;
+                    return processCloudQueue(reason, options);
+                },
+                (error) => {
+                    if (requestedEpoch !== cloudConfigEpoch) return;
+                    if (!isCloudConfigRevokedError(error)) throw error;
+                    return processCloudQueue(reason, options);
+                }
+            );
+            return options.waitForExisting === false ? Promise.resolve() : restart;
+        }
         return options.waitForExisting === false ? Promise.resolve() : cloudQueueDrainPromise;
     }
 
-    const drain = drainCloudQueue(reason, options);
+    const drainContext = {
+        epoch: cloudConfigEpoch,
+        config: null,
+        configFingerprint: null,
+        revoked: false,
+        abortController: new AbortController()
+    };
+    activeCloudQueueDrainContext = drainContext;
+    const drain = drainCloudQueue(reason, options, drainContext);
     cloudQueueDrainPromise = drain;
     drain.finally(() => {
         if (cloudQueueDrainPromise === drain) cloudQueueDrainPromise = null;
+        if (activeCloudQueueDrainContext === drainContext) activeCloudQueueDrainContext = null;
     }).catch(() => {});
     return drain;
 }
@@ -2152,8 +2361,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     if (changes[CloudSync.STORAGE_KEYS.cloudConfig]) {
         const oldNormalized = CloudSync.normalizeCloudConfig(changes[CloudSync.STORAGE_KEYS.cloudConfig].oldValue);
         const newNormalized = CloudSync.normalizeCloudConfig(changes[CloudSync.STORAGE_KEYS.cloudConfig].newValue);
+        const configChanged = JSON.stringify(oldNormalized) !== JSON.stringify(newNormalized);
 
-        if (JSON.stringify(oldNormalized) !== JSON.stringify(newNormalized)) {
+        if (configChanged) {
+            cloudConfigEpoch += 1;
+            revokeActiveCloudQueueDrain();
             chrome.storage.local.set({ [CloudSync.STORAGE_KEYS.cloudConfig]: newNormalized }).catch(() => { });
         }
 
