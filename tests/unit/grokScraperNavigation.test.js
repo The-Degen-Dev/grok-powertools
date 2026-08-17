@@ -4760,7 +4760,7 @@ describe('background scrape lease authority', () => {
         ))).toHaveLength(1);
     });
 
-    test('concurrent workers from one snapshot deterministically retain one same-tuple run-state writer across restarts', async () => {
+    test('distinct writer claimants with the same full authority fail closed across restart', async () => {
         const lease = createLeaseRecord({ token: 'concurrent-writer-claims' });
         const initialLocalState = {
             scraperState: 'running',
@@ -4782,14 +4782,16 @@ describe('background scrape lease authority', () => {
             }
             return baseGet(keys);
         });
-        const writerIds = [
-            '00000000-0000-4000-8000-000000000001',
-            '00000000-0000-4000-8000-000000000002',
-            '00000000-0000-4000-8000-000000000003',
-            '00000000-0000-4000-8000-000000000004'
+        const generatedIds = [
+            'writer-authority-collision',
+            'claim-identity-a',
+            'writer-authority-collision',
+            'claim-identity-b',
+            'restart-writer-c',
+            'restart-claim-c'
         ];
         const randomUuid = jest.spyOn(global.crypto, 'randomUUID');
-        writerIds.forEach((writerId) => randomUuid.mockReturnValueOnce(writerId));
+        generatedIds.forEach((value) => randomUuid.mockReturnValueOnce(value));
         global.chrome = harness.chromeApi;
 
         try {
@@ -4839,64 +4841,128 @@ describe('background scrape lease authority', () => {
                 .slice(0, 2);
             expect(completedClaims).toHaveLength(2);
             expect(new Set(completedClaims.map((record) => record.writerEpoch))).toEqual(new Set([1]));
-            expect(new Set(completedClaims.map((record) => record.writerId))).toEqual(new Set(writerIds.slice(0, 2)));
+            expect(new Set(completedClaims.map((record) => record.writerId))).toEqual(new Set([
+                'writer-authority-collision'
+            ]));
+            expect(new Set(completedClaims.map((record) => record.claimId))).toEqual(new Set([
+                'claim-identity-a',
+                'claim-identity-b'
+            ]));
 
             const completedStateWrites = harness.chromeApi.storage.local.set.mock.calls
                 .map(([values]) => findStoredRecord(values, 'scrape_run_state_record'))
                 .filter((record) => record?.lease?.token === lease.token);
             expect(completedStateWrites).toHaveLength(2);
-            expect(new Set(completedStateWrites.map((record) => record.revision))).toEqual(new Set([1]));
-            const orderedWrites = [...completedStateWrites].sort((left, right) => (
-                left.writerId.localeCompare(right.writerId)
-            ));
-            const losingRecord = JSON.parse(JSON.stringify(orderedWrites[0]));
-            const winningRecord = orderedWrites[1];
-            const winningState = winningRecord.mirror;
+            expect(new Set(completedStateWrites.map((record) => record.writerId))).toEqual(new Set([
+                'writer-authority-collision'
+            ]));
+            expect(new Set(completedStateWrites.map((record) => record.claimId))).toEqual(new Set([
+                'claim-identity-a',
+                'claim-identity-b'
+            ]));
+            completedStateWrites[0].revision = 3;
+            completedStateWrites[0].mirror.currentIndex = 11;
+            completedStateWrites[1].revision = 9;
+            completedStateWrites[1].mirror.currentIndex = 22;
+            harness.storedLocal['scrapeRunStateRecord:forced-claim-a'] = JSON.parse(
+                JSON.stringify(completedStateWrites[0])
+            );
+            harness.storedLocal['scrapeRunStateRecord:forced-claim-b'] = JSON.parse(
+                JSON.stringify(completedStateWrites[1])
+            );
 
             jest.resetModules();
-            let restarted = require('../../background.js');
+            const restarted = require('../../background.js');
             await restarted.ensureBackgroundStateReady();
             await restarted.ensureScrapeLeaseHydrated();
             const active = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
                 action: 'GET_ACTIVE_SCRAPE_RUN_STATE'
             }, { tab: { id: lease.tabId } });
-            await expect(active.response).resolves.toMatchObject({
-                status: 'ok',
-                state: {
-                    currentIndex: winningState.currentIndex,
-                    scrapeNavigation: winningState.scrapeNavigation
-                }
+            await expect(active.response).resolves.toEqual({
+                status: 'ignored',
+                reason: 'stale_authority'
             });
             await flushAsyncTurns(30);
-            expect(getStoredRunStateRecords(harness.storedLocal, lease.token)).toEqual([
-                expect.objectContaining({
-                    writerId: winningRecord.writerId,
-                    mirror: expect.objectContaining({ currentIndex: winningState.currentIndex })
-                })
-            ]);
-
-            harness.storedLocal['scrapeRunStateRecord:late-concurrent-loser'] = losingRecord;
-            jest.resetModules();
-            restarted = require('../../background.js');
-            await restarted.ensureBackgroundStateReady();
-            await restarted.ensureScrapeLeaseHydrated();
-            const activeAfterLateLoser = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
-                action: 'GET_ACTIVE_SCRAPE_RUN_STATE'
-            }, { tab: { id: lease.tabId } });
-            await expect(activeAfterLateLoser.response).resolves.toMatchObject({
-                status: 'ok',
-                state: { currentIndex: winningState.currentIndex }
+            expect(harness.sessionState.activeScrapeRunToken).toMatchObject({
+                status: 'idle',
+                token: null
             });
-            await flushAsyncTurns(30);
-            expect(getStoredRunStateRecords(harness.storedLocal, lease.token)).toEqual([
-                expect.objectContaining({ writerId: winningRecord.writerId })
-            ]);
-            expect(Object.values(harness.storedLocal).filter((value) => (
-                value?.kind === 'scrape_persistence_writer'
-            ))).toHaveLength(1);
+            expect(harness.storedLocal).toMatchObject({
+                scraperState: 'idle',
+                currentIndex: 0,
+                scrapeNavigation: null,
+                isScraping: false,
+                isR2Backup: false
+            });
         } finally {
             randomUuid.mockRestore();
         }
+    });
+
+    test('one writer claimant with sequential revisions restores its latest accepted record', async () => {
+        const lease = createLeaseRecord({ token: 'sequential-writer-claim' });
+        const baseRecord = {
+            kind: 'scrape_run_state_record',
+            version: 4,
+            writerEpoch: 7,
+            writerId: 'sequential-writer',
+            claimId: 'sequential-claim',
+            lease,
+            createdAt: 1780000000000
+        };
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                currentIndex: 91,
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                scrapeNavigation: { currentItemId: 'stale-unversioned-item' },
+                isScraping: true,
+                isR2Backup: false,
+                'scrapeRunStateRecord:sequential-1': {
+                    ...baseRecord,
+                    revision: 1,
+                    mirror: {
+                        scraperState: 'running',
+                        currentIndex: 4,
+                        scrapeRunToken: lease.token,
+                        scrapeRunEpoch: lease.epoch,
+                        scrapeNavigation: { currentItemId: 'accepted-item-4' },
+                        isScraping: true,
+                        isR2Backup: false
+                    }
+                },
+                'scrapeRunStateRecord:sequential-2': {
+                    ...baseRecord,
+                    revision: 2,
+                    mirror: {
+                        scraperState: 'running',
+                        currentIndex: 8,
+                        scrapeRunToken: lease.token,
+                        scrapeRunEpoch: lease.epoch,
+                        scrapeNavigation: { currentItemId: 'accepted-item-8' },
+                        isScraping: true,
+                        isR2Backup: false
+                    }
+                }
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+
+        const active = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'GET_ACTIVE_SCRAPE_RUN_STATE'
+        }, { tab: { id: lease.tabId } });
+        await expect(active.response).resolves.toMatchObject({
+            status: 'ok',
+            state: {
+                currentIndex: 8,
+                scrapeNavigation: { currentItemId: 'accepted-item-8' }
+            }
+        });
     });
 
     test.each([
@@ -4919,21 +4985,43 @@ describe('background scrape lease authority', () => {
             () => ({
                 'scrapeRunStateRecord:ambiguous-a': {
                     kind: 'scrape_run_state_record',
-                    version: 3,
+                    version: 4,
                     writerEpoch: 1,
                     writerId: 'writer-collision',
+                    claimId: 'claim-a',
                     revision: 1,
                     lease: createLeaseRecord({ token: 'fail-closed-run-state', kind: 'r2_backup' }),
                     mirror: { currentIndex: 4 }
                 },
                 'scrapeRunStateRecord:ambiguous-b': {
                     kind: 'scrape_run_state_record',
-                    version: 3,
+                    version: 4,
                     writerEpoch: 1,
                     writerId: 'writer-collision',
-                    revision: 1,
+                    claimId: 'claim-b',
+                    revision: 8,
                     lease: createLeaseRecord({ token: 'fail-closed-run-state', kind: 'r2_backup' }),
                     mirror: { currentIndex: 9 }
+                }
+            })
+        ],
+        [
+            'mismatched lease writer',
+            () => ({
+                'scrapeRunStateRecord:mismatched-lease-writer': {
+                    kind: 'scrape_run_state_record',
+                    version: 4,
+                    writerEpoch: 3,
+                    writerId: 'record-writer',
+                    claimId: 'record-claim',
+                    revision: 2,
+                    lease: createLeaseRecord({
+                        token: 'fail-closed-run-state',
+                        kind: 'r2_backup',
+                        writerEpoch: 4,
+                        writerId: 'mismatched-lease-writer'
+                    }),
+                    mirror: { currentIndex: 12 }
                 }
             })
         ]

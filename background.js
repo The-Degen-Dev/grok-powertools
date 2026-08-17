@@ -290,6 +290,8 @@ let scrapeRunStateRecordRevision = 0;
 let latestScrapeRunStateAttemptRevision = 0;
 let scrapePersistenceWriterEpoch = 0;
 let scrapePersistenceWriterId = '';
+let scrapePersistenceWriterClaimId = '';
+let ambiguousScrapePersistenceAuthorities = new Set();
 let activeScrapeRunMirror = null;
 let backgroundStateStatus = { status: 'initializing', error: null };
 let cloudSyncState = {
@@ -2326,6 +2328,11 @@ function makeScrapePersistenceWriterId() {
     return normalized;
 }
 
+function getScrapePersistenceAuthorityKey(value = {}) {
+    const order = getScrapePersistenceOrder(value);
+    return `${order.writerEpoch}:${order.writerId}`;
+}
+
 function getScrapePersistenceOrder(value = {}) {
     const checkpointFence = value?.checkpoint?.fence || value?.fence;
     const source = checkpointFence
@@ -2363,16 +2370,20 @@ function getScrapePersistenceWriterRecords(stored = {}) {
         const writerId = legacy
             ? ''
             : normalizeScrapePersistenceWriterId(value?.writerId);
+        const claimId = value?.version === 3
+            ? normalizeScrapePersistenceWriterId(value?.claimId)
+            : `legacy-marker:${key}`;
         if (value?.kind !== 'scrape_persistence_writer'
             || !Number.isInteger(value.writerEpoch)
             || value.writerEpoch < 0
-            || (!legacy && !writerId)) {
+            || (!legacy && !writerId)
+            || !claimId) {
             throw new Error('scrape_persistence_writer_record_invalid');
         }
-        if (value.version !== 1 && value.version !== 2) {
+        if (value.version !== 1 && value.version !== 2 && value.version !== 3) {
             throw new Error('scrape_persistence_writer_record_invalid');
         }
-        records.push({ ...value, writerId, storageKey: key });
+        records.push({ ...value, writerId, claimId, storageKey: key });
         return records;
     }, []).sort((left, right) => (
         right.writerEpoch - left.writerEpoch
@@ -2392,6 +2403,17 @@ async function removeScrapePersistenceWriterRecords(records) {
 
 async function initializeScrapePersistenceWriter(stored = {}, context = null) {
     const writerRecords = getScrapePersistenceWriterRecords(stored);
+    const claimsByAuthority = new Map();
+    for (const record of writerRecords) {
+        const authorityKey = getScrapePersistenceAuthorityKey(record);
+        if (!claimsByAuthority.has(authorityKey)) claimsByAuthority.set(authorityKey, new Set());
+        claimsByAuthority.get(authorityKey).add(record.claimId);
+    }
+    ambiguousScrapePersistenceAuthorities = new Set(
+        Array.from(claimsByAuthority.entries())
+            .filter(([, claimIds]) => claimIds.size > 1)
+            .map(([authorityKey]) => authorityKey)
+    );
     const observedEpoch = Object.values(stored).reduce((latest, value) => {
         if (value?.kind !== 'scrape_run_state_record'
             && value?.kind !== 'scrape_completion_journal') {
@@ -2401,11 +2423,13 @@ async function initializeScrapePersistenceWriter(stored = {}, context = null) {
     }, writerRecords[0]?.writerEpoch || 0);
     const writerEpoch = observedEpoch + 1;
     const writerId = makeScrapePersistenceWriterId();
+    const claimId = makeScrapePersistenceWriterId();
     const record = {
         kind: 'scrape_persistence_writer',
-        version: 2,
+        version: 3,
         writerEpoch,
-        writerId
+        writerId,
+        claimId
     };
     const storageKey = buildImmutableStorageKey(
         SCRAPE_PERSISTENCE_WRITER_PREFIX,
@@ -2418,6 +2442,7 @@ async function initializeScrapePersistenceWriter(stored = {}, context = null) {
     assertBackgroundInitializationCurrent(context);
     scrapePersistenceWriterEpoch = writerEpoch;
     scrapePersistenceWriterId = writerId;
+    scrapePersistenceWriterClaimId = claimId;
     await removeScrapePersistenceWriterRecords(writerRecords);
     assertBackgroundInitializationCurrent(context);
 }
@@ -2466,8 +2491,13 @@ function parseScrapeRunStateRecord(storageKey, value) {
     const writerId = legacy
         ? ''
         : normalizeScrapePersistenceWriterId(value.writerId);
-    if ((value.version !== 2 && value.version !== 3) || (!legacy && !writerId)) return null;
-    return { ...value, writerId, storageKey };
+    const claimId = value.version === 4
+        ? normalizeScrapePersistenceWriterId(value.claimId)
+        : `legacy-record:${storageKey}`;
+    if ((value.version !== 2 && value.version !== 3 && value.version !== 4)
+        || (!legacy && !writerId)
+        || !claimId) return null;
+    return { ...value, writerId, claimId, storageKey };
 }
 
 function getScrapeRunStateRecords(stored = {}) {
@@ -2484,7 +2514,8 @@ function hydrateScrapeRunStateRecordRevision(stored = {}) {
         .filter((record) => {
             const order = getScrapePersistenceOrder(record);
             return order.writerEpoch === scrapePersistenceWriterEpoch
-                && order.writerId === scrapePersistenceWriterId;
+                && order.writerId === scrapePersistenceWriterId
+                && record.claimId === scrapePersistenceWriterClaimId;
         })
         .reduce(
             (revision, record) => Math.max(revision, record.revision),
@@ -2524,9 +2555,22 @@ function getLatestScrapeRunStateRecord(stored, lease) {
         return { status: 'invalid', record: null };
     }
     const records = targetedEntries
-        .map(([key, value]) => parseScrapeRunStateRecord(key, value))
-        .filter((record) => scrapeLeaseMatches(normalizeScrapeLease(record.lease), lease))
-        .sort((left, right) => compareScrapePersistenceOrder(right, left));
+        .map(([key, value]) => parseScrapeRunStateRecord(key, value));
+    if (records.some((record) => !scrapeLeaseMatches(normalizeScrapeLease(record.lease), lease))) {
+        return { status: 'conflict', record: null };
+    }
+    const claimsByAuthority = new Map();
+    for (const record of records) {
+        const authorityKey = getScrapePersistenceAuthorityKey(record);
+        if (!claimsByAuthority.has(authorityKey)) claimsByAuthority.set(authorityKey, new Set());
+        claimsByAuthority.get(authorityKey).add(record.claimId);
+    }
+    if (Array.from(claimsByAuthority.entries()).some(([authorityKey, claimIds]) => (
+        claimIds.size > 1 || ambiguousScrapePersistenceAuthorities.has(authorityKey)
+    ))) {
+        return { status: 'conflict', record: null };
+    }
+    records.sort((left, right) => compareScrapePersistenceOrder(right, left));
     if (records.length === 0) return { status: 'missing', record: null };
     const tied = records.filter((record) => compareScrapePersistenceOrder(record, records[0]) === 0);
     if (tied.some((record) => !scrapeRunStateRecordsEquivalent(record, records[0]))) {
@@ -2541,6 +2585,7 @@ function setActiveScrapeRunMirror(record) {
         lease: copyScrapeLeaseAuthority(record.lease),
         writerEpoch: getScrapePersistenceOrder(record).writerEpoch,
         writerId: getScrapePersistenceOrder(record).writerId,
+        claimId: record.claimId || '',
         revision: record.revision,
         storageKey: record.storageKey || null,
         mirror: { ...record.mirror }
@@ -2656,6 +2701,7 @@ async function hydrateScrapeLeaseAuthority() {
     await pruneScrapeRunStateRecords();
     if (hasStaleLocalRunState(stored) || hasStaleLocalRunState(effectiveStored)) {
         const stopReason = runStateSelection.status === 'invalid'
+            || runStateSelection.status === 'conflict'
             ? 'invalid_persisted_run_state'
             : 'stale_session';
         await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
@@ -2800,9 +2846,10 @@ async function commitScrapeRunState(request, sender) {
         latestScrapeRunStateAttemptRevision = revision;
         const record = {
             kind: 'scrape_run_state_record',
-            version: 3,
+            version: 4,
             writerEpoch: scrapePersistenceWriterEpoch,
             writerId: scrapePersistenceWriterId,
+            claimId: scrapePersistenceWriterClaimId,
             revision,
             lease: copyScrapeLeaseAuthority(requested),
             mirror: buildAuthorizedRunningMirror(requested, request.values),
@@ -2847,6 +2894,7 @@ async function commitScrapeRunState(request, sender) {
         if (!scrapeLeaseMatches(activeScrapeLease, requested)
             || prepared.record.writerEpoch !== scrapePersistenceWriterEpoch
             || prepared.record.writerId !== scrapePersistenceWriterId
+            || prepared.record.claimId !== scrapePersistenceWriterClaimId
             || prepared.record.revision !== latestScrapeRunStateAttemptRevision) {
             return { status: 'ignored', reason: 'stale_authority' };
         }
