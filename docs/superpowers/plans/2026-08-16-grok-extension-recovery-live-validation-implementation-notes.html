@@ -65,7 +65,7 @@
             <h1>Grok Extension Recovery Implementation Notes</h1>
             <p class="stamp">Initialized 2026-08-16 23:10:16 EDT</p>
             <section class="lede">
-                <div><strong>Status:</strong> <span class="status">Task 5 of 15 starting</span></div>
+                <div><strong>Status:</strong> <span class="status">Task 6 of 15 starting</span></div>
                 <div><strong>Branch:</strong> <code>codex/grok-extension-recovery</code></div>
                 <div><strong>Plan:</strong> <code>2026-08-16-grok-extension-recovery-live-validation.md</code></div>
                 <div><strong>Proof boundary:</strong> No runtime edit or live lane has run yet. Existing automated and two-item evidence is not being treated as Sync, Dual-write, or full-backup proof.</div>
@@ -80,8 +80,9 @@
                     <tr><td>Task 2</td><td class="ok">Complete</td><td>GalleryReceiptV3 now binds route, conversation, native scope, source, expected next item, and stable anchors. Prompted Batch route acceptance requires the captured same conversation; Saved return and Stop restore fail closed on scope drift.</td></tr>
                     <tr><td>Task 3</td><td class="ok">Closed with ruling</td><td>Dual-write no longer persists after local completion alone. Worker-local single-flight ownership provides exactly-once finalization without durable claim markers. One load-bearing completion-handoff race is explicitly carried into Task 4.</td></tr>
                     <tr><td>Task 4</td><td class="ok">Closed with ruling</td><td>Run completion now waits for durable run-owned work, uses immutable fenced persistence, bounds startup and recovery waits, preserves retry decisions across late writes and restarts, and fails closed on timeout. One writer-authority ambiguity is explicitly carried into Task 5.</td></tr>
-                    <tr><td>Task 5</td><td class="status">Starting</td><td>First gate: close the carried writer-authority ambiguity. Then add the conservative Saved scan ledger and exhaustion proof.</td></tr>
-                    <tr><td>Tasks 6-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
+                    <tr><td>Task 5</td><td class="ok">Complete</td><td>Duplicate writer authority and lease-writer mismatch now fail closed. Saved traversal uses an explicit surface root, a per-run scan ledger, conservative semantic loading, and stable-bottom proof before completion.</td></tr>
+                    <tr><td>Task 6</td><td class="status">Starting</td><td>Add read-only paginated inventory and per-object HEAD proof so historical processed IDs cannot substitute for current R2 presence.</td></tr>
+                    <tr><td>Tasks 7-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
                 </tbody>
             </table>
 
@@ -99,11 +100,13 @@
                     <tr><td>Carry the breaker-round completion-handoff finding into Task 4.</td><td>Task 4 owns completion snapshots, durability barriers, and retry classification, and its files overlap the exact race.</td><td>Task 4 cannot pass until active finalizers are protected from revision handoff and incomplete complete/R2-present Dual-write operations have a retry path.</td></tr>
                     <tr><td>Replace shared-key completion snapshots with immutable records and bounded terminal checkpoints.</td><td>Chrome storage writes cannot be cancelled. A timed-out shared-key write can settle late and overwrite newer state.</td><td>Late writes are fenced by authority instead of assumed cancelled; checkpoints compact retained evidence before finite local storage can grow without bound.</td></tr>
                     <tr><td>Carry the final writer-authority ambiguity into Task 5 as its first gate.</td><td>After five Task 4 review rounds, one narrow hydration conflict remains real and load-bearing. The protocol forbids a sixth hidden fix round.</td><td>Task 5 must fail closed on duplicate claims and lease-writer mismatch before adding traversal state that depends on hydrated run authority.</td></tr>
+                    <tr><td>Prove Saved exhaustion from a run-local identity ledger rather than processed IDs.</td><td>Processed IDs describe prior extension work, not current gallery membership or R2 presence. Virtualized lists can also recycle DOM nodes.</td><td>A run completes only after semantic loading is absent, no new eligible identity appears, and the stable-bottom round and elapsed-time thresholds both pass.</td></tr>
+                    <tr><td>Keep loader detection inside the explicit Saved surface root.</td><td>An unrelated page progress bar must not keep a backup running until its scan limit.</td><td>A missing post-scroll Saved root resets stability and fails closed instead of widening the query to a parent or the document.</td></tr>
                 </tbody>
             </table>
 
             <h2>Deviations</h2>
-            <div class="panel"><p>Task 3 intentionally used all five review rounds and carried one completion-handoff race into Task 4. Task 4 also used all five rounds because uncancelable Chrome storage writes required a broader immutable-record and terminal-checkpoint protocol than the original snapshot design. Its remaining narrow writer-authority ambiguity is not deferred to release; it is the binding first gate of Task 5.</p></div>
+            <div class="panel"><p>Task 3 intentionally used all five review rounds and carried one completion-handoff race into Task 4. Task 4 also used all five rounds because uncancelable Chrome storage writes required a broader immutable-record and terminal-checkpoint protocol than the original snapshot design. Its remaining narrow writer-authority ambiguity became Task 5's first gate and is now closed. Task 5 deferred one minor timing-test precision check to final review; the runtime requires both stable rounds and elapsed time.</p></div>
 
             <h2>Tradeoffs</h2>
             <table>
@@ -112,6 +115,7 @@
                     <tr><td>Track public implementation notes in Git and keep detailed worker artifacts in the ignored SDD workspace.</td><td>Put all coordination detail in one tracked HTML file.</td><td>The HTML stays readable and secret-safe; briefs, reports, and review packages remain recoverable without bloating the branch.</td></tr>
                     <tr><td>Execute deterministic Tasks 1-9 before any live Chrome lane.</td><td>Patch and test directly against production first.</td><td>This keeps cloud and credit-bearing actions behind source-bound deterministic gates.</td></tr>
                     <tr><td>Use immutable uniquely keyed records plus retained terminal fences.</td><td>Hold mutation queues until every storage promise settles, or release timed-out same-key writes.</td><td>The chosen design keeps Stop and replacement runs operable while making late writes non-authoritative. It costs more local protocol code and requires bounded compaction tests.</td></tr>
+                    <tr><td>Require both eight stable rounds and 6000 ms before Saved exhaustion.</td><td>Use only a round count, only elapsed time, or infer completion from processed IDs.</td><td>The combined condition tolerates virtualization and delayed loading at the cost of a bounded quiet period before natural completion.</td></tr>
                 </tbody>
             </table>
 
@@ -137,6 +141,8 @@
                     <tr><td>Task 3 breaker review</td><td class="status">One ruling carried</td><td>Persisted ownership is removed and exactly-once behavior is proven. Completion handoff can still invalidate an active finalizer; Task 4 owns and must close it.</td></tr>
                     <tr><td>Task 4 deterministic gates</td><td class="ok">757 unit and 35 E2E passed</td><td>Includes permanent non-settlement, late prepare/revocation, true module restart, bounded checkpoint retention, failed compaction, exact deadlines, Stop, replacement runs, retry hydration, and fail-closed completion labels.</td></tr>
                     <tr><td>Task 4 breaker review</td><td class="status">One ruling carried</td><td>Late checkpoint regression and unbounded readiness are closed. Duplicate writer authority and lease-writer mismatch must fail closed before Task 5 traversal work.</td></tr>
+                    <tr><td>Task 5 deterministic gates</td><td class="ok">769 unit and 37 E2E passed</td><td>Includes duplicate writer claims, lease-writer mismatch, scan-ledger rules, explicit Saved-root loader scoping, 30-item virtualized mixed media, and real scan-limit attempts.</td></tr>
+                    <tr><td>Task 5 independent review</td><td class="ok">Approved after fix</td><td>Conflict cleanup now removes inherited progress, outside loaders cannot block exhaustion, and the detailed SDD report remains ignored and untracked.</td></tr>
                     <tr><td>Runtime validation</td><td>Not run</td><td>No behavior claim yet.</td></tr>
                     <tr><td>Live Chrome/cloud validation</td><td>Not run</td><td>No output, R2, or full-backup claim yet.</td></tr>
                 </tbody>
@@ -154,6 +160,7 @@
                     <tr><td><code>81d07aa</code> through <code>a7bd020</code></td><td>Defer Dual-write processing, add finalization ownership, and pressure-test storage timeout ordering.</td><td>Five review rounds exposed that persisted ownership was unnecessary complexity.</td></tr>
                     <tr><td><code>fcbae44</code></td><td>Replace persisted claims with worker-local single-flight finalization.</td><td>Original claim defect closed; one completion-handoff race carried into Task 4.</td></tr>
                     <tr><td><code>56b73de</code> through <code>d34e9ba</code></td><td>Add run-owned durability snapshots, immutable persistence fences, restart-safe authority, bounded terminal checkpoints, and bounded readiness/recovery.</td><td>Five review rounds closed completion, timeout, late-write, restart, and quota risks. One hydration ambiguity is carried into Task 5.</td></tr>
+                    <tr><td><code>75a589c</code> through <code>d64c51f</code></td><td>Reject ambiguous persisted writers and prove Saved gallery exhaustion with a scoped scan ledger.</td><td>Review clean after one fix round; one minor boundary-test refinement is deferred to final review.</td></tr>
                 </tbody>
             </table>
 
