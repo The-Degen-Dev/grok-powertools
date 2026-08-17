@@ -65,7 +65,7 @@
             <h1>Grok Extension Recovery Implementation Notes</h1>
             <p class="stamp">Initialized 2026-08-16 23:10:16 EDT</p>
             <section class="lede">
-                <div><strong>Status:</strong> <span class="status">Task 7 of 15 starting</span></div>
+                <div><strong>Status:</strong> <span class="status">Task 8 of 15 starting</span></div>
                 <div><strong>Branch:</strong> <code>codex/grok-extension-recovery</code></div>
                 <div><strong>Plan:</strong> <code>2026-08-16-grok-extension-recovery-live-validation.md</code></div>
                 <div><strong>Proof boundary:</strong> No runtime edit or live lane has run yet. Existing automated and two-item evidence is not being treated as Sync, Dual-write, or full-backup proof.</div>
@@ -82,8 +82,9 @@
                     <tr><td>Task 4</td><td class="ok">Closed with ruling</td><td>Run completion now waits for durable run-owned work, uses immutable fenced persistence, bounds startup and recovery waits, preserves retry decisions across late writes and restarts, and fails closed on timeout. One writer-authority ambiguity is explicitly carried into Task 5.</td></tr>
                     <tr><td>Task 5</td><td class="ok">Complete</td><td>Duplicate writer authority and lease-writer mismatch now fail closed. Saved traversal uses an explicit surface root, a per-run scan ledger, conservative semantic loading, and stable-bottom proof before completion.</td></tr>
                     <tr><td>Task 6</td><td class="ok">Complete</td><td>Full backup now scans historical processed identities, loads one prefix-validated inventory snapshot per lease, proves each candidate with read-only HEAD, and fetches Grok bytes only for missing objects.</td></tr>
-                    <tr><td>Task 7</td><td class="status">Starting</td><td>Add an extension-independent Saved observer and a read-only Vault reconciliation CLI that emits redacted evidence.</td></tr>
-                    <tr><td>Tasks 8-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
+                    <tr><td>Task 7</td><td class="ok">Complete</td><td>An extension-independent Saved observer now proves bounded exhaustion and restores scroll; a GET-only CLI reconciles only complete observer evidence against paginated inventory and emits deterministic redacted results.</td></tr>
+                    <tr><td>Task 8</td><td class="status">Starting</td><td>Integrate five-result Prompted Batch, thirty-asset virtualized Saved traversal, three Dual-write operations, and Stop/failure transitions into deterministic workflows.</td></tr>
+                    <tr><td>Tasks 9-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
                 </tbody>
             </table>
 
@@ -105,6 +106,8 @@
                     <tr><td>Keep loader detection inside the explicit Saved surface root.</td><td>An unrelated page progress bar must not keep a backup running until its scan limit.</td><td>A missing post-scroll Saved root resets stability and fails closed instead of widening the query to a parent or the document.</td></tr>
                     <tr><td>Treat inventory verification as a per-lease read-only preflight, not as processed-ID proof.</td><td>Historical extension state cannot prove that an object still exists in R2, and an inventory row alone cannot prove readable bytes.</td><td>Each verified canonical row must pass HEAD with positive bytes and matching media type before it can become <code>already_present</code>; otherwise only a 404 continues to upload.</td></tr>
                     <tr><td>Use one common durable-result recorder for presence hits, uploads, and failures.</td><td>Separate accounting paths allowed legacy-detail presence errors to disappear and later report Complete.</td><td>Both Agent and legacy-detail flows now stop on unsuccessful transfer status, count failure once, persist progress, and leave processed IDs unchanged.</td></tr>
+                    <tr><td>Require complete observer proof before reconciliation begins.</td><td>A partial, blocked, or malformed observer snapshot could otherwise reconcile a subset and return green.</td><td>The CLI requires schema version 1, exact normalized UUIDs, <code>exhausted: true</code>, and no blocked reason before making any request.</td></tr>
+                    <tr><td>Make reconciliation artifacts deterministic and fail-closed.</td><td>DOM/API order and untrusted Worker response text must not change evidence or leak into terminal output.</td><td>Classifications and redacted rows are sorted; malformed cursor or inventory shapes emit fixed codes, write no evidence, and expose no stack, path, key, or secret-shaped value.</td></tr>
                 </tbody>
             </table>
 
@@ -120,6 +123,7 @@
                     <tr><td>Use immutable uniquely keyed records plus retained terminal fences.</td><td>Hold mutation queues until every storage promise settles, or release timed-out same-key writes.</td><td>The chosen design keeps Stop and replacement runs operable while making late writes non-authoritative. It costs more local protocol code and requires bounded compaction tests.</td></tr>
                     <tr><td>Require both eight stable rounds and 6000 ms before Saved exhaustion.</td><td>Use only a round count, only elapsed time, or infer completion from processed IDs.</td><td>The combined condition tolerates virtualization and delayed loading at the cost of a bounded quiet period before natural completion.</td></tr>
                     <tr><td>Cache the inventory Promise by immutable scrape-lease key.</td><td>Cache only a resolved map or paginate independently for every item.</td><td>Concurrent checks share one pagination pass; stop, completion, revocation, and preflight failure evict the cache.</td></tr>
+                    <tr><td>Use an observer that shares thresholds but not extension code.</td><td>Trust the extension's own traversal/completion output as the only proof.</td><td>The acceptance observer independently resolves the Saved owner/scroller and captures UUIDs without clicks, navigation, media fetches, or extension APIs.</td></tr>
                 </tbody>
             </table>
 
@@ -149,6 +153,8 @@
                     <tr><td>Task 5 independent review</td><td class="ok">Approved after fix</td><td>Conflict cleanup now removes inherited progress, outside loaders cannot block exhaustion, and the detailed SDD report remains ignored and untracked.</td></tr>
                     <tr><td>Task 6 deterministic gates</td><td class="ok">783 unit and 37 E2E passed</td><td>Includes backup-vs-Sync eligibility, paginated inventory, prefix rejection, HEAD outcomes, no-byte-fetch hits, authority revocation during body reads, and Agent/legacy failure accounting.</td></tr>
                     <tr><td>Task 6 independent review</td><td class="ok">Approved after fix</td><td>Initial review found a legacy false-completion path and one missing catch-path authority check. Scoped re-review confirmed both closed with no new breakage.</td></tr>
+                    <tr><td>Task 7 deterministic gates</td><td class="ok">819 unit and 37 E2E passed</td><td>Includes browser-global export, real DOM resolver ambiguity, virtualized exhaustion, exact scan limit, scroll restoration, complete-observer gating, pagination drift, redaction, determinism, and mocked spawned CLI operation.</td></tr>
+                    <tr><td>Task 7 independent review</td><td class="ok">Approved after two fixes</td><td>Initial review found eight acceptance-proof gaps. Round 1 closed seven; round 2 made malformed successful inventory fail through fixed codes with no evidence or raw output.</td></tr>
                     <tr><td>Runtime validation</td><td>Not run</td><td>No behavior claim yet.</td></tr>
                     <tr><td>Live Chrome/cloud validation</td><td>Not run</td><td>No output, R2, or full-backup claim yet.</td></tr>
                 </tbody>
@@ -168,6 +174,7 @@
                     <tr><td><code>56b73de</code> through <code>d34e9ba</code></td><td>Add run-owned durability snapshots, immutable persistence fences, restart-safe authority, bounded terminal checkpoints, and bounded readiness/recovery.</td><td>Five review rounds closed completion, timeout, late-write, restart, and quota risks. One hydration ambiguity is carried into Task 5.</td></tr>
                     <tr><td><code>75a589c</code> through <code>d64c51f</code></td><td>Reject ambiguous persisted writers and prove Saved gallery exhaustion with a scoped scan ledger.</td><td>Review clean after one fix round; one minor boundary-test refinement is deferred to final review.</td></tr>
                     <tr><td><code>6107925</code> through <code>dd364db</code></td><td>Verify R2 presence before full-backup byte fetch and fail closed on every preflight error.</td><td>Review clean after one fix round; metadata/cache-lifecycle coverage expansion is deferred to final review.</td></tr>
+                    <tr><td><code>24101dc</code> through <code>71ac7b5</code></td><td>Add and harden the independent Saved observer and redacted read-only reconciliation CLI.</td><td>Review clean after two fix rounds; no live request or credential read occurred.</td></tr>
                 </tbody>
             </table>
 
