@@ -82,9 +82,12 @@ function makeVisible(element, width = 120, height = 32) {
 }
 
 function mountSavedScope(selected = 'all') {
+    document.querySelectorAll('[data-test-saved-scope]').forEach((control) => control.remove());
     const toolbar = document.createElement('div');
     const all = makeVisible(document.createElement('button'));
     const liked = makeVisible(document.createElement('button'));
+    all.setAttribute('data-test-saved-scope', 'all');
+    liked.setAttribute('data-test-saved-scope', 'liked');
     all.textContent = 'All';
     liked.textContent = 'Liked';
     if (selected === 'all') all.className = 'bg-primary text-background hover:bg-primary';
@@ -774,6 +777,7 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
     });
 
     test('requires one source and one immediately adjacent expected-next identity', () => {
+        mountSavedScope('all');
         const source = '11111111-1111-4111-8111-111111111111';
         const middle = '22222222-2222-4222-8222-222222222222';
         const next = '33333333-3333-4333-8333-333333333333';
@@ -792,6 +796,7 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
     });
 
     test('captures the literal semantic neighbor and rejects stale V2 receipts', () => {
+        mountSavedScope('all');
         const list = document.createElement('div');
         list.setAttribute('role', 'list');
         const source = '11111111-1111-4111-8111-111111111111';
@@ -813,9 +818,29 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
             scrollTop: 0
         })).toBeNull();
     });
+
+    test.each(['liked', 'unknown'])(
+        'rejects Saved receipt capture when the native scope is %s',
+        (scope) => {
+            window.history.pushState({}, '', '/imagine/saved');
+            const list = document.createElement('div');
+            list.setAttribute('role', 'list');
+            const source = '61616161-1111-4111-8111-111111111111';
+            appendCard(list, source);
+            document.body.appendChild(list);
+            mountSavedScope(scope);
+
+            expect(captureSavedViewportReceipt({ root: document, sourceIdentity: source }))
+                .toBeNull();
+        }
+    );
 });
 
 describe('Grok scrape surface transitions', () => {
+    beforeEach(() => {
+        mountSavedScope('all');
+    });
+
     afterEach(() => {
         delete global.chrome;
         document.body.textContent = '';
@@ -1828,6 +1853,39 @@ describe('Grok scrape surface transitions', () => {
         expect(scraper.state.isRunning).toBe(false);
         expect(scraper.runToken).toBeNull();
         backSpy.mockRestore();
+    });
+
+    test('Stop return does not restore a Saved receipt after native scope drift', async () => {
+        const sourceId = '72727272-2222-4222-8222-222222222222';
+        window.history.pushState({}, '', '/imagine/saved');
+        const { scroller } = mountSemanticSavedImage(
+            `https://assets.grok.com/users/u/generated/${sourceId}/image.jpg`
+        );
+        mountSavedScope('liked');
+        const scraper = createScraper(SCRAPE_SURFACES.savedGallery);
+        scraper.state.isRunning = false;
+        scraper.sleep = jest.fn().mockResolvedValue();
+        const stopNavigation = {
+            runToken: 'run-stop-scope-drift',
+            runEpoch: 12,
+            galleryUrl: 'https://grok.com/imagine/saved',
+            savedViewportReceipt: {
+                version: 3,
+                sourceIdentity: sourceId,
+                expectedNextIdentity: null,
+                beforeIdentities: [],
+                afterIdentities: [],
+                visibleIdentities: [sourceId],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
+                scrollTop: 420
+            },
+            viewportRestored: false,
+            returnAlreadyInFlight: false
+        };
+
+        await expect(GrokScraper.prototype.returnToSavedAfterStop.call(scraper, stopNavigation))
+            .resolves.toBe(true);
+        expect(scroller.scrollTop).toBe(0);
     });
 
     test('a storage tombstone preserves the pending Saved return before invalidating the run', async () => {

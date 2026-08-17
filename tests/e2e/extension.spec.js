@@ -797,6 +797,7 @@ async function setupMockPromptedBatch(page, {
                     submit.addEventListener('click', () => {
                         window.__promptedBatchEvents.promptAtSubmit = input.textContent;
                         window.__promptedBatchEvents.submitCount++;
+                        submit.disabled = true;
                         const result = document.createElement('video');
                         result.src = `https://assets.grok.com/users/${accountUuid}/generated/${selectedMediaUuid}/generated_video.mp4`;
                         Object.defineProperty(result, 'readyState', { configurable: true, value: 4 });

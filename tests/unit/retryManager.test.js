@@ -135,6 +135,10 @@ function mountFocusedGrok2VideoComposer({
 }
 
 function createSavedBatchCard(sourceUrl, onImageClick = null) {
+    if (window.location.pathname === '/imagine/saved'
+        && !document.querySelector('[data-test-saved-scope]')) {
+        mountSavedScope('all');
+    }
     const card = document.createElement('div');
     card.setAttribute('role', 'listitem');
     const image = document.createElement('img');
@@ -147,6 +151,20 @@ function createSavedBatchCard(sourceUrl, onImageClick = null) {
     card.append(image, makeVideo);
     document.body.appendChild(card);
     return { card, image, makeVideo };
+}
+
+function mountSavedScope(selected = 'all') {
+    document.querySelectorAll('[data-test-saved-scope]').forEach((control) => control.remove());
+    const all = makeVisible(document.createElement('button'));
+    const liked = makeVisible(document.createElement('button'));
+    all.setAttribute('data-test-saved-scope', 'all');
+    liked.setAttribute('data-test-saved-scope', 'liked');
+    all.textContent = 'All';
+    liked.textContent = 'Liked';
+    if (selected === 'all') all.className = 'bg-primary text-background';
+    if (selected === 'liked') liked.className = 'bg-primary text-background';
+    document.body.append(all, liked);
+    return { all, liked };
 }
 
 function addNextCardClickProbe() {
@@ -181,7 +199,8 @@ function renderAgentEditor({
     composer = true,
     includeAgentAsset = true,
     onSubmit = null,
-    produceResult = true
+    produceResult = true,
+    settleSubmit = true
 } = {}) {
     document.body.innerHTML = `${includeAgentAsset ? `
         <div class="react-flow__node-asset selected" data-id="asset-source">
@@ -202,7 +221,8 @@ function renderAgentEditor({
             const menuItem = createMenuItem('Add Prompt', () => {
                 if (!composer) return;
                 mountFocusedPromptedVideoComposer({
-                    onSubmit: () => {
+                    onSubmit: (event) => {
+                        if (settleSubmit) event.currentTarget.disabled = true;
                         if (onSubmit) onSubmit();
                         if (produceResult) appendReadyVideoResult(sourceUrl);
                     }
@@ -556,7 +576,8 @@ describe('VideoRetryManager', () => {
                     const menu = makeVisible(document.createElement('div'));
                     const addPrompt = createMenuItem('Add Prompt', () => {
                         const { input } = mountFocusedPromptedVideoComposer({
-                            onSubmit: () => {
+                            onSubmit: (event) => {
+                                event.currentTarget.disabled = true;
                                 submittedPrompt = input.textContent;
                                 appendReadyVideoResult(sourceUrl);
                             }
@@ -1012,6 +1033,7 @@ describe('VideoRetryManager', () => {
 
         const renderSavedCard = () => {
             document.body.innerHTML = '';
+            mountSavedScope('all');
             const card = document.createElement('div');
             card.setAttribute('role', 'listitem');
             const image = document.createElement('img');
@@ -1049,7 +1071,8 @@ describe('VideoRetryManager', () => {
                 const menu = makeVisible(document.createElement('div'));
                 const addPrompt = createMenuItem('Add Prompt', () => {
                     mountFocusedPromptedVideoComposer({
-                        onSubmit: () => {
+                        onSubmit: (event) => {
+                            event.currentTarget.disabled = true;
                             submitted++;
                             appendReadyVideoResult(sourceUrl);
                         }
@@ -1119,7 +1142,8 @@ describe('VideoRetryManager', () => {
                     const menu = makeVisible(document.createElement('div'));
                     const addPrompt = createMenuItem('Add Prompt', () => {
                         mountFocusedPromptedVideoComposer({
-                            onSubmit: () => {
+                            onSubmit: (event) => {
+                                event.currentTarget.disabled = true;
                                 submitted++;
                                 appendReadyVideoResult(sourceUrl);
                             }
@@ -1422,6 +1446,7 @@ describe('VideoRetryManager', () => {
             renderAgentEditor({
                 sourceUrl,
                 produceResult: false,
+                settleSubmit: false,
                 onBack: () => {
                     window.history.pushState({}, '', '/imagine/saved');
                     document.body.innerHTML = '';
@@ -1442,11 +1467,11 @@ describe('VideoRetryManager', () => {
         );
 
         expect(acceptanceSpy).toHaveBeenCalledWith(
-            expect.objectContaining({
-                videoResultBaseline: expect.objectContaining({ surface: 'agent_media' })
-            }),
+            expect.any(Object),
             runToken
         );
+        expect(acceptanceSpy.mock.calls[0][0]).not.toHaveProperty('progressCount');
+        expect(acceptanceSpy.mock.calls[0][0]).not.toHaveProperty('videoResultBaseline');
         expect(retryManager.awaitBatchItemCompletion).not.toHaveBeenCalled();
         expect(processedSrcs.has('acacacac-bbbb-4ccc-8ddd-eeeeeeeeeeee')).toBe(false);
         expect(retryManager.goalCount).toBe(0);
@@ -1804,6 +1829,62 @@ describe('VideoRetryManager', () => {
         expect(retryManager.batchQueue).toHaveLength(0);
     });
 
+    test('Prompted Batch return polling rejects Saved scope drift', async () => {
+        const sourceId = '16161616-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        window.history.pushState({}, '', '/imagine/saved');
+        createSavedBatchCard(
+            `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`
+        );
+        mountSavedScope('liked');
+        const token = 'prompted-saved-scope-drift-poll';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        const snapshot = {
+            savedViewportReceipt: {
+                version: 3,
+                sourceIdentity: sourceId,
+                expectedNextIdentity: null,
+                beforeIdentities: [],
+                afterIdentities: [],
+                visibleIdentities: [sourceId],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
+                scrollTop: 420
+            }
+        };
+
+        await expect(retryManager.waitForPromptedBatchSavedSurface(snapshot, token, 200))
+            .resolves.toBe(false);
+    });
+
+    test('Prompted Batch state restoration rejects Saved scope drift', () => {
+        const sourceId = '17171717-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        window.history.pushState({}, '', '/imagine/saved');
+        createSavedBatchCard(
+            `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`
+        );
+        mountSavedScope('liked');
+        const token = 'prompted-saved-scope-drift-restore';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        const snapshot = {
+            savedViewportReceipt: {
+                version: 3,
+                sourceIdentity: sourceId,
+                expectedNextIdentity: null,
+                beforeIdentities: [],
+                afterIdentities: [],
+                visibleIdentities: [sourceId],
+                origin: { pathname: '/imagine/saved', conversationId: '', scope: 'all' },
+                scrollTop: 420
+            }
+        };
+
+        expect(retryManager.restorePromptedBatchSavedState(snapshot, token)).toBe(false);
+    });
+
     test('restores the semantic Saved neighborhood before resuming the expected next card', async () => {
         const sourceId = 'b8b8b8b8-cccc-4ddd-8eee-a7a7a7a7a7a7';
         const nextId = 'c9c9c9c9-dddd-4eee-8fff-b8b8b8b8b8b8';
@@ -1838,6 +1919,7 @@ describe('VideoRetryManager', () => {
         let galleryScroller = null;
         let list = null;
         const renderReturnedSaved = () => {
+            mountSavedScope('all');
             galleryScroller = document.createElement('div');
             galleryScroller.className = 'h-dvh overflow-scroll items-center';
             galleryScroller.style.overflowY = 'scroll';
@@ -2961,6 +3043,48 @@ describe('VideoRetryManager', () => {
         const receipt = retryManager._capturePromptedVideoSubmissionReceipt();
         retryManager.sleep = jest.fn().mockImplementation(async () => {
             window.history.pushState({}, '', '/imagine/post/generated-post?conversation=conversation-2');
+        });
+
+        await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
+            .resolves.toBe(false);
+    });
+
+    test('prompted video submission rejects a changed post when no conversation was captured', async () => {
+        window.history.pushState({}, '', '/imagine/post/source-post');
+        const { composer, input } = mountFocusedPromptedVideoComposer();
+        input.textContent = 'slow camera push in';
+        retryManager.promptedVideoComposerRoot = composer;
+        const token = 'submission-post-without-conversation';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        const receipt = retryManager._capturePromptedVideoSubmissionReceipt();
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            window.history.pushState({}, '', '/imagine/post/generated-post?conversation=conversation-2');
+        });
+
+        expect(receipt.conversationId).toBeNull();
+        await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
+            .resolves.toBe(false);
+    });
+
+    test('prompted video submission ignores unrelated document progress', async () => {
+        window.history.pushState({}, '', '/imagine/post/source-post?conversation=conversation-1');
+        const { composer, input } = mountFocusedPromptedVideoComposer();
+        input.textContent = 'slow camera push in';
+        retryManager.promptedVideoComposerRoot = composer;
+        const token = 'submission-unrelated-progress';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        const receipt = retryManager._capturePromptedVideoSubmissionReceipt();
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            const unrelatedProgress = document.createElement('button');
+            unrelatedProgress.setAttribute('aria-label', 'Video Options');
+            const unrelatedResult = document.createElement('video');
+            unrelatedResult.src = 'https://assets.grok.com/unrelated/generated_video.mp4';
+            Object.defineProperty(unrelatedResult, 'readyState', { configurable: true, value: 4 });
+            document.body.append(unrelatedProgress, unrelatedResult);
         });
 
         await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))

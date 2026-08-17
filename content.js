@@ -683,7 +683,7 @@ function hasOrderedSavedNeighborhood(entries, receipt) {
         currentOrigin: {
             pathname: window.location.pathname,
             conversationId: new URLSearchParams(window.location.search).get('conversation') || '',
-            scope: SAVED_GALLERY_SCOPES.all
+            scope: detectSavedGalleryScope(document)
         },
         allowSourceReplacement: false
     }).status === 'matched';
@@ -753,6 +753,8 @@ function captureSavedViewportReceipt({
 } = {}) {
     const normalizedSource = getGrokMediaIdentity(sourceIdentity);
     if (!normalizedSource) return null;
+    const scope = detectSavedGalleryScope(document);
+    if (scope !== SAVED_GALLERY_SCOPES.all) return null;
     const context = getSavedGalleryContext(root);
     if (!context) return null;
     const sourceIndices = context.entries
@@ -768,7 +770,7 @@ function captureSavedViewportReceipt({
         origin: {
             pathname: window.location.pathname,
             conversationId: new URLSearchParams(window.location.search).get('conversation') || '',
-            scope: SAVED_GALLERY_SCOPES.all
+            scope
         },
         scrollTop: getSavedScrollerSnapshot(context.scroller || fallbackScroller).scrollTop
     });
@@ -3741,7 +3743,7 @@ class VideoRetryManager {
         return !agentBinding || !!this._resolveCurrentAgentMediaBinding(agentBinding);
     }
 
-    _capturePromptedVideoSubmissionReceipt(agentBinding = null) {
+    _capturePromptedVideoSubmissionReceipt() {
         const composer = this._getVerifiedPromptedVideoComposer(
             this.promptedVideoComposerRoot,
             false
@@ -3756,9 +3758,7 @@ class VideoRetryManager {
             inputValue: String(inputValue || '').trim(),
             submitButton: composer.submitButton,
             postId: this._getImaginePostId(window.location.href),
-            conversationId: this._getImagineConversationId(window.location.href),
-            progressCount: document.querySelectorAll(this.PROGRESS_SELECTOR).length,
-            videoResultBaseline: this.capturePromptedVideoResultBaseline(document, agentBinding)
+            conversationId: this._getImagineConversationId(window.location.href)
         };
     }
 
@@ -3781,26 +3781,19 @@ class VideoRetryManager {
             const submitSettled = !receipt.submitButton.isConnected
                 || receipt.submitButton.disabled
                 || receipt.submitButton.getAttribute('aria-disabled') === 'true';
-            const progressStarted = document.querySelectorAll(this.PROGRESS_SELECTOR).length
-                > receipt.progressCount;
-            const resultAppeared = this._hasNewPromptedVideoResult(
-                document,
-                receipt.videoResultBaseline
-            );
             const currentPostId = this._getImaginePostId(window.location.href);
             const currentConversationId = this._getImagineConversationId(window.location.href);
             const acceptedPostOpened = !!receipt.postId
+                && !!receipt.conversationId
                 && !!currentPostId
                 && currentPostId !== receipt.postId
                 && !!currentConversationId
-                && (!receipt.conversationId || currentConversationId === receipt.conversationId);
+                && currentConversationId === receipt.conversationId;
 
             if (
                 inputChanged
                 || composerClosed
                 || submitSettled
-                || progressStarted
-                || resultAppeared
                 || acceptedPostOpened
             ) {
                 return true;
@@ -4348,9 +4341,7 @@ class VideoRetryManager {
             );
         }
 
-        const submissionReceipt = this._capturePromptedVideoSubmissionReceipt(
-            editorReady.agentBinding || null
-        );
+        const submissionReceipt = this._capturePromptedVideoSubmissionReceipt();
         if (!submissionReceipt) {
             return this._stopPromptedResultsItem(
                 'Prompted Batch [results]: Video submit state could not be verified',
@@ -4805,8 +4796,15 @@ class VideoRetryManager {
     }
 
     async waitForPromptedBatchSavedSurface(snapshot, runToken, timeoutMs = 10000) {
-        const result = await restoreSavedViewportReceipt(snapshot, {
+        const receipt = normalizeSavedViewportReceipt(snapshot);
+        if (!receipt) return false;
+        const result = await restoreSavedViewportReceipt(receipt, {
             isActive: () => this.isBatchRunActive(runToken),
+            isScopeValid: () => {
+                const currentScope = detectSavedGalleryScope(document);
+                return currentScope === SAVED_GALLERY_SCOPES.unknown
+                    || currentScope === receipt.origin.scope;
+            },
             sleep: (delay) => this.sleep(delay),
             timeoutMs
         });
@@ -4829,7 +4827,7 @@ class VideoRetryManager {
         this.batchQueue = this.buildBatchQueue();
         const receipt = normalizeSavedViewportReceipt(snapshot);
         const context = getSavedGalleryContext(document);
-        if (!receipt || !context) return false;
+        if (!receipt || !context || !hasOrderedSavedNeighborhood(context.entries, receipt)) return false;
         const sourceIndices = context.entries
             .map((entry, index) => entry.sourceIdentity === receipt.sourceIdentity ? index : -1)
             .filter((index) => index >= 0);
@@ -4967,9 +4965,7 @@ class VideoRetryManager {
         }
 
         if (!this.isBatchRunActive(runToken)) return false;
-        const submissionReceipt = this._capturePromptedVideoSubmissionReceipt(
-            editorReady.agentBinding || null
-        );
+        const submissionReceipt = this._capturePromptedVideoSubmissionReceipt();
         if (!submissionReceipt) {
             return this.stopPromptedBatchItem(
                 'Prompted Batch [gallery]: Video submit state could not be verified',
