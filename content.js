@@ -5815,11 +5815,16 @@ class GrokScraper {
             if (Number.isFinite(writeGuard.deadline) && Date.now() >= writeGuard.deadline) {
                 return { ok: false, invalidated: false, skipped: true, timedOut: true, operation };
             }
+            const deadlineAt = Math.min(
+                Number.isFinite(writeGuard.deadline) ? writeGuard.deadline : Number.POSITIVE_INFINITY,
+                Date.now() + writeGuard.timeoutMs
+            );
             const responsePromise = safeChromeRuntimeSendMessage({
                 action: 'SCRAPE_RUN_STATE_WRITE',
                 runToken: writeGuard.runToken,
                 runEpoch: writeGuard.runEpoch,
                 kind: writeGuard.kind,
+                deadlineAt,
                 values
             }, operation);
             let timeoutId = null;
@@ -5827,7 +5832,10 @@ class GrokScraper {
             const response = await Promise.race([
                 responsePromise,
                 new Promise((resolve) => {
-                    timeoutId = setTimeout(() => resolve(timeout), writeGuard.timeoutMs);
+                    timeoutId = setTimeout(
+                        () => resolve(timeout),
+                        Math.max(0, deadlineAt - Date.now())
+                    );
                 })
             ]);
             if (timeoutId !== null) clearTimeout(timeoutId);
@@ -5892,7 +5900,20 @@ class GrokScraper {
             return;
         }
         if (this.getRunInvalidationVersion() !== initInvalidationVersion) return;
-        const stored = storedResult.value;
+        const activeStateResult = await safeChromeRuntimeSendMessage({
+            action: 'GET_ACTIVE_SCRAPE_RUN_STATE'
+        }, 'load active scrape state');
+        if (activeStateResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return;
+        }
+        if (this.getRunInvalidationVersion() !== initInvalidationVersion) return;
+        const activeState = activeStateResult.value?.status === 'ok'
+            && activeStateResult.value.state
+            && typeof activeStateResult.value.state === 'object'
+            ? activeStateResult.value.state
+            : null;
+        const stored = activeState ? { ...storedResult.value, ...activeState } : storedResult.value;
         if (stored.processedIds) {
             this.processedIds = new Set(stored.processedIds);
             console.log(`Loaded ${this.processedIds.size} processed items.`);

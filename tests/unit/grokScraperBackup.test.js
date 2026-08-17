@@ -207,6 +207,31 @@ function cloneJson(value) {
     return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
+function findStoredRecord(values, kind, predicate = () => true) {
+    return Object.values(values || {}).find((value) => (
+        value
+        && typeof value === 'object'
+        && value.kind === kind
+        && predicate(value)
+    ));
+}
+
+function isCompletionPersistence(values, phase) {
+    return Boolean(findStoredRecord(
+        values,
+        'scrape_completion_journal',
+        (record) => record.phase === phase
+    ));
+}
+
+function getStoredCompletionRecord(storageState, phase, txnId = null) {
+    return findStoredRecord(
+        storageState,
+        'scrape_completion_journal',
+        (record) => record.phase === phase && (!txnId || record.txn?.id === txnId)
+    );
+}
+
 function createDeferred() {
     let resolve;
     let reject;
@@ -1609,7 +1634,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
             isR2Backup: true
         };
         const harness = createDurableBackgroundHarness(storage, {}, { activeScrapeRunToken: lease });
-        await createFailedRunOwnedDualWrite(harness, lease, downloadId);
+        const background = await createFailedRunOwnedDualWrite(harness, lease, downloadId);
 
         expect(harness.storageState.cloudSyncQueue[0]).toEqual(expect.objectContaining({
             cleanupDownloadId: downloadId,
@@ -1633,18 +1658,21 @@ describe('cloud-only download proof and cleanup ordering', () => {
         }, { tab: { id: lease.tabId } });
         await expect(completion.response).resolves.toEqual({ status: 'ok' });
 
-        expect(harness.storageState.cloudSyncQueue[0]).toEqual(expect.objectContaining({
+        const effectiveQueue = background.getCloudSyncQueueForTest();
+        const effectiveOperations = background.getPendingDownloadOperationsForTest();
+        expect(effectiveQueue[0]).toEqual(expect.objectContaining({
             attempts: 1,
             queueRevision: expect.any(Number)
         }));
-        expect(harness.storageState.cloudSyncQueue[0].queueRevision).toBeGreaterThan(runQueueRevision);
-        expect(harness.storageState.cloudSyncQueue[0]).not.toHaveProperty('scrapeLease');
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+        expect(effectiveQueue[0].queueRevision).toBeGreaterThan(runQueueRevision);
+        expect(effectiveQueue[0]).not.toHaveProperty('scrapeLease');
+        expect(effectiveOperations[String(downloadId)]).toEqual(expect.objectContaining({
             attempts: 0,
             downloadState: 'in_progress',
             r2State: 'pending'
         }));
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).not.toHaveProperty('scrapeLease');
+        expect(effectiveOperations[String(downloadId)]).not.toHaveProperty('scrapeLease');
+        expect(getStoredCompletionRecord(harness.storageState, 'committed')).toBeTruthy();
 
         installR2PresentFetch(publicUrl);
         harness.getAlarmListener()({ name: 'gptCloudRetry' });
@@ -1715,15 +1743,11 @@ describe('cloud-only download proof and cleanup ordering', () => {
         await background.ensureBackgroundStateReady();
         await background.ensureScrapeLeaseHydrated();
 
-        const originalGet = harness.chromeApi.storage.local.get.getMockImplementation();
-        const authorityRead = createDeferred();
-        let authorityReadStarted = false;
-        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
-            if (!authorityReadStarted && Array.isArray(keys) && keys.includes('scraperState')) {
-                authorityReadStarted = true;
-                return authorityRead.promise;
-            }
-            return originalGet(keys);
+        const downloadSearch = createDeferred();
+        let downloadSearchStarted = false;
+        harness.chromeApi.downloads.search.mockImplementation(() => {
+            downloadSearchStarted = true;
+            return downloadSearch.promise;
         });
         harness.downloads.set(downloadId, {
             ...harness.downloads.get(downloadId),
@@ -1734,7 +1758,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
             id: downloadId,
             state: { current: 'complete' }
         });
-        await waitForAssertion(() => expect(authorityReadStarted).toBe(true));
+        await waitForAssertion(() => expect(downloadSearchStarted).toBe(true));
 
         const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
             action: 'R2_BACKUP_COMPLETE',
@@ -1745,23 +1769,18 @@ describe('cloud-only download proof and cleanup ordering', () => {
         }, { tab: { id: lease.tabId } });
         await expect(completion.response).resolves.toEqual({ status: 'ok' });
 
-        authorityRead.resolve({
-            scraperState: 'running',
-            scrapeRunToken: lease.token,
-            scrapeRunEpoch: lease.epoch,
-            isScraping: true,
-            isR2Backup: true
-        });
+        downloadSearch.resolve([cloneJson(harness.downloads.get(downloadId))]);
         await changed;
 
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+        const effectiveOperation = background.getPendingDownloadOperationsForTest()[String(downloadId)];
+        expect(effectiveOperation).toEqual(expect.objectContaining({
             downloadId,
             operationRevision: expect.any(Number),
-            downloadState: 'in_progress',
+            downloadState: 'complete',
             r2State: 'pending'
         }));
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].operationRevision).toBeGreaterThan(11);
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).not.toHaveProperty('scrapeLease');
+        expect(effectiveOperation.operationRevision).toBeGreaterThan(11);
+        expect(effectiveOperation).not.toHaveProperty('scrapeLease');
         expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalledWith(downloadId);
         expect(harness.storageState.processedIds).toEqual([]);
     });
@@ -1808,7 +1827,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
 
         const originalSet = harness.chromeApi.storage.local.set.getMockImplementation();
         harness.chromeApi.storage.local.set.mockImplementation((values) => {
-            if (values.cloudSyncQueue && values.pendingDownloadOperations && values.scrapeCompletionTxn) {
+            if (isCompletionPersistence(values, 'prepared')) {
                 return Promise.reject(new Error('atomic completion persistence rejected'));
             }
             return originalSet(values);
@@ -1829,13 +1848,14 @@ describe('cloud-only download proof and cleanup ordering', () => {
         harness.chromeApi.storage.local.set.mockImplementation(originalSet);
         const stopped = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'STOP_R2_BACKUP' });
         await expect(stopped.response).resolves.toEqual(expect.objectContaining({ status: 'stopped' }));
-        expect(harness.storageState.cloudSyncQueue.filter((item) => item.type === 'media')).toEqual([]);
-        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(background.getCloudSyncQueueForTest().filter((item) => item.type === 'media')).toEqual([]);
+        expect(background.getPendingDownloadOperationsForTest()).toEqual({});
+        expect(getStoredCompletionRecord(harness.storageState, 'revoked')).toBeTruthy();
         expect(harness.chromeApi.downloads.cancel).toHaveBeenCalledWith(downloadId);
         expect(harness.storageState.processedIds).toEqual([]);
     });
 
-    test('timed-out late completion transfer stays blocked and Stop revokes it across restart', async () => {
+    test('a timed-out late committed completion record is fenced by revocation across restart', async () => {
         jest.useFakeTimers();
         const downloadId = 77;
         const lease = activeScrapeLease({ token: 'late-completion-transfer-run' });
@@ -1881,7 +1901,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
         const completionWriteStarted = createDeferred();
         let lateValues = null;
         harness.chromeApi.storage.local.set.mockImplementation((values) => {
-            if (!lateValues && values.cloudSyncQueue && values.pendingDownloadOperations && values.scrapeCompletionTxn) {
+            if (!lateValues && isCompletionPersistence(values, 'committed')) {
                 lateValues = cloneJson(values);
                 completionWriteStarted.resolve();
                 return lateWrite.promise.then(() => originalSet(lateValues));
@@ -1897,47 +1917,33 @@ describe('cloud-only download proof and cleanup ordering', () => {
             stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
         }, { tab: { id: lease.tabId } });
         await completionWriteStarted.promise;
-        expect(lateValues).toEqual(expect.objectContaining({
-            cloudSyncQueue: expect.any(Array),
-            pendingDownloadOperations: expect.any(Object),
-            scrapeCompletionTxn: expect.objectContaining({ phase: 'prepared' })
-        }));
-        await jest.advanceTimersByTimeAsync(1100);
+        expect(findStoredRecord(lateValues, 'scrape_completion_journal')).toEqual(
+            expect.objectContaining({ phase: 'committed' })
+        );
+        await jest.advanceTimersByTimeAsync(3500);
         await expect(completion.response).resolves.toEqual({ status: 'ignored' });
-
-        harness.downloads.set(downloadId, {
-            ...harness.downloads.get(downloadId),
-            filename: '/Downloads/late-auth-file.jpg',
-            mime: 'image/jpeg',
-            state: 'complete'
-        });
-        harness.getAlarmListener()({ name: 'gptCloudRetry' });
-        for (let tick = 0; tick < 10; tick++) await Promise.resolve();
-        expect(harness.chromeApi.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
-            action: 'READ_FILE_FOR_UPLOAD'
-        }));
-
+        expect(harness.storageState.scraperState).toBe('idle');
+        expect(background.getCloudSyncQueueForTest()).toEqual([]);
+        expect(background.getPendingDownloadOperationsForTest()).toEqual({});
+        expect(getStoredCompletionRecord(harness.storageState, 'revoked')).toBeTruthy();
         const upload = jest.fn();
-        await background.processCloudQueue('blocked-late-transfer', { uploadMediaQueueItem: upload });
+        await background.processCloudQueue('revoked-late-transfer', { uploadMediaQueueItem: upload });
         expect(upload).not.toHaveBeenCalled();
 
         jest.useRealTimers();
+        findStoredRecord(lateValues, 'scrape_completion_journal').revision = 1000;
         lateWrite.resolve();
         await lateWrite.promise;
         await Promise.resolve();
-        const stopped = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'STOP_R2_BACKUP' });
-        await expect(stopped.response).resolves.toEqual(expect.objectContaining({ status: 'stopped' }));
-        expect(harness.storageState.cloudSyncQueue).toEqual([]);
-        expect(harness.storageState.pendingDownloadOperations).toEqual({});
-        expect(harness.storageState.processedIds).toEqual([]);
+        expect(getStoredCompletionRecord(harness.storageState, 'committed')).toBeTruthy();
 
-        await harness.load();
-        await Promise.resolve();
-        harness.getAlarmListener()({ name: 'gptCloudRetry' });
-        await Promise.resolve();
-        expect(harness.storageState.cloudSyncQueue).toEqual([]);
-        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        const restarted = await harness.load();
+        await restarted.ensureBackgroundStateReady();
+        await restarted.processCloudQueue('restarted-revoked-late-transfer', { uploadMediaQueueItem: upload });
+        expect(restarted.getCloudSyncQueueForTest()).toEqual([]);
+        expect(restarted.getPendingDownloadOperationsForTest()).toEqual({});
         expect(upload).not.toHaveBeenCalled();
+        expect(harness.storageState.processedIds).toEqual([]);
     });
 
     test('startup commits a prepared completion transfer and unblocks its retry work', async () => {
@@ -1981,10 +1987,11 @@ describe('cloud-only download proof and cleanup ordering', () => {
         const background = await harness.load();
         await background.ensureBackgroundStateReady();
 
-        expect(harness.storageState.scrapeCompletionTxn).toEqual(expect.objectContaining({
-            id: completionTxn.id,
-            phase: 'committed'
-        }));
+        expect(getStoredCompletionRecord(
+            harness.storageState,
+            'committed',
+            completionTxn.id
+        )).toBeTruthy();
 
         const upload = jest.fn(() => Promise.resolve({ status: 'already_present', bytes: 0 }));
         await background.processCloudQueue('prepared-restart-recovery', { uploadMediaQueueItem: upload });
@@ -2054,9 +2061,9 @@ describe('cloud-only download proof and cleanup ordering', () => {
         await background.processCloudQueue('stopped-prepared-recovery', { uploadMediaQueueItem: upload });
 
         expect(upload).not.toHaveBeenCalled();
-        expect(harness.storageState.scrapeCompletionTxn).toBeNull();
+        expect(getStoredCompletionRecord(harness.storageState, 'revoked')).toBeTruthy();
         expect(harness.storageState.cloudSyncQueue).toEqual([]);
-        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(background.getPendingDownloadOperationsForTest()).toEqual({});
         expect(harness.storageState.processedIds).toEqual([]);
     });
 
@@ -2086,7 +2093,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
         const originalSet = harness.chromeApi.storage.local.set.getMockImplementation();
         let rejectedCommit = false;
         harness.chromeApi.storage.local.set.mockImplementation((values) => {
-            if (!rejectedCommit && values.scrapeCompletionTxn?.phase === 'committed') {
+            if (!rejectedCommit && isCompletionPersistence(values, 'committed')) {
                 rejectedCommit = true;
                 return Promise.reject(new Error('completion commit rejected once'));
             }
@@ -2101,13 +2108,18 @@ describe('cloud-only download proof and cleanup ordering', () => {
             stats: { uploaded: 0, alreadyPresent: 0, queued: 1, errors: 0, stopReason: 'complete' }
         }, { tab: { id: lease.tabId } });
         await expect(completion.response).resolves.toEqual({ status: 'ignored' });
-        expect(harness.storageState.scrapeCompletionTxn).toEqual(expect.objectContaining({ phase: 'prepared' }));
+        const preparedRecord = getStoredCompletionRecord(harness.storageState, 'prepared');
+        expect(preparedRecord).toBeTruthy();
 
         const upload = jest.fn(() => Promise.resolve({ status: 'already_present', bytes: 0 }));
         await background.processCloudQueue('same-worker-completion-recovery', { uploadMediaQueueItem: upload });
 
         expect(upload).toHaveBeenCalledTimes(1);
-        expect(harness.storageState.scrapeCompletionTxn).toEqual(expect.objectContaining({ phase: 'committed' }));
+        expect(getStoredCompletionRecord(
+            harness.storageState,
+            'committed',
+            preparedRecord.txn.id
+        )).toBeTruthy();
         expect(harness.storageState.cloudSyncQueue).toEqual([]);
         expect(harness.storageState.processedIds).toEqual([mediaId]);
     });
@@ -2143,22 +2155,9 @@ describe('cloud-only download proof and cleanup ordering', () => {
         await background.ensureBackgroundStateReady();
         await background.ensureScrapeLeaseHydrated();
 
-        const originalGet = harness.chromeApi.storage.local.get.getMockImplementation();
-        const authorityRead = createDeferred();
-        let authorityReadStarted = false;
-        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
-            if (!authorityReadStarted && Array.isArray(keys) && keys.includes('scraperState')) {
-                authorityReadStarted = true;
-                return authorityRead.promise;
-            }
-            return originalGet(keys);
-        });
-
-        const changed = harness.getDownloadChangedListener()({
-            id: downloadId,
-            state: { current: 'interrupted' }
-        });
-        await waitForAssertion(() => expect(authorityReadStarted).toBe(true));
+        const staleRevision = background
+            .getPendingDownloadOperationsForTest()[String(downloadId)]
+            .operationRevision;
 
         const completion = dispatchRuntimeMessage(harness.getRuntimeListener(), {
             action: 'R2_BACKUP_COMPLETE',
@@ -2169,22 +2168,20 @@ describe('cloud-only download proof and cleanup ordering', () => {
         }, { tab: { id: lease.tabId } });
         await expect(completion.response).resolves.toEqual({ status: 'ok' });
 
-        authorityRead.resolve({
-            scraperState: 'running',
-            scrapeRunToken: lease.token,
-            scrapeRunEpoch: lease.epoch,
-            isScraping: true,
-            isR2Backup: true
-        });
-        await changed;
+        await expect(background.removeDownloadOperationRevisionForTest(
+            downloadId,
+            staleRevision,
+            lease
+        )).resolves.toBeNull();
 
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+        const effectiveOperation = background.getPendingDownloadOperationsForTest()[String(downloadId)];
+        expect(effectiveOperation).toEqual(expect.objectContaining({
             operationRevision: expect.any(Number),
             downloadState: 'in_progress',
             r2State: 'pending'
         }));
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].operationRevision).toBeGreaterThan(41);
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).not.toHaveProperty('scrapeLease');
+        expect(effectiveOperation.operationRevision).toBeGreaterThan(41);
+        expect(effectiveOperation).not.toHaveProperty('scrapeLease');
         expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalledWith(downloadId);
     });
 
@@ -2231,14 +2228,16 @@ describe('cloud-only download proof and cleanup ordering', () => {
         }, { tab: { id: lease.tabId } });
         await expect(completion.response).resolves.toEqual({ status: 'ok' });
 
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).toEqual(expect.objectContaining({
+        const effectiveOperation = background.getPendingDownloadOperationsForTest()[String(downloadId)];
+        expect(effectiveOperation).toEqual(expect.objectContaining({
             downloadId,
             operationRevision: expect.any(Number),
             downloadState: 'in_progress',
             r2State: 'pending'
         }));
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)].operationRevision).toBeGreaterThan(23);
-        expect(harness.storageState.pendingDownloadOperations[String(downloadId)]).not.toHaveProperty('scrapeLease');
+        expect(effectiveOperation.operationRevision).toBeGreaterThan(23);
+        expect(effectiveOperation).not.toHaveProperty('scrapeLease');
+        expect(getStoredCompletionRecord(harness.storageState, 'committed')).toBeTruthy();
         expect(harness.chromeApi.downloads.cancel).not.toHaveBeenCalledWith(downloadId);
     });
 
@@ -2296,13 +2295,14 @@ describe('cloud-only download proof and cleanup ordering', () => {
             isR2Backup: true
         };
         const harness = createDurableBackgroundHarness(storage, {}, { activeScrapeRunToken: lease });
-        await createFailedRunOwnedDualWrite(harness, lease, downloadId);
+        const background = await createFailedRunOwnedDualWrite(harness, lease, downloadId);
 
         const stopped = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'STOP_R2_BACKUP' });
         await expect(stopped.response).resolves.toEqual(expect.objectContaining({ status: 'stopped' }));
 
-        expect(harness.storageState.cloudSyncQueue.filter((item) => item.type === 'media')).toEqual([]);
-        expect(harness.storageState.pendingDownloadOperations).toEqual({});
+        expect(background.getCloudSyncQueueForTest().filter((item) => item.type === 'media')).toEqual([]);
+        expect(background.getPendingDownloadOperationsForTest()).toEqual({});
+        expect(getStoredCompletionRecord(harness.storageState, 'revoked')).toBeTruthy();
         expect(harness.chromeApi.downloads.cancel).toHaveBeenCalledWith(downloadId);
         expect(harness.storageState.processedIds).toEqual([]);
     });
@@ -2348,8 +2348,9 @@ describe('cloud-only download proof and cleanup ordering', () => {
         }, { tab: { id: lease.tabId } });
         await expect(completion.response).resolves.toEqual({ status: 'ok' });
 
-        expect(harness.storageState.cloudSyncQueue).toHaveLength(1);
-        expect(harness.storageState.cloudSyncQueue[0]).not.toHaveProperty('scrapeLease');
+        expect(background.getCloudSyncQueueForTest()).toHaveLength(1);
+        expect(background.getCloudSyncQueueForTest()[0]).not.toHaveProperty('scrapeLease');
+        expect(getStoredCompletionRecord(harness.storageState, 'committed')).toBeTruthy();
         installR2PresentFetch(publicUrl);
         harness.getAlarmListener()({ name: 'gptCloudRetry' });
         await waitForAssertion(() => expect(harness.storageState.processedIds).toEqual([mediaId]));
@@ -2388,7 +2389,8 @@ describe('cloud-only download proof and cleanup ordering', () => {
         const stopped = dispatchRuntimeMessage(harness.getRuntimeListener(), { action: 'STOP_R2_BACKUP' });
         await expect(stopped.response).resolves.toEqual(expect.objectContaining({ status: 'stopped' }));
 
-        expect(harness.storageState.cloudSyncQueue.filter((item) => item.type === 'media')).toEqual([]);
+        expect(background.getCloudSyncQueueForTest().filter((item) => item.type === 'media')).toEqual([]);
+        expect(getStoredCompletionRecord(harness.storageState, 'revoked')).toBeTruthy();
         expect(harness.storageState.processedIds).toEqual([]);
     });
 

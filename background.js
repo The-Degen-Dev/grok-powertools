@@ -253,6 +253,8 @@ const CLOUD_SCHEMA_VERSION = 1;
 const PROCESSED_IDS_KEY = 'processedIds';
 const PENDING_DOWNLOAD_OPERATIONS_KEY = 'pendingDownloadOperations';
 const SCRAPE_COMPLETION_TXN_KEY = 'scrapeCompletionTxn';
+const SCRAPE_COMPLETION_JOURNAL_PREFIX = 'scrapeCompletionJournal:';
+const SCRAPE_RUN_STATE_RECORD_PREFIX = 'scrapeRunStateRecord:';
 
 // Global History Set
 let processedUUIDs = new Set();
@@ -274,6 +276,11 @@ let cloudQueueDrainPromise = null;
 let cloudStatePersistenceRevision = 0;
 let scrapeCompletionTxn = null;
 let scrapeCompletionTransition = null;
+let scrapeCompletionJournalRevision = 0;
+let scrapeRunStateRecordRevision = 0;
+let latestScrapeRunStateAttemptRevision = 0;
+let activeScrapeRunMirror = null;
+const scrapeRunStateRecordKeys = new Set();
 let cloudSyncState = {
     unsyncedCount: 0,
     lastError: null,
@@ -1882,13 +1889,7 @@ async function generateFilenameForBackup(url, extHint) {
 }
 
 async function initializeBackgroundState() {
-    const stored = await chrome.storage.local.get([
-        PROCESSED_IDS_KEY,
-        CloudSync.STORAGE_KEYS.cloudSyncQueue,
-        CloudSync.STORAGE_KEYS.cloudSyncState,
-        PENDING_DOWNLOAD_OPERATIONS_KEY,
-        SCRAPE_COMPLETION_TXN_KEY
-    ]);
+    const stored = await chrome.storage.local.get(null);
 
     if (stored[PROCESSED_IDS_KEY]) {
         processedUUIDs = new Set(normalizeProcessedIds(stored[PROCESSED_IDS_KEY]));
@@ -1907,9 +1908,6 @@ async function initializeBackgroundState() {
         && typeof stored[SCRAPE_COMPLETION_TXN_KEY] === 'object'
         ? { ...stored[SCRAPE_COMPLETION_TXN_KEY] }
         : null;
-    const startupDownloadOperations = Array.from(pendingDownloadOperations.values())
-        .map((operation) => ({ ...operation }));
-
     cloudSyncQueue = Array.isArray(stored[CloudSync.STORAGE_KEYS.cloudSyncQueue])
         ? stored[CloudSync.STORAGE_KEYS.cloudSyncQueue].map((item) => {
             if (item?.type !== 'media' || !item.lastError || isRedactedMediaError(item.lastError)) return item;
@@ -1927,6 +1925,10 @@ async function initializeBackgroundState() {
         (latest, item) => Math.max(latest, Number.isInteger(item?.queueRevision) ? item.queueRevision : 0),
         cloudQueueRevision
     );
+    hydrateScrapeCompletionJournal(stored);
+    hydrateScrapeRunStateRecordRevision(stored);
+    const startupDownloadOperations = Array.from(pendingDownloadOperations.values())
+        .map((operation) => ({ ...operation }));
 
     cloudSyncState = {
         ...cloudSyncState,
@@ -2225,6 +2227,82 @@ function buildAuthoritativeIdleLocalState(stored = {}, stopReason = 'stopped') {
     return values;
 }
 
+function buildImmutableStorageKey(prefix, revision, identity) {
+    const suffix = Math.random().toString(16).slice(2, 10);
+    return `${prefix}${revision}:${identity}:${Date.now()}:${suffix}`;
+}
+
+function getScrapeRunStateRecords(stored = {}) {
+    return Object.entries(stored).reduce((records, [key, value]) => {
+        if (!key.startsWith(SCRAPE_RUN_STATE_RECORD_PREFIX)
+            || value?.kind !== 'scrape_run_state_record'
+            || !Number.isInteger(value.revision)
+            || !normalizeScrapeLease(value.lease)
+            || !value.mirror
+            || typeof value.mirror !== 'object') {
+            return records;
+        }
+        records.push({ ...value, storageKey: key });
+        return records;
+    }, []);
+}
+
+function hydrateScrapeRunStateRecordRevision(stored = {}) {
+    const records = getScrapeRunStateRecords(stored);
+    for (const record of records) scrapeRunStateRecordKeys.add(record.storageKey);
+    const latest = records.reduce(
+        (revision, record) => Math.max(revision, record.revision),
+        0
+    );
+    scrapeRunStateRecordRevision = Math.max(scrapeRunStateRecordRevision, latest);
+    latestScrapeRunStateAttemptRevision = Math.max(latestScrapeRunStateAttemptRevision, latest);
+}
+
+function getLatestScrapeRunStateRecord(stored, lease) {
+    return getScrapeRunStateRecords(stored)
+        .filter((record) => scrapeLeaseMatches(normalizeScrapeLease(record.lease), lease))
+        .sort((left, right) => right.revision - left.revision)[0] || null;
+}
+
+function setActiveScrapeRunMirror(record) {
+    activeScrapeRunMirror = record ? {
+        lease: copyScrapeLeaseAuthority(record.lease),
+        revision: record.revision,
+        storageKey: record.storageKey || null,
+        mirror: { ...record.mirror }
+    } : null;
+}
+
+function removeScrapeRunStateRecords(storageKeys) {
+    const keys = Array.from(new Set(storageKeys)).filter(Boolean);
+    if (keys.length === 0 || typeof chrome.storage?.local?.remove !== 'function') return;
+    try {
+        Promise.resolve(chrome.storage.local.remove(keys)).then(() => {
+            for (const key of keys) scrapeRunStateRecordKeys.delete(key);
+        }).catch(() => {});
+    } catch {
+        // Cleanup is opportunistic; unique records cannot overwrite newer keys.
+    }
+}
+
+function pruneScrapeRunStateRecords(retainedStorageKey = null) {
+    removeScrapeRunStateRecords(
+        Array.from(scrapeRunStateRecordKeys).filter((key) => key !== retainedStorageKey)
+    );
+}
+
+function getActiveScrapeRunMirror(lease = activeScrapeLease) {
+    return scrapeLeaseMatches(activeScrapeRunMirror?.lease, lease)
+        ? { ...activeScrapeRunMirror.mirror }
+        : null;
+}
+
+async function readEffectiveScrapeRunState(lease, keys) {
+    const mirror = getActiveScrapeRunMirror(lease);
+    if (mirror) return mirror;
+    return chrome.storage.local.get(keys);
+}
+
 async function persistScrapeLease(lease) {
     const session = chrome.storage?.session;
     if (!session || typeof session.set !== 'function') {
@@ -2232,6 +2310,10 @@ async function persistScrapeLease(lease) {
     }
     await session.set({ [ACTIVE_SCRAPE_RUN_TOKEN_KEY]: lease });
     activeScrapeLease = lease;
+    if (!scrapeLeaseMatches(activeScrapeRunMirror?.lease, lease)) {
+        setActiveScrapeRunMirror(null);
+        pruneScrapeRunStateRecords();
+    }
     return lease;
 }
 
@@ -2242,21 +2324,22 @@ async function hydrateScrapeLeaseAuthority() {
     }
     const [sessionValues, stored] = await Promise.all([
         session.get([ACTIVE_SCRAPE_RUN_TOKEN_KEY]),
-        chrome.storage.local.get([
-            'scraperState',
-            'scrapeRunToken',
-            'scrapeRunEpoch',
-            'scrapeNavigation',
-            'currentItemId',
-            'scrapeBackupOptions',
-            'isScraping',
-            'isR2Backup',
-            'r2BackupState'
-        ])
+        chrome.storage.local.get(null)
     ]);
+    hydrateScrapeRunStateRecordRevision(stored);
     const storedLease = normalizeScrapeLease(sessionValues?.[ACTIVE_SCRAPE_RUN_TOKEN_KEY]);
-    if (storedLease?.status === 'active' && localRunMatchesLease(stored, storedLease)) {
+    const runStateRecord = storedLease?.status === 'active'
+        ? getLatestScrapeRunStateRecord(stored, storedLease)
+        : null;
+    const effectiveStored = runStateRecord?.mirror || stored;
+    if (storedLease?.status === 'active' && localRunMatchesLease(effectiveStored, storedLease)) {
         activeScrapeLease = storedLease;
+        setActiveScrapeRunMirror(runStateRecord || {
+            lease: storedLease,
+            revision: 0,
+            mirror: effectiveStored
+        });
+        pruneScrapeRunStateRecords(runStateRecord?.storageKey || null);
         isScraping = true;
         isR2Backup = storedLease.kind === 'r2_backup';
         scrapeStartPending = false;
@@ -2270,8 +2353,9 @@ async function hydrateScrapeLeaseAuthority() {
     isScraping = false;
     isR2Backup = false;
     scrapeStartPending = false;
-    if (hasStaleLocalRunState(stored)) {
-        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, 'stale_session'));
+    pruneScrapeRunStateRecords();
+    if (hasStaleLocalRunState(effectiveStored)) {
+        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(effectiveStored, 'stale_session'));
     }
     return tombstone;
 }
@@ -2340,7 +2424,7 @@ async function validateScrapeResume(value, senderTabId = null) {
         if (!scrapeLeaseMatches(owner, requested)) {
             return { valid: false, reason: 'stale_authority' };
         }
-        const stored = await chrome.storage.local.get([
+        const stored = await readEffectiveScrapeRunState(requested, [
             'scraperState',
             'scrapeRunToken',
             'scrapeRunEpoch',
@@ -2382,14 +2466,74 @@ function buildAuthorizedRunningMirror(lease, values = {}) {
 
 async function commitScrapeRunState(request, sender) {
     const requested = getRunScopedScrapeLease(request, sender?.tab?.id ?? null);
-    return enqueueScrapeLeaseOperation(async () => {
+    const startedAt = Date.now();
+    const deadlineAt = Math.min(
+        Number.isFinite(request?.deadlineAt)
+            ? request.deadlineAt
+            : startedAt + PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS,
+        startedAt + PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS
+    );
+    const prepared = await enqueueScrapeLeaseOperation(() => {
         if (!scrapeLeaseMatches(activeScrapeLease, requested)) {
+            return { response: { status: 'ignored', reason: 'stale_authority' } };
+        }
+        if (Date.now() >= deadlineAt) {
+            return { response: { status: 'ignored', reason: 'persistence_timeout' } };
+        }
+        const revision = ++scrapeRunStateRecordRevision;
+        latestScrapeRunStateAttemptRevision = revision;
+        const record = {
+            kind: 'scrape_run_state_record',
+            version: 1,
+            revision,
+            lease: copyScrapeLeaseAuthority(requested),
+            mirror: buildAuthorizedRunningMirror(requested, request.values),
+            createdAt: Date.now()
+        };
+        return {
+            record,
+            storageKey: buildImmutableStorageKey(
+                SCRAPE_RUN_STATE_RECORD_PREFIX,
+                revision,
+                `${requested.epoch}:${requested.token}`
+            )
+        };
+    });
+    if (prepared.response) return prepared.response;
+    scrapeRunStateRecordKeys.add(prepared.storageKey);
+
+    const timeout = Symbol('scrape_run_state_persist_timeout');
+    const failed = Symbol('scrape_run_state_persist_failed');
+    const write = Promise.resolve(chrome.storage.local.set({
+        [prepared.storageKey]: prepared.record
+    }));
+    const result = await withTimeout(
+        write.then(() => true, () => failed),
+        Math.max(0, deadlineAt - Date.now()),
+        timeout
+    );
+    if (Date.now() >= deadlineAt || result !== true) {
+        write.then(() => removeScrapeRunStateRecords([prepared.storageKey]), () => {
+            scrapeRunStateRecordKeys.delete(prepared.storageKey);
+        });
+        return {
+            status: 'ignored',
+            reason: Date.now() >= deadlineAt || result === timeout
+                ? 'persistence_timeout'
+                : 'persistence_failed'
+        };
+    }
+
+    return enqueueScrapeLeaseOperation(() => {
+        if (Date.now() >= deadlineAt) {
+            return { status: 'ignored', reason: 'persistence_timeout' };
+        }
+        if (!scrapeLeaseMatches(activeScrapeLease, requested)
+            || prepared.record.revision !== latestScrapeRunStateAttemptRevision) {
             return { status: 'ignored', reason: 'stale_authority' };
         }
-        await chrome.storage.local.set(buildAuthorizedRunningMirror(requested, request.values));
-        if (!scrapeLeaseMatches(activeScrapeLease, requested)) {
-            return { status: 'ignored', reason: 'stale_authority' };
-        }
+        setActiveScrapeRunMirror({ ...prepared.record, storageKey: prepared.storageKey });
+        pruneScrapeRunStateRecords(prepared.storageKey);
         return { status: 'ok' };
     });
 }
@@ -2400,7 +2544,7 @@ async function getAuthorizedScrapeTransferLease(request, sender) {
         scrapeLeaseMatches(activeScrapeLease, requested) ? { ...requested } : null
     ));
     if (!authoritySnapshot) return null;
-    const stored = await chrome.storage.local.get([
+    const stored = await readEffectiveScrapeRunState(requested, [
         'scraperState',
         'scrapeRunToken',
         'scrapeRunEpoch',
@@ -2743,7 +2887,7 @@ async function cancelPreparedScrapeStart(lease, stopReason = 'start_failed') {
         scrapeStartPending = false;
         isScraping = false;
         isR2Backup = false;
-        const stored = await chrome.storage.local.get(['r2BackupState']);
+        const stored = await readEffectiveScrapeRunState(lease, ['r2BackupState']);
         await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
         return true;
     });
@@ -2764,7 +2908,7 @@ async function finalizeScrapeStart(lease, initResponse) {
             scrapeStartPending = false;
             isScraping = false;
             isR2Backup = false;
-            const stored = await chrome.storage.local.get(['r2BackupState']);
+            const stored = await readEffectiveScrapeRunState(lease, ['r2BackupState']);
             await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, 'start_rejected'));
             if (initResponse?.status === 'invalid_context') return initResponse;
             return {
@@ -2852,7 +2996,7 @@ async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
         scrapeStartPending = false;
         isScraping = false;
         isR2Backup = false;
-        const stored = await chrome.storage.local.get(['r2BackupState', 'scrapeNavigation']);
+        const stored = await readEffectiveScrapeRunState(lease, ['r2BackupState', 'scrapeNavigation']);
         const stopNavigation = stored.scrapeNavigation || null;
         await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
         await revokeScrapeDownloadAuthority(lease);
@@ -2906,7 +3050,7 @@ async function completeScrapeRun(request, sender, kind) {
     const completionTransfer = await prepareScrapeCompletionTransfer(lease);
     return enqueueScrapeLeaseOperation(async () => {
         if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
-        const stored = await chrome.storage.local.get(['r2BackupState']);
+        const stored = await readEffectiveScrapeRunState(lease, ['r2BackupState']);
         if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
         await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
         scrapeStartPending = false;
@@ -3185,6 +3329,26 @@ function handleRuntimeMessage(request, sender, sendResponse) {
         return true;
     }
 
+    if (request.action === 'GET_ACTIVE_SCRAPE_RUN_STATE') {
+        enqueueScrapeLeaseOperation(() => {
+            const lease = activeScrapeLease;
+            const state = getActiveScrapeRunMirror(lease);
+            if (lease?.status !== 'active' || sender?.tab?.id !== lease.tabId || !state) {
+                return { status: 'ignored', reason: 'stale_authority' };
+            }
+            return {
+                status: 'ok',
+                runToken: lease.token,
+                runEpoch: lease.epoch,
+                kind: lease.kind,
+                state
+            };
+        }).then(sendResponse).catch(() => {
+            sendResponse({ status: 'ignored', reason: 'stale_authority' });
+        });
+        return true;
+    }
+
     if (request.action === 'GET_CLOUD_CONFIG') {
         (async () => {
             const config = await getCloudConfig();
@@ -3409,6 +3573,7 @@ const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
     'PROCESSED_IDS_ADD',
     'PROCESSED_IDS_RESET',
     'SCRAPE_RUN_STATE_WRITE',
+    'GET_ACTIVE_SCRAPE_RUN_STATE',
     'SCRAPE_PROCESSED_IDS_ADD',
     'GET_SCRAPE_DURABILITY',
     'START_SCRAPE',
@@ -3443,7 +3608,7 @@ async function getActiveLeaseForTabEvent(tabId, tab = {}) {
         const lease = activeScrapeLease;
         if (lease?.status !== 'active') return null;
         if (tabId !== lease.tabId && tab?.openerTabId !== lease.tabId) return null;
-        const stored = await chrome.storage.local.get([
+        const stored = await readEffectiveScrapeRunState(lease, [
             'scraperState',
             'scrapeRunToken',
             'scrapeRunEpoch',
@@ -3671,6 +3836,71 @@ function makeScrapeCompletionTxn(lease) {
     };
 }
 
+function getScrapeCompletionJournalRecords(stored = {}) {
+    return Object.entries(stored).reduce((records, [key, value]) => {
+        if (!key.startsWith(SCRAPE_COMPLETION_JOURNAL_PREFIX)
+            || value?.kind !== 'scrape_completion_journal'
+            || !Number.isInteger(value.revision)
+            || !['prepared', 'committed', 'revoked'].includes(value.phase)
+            || !normalizeScrapeLease(value.lease)) {
+            return records;
+        }
+        records.push({ ...value, storageKey: key });
+        return records;
+    }, []).sort((left, right) => left.revision - right.revision);
+}
+
+function makeScrapeCompletionJournalRecord(lease, phase, txn = null) {
+    const revision = ++scrapeCompletionJournalRevision;
+    const normalizedTxn = txn ? { ...txn, phase } : null;
+    return {
+        kind: 'scrape_completion_journal',
+        version: 1,
+        revision,
+        phase,
+        lease: copyScrapeLeaseAuthority(lease),
+        txn: normalizedTxn,
+        createdAt: Date.now()
+    };
+}
+
+function startScrapeCompletionJournalWrite(record) {
+    const identity = record.txn?.id || `${record.lease.epoch}:${record.lease.token}`;
+    const storageKey = buildImmutableStorageKey(
+        SCRAPE_COMPLETION_JOURNAL_PREFIX,
+        record.revision,
+        `${identity}:${record.phase}`
+    );
+    return Promise.resolve(chrome.storage.local.set({ [storageKey]: record }));
+}
+
+function applyScrapeCompletionJournalRecord(record) {
+    const lease = normalizeScrapeLease(record.lease);
+    if (!lease) return false;
+    scrapeCompletionJournalRevision = Math.max(scrapeCompletionJournalRevision, record.revision || 0);
+    if (record.phase === 'revoked') {
+        const queue = cloneCloudQueue().filter((item) => !recordOwnedByScrapeLease(item, lease));
+        const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
+        for (const [downloadId, operation] of operations) {
+            if (recordOwnedByScrapeLease(operation, lease)) operations.delete(downloadId);
+        }
+        const nextTxn = completionTxnMatchesLease(scrapeCompletionTxn, lease) ? null : scrapeCompletionTxn;
+        applyCompletionRetrySnapshots(queue, operations, nextTxn);
+        return true;
+    }
+    if (!record.txn || typeof record.txn !== 'object') return false;
+    const txn = { ...record.txn, phase: record.phase };
+    const snapshots = buildCompletionRetrySnapshots(lease, txn);
+    applyCompletionRetrySnapshots(snapshots.queue, snapshots.operations, txn);
+    return true;
+}
+
+function hydrateScrapeCompletionJournal(stored = {}) {
+    const records = getScrapeCompletionJournalRecords(stored);
+    for (const record of records) applyScrapeCompletionJournalRecord(record);
+    return records;
+}
+
 function buildCompletionRetrySnapshots(lease, txn) {
     const queue = cloneCloudQueue().map((item) => {
         if (!scrapeLeaseMatches(item.scrapeLease, lease)) return item;
@@ -3748,10 +3978,20 @@ async function runWithScrapeCompletionMutationBarrier({
 
         let releaseBarrier;
         const barrier = new Promise((resolve) => { releaseBarrier = resolve; });
+        let barrierReleased = false;
+        const releaseMutationBarrier = () => {
+            if (barrierReleased) return;
+            barrierReleased = true;
+            if (transition.releaseMutationBarrier === releaseMutationBarrier) {
+                transition.releaseMutationBarrier = null;
+            }
+            releaseBarrier();
+        };
         cloudQueueMutationQueue = barrier;
         pendingDownloadOperationsMutationQueue = barrier;
+        transition.releaseMutationBarrier = releaseMutationBarrier;
         const operationPromise = Promise.resolve().then(operation);
-        operationPromise.finally(releaseBarrier).catch(() => {});
+        operationPromise.finally(releaseMutationBarrier).catch(() => {});
         const timeout = Symbol('scrape_completion_mutation_timeout');
         const result = await withTimeout(
             operationPromise,
@@ -3760,23 +4000,12 @@ async function runWithScrapeCompletionMutationBarrier({
         );
         if (result === timeout) {
             transition.status = `${transition.status}_timed_out`;
+            transition.abandoned = true;
+            releaseMutationBarrier();
             throw new Error('scrape_completion_transfer_persist_timeout');
         }
         return result;
     }
-}
-
-function buildCompletionRetryStorageValues(queue, operations, txn) {
-    return {
-        [CloudSync.STORAGE_KEYS.cloudSyncQueue]: cloneCloudQueue(queue),
-        [CloudSync.STORAGE_KEYS.cloudSyncState]: {
-            ...cloudSyncState,
-            unsyncedCount: queue.length,
-            processing: false
-        },
-        [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(operations),
-        [SCRAPE_COMPLETION_TXN_KEY]: txn
-    };
 }
 
 function applyCompletionRetrySnapshots(queue, operations, txn) {
@@ -3802,7 +4031,6 @@ async function recoverPreparedScrapeCompletionTransfer() {
         for (const [downloadId, operation] of operations) {
             if (operation?.completionTxnId === txn.id) operations.delete(downloadId);
         }
-        await chrome.storage.local.set(buildCompletionRetryStorageValues(queue, operations, null));
         applyCompletionRetrySnapshots(queue, operations, null);
         return false;
     }
@@ -3810,7 +4038,9 @@ async function recoverPreparedScrapeCompletionTransfer() {
     await ensureScrapeLeaseHydrated();
     const stored = await chrome.storage.local.get(['r2BackupState', 'scrapeStopReason']);
     const stopReason = stored.scrapeStopReason || stored.r2BackupState?.stopReason || null;
-    if (stopReason === 'stopped' || stopReason === 'owner_tab_closed') {
+    if (stopReason === 'stopped'
+        || stopReason === 'owner_tab_closed'
+        || stopReason === 'completion_timeout') {
         await revokeScrapeRetryAuthorityAtomically(lease);
         return false;
     }
@@ -3836,25 +4066,46 @@ async function recoverPreparedScrapeCompletionTransfer() {
         committedAt: Date.now(),
         recoveredAt: Date.now()
     };
-    const snapshots = buildCompletionRetrySnapshots(lease, committedTxn);
-    await chrome.storage.local.set(buildCompletionRetryStorageValues(
-        snapshots.queue,
-        snapshots.operations,
-        committedTxn
-    ));
-    applyCompletionRetrySnapshots(snapshots.queue, snapshots.operations, committedTxn);
-    return true;
+    while (true) {
+        const cloudQueueTail = cloudQueueMutationQueue;
+        const pendingOperationsTail = pendingDownloadOperationsMutationQueue;
+        await Promise.all([cloudQueueTail, pendingOperationsTail]);
+        if (cloudQueueTail !== cloudQueueMutationQueue
+            || pendingOperationsTail !== pendingDownloadOperationsMutationQueue) {
+            continue;
+        }
+
+        let releaseBarrier;
+        const barrier = new Promise((resolve) => { releaseBarrier = resolve; });
+        cloudQueueMutationQueue = barrier;
+        pendingDownloadOperationsMutationQueue = barrier;
+        try {
+            const journalRecord = makeScrapeCompletionJournalRecord(lease, 'committed', committedTxn);
+            const write = startScrapeCompletionJournalWrite(journalRecord);
+            const persisted = await withTimeout(
+                write.then(() => true, () => false),
+                CLOUD_QUEUE_MUTATION_TIMEOUT_MS,
+                false
+            );
+            if (!persisted) return false;
+            const snapshots = buildCompletionRetrySnapshots(lease, committedTxn);
+            applyCompletionRetrySnapshots(snapshots.queue, snapshots.operations, committedTxn);
+            return true;
+        } finally {
+            releaseBarrier();
+        }
+    }
 }
 
 async function persistCompletionRetrySnapshots(queue, operations, txn, transition, stage) {
     transition.status = stage;
-    const rawWrite = Promise.resolve(chrome.storage.local.set(
-        buildCompletionRetryStorageValues(queue, operations, txn)
-    ));
+    const journalRecord = makeScrapeCompletionJournalRecord(txn.lease, txn.phase, txn);
+    const rawWrite = startScrapeCompletionJournalWrite(journalRecord);
     const pendingWrite = rawWrite.then(async () => {
         transition.persisted = true;
-        if (transition.revoked) {
-            await revokeScrapeRetryAuthorityAtomically(transition.txn.lease);
+        if (transition.revoked
+            || transition.abandoned
+            || scrapeCompletionTransition !== transition) {
             throw createScrapeAuthorityRevokedError();
         }
         applyCompletionRetrySnapshots(queue, operations, txn);
@@ -3880,7 +4131,9 @@ async function prepareScrapeCompletionTransfer(lease) {
         status: 'preparing',
         persisted: false,
         revoked: false,
-        pendingWritePromise: null
+        abandoned: false,
+        pendingWritePromise: null,
+        releaseMutationBarrier: null
     };
     scrapeCompletionTransition = transition;
     try {
@@ -3905,8 +4158,19 @@ async function prepareScrapeCompletionTransfer(lease) {
             }
         });
     } catch (error) {
-        if (!/_timed_out$/.test(transition.status) && scrapeCompletionTransition === transition) {
+        const timedOut = error?.message === 'scrape_completion_transfer_persist_timeout';
+        if (timedOut) {
+            transition.revoked = true;
+            transition.abandoned = true;
+            transition.releaseMutationBarrier?.();
+        }
+        if (scrapeCompletionTransition === transition) {
             scrapeCompletionTransition = null;
+        }
+        if (timedOut) {
+            await stopScrapeRun(lease.kind, 'completion_timeout').catch(async () => {
+                await revokeScrapeRetryAuthorityAtomically(lease).catch(() => {});
+            });
         }
         throw error;
     }
@@ -3918,22 +4182,33 @@ async function commitScrapeCompletionTransfer(prepared) {
         phase: 'committed',
         committedAt: Date.now()
     };
-    await runWithScrapeCompletionMutationBarrier({
-        transition: prepared.transition,
-        operation: async () => {
-            assertScrapeCompletionTransitionCurrent(prepared.transition);
-            const snapshots = buildCompletionRetrySnapshots(prepared.txn.lease, committedTxn);
-            await persistCompletionRetrySnapshots(
-                snapshots.queue,
-                snapshots.operations,
-                committedTxn,
-                prepared.transition,
-                'committing'
-            );
-            prepared.transition.status = 'committed';
+    try {
+        await runWithScrapeCompletionMutationBarrier({
+            transition: prepared.transition,
+            operation: async () => {
+                assertScrapeCompletionTransitionCurrent(prepared.transition);
+                const snapshots = buildCompletionRetrySnapshots(prepared.txn.lease, committedTxn);
+                await persistCompletionRetrySnapshots(
+                    snapshots.queue,
+                    snapshots.operations,
+                    committedTxn,
+                    prepared.transition,
+                    'committing'
+                );
+                prepared.transition.status = 'committed';
+                if (scrapeCompletionTransition === prepared.transition) scrapeCompletionTransition = null;
+            }
+        });
+    } catch (error) {
+        if (error?.message === 'scrape_completion_transfer_persist_timeout') {
+            prepared.transition.revoked = true;
+            prepared.transition.abandoned = true;
+            prepared.transition.releaseMutationBarrier?.();
             if (scrapeCompletionTransition === prepared.transition) scrapeCompletionTransition = null;
+            await revokeScrapeRetryAuthorityAtomically(prepared.txn.lease);
         }
-    });
+        throw error;
+    }
 }
 
 function markScrapeCompletionTransitionRevoked(lease) {
@@ -3953,36 +4228,23 @@ async function revokeScrapeRetryAuthorityAtomically(lease) {
     cloudStatePersistenceRevision += 1;
     pendingDownloadOperationsRevision += 1;
     applyCompletionRetrySnapshots(queue, operations, nextTxn);
-    const write = Promise.resolve(chrome.storage.local.set(
-        buildCompletionRetryStorageValues(queue, operations, nextTxn)
-    ));
-    const persisted = await withTimeout(
-        write.then(() => true).catch(() => false),
+    const journalRecord = makeScrapeCompletionJournalRecord(lease, 'revoked');
+    const write = startScrapeCompletionJournalWrite(journalRecord);
+    return withTimeout(
+        write.then(() => true, () => false),
         Math.max(CLOUD_QUEUE_MUTATION_TIMEOUT_MS, PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS),
         false
     );
-    if (!persisted) {
-        write.finally(() => chrome.storage.local.set(buildCompletionRetryStorageValues(
-            cloudSyncQueue,
-            pendingDownloadOperations,
-            scrapeCompletionTxn
-        )).catch(() => {})).catch(() => {});
-    }
 }
 
 async function settleRevokedScrapeCompletionTransition(lease) {
     const transition = scrapeCompletionTransition;
     if (!transition || !completionTxnMatchesLease(transition.txn, lease)) return true;
     transition.revoked = true;
-    if (!transition.pendingWritePromise) return true;
-    const timeout = Symbol('scrape_completion_stop_timeout');
-    const result = await withTimeout(
-        transition.pendingWritePromise.then(() => true).catch(() => false),
-        SCRAPE_TRANSFER_DRAIN_TIMEOUT_MS,
-        timeout
-    );
-    if (result === timeout) return false;
+    transition.abandoned = true;
+    transition.releaseMutationBarrier?.();
     transition.pendingWritePromise = null;
+    if (scrapeCompletionTransition === transition) scrapeCompletionTransition = null;
     return true;
 }
 
@@ -4651,6 +4913,7 @@ if (typeof module !== 'undefined') {
         RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS,
         requestPresignedUrl,
         reserveDownloadOperationForTest: reserveDownloadOperation,
+        removeDownloadOperationRevisionForTest: removeDownloadOperationRevision,
         parseFilenameInfo,
         processCompletedDownloadOperation,
         processCloudQueue,
