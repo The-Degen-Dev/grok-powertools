@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Grok Extension Recovery Implementation Notes</title>
+        <style>
+            :root {
+                color-scheme: light dark;
+                --bg: #f6f7f9;
+                --surface: #ffffff;
+                --text: #17191d;
+                --muted: #5e6673;
+                --line: #d9dde4;
+                --accent: #2563eb;
+                --ok: #16794a;
+                --pending: #a05a00;
+            }
+            @media (prefers-color-scheme: dark) {
+                :root {
+                    --bg: #101114;
+                    --surface: #181a1f;
+                    --text: #f3f4f6;
+                    --muted: #a9b0bc;
+                    --line: #343943;
+                    --accent: #60a5fa;
+                    --ok: #5ee0a0;
+                    --pending: #f5b85b;
+                }
+            }
+            * { box-sizing: border-box; }
+            body {
+                margin: 0;
+                background: var(--bg);
+                color: var(--text);
+                font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }
+            main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 64px; }
+            h1 { margin: 0; font-size: clamp(24px, 4vw, 36px); letter-spacing: 0; }
+            h2 { margin: 32px 0 12px; font-size: 19px; letter-spacing: 0; }
+            p { margin: 8px 0; }
+            code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+            .lede, .panel { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; }
+            .lede { margin-top: 18px; padding: 16px; display: grid; gap: 8px; }
+            .panel { padding: 16px; }
+            .status { color: var(--pending); font-weight: 700; }
+            .ok { color: var(--ok); }
+            table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); }
+            th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+            th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+            tr:last-child td { border-bottom: 0; }
+            ul { margin: 8px 0; padding-left: 22px; }
+            .empty { color: var(--muted); font-style: italic; }
+            .stamp { color: var(--muted); font-size: 13px; }
+            @media (max-width: 700px) {
+                table, thead, tbody, tr, th, td { display: block; }
+                thead { display: none; }
+                tr { padding: 8px 0; border-bottom: 1px solid var(--line); }
+                td { border: 0; padding: 4px 12px; overflow-wrap: anywhere; }
+            }
+        </style>
+    </head>
+    <body>
+        <main>
+            <h1>Grok Extension Recovery Implementation Notes</h1>
+            <p class="stamp">Initialized 2026-08-16 23:10:16 EDT</p>
+            <section class="lede">
+                <div><strong>Status:</strong> <span class="status">Task 1 of 15 in progress</span></div>
+                <div><strong>Branch:</strong> <code>codex/grok-extension-recovery</code></div>
+                <div><strong>Plan:</strong> <code>2026-08-16-grok-extension-recovery-live-validation.md</code></div>
+                <div><strong>Proof boundary:</strong> No runtime edit or live lane has run yet. Existing automated and two-item evidence is not being treated as Sync, Dual-write, or full-backup proof.</div>
+            </section>
+
+            <h2>Current Status</h2>
+            <table>
+                <thead><tr><th>Task</th><th>State</th><th>Evidence</th></tr></thead>
+                <tbody>
+                    <tr><td>Preflight</td><td class="ok">Complete</td><td>Branch and approved dirty baseline match the preserved checkpoint. The spec exists and the 15-task plan was scanned for cross-task conflicts.</td></tr>
+                    <tr><td>Task 1</td><td class="status">In progress</td><td>Preparing the evidence contract and exact pre-runtime baseline capture.</td></tr>
+                    <tr><td>Tasks 2-15</td><td>Pending</td><td>No implementation or live proof claimed.</td></tr>
+                </tbody>
+            </table>
+
+            <h2>Design Decisions</h2>
+            <table>
+                <thead><tr><th>Decision</th><th>Reason</th><th>Impact</th></tr></thead>
+                <tbody>
+                    <tr><td>Use this plan-specific HTML file instead of replacing the tracked root <code>implementation-notes.html</code>.</td><td>The root file documents an older Video/GIF Recreate goal and is historical project evidence.</td><td>Both records remain intact; this file is the running record for the current recovery plan.</td></tr>
+                    <tr><td>Allow Task 1's <code>--evidence</code> argument to accept inline JSON or a readable JSON file path.</td><td>Task 1 describes inline JSON, while Task 9's approved command passes a file path.</td><td>One CLI supports both approved call sites without creating a second tool.</td></tr>
+                    <tr><td>Commit this notes file before runtime baseline capture.</td><td>Task 1 requires the dirty baseline to contain exactly the six approved tracked runtime/test files and two protected untracked files.</td><td>A docs-only commit precedes Task 1; the captured runtime patch remains exact.</td></tr>
+                </tbody>
+            </table>
+
+            <h2>Deviations</h2>
+            <div class="panel"><p class="empty">None. The two rulings above resolve plan mechanics without changing the approved product or validation scope.</p></div>
+
+            <h2>Tradeoffs</h2>
+            <table>
+                <thead><tr><th>Choice</th><th>Alternative</th><th>Why</th></tr></thead>
+                <tbody>
+                    <tr><td>Track public implementation notes in Git and keep detailed worker artifacts in the ignored SDD workspace.</td><td>Put all coordination detail in one tracked HTML file.</td><td>The HTML stays readable and secret-safe; briefs, reports, and review packages remain recoverable without bloating the branch.</td></tr>
+                    <tr><td>Execute deterministic Tasks 1-9 before any live Chrome lane.</td><td>Patch and test directly against production first.</td><td>This keeps cloud and credit-bearing actions behind source-bound deterministic gates.</td></tr>
+                </tbody>
+            </table>
+
+            <h2>Open Questions</h2>
+            <div class="panel"><p class="empty">None requiring user input. Named pause conditions remain account reauthentication, Chrome permission prompts, unavailable acceptance resources or credentials, an unidentifiable competing job, ambiguous low-cost Grok settings, or unexpected dirty-file ownership overlap.</p></div>
+
+            <h2>Verification Evidence</h2>
+            <table>
+                <thead><tr><th>Check</th><th>Result</th><th>Boundary</th></tr></thead>
+                <tbody>
+                    <tr><td><code>git status --short --branch</code></td><td class="ok">Matched checkpoint</td><td>Six tracked dirty files, two protected untracked files, branch ahead by two.</td></tr>
+                    <tr><td>Plan/spec preflight</td><td class="ok">Complete</td><td>All 15 tasks checked internally and at shared interfaces. One CLI-input inconsistency was ruled on above.</td></tr>
+                    <tr><td>Runtime validation</td><td>Not run</td><td>No behavior claim yet.</td></tr>
+                    <tr><td>Live Chrome/cloud validation</td><td>Not run</td><td>No output, R2, or full-backup claim yet.</td></tr>
+                </tbody>
+            </table>
+
+            <h2>Commit Log</h2>
+            <table>
+                <thead><tr><th>Commit</th><th>Purpose</th><th>Review</th></tr></thead>
+                <tbody>
+                    <tr><td>Pending</td><td>Initialize plan-specific implementation notes.</td><td>Controller-owned documentation only.</td></tr>
+                </tbody>
+            </table>
+
+            <h2>Safety And Restoration</h2>
+            <ul>
+                <li>No processed IDs have been reset, exported, or rewritten.</li>
+                <li>No Chrome tab discovery or whole-profile inspection has occurred.</li>
+                <li>No R2, D1, Worker, OAuth, environment, or cloud object state has changed.</li>
+                <li>No live workflow or resource-intensive job has started.</li>
+            </ul>
+        </main>
+    </body>
+</html>
