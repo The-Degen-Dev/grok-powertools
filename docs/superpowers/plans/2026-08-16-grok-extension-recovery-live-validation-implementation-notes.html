@@ -65,7 +65,7 @@
             <h1>Grok Extension Recovery Implementation Notes</h1>
             <p class="stamp">Initialized 2026-08-16 23:10:16 EDT</p>
             <section class="lede">
-                <div><strong>Status:</strong> <span class="status">Task 9 of 15 starting</span></div>
+                <div><strong>Status:</strong> <span class="status">Task 10 of 15 starting</span></div>
                 <div><strong>Branch:</strong> <code>codex/grok-extension-recovery</code></div>
                 <div><strong>Plan:</strong> <code>2026-08-16-grok-extension-recovery-live-validation.md</code></div>
                 <div><strong>Proof boundary:</strong> No runtime edit or live lane has run yet. Existing automated and two-item evidence is not being treated as Sync, Dual-write, or full-backup proof.</div>
@@ -84,8 +84,9 @@
                     <tr><td>Task 6</td><td class="ok">Complete</td><td>Full backup now scans historical processed identities, loads one prefix-validated inventory snapshot per lease, proves each candidate with read-only HEAD, and fetches Grok bytes only for missing objects.</td></tr>
                     <tr><td>Task 7</td><td class="ok">Complete</td><td>An extension-independent Saved observer now proves bounded exhaustion and restores scroll; a GET-only CLI reconciles only complete observer evidence against paginated inventory and emits deterministic redacted results.</td></tr>
                     <tr><td>Task 8</td><td class="ok">Complete</td><td>Deterministic E2E now proves five ordered Prompted Batch submissions, thirty remounted Saved assets, production-backed three-item Dual-write durability, and fail-closed Stop/error transitions.</td></tr>
-                    <tr><td>Task 9</td><td class="status">Starting</td><td>Run every deterministic gate, inspect the packaged extension and source scans, then bind the results and checksum into the evidence workbook.</td></tr>
-                    <tr><td>Tasks 10-15</td><td>Pending</td><td>No live proof claimed.</td></tr>
+                    <tr><td>Task 9</td><td class="ok">Complete</td><td>All nine deterministic gates passed; the packaged extension, checksums, exclusions, and 529 classified scan hits were independently verified and recorded.</td></tr>
+                    <tr><td>Task 10</td><td class="status">Starting</td><td>Run the isolated acceptance-cloud lane in the existing visible Chrome session, prove five upload outcomes, and restore production settings exactly.</td></tr>
+                    <tr><td>Tasks 11-15</td><td>Pending</td><td>No live proof claimed.</td></tr>
                 </tbody>
             </table>
 
@@ -111,6 +112,7 @@
                     <tr><td>Make reconciliation artifacts deterministic and fail-closed.</td><td>DOM/API order and untrusted Worker response text must not change evidence or leak into terminal output.</td><td>Classifications and redacted rows are sorted; malformed cursor or inventory shapes emit fixed codes, write no evidence, and expose no stack, path, key, or secret-shaped value.</td></tr>
                     <tr><td>Drive Dual-write E2E through production background code.</td><td>A fixture-owned operation map and direct processed-ID write could pass while production durability was broken.</td><td>The harness now dispatches through the registered <code>background.js</code> listener and drives production download-complete/R2-present hooks; only production code mutates processed IDs.</td></tr>
                     <tr><td>Define negative-workflow quiescence from controller state, not elapsed wall time.</td><td>A 20 ms sleep could miss a late continuation after Stop or failure.</td><td>Tests advance beyond configured deadlines, drain runtime/timer work, and require controller, transfer, return, and batch promises to be idle before stable snapshots.</td></tr>
+                    <tr><td>Keep the deterministic lane passed while the overall release gate remains inconclusive.</td><td>Tests and package checks cannot substitute for the eight required live lanes.</td><td>The workbook records actual command exits/counts and package checksum, with failed/blocked empty and all live lanes explicitly missing.</td></tr>
                 </tbody>
             </table>
 
@@ -161,6 +163,8 @@
                     <tr><td>Task 7 independent review</td><td class="ok">Approved after two fixes</td><td>Initial review found eight acceptance-proof gaps. Round 1 closed seven; round 2 made malformed successful inventory fail through fixed codes with no evidence or raw output.</td></tr>
                     <tr><td>Task 8 deterministic gates</td><td class="ok">819 unit and 47 E2E passed</td><td>Includes five Prompted Batch items, thirty alternating image/video Saved transfers, production-backed Dual-write, receipt remounts, ambiguity, timeout, durability failure, Stop stages, and invalidated context.</td></tr>
                     <tr><td>Task 8 independent review</td><td class="ok">Approved after fix</td><td>Initial review rejected self-fulfilled durability, stale-node reuse, seeded ordering, and short quiet waits. Scoped re-review confirmed all four corrected.</td></tr>
+                    <tr><td>Task 9 deterministic release gates</td><td class="ok">Passed and recorded</td><td>Jest 819/819, Playwright 47/47, Cloud TAP 26/26, lint, package, syntax, cloud typecheck, and diff checks passed. Package SHA-256: <code>7cea263a630020bbaa259593ab4995e2d896b52afeb040f7228a11d5fff6bd27</code>.</td></tr>
+                    <tr><td>Task 9 package/evidence review</td><td class="ok">Approved</td><td>Checksums and eight missing live lanes were independently verified. One unchanged <code>offscreen.js</code> local-path diagnostic is deferred as a minor privacy cleanup.</td></tr>
                     <tr><td>Runtime validation</td><td>Not run</td><td>No behavior claim yet.</td></tr>
                     <tr><td>Live Chrome/cloud validation</td><td>Not run</td><td>No output, R2, or full-backup claim yet.</td></tr>
                 </tbody>
