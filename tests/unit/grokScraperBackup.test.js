@@ -3295,6 +3295,7 @@ describe('Grok backup canary flow', () => {
         scraper.waitForMatchingLegacyDetailMedia = jest.fn(async () => media);
         scraper.performDownload = jest.fn(async () => {
             recordBackupUploadStatus(scraper.backupStats, 'uploaded');
+            return { status: 'uploaded' };
         });
         scraper.stopBackupMode = jest.fn(async (stopReason) => {
             scraper.state.isRunning = false;

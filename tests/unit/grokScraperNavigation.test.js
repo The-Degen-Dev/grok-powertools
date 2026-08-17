@@ -1454,6 +1454,46 @@ describe('Grok scrape surface transitions', () => {
         expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
     });
 
+    test('an Agent R2 presence error stops backup once without persisting processed IDs', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
+        const mediaId = '73737373-7373-4373-8373-737373737373';
+        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        const media = document.createElement('img');
+        media.src = currentItemId;
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: mediaId,
+            currentItemId
+        };
+        scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'matched', media }));
+        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
+        scraper.stopBackupMode = jest.fn(() => Promise.resolve({ status: 'stopped' }));
+        scraper.returnToSavedGallery = jest.fn();
+        chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'R2_BACKUP_CHECK_PRESENT') {
+                return { status: 'error', error: 'r2_head_500' };
+            }
+            return { status: 'error', error: 'unexpected_action' };
+        });
+
+        await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
+
+        expect(scraper.stopBackupMode).toHaveBeenCalledTimes(1);
+        expect(scraper.stopBackupMode).toHaveBeenCalledWith('media_transfer_failed');
+        expect(scraper.backupStats.errors).toBe(1);
+        expect(scraper.persistBackupProgress).toHaveBeenCalledTimes(2);
+        expect(scraper.processedIds).toEqual(new Set());
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_PROCESSED_IDS_ADD'
+        }));
+        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
+    });
+
     test('returns a successful Agent canary to Saved before completing the run', async () => {
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
         const media = document.createElement('video');
@@ -1647,6 +1687,47 @@ describe('Grok scrape surface transitions', () => {
         );
         expect(scraper.performDownload).not.toHaveBeenCalled();
         expect(scraper.persistProcessedId).not.toHaveBeenCalled();
+        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
+    });
+
+    test('a legacy-detail R2 presence error stops backup once without persisting processed IDs', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
+        const mediaId = '59595959-5959-4959-8959-595959595959';
+        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        const media = document.createElement('img');
+        media.src = currentItemId;
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: mediaId,
+            currentItemId
+        };
+        chrome.storage.local.get.mockResolvedValue({ currentItemId });
+        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(media));
+        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
+        scraper.stopBackupMode = jest.fn(() => Promise.resolve({ status: 'stopped' }));
+        scraper.returnToSavedGallery = jest.fn();
+        chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'R2_BACKUP_CHECK_PRESENT') {
+                return { status: 'error', error: 'r2_head_500' };
+            }
+            return { status: 'error', error: 'unexpected_action' };
+        });
+
+        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
+
+        expect(scraper.stopBackupMode).toHaveBeenCalledTimes(1);
+        expect(scraper.stopBackupMode).toHaveBeenCalledWith('media_transfer_failed');
+        expect(scraper.backupStats.errors).toBe(1);
+        expect(scraper.persistBackupProgress).toHaveBeenCalledTimes(2);
+        expect(scraper.processedIds).toEqual(new Set());
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_PROCESSED_IDS_ADD'
+        }));
         expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
     });
 
@@ -3904,6 +3985,37 @@ describe('background scrape lease authority', () => {
         await expect(dispatched.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
         expect(global.fetch).not.toHaveBeenCalled();
         expect(harness.storedLocal.processedIds).toEqual([]);
+    });
+
+    test('R2 presence reports ignored when Stop revokes authority during inventory body read', async () => {
+        const mediaId = '45000000-0000-4000-8000-000000000001';
+        const sourceUrl = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        const bodyRead = deferred();
+        const bodyReadStarted = deferred();
+        global.fetch = jest.fn(async (url) => {
+            const parsed = new URL(String(url));
+            expect(parsed.pathname).toBe('/v1/vault/inventory');
+            return {
+                ok: true,
+                status: 200,
+                json: () => {
+                    bodyReadStarted.resolve();
+                    return bodyRead.promise;
+                }
+            };
+        });
+        const { background, harness, lease } = await loadR2PresenceHarness();
+
+        const presence = dispatchR2Presence(harness, lease, sourceUrl);
+        await bodyReadStarted.promise;
+        const stopping = background.stopScrapeRun('r2_backup');
+        await waitForCondition(() => harness.storedLocal.scraperState === 'idle');
+        bodyRead.reject(new Error('inventory body failed'));
+
+        await expect(presence).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
     test('waits for deferred hydration before Stop and cannot resurrect the prior active lease', async () => {

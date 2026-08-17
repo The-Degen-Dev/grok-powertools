@@ -7464,9 +7464,13 @@ class GrokScraper {
         }
         const response = await this.performDownload(mediaEl, currentId, runToken);
         if (!this.isRunActive(runToken)) return;
-        if (!this.backupMode && !isSuccessfulMediaTransferStatus(response?.status)) {
+        if (!isSuccessfulMediaTransferStatus(response?.status)) {
             normalTransferSucceeded = false;
-            await this.failRun(response?.error || 'Legacy media download failed.', 'media_transfer_failed');
+            await this.failRun(
+                response?.error || 'Legacy media download failed.',
+                'media_transfer_failed',
+                false
+            );
             return;
         }
         if (!this.backupMode && !shouldPersistBackupProcessedId(response?.status)) {
@@ -7532,7 +7536,10 @@ class GrokScraper {
                 return this.recordDurableBackupResult(presence, src, currentItemId, runToken);
             }
             if (presence?.status !== 'missing') {
-                return { status: 'error', error: presence?.error || 'r2_presence_check_failed' };
+                return this.recordDurableBackupResult({
+                    status: 'error',
+                    error: presence?.error || 'r2_presence_check_failed'
+                }, src, currentItemId, runToken);
             }
 
             const alreadyLocal = this.isMediaProcessed(src) || this.isMediaProcessed(currentItemId);

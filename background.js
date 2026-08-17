@@ -3618,6 +3618,7 @@ async function checkR2BackupPresence(request, sender) {
         } catch (error) {
             clearR2BackupInventoryCache(lease);
             if (isScrapeAuthorityRevokedError(error)) throw error;
+            await assertAuthorized();
             const code = String(error?.message || '');
             return {
                 status: 'error',
