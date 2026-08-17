@@ -3473,12 +3473,12 @@ function serializeDownloadOperations(operations) {
     }, {});
 }
 
-function mutatePendingDownloadOperations(mutator) {
+function mutatePendingDownloadOperations(mutator, { installAfterPersist = false } = {}) {
     const execute = async () => {
         const revision = ++pendingDownloadOperationsRevision;
         const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
         const result = await mutator(operations);
-        pendingDownloadOperations = operations;
+        if (!installAfterPersist) pendingDownloadOperations = operations;
         const write = chrome.storage.local.set({
             [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(operations)
         });
@@ -3489,13 +3489,14 @@ function mutatePendingDownloadOperations(mutator) {
         );
         if (!persisted) {
             Promise.resolve(write).then(() => {
-                if (revision === pendingDownloadOperationsRevision) return;
+                if (!installAfterPersist && revision === pendingDownloadOperationsRevision) return;
                 return chrome.storage.local.set({
                     [PENDING_DOWNLOAD_OPERATIONS_KEY]: serializeDownloadOperations(pendingDownloadOperations)
                 });
             }).catch(() => {});
             throw new Error('pending_download_operations_persist_timeout');
         }
+        if (installAfterPersist) pendingDownloadOperations = operations;
         return result;
     };
     const mutation = pendingDownloadOperationsMutationQueue.then(execute, execute);
@@ -3570,7 +3571,7 @@ function claimDownloadOperationFinalization(downloadId) {
         const claimed = { ...existing, finalizationClaim: claim };
         operations.set(downloadId, claimed);
         return { claim: { ...claim }, operation: { ...claimed } };
-    });
+    }, { installAfterPersist: true });
 }
 
 function updateClaimedDownloadOperation(downloadId, claim, update) {

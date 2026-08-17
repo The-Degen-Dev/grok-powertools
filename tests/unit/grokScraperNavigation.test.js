@@ -4397,6 +4397,114 @@ describe('background scrape lease authority', () => {
         expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('42');
     });
 
+    test('claim persistence rejection leaves dual-write retryable in the same worker', async () => {
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891052';
+        const { background, harness } = await seedRunOwnedDownloadOperation({
+            mode: 'dual_write',
+            downloadId: 52,
+            mediaId,
+            downloadState: 'complete',
+            r2State: 'pending'
+        });
+        const processedWritesBefore = harness.chromeApi.storage.local.set.mock.calls
+            .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
+        const operationRemovalsBefore = harness.chromeApi.storage.local.set.mock.calls
+            .filter(([values]) => values.pendingDownloadOperations
+                && !Object.prototype.hasOwnProperty.call(values.pendingDownloadOperations, '52')).length;
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let rejected = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!rejected && values.pendingDownloadOperations?.['52']?.finalizationClaim) {
+                rejected = true;
+                return Promise.reject(new Error('claim persistence failed'));
+            }
+            return baseSet(values);
+        });
+
+        await expect(background.markDownloadOperationR2Present(52, { status: 'uploaded' }))
+            .rejects.toThrow('claim persistence failed');
+
+        const retryable = background.getPendingDownloadOperationsForTest()['52'];
+        expect(retryable).toMatchObject({ downloadState: 'complete', r2State: 'present' });
+        expect(retryable).not.toHaveProperty('finalizationClaim');
+        expect(harness.storedLocal.processedIds).toEqual([]);
+
+        await expect(background.markDownloadOperationR2Present(52, { status: 'already_present' }))
+            .resolves.toBe(true);
+
+        const processedWritesAfter = harness.chromeApi.storage.local.set.mock.calls
+            .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
+        const operationRemovalsAfter = harness.chromeApi.storage.local.set.mock.calls
+            .filter(([values]) => values.pendingDownloadOperations
+                && !Object.prototype.hasOwnProperty.call(values.pendingDownloadOperations, '52')).length;
+        expect(processedWritesAfter - processedWritesBefore).toBe(1);
+        expect(operationRemovalsAfter - operationRemovalsBefore).toBe(1);
+        expect(harness.storedLocal.processedIds).toEqual([mediaId]);
+        expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('52');
+    });
+
+    test('claim persistence timeout rolls back memory and corrects a late claim write', async () => {
+        jest.useFakeTimers();
+        const stalledClaimWrite = deferred();
+        try {
+            const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891053';
+            const { background, harness } = await seedRunOwnedDownloadOperation({
+                mode: 'dual_write',
+                downloadId: 53,
+                mediaId,
+                downloadState: 'complete',
+                r2State: 'pending'
+            });
+            const processedWritesBefore = harness.chromeApi.storage.local.set.mock.calls
+                .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
+            const operationRemovalsBefore = harness.chromeApi.storage.local.set.mock.calls
+                .filter(([values]) => values.pendingDownloadOperations
+                    && !Object.prototype.hasOwnProperty.call(values.pendingDownloadOperations, '53')).length;
+            const claimWriteStarted = deferred();
+            const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+            let stalled = false;
+            harness.chromeApi.storage.local.set.mockImplementation((values) => {
+                if (!stalled && values.pendingDownloadOperations?.['53']?.finalizationClaim) {
+                    stalled = true;
+                    claimWriteStarted.resolve();
+                    return stalledClaimWrite.promise.then(() => baseSet(values));
+                }
+                return baseSet(values);
+            });
+
+            const timedOut = background.markDownloadOperationR2Present(53, { status: 'uploaded' });
+            await claimWriteStarted.promise;
+            await jest.advanceTimersByTimeAsync(1000);
+            await expect(timedOut).rejects.toThrow('pending_download_operations_persist_timeout');
+
+            const retryable = background.getPendingDownloadOperationsForTest()['53'];
+            expect(retryable).toMatchObject({ downloadState: 'complete', r2State: 'present' });
+            expect(retryable).not.toHaveProperty('finalizationClaim');
+            expect(harness.storedLocal.processedIds).toEqual([]);
+
+            await expect(background.markDownloadOperationR2Present(53, { status: 'already_present' }))
+                .resolves.toBe(true);
+            const processedWritesAfter = harness.chromeApi.storage.local.set.mock.calls
+                .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
+            const operationRemovalsAfter = harness.chromeApi.storage.local.set.mock.calls
+                .filter(([values]) => values.pendingDownloadOperations
+                    && !Object.prototype.hasOwnProperty.call(values.pendingDownloadOperations, '53')).length;
+            expect(processedWritesAfter - processedWritesBefore).toBe(1);
+            expect(operationRemovalsAfter - operationRemovalsBefore).toBe(1);
+            expect(harness.storedLocal.processedIds).toEqual([mediaId]);
+            expect(background.getPendingDownloadOperationsForTest()).not.toHaveProperty('53');
+
+            stalledClaimWrite.resolve();
+            await flushAsyncTurns(20);
+
+            expect(harness.storedLocal.pendingDownloadOperations).not.toHaveProperty('53');
+        } finally {
+            stalledClaimWrite.resolve();
+            await jest.runOnlyPendingTimersAsync();
+            jest.useRealTimers();
+        }
+    });
+
     test('retryable finalization failure releases its claim without repeating identity persistence', async () => {
         const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891049';
         const { background, harness } = await seedRunOwnedDownloadOperation({
