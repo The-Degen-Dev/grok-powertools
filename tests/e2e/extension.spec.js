@@ -289,6 +289,7 @@ async function setupMockSavedAgentSync(page, {
         stopAfterNavigationClear,
         bridgeResponse
     });
+    await installTask8SavedWorkflowTracker(page);
 }
 
 async function setupVirtualizedSavedBackup(page, { accountUuid, mediaUuids, runToken }) {
@@ -457,6 +458,301 @@ async function setupVirtualizedSavedBackup(page, { accountUuid, mediaUuids, runT
     }, { accountUuid, mediaUuids, runToken });
 }
 
+function readHarnessStorage(state, keys) {
+    if (keys == null) return { ...state };
+    if (typeof keys === 'string') return { [keys]: state[keys] };
+    if (Array.isArray(keys)) {
+        return keys.reduce((selected, key) => {
+            if (Object.prototype.hasOwnProperty.call(state, key)) selected[key] = state[key];
+            return selected;
+        }, {});
+    }
+    return Object.keys(keys).reduce((selected, key) => {
+        selected[key] = Object.prototype.hasOwnProperty.call(state, key) ? state[key] : keys[key];
+        return selected;
+    }, {});
+}
+
+function createListenerTarget() {
+    const listeners = [];
+    return {
+        listeners,
+        addListener: (listener) => { listeners.push(listener); }
+    };
+}
+
+async function createProductionDualWriteHarness({
+    runToken,
+    mediaUuids,
+    terminalOutcome = 'r2_present'
+}) {
+    const tabId = 1;
+    const runEpoch = 1;
+    const lease = {
+        version: 1,
+        epoch: runEpoch,
+        token: runToken,
+        tabId,
+        kind: 'sync',
+        status: 'active',
+        startedAt: 1810000000000
+    };
+    const localState = {
+        scraperState: 'running',
+        scrapeRunToken: runToken,
+        scrapeRunEpoch: runEpoch,
+        isScraping: true,
+        isR2Backup: false,
+        processedIds: [],
+        cloudConfig: {
+            enabled: true,
+            mode: 'dual_write',
+            workerUrl: 'https://task-8-fixture.example.workers.dev',
+            apiKey: 'test-placeholder',
+            keyPrefix: 'grok-powertools/v1'
+        }
+    };
+    const sessionState = { activeScrapeRunToken: lease };
+    const runtimeMessages = [];
+    const productionRequests = [];
+    const storageWrites = [];
+    const productionTransitions = [];
+    const durabilitySnapshots = [];
+    const observedTransitions = new Set();
+    const downloadItems = new Map();
+    const pendingFilenameHandlers = new Map();
+    const runtimeOnMessage = createListenerTarget();
+    let nextDownloadId = 800;
+    let background = null;
+    let completionPromise = null;
+    let processedBeforeDurability = null;
+    let processedAfterDurability = null;
+
+    const recordProductionTransitions = (values) => {
+        const operations = values.pendingDownloadOperations;
+        if (operations && typeof operations === 'object') {
+            Object.values(operations).forEach((operation) => {
+                const identity = operation?.mediaId;
+                if (!mediaUuids.includes(identity)) return;
+                const candidates = [
+                    operation.downloadState === 'in_progress' ? `queued:${identity}` : null,
+                    operation.downloadState === 'complete' ? `download_complete:${identity}` : null,
+                    operation.r2State === 'present' ? `r2_present:${identity}` : null
+                ].filter(Boolean);
+                candidates.forEach((transition) => {
+                    if (observedTransitions.has(transition)) return;
+                    observedTransitions.add(transition);
+                    productionTransitions.push(transition);
+                });
+            });
+        }
+        if (Array.isArray(values.processedIds)) {
+            values.processedIds.forEach((identity) => {
+                const transition = `processed:${identity}`;
+                if (!mediaUuids.includes(identity) || observedTransitions.has(transition)) return;
+                observedTransitions.add(transition);
+                productionTransitions.push(transition);
+            });
+        }
+    };
+
+    const chromeApi = {
+        alarms: {
+            clear: async () => true,
+            create: async () => {},
+            onAlarm: createListenerTarget()
+        },
+        downloads: {
+            cancel: () => {},
+            download: (options, callback) => {
+                const id = nextDownloadId++;
+                const item = {
+                    id,
+                    url: options.url,
+                    finalUrl: options.url,
+                    state: 'in_progress',
+                    filename: 'image.jpg',
+                    mime: options.url.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg'
+                };
+                downloadItems.set(id, item);
+                const filenameHandling = Promise.resolve().then(async () => {
+                    callback(id);
+                    await background.handleDownloadFilename(item, () => {});
+                });
+                pendingFilenameHandlers.set(id, filenameHandling);
+                filenameHandling.finally(() => pendingFilenameHandlers.delete(id));
+            },
+            erase: (_query, callback) => callback?.([]),
+            onChanged: createListenerTarget(),
+            onDeterminingFilename: createListenerTarget(),
+            removeFile: (_downloadId, callback) => callback?.(),
+            search: async ({ id }) => {
+                const item = downloadItems.get(id);
+                return item ? [item] : [];
+            }
+        },
+        offscreen: {
+            createDocument: async () => {}
+        },
+        runtime: {
+            id: 'task-8-production-background',
+            lastError: null,
+            getURL: (resourcePath) => resourcePath,
+            onMessage: runtimeOnMessage,
+            sendMessage: async (message) => {
+                runtimeMessages.push(message);
+                if (message?.action === 'READ_FILE_FOR_UPLOAD') return { ok: false };
+                return { ok: true };
+            }
+        },
+        scripting: {
+            executeScript: (_options, callback) => callback?.()
+        },
+        storage: {
+            local: {
+                get: async (keys) => readHarnessStorage(localState, keys),
+                remove: async (keys) => {
+                    for (const key of Array.isArray(keys) ? keys : [keys]) delete localState[key];
+                },
+                set: async (values) => {
+                    storageWrites.push(JSON.parse(JSON.stringify(values)));
+                    Object.assign(localState, values);
+                    recordProductionTransitions(values);
+                }
+            },
+            session: {
+                get: async (keys) => readHarnessStorage(sessionState, keys),
+                remove: async (keys) => {
+                    for (const key of Array.isArray(keys) ? keys : [keys]) delete sessionState[key];
+                },
+                set: async (values) => { Object.assign(sessionState, values); }
+            },
+            onChanged: createListenerTarget()
+        },
+        tabs: {
+            onRemoved: createListenerTarget(),
+            onUpdated: createListenerTarget(),
+            query: (_query, callback) => callback([{ id: tabId, url: 'https://grok.com/imagine/saved' }]),
+            remove: () => {},
+            sendMessage: (_tabId, _message, callback) => callback?.({ status: 'stopped' })
+        }
+    };
+
+    const originalChrome = global.chrome;
+    const backgroundPath = require.resolve('../../background.js');
+    delete require.cache[backgroundPath];
+    global.chrome = chromeApi;
+    background = require('../../background.js');
+    await background.ensureBackgroundStateReady();
+    await background.ensureScrapeLeaseHydrated();
+
+    const dispatchProductionMessage = (request) => {
+        const listener = runtimeOnMessage.listeners[0];
+        if (!listener) throw new Error('Production background runtime listener was not registered.');
+        productionRequests.push({ ...request });
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const sendResponse = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
+            try {
+                const keepPortOpen = listener(request, { tab: { id: tabId } }, sendResponse);
+                if (keepPortOpen !== true && !settled) resolve(undefined);
+            } catch (error) {
+                reject(error);
+            }
+        });
+    };
+
+    const completeQueuedOperations = async () => {
+        const operations = background.getPendingDownloadOperationsForTest();
+        for (const identity of mediaUuids) {
+            const operation = Object.values(operations).find((candidate) => candidate.mediaId === identity);
+            if (!operation) throw new Error(`Missing production download operation for ${identity}`);
+            const item = downloadItems.get(operation.downloadId);
+            item.state = 'complete';
+            await background.handleDownloadChanged({
+                id: operation.downloadId,
+                state: { current: 'complete' }
+            });
+            const completed = background.getPendingDownloadOperationsForTest()[operation.downloadId];
+            if (completed?.downloadState !== 'complete') {
+                throw new Error(`Production download completion was not observed for ${identity}`);
+            }
+            await background.markDownloadOperationR2Present(
+                operation.downloadId,
+                { status: 'uploaded' }
+            );
+        }
+    };
+
+    const failQueuedOperations = async () => {
+        const operations = background.getPendingDownloadOperationsForTest();
+        for (const operation of Object.values(operations)) {
+            await background.updateDownloadOperation(operation.downloadId, {
+                attempts: background.getCloudSyncForTest().MAX_RETRY_ATTEMPTS,
+                lastError: 'task_8_forced_terminal_failure'
+            });
+        }
+    };
+
+    return {
+        async request(request) {
+            const response = await dispatchProductionMessage(request);
+            if (request.action === 'DOWNLOAD_MEDIA') {
+                await Promise.all(Array.from(pendingFilenameHandlers.values()));
+                if (terminalOutcome === 'failed'
+                    && Object.keys(background.getPendingDownloadOperationsForTest()).length === mediaUuids.length
+                    && !completionPromise) {
+                    processedBeforeDurability = [...(localState.processedIds || [])];
+                    completionPromise = failQueuedOperations();
+                    await completionPromise;
+                    processedAfterDurability = [...(localState.processedIds || [])];
+                }
+            }
+            if (request.action === 'GET_SCRAPE_DURABILITY') {
+                durabilitySnapshots.push({ ...response });
+            }
+            if (request.action === 'GET_SCRAPE_DURABILITY'
+                && response?.status === 'pending'
+                && Object.keys(background.getPendingDownloadOperationsForTest()).length === mediaUuids.length
+                && !completionPromise) {
+                processedBeforeDurability = [...(localState.processedIds || [])];
+                completionPromise = completeQueuedOperations();
+                await completionPromise;
+                processedAfterDurability = [...(localState.processedIds || [])];
+            }
+            return response;
+        },
+        async settle() {
+            if (completionPromise) await completionPromise;
+            await Promise.resolve();
+        },
+        evidence() {
+            return {
+                productionBackgroundTransitions: [...productionTransitions],
+                processedBeforeDurability: [...(processedBeforeDurability || [])],
+                processedAfterDurability: [...(processedAfterDurability || [])],
+                processedIds: [...(localState.processedIds || [])],
+                pendingOperations: background.getPendingDownloadOperationsForTest(),
+                productionRequestActions: productionRequests.map(({ action }) => action),
+                runtimeActions: runtimeMessages.map((message) => message?.action).filter(Boolean),
+                durabilitySnapshots: durabilitySnapshots.map((snapshot) => ({ ...snapshot })),
+                processedWrites: storageWrites.filter((values) => (
+                    Object.prototype.hasOwnProperty.call(values, 'processedIds')
+                )).length
+            };
+        },
+        dispose() {
+            delete require.cache[backgroundPath];
+            if (typeof originalChrome === 'undefined') delete global.chrome;
+            else global.chrome = originalChrome;
+        }
+    };
+}
+
 async function setupVirtualizedSavedSync(page, {
     accountUuid,
     mediaUuids,
@@ -483,10 +779,9 @@ async function setupVirtualizedSavedSync(page, {
             mediaTypes: [],
             agentGalleryScrollCalls: 0,
             savedRenderGenerations: [],
+            openedGenerations: [],
+            rejectedActivations: [],
             validReceiptReturns: 0,
-            processedBeforeDurability: null,
-            processedAfterDurability: [],
-            dualWriteTransitions: [],
             completionReason: null
         };
         window.__gptE2eRunLease = { runToken, runEpoch: 1 };
@@ -498,24 +793,14 @@ async function setupVirtualizedSavedSync(page, {
             windowIndex * pageSize,
             (windowIndex + 1) * pageSize
         );
-        const dualWriteOperations = new Map();
-        let dualWriteFinalized = false;
-
         window.__chromeRuntimeResponseByAction = {
             GET_CLOUD_CONFIG: { config: { mode: transferMode } },
-            DOWNLOAD_MEDIA: (message) => {
+            DOWNLOAD_MEDIA: async (message) => {
                 const identity = message.url.match(/generated\/([^/]+)/)?.[1] || '';
                 window.__virtualSyncEvidence.transferredIdentities.push(identity);
                 window.__virtualSyncEvidence.mediaTypes.push(message.isVideo ? 'video' : 'image');
                 if (transferMode !== 'dual_write') return { status: 'uploaded' };
-                dualWriteOperations.set(identity, {
-                    identity,
-                    sourceUrl: sourceUrlFor(identity),
-                    downloadStatus: 'queued',
-                    r2Status: 'pending'
-                });
-                window.__virtualSyncEvidence.dualWriteTransitions.push(`queued:${identity}`);
-                return { status: 'queued', operationId: `operation-${identity}` };
+                return window.__productionBackgroundRequest(message);
             },
             GET_SCRAPE_DURABILITY: async () => {
                 if (transferMode !== 'dual_write') {
@@ -528,49 +813,12 @@ async function setupVirtualizedSavedSync(page, {
                         failedItems: 0
                     };
                 }
-                if (dualWriteOperations.size < mediaUuids.length) {
-                    return {
-                        status: 'pending',
-                        inFlightTasks: 0,
-                        pendingDownloads: mediaUuids.length - dualWriteOperations.size,
-                        pendingOperations: dualWriteOperations.size,
-                        pendingQueueItems: 0,
-                        failedItems: 0
-                    };
-                }
-                if (!dualWriteFinalized) {
-                    dualWriteFinalized = true;
-                    window.__virtualSyncEvidence.processedBeforeDurability = [
-                        ...(window.__chromeStorageLocalState.processedIds || [])
-                    ];
-                    for (const operation of dualWriteOperations.values()) {
-                        operation.downloadStatus = 'complete';
-                        window.__virtualSyncEvidence.dualWriteTransitions.push(
-                            `download_complete:${operation.identity}`
-                        );
-                        operation.r2Status = 'uploaded';
-                        window.__virtualSyncEvidence.dualWriteTransitions.push(
-                            `r2_uploaded:${operation.identity}`
-                        );
-                    }
-                    const processedIds = Array.from(dualWriteOperations.values(), (operation) => (
-                        operation.sourceUrl
-                    ));
-                    await window.chrome.storage.local.set({ processedIds });
-                    window.__virtualSyncEvidence.processedAfterDurability = [...processedIds];
-                    processedIds.forEach((sourceUrl) => {
-                        const identity = sourceUrl.match(/generated\/([^/]+)/)?.[1] || '';
-                        window.__virtualSyncEvidence.dualWriteTransitions.push(`processed:${identity}`);
-                    });
-                }
-                return {
-                    status: 'durable',
-                    inFlightTasks: 0,
-                    pendingDownloads: 0,
-                    pendingOperations: 0,
-                    pendingQueueItems: 0,
-                    failedItems: 0
-                };
+                return window.__productionBackgroundRequest({
+                    action: 'GET_SCRAPE_DURABILITY',
+                    runToken,
+                    runEpoch: 1,
+                    kind: 'sync'
+                });
             }
         };
 
@@ -639,13 +887,29 @@ async function setupVirtualizedSavedSync(page, {
             const list = document.createElement('div');
             list.setAttribute('role', 'list');
             currentWindowIdentities().forEach((identity) => {
+                const mountedGeneration = renderGeneration;
                 const card = document.createElement('article');
                 card.setAttribute('role', 'listitem');
                 card.dataset.renderGeneration = String(renderGeneration);
                 const image = document.createElement('img');
                 image.alt = 'Generated image';
                 image.src = sourceUrlFor(identity);
-                image.addEventListener('click', () => renderAgent(identity));
+                image.addEventListener('click', () => {
+                    if (!image.isConnected || mountedGeneration !== renderGeneration) {
+                        window.__virtualSyncEvidence.rejectedActivations.push({
+                            identity,
+                            mountedGeneration,
+                            currentGeneration: renderGeneration,
+                            isConnected: image.isConnected
+                        });
+                        return;
+                    }
+                    window.__virtualSyncEvidence.openedGenerations.push({
+                        identity,
+                        generation: mountedGeneration
+                    });
+                    renderAgent(identity);
+                });
                 card.appendChild(image);
                 list.appendChild(card);
             });
@@ -692,6 +956,7 @@ async function setupVirtualizedSavedSync(page, {
         window.history.replaceState({}, '', savedUrl);
         renderSaved();
     }, { accountUuid, mediaUuids, runToken, transferMode });
+    await installTask8SavedWorkflowTracker(page);
 }
 
 async function setupMockSavedLegacyDetailSync(page, {
@@ -1253,6 +1518,9 @@ async function setupMockPromptedResultsBatch(page, {
         const conversationId = 'prompted-batch-conversation';
         const resultsUrl = `https://grok.com/imagine?conversation=${conversationId}`;
         const promptText = 'slow orbit through warm afternoon light';
+        let clock = Date.now();
+        Date.now = () => clock;
+        window.__task8AdvanceClock = (milliseconds) => { clock += milliseconds; };
         const makeVisible = (element, top = 20, left = 20, width = 100) => {
             element.getBoundingClientRect = () => ({
                 x: left,
@@ -1268,7 +1536,10 @@ async function setupMockPromptedResultsBatch(page, {
         };
 
         retry.createBatchRunToken = () => 'e2e-prompted-results-batch';
-        retry.sleep = () => Promise.resolve();
+        retry.sleep = async (delay = 0) => {
+            clock += Number(delay) || 0;
+            await Promise.resolve();
+        };
         window.__resolvePromptedBatchNativeClickTarget = (x, y) => {
             const submit = retry.promptedVideoComposerRoot
                 ?.querySelector('button[aria-label="Send"], button[aria-label="Make video"]');
@@ -1290,17 +1561,25 @@ async function setupMockPromptedResultsBatch(page, {
             preciseEditClicks: 0,
             promptWrites: []
         };
-        window.__promptedResultsItemEvents = mediaUuids.map((sourceIdentity, index) => ({
+        window.__promptedResultsItemEvents = mediaUuids.map((sourceIdentity) => ({
             sourceIdentity,
+            openIdentity: null,
             makeVideoClicks: 0,
             addPromptClicks: 0,
             preciseEditClicks: 0,
             promptWrites: [],
             submitClicks: 0,
+            submitIdentity: null,
             acceptedConversationId: null,
             returnStatus: null,
-            nextIdentity: mediaUuids[index + 1] || null
+            returnIdentity: null,
+            nextIdentity: null
         }));
+        window.__promptedResultsMountEvidence = {
+            currentGeneration: 0,
+            openedGenerations: [],
+            rejectedActivations: []
+        };
         const getItemEvents = (sourceIdentity) => window.__promptedResultsItemEvents.find((item) => (
             item.sourceIdentity === sourceIdentity
         ));
@@ -1379,6 +1658,7 @@ async function setupMockPromptedResultsBatch(page, {
                     submit.addEventListener('click', () => {
                         const itemEvents = getItemEvents(mediaUuid);
                         itemEvents.submitClicks++;
+                        itemEvents.submitIdentity = mediaUuid;
                         itemEvents.acceptedConversationId = new URLSearchParams(window.location.search)
                             .get('conversation');
                         window.__promptedResultsEvents.submitted.push({
@@ -1426,7 +1706,9 @@ async function setupMockPromptedResultsBatch(page, {
                     event.preventDefault();
                     if (backEvents.join(',') !== 'pointerdown,mousedown,pointerup,mouseup,click') return;
                     window.__promptedResultsEvents.returned.push(mediaUuid);
-                    getItemEvents(mediaUuid).returnStatus = 'returned';
+                    const itemEvents = getItemEvents(mediaUuid);
+                    itemEvents.returnStatus = 'returned';
+                    itemEvents.returnIdentity = mediaUuid;
                     window.history.replaceState({}, '', resultsUrl);
                     renderResults();
                 });
@@ -1436,6 +1718,7 @@ async function setupMockPromptedResultsBatch(page, {
 
         const renderResults = () => {
             document.body.innerHTML = '';
+            const mountedGeneration = ++window.__promptedResultsMountEvidence.currentGeneration;
             const nativePrompt = document.createElement('div');
             nativePrompt.setAttribute('contenteditable', 'true');
             nativePrompt.textContent = promptText;
@@ -1473,6 +1756,23 @@ async function setupMockPromptedResultsBatch(page, {
                 link.appendChild(image);
                 link.addEventListener('click', (event) => {
                     event.preventDefault();
+                    if (!link.isConnected
+                        || mountedGeneration !== window.__promptedResultsMountEvidence.currentGeneration) {
+                        window.__promptedResultsMountEvidence.rejectedActivations.push({
+                            identity: mediaUuid,
+                            mountedGeneration,
+                            currentGeneration: window.__promptedResultsMountEvidence.currentGeneration,
+                            isConnected: link.isConnected
+                        });
+                        return;
+                    }
+                    const previousIdentity = window.__promptedResultsEvents.opened.at(-1) || null;
+                    if (previousIdentity) getItemEvents(previousIdentity).nextIdentity = mediaUuid;
+                    getItemEvents(mediaUuid).openIdentity = mediaUuid;
+                    window.__promptedResultsMountEvidence.openedGenerations.push({
+                        identity: mediaUuid,
+                        generation: mountedGeneration
+                    });
                     window.__promptedResultsEvents.opened.push(mediaUuid);
                     renderDetail(mediaUuid);
                 });
@@ -1522,6 +1822,87 @@ async function dispatchRuntimeMessage(page, message) {
     }, message);
 }
 
+async function installTask8SavedWorkflowTracker(page) {
+    await page.evaluate(() => {
+        if (window.__task8WorkflowTracker) return;
+
+        const { scraper } = window.__gptE2e;
+        const activeWorkflows = new Set();
+        const determineModeAndExecute = scraper.determineModeAndExecute.bind(scraper);
+        const originalDateNow = Date.now;
+        let clock = Date.now();
+
+        Date.now = () => clock;
+        scraper.sleep = async (delay = 0) => {
+            clock += Number(delay) || 0;
+            await Promise.resolve();
+        };
+        scraper.determineModeAndExecute = (...args) => {
+            const workflow = Promise.resolve().then(() => determineModeAndExecute(...args));
+            activeWorkflows.add(workflow);
+            void workflow.finally(() => activeWorkflows.delete(workflow)).catch(() => {});
+            return workflow;
+        };
+        window.__task8WorkflowTracker = {
+            activeWorkflows,
+            advance: (milliseconds) => { clock += milliseconds; },
+            restore: () => { Date.now = originalDateNow; }
+        };
+    });
+}
+
+async function settleTask8Controller(page) {
+    return page.evaluate(async () => {
+        const { scraper, retry } = window.__gptE2e;
+        const tracker = window.__task8WorkflowTracker;
+        if (tracker) tracker.advance(120000);
+        else window.__task8AdvanceClock?.(120000);
+
+        const namedPromises = [
+            window.__task8PromptedWorkflow,
+            window.__stopDuringTransfer,
+            window.__stopDuringReturn,
+            scraper?._lastStoppedRun?.cleanupPromise,
+            scraper?._activeStopReturn?.promise,
+            scraper?._returnToSavedInFlight?.promise
+        ].filter((candidate) => candidate && typeof candidate.then === 'function');
+        if (namedPromises.length > 0) await Promise.allSettled(namedPromises);
+
+        for (let attempt = 0; attempt < 100; attempt++) {
+            const active = tracker ? [...tracker.activeWorkflows] : [];
+            if (active.length > 0) await Promise.allSettled(active);
+            await Promise.resolve();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            const idle = (!tracker || tracker.activeWorkflows.size === 0)
+                && (window.__chromeRuntimePendingCount || 0) === 0
+                && !scraper?._returnToSavedInFlight
+                && !scraper?._activeStopReturn;
+            if (idle) break;
+        }
+
+        return {
+            scraperIdle: scraper?.state?.isRunning !== true,
+            batchIdle: retry?.batchRunning !== true && retry?.batchRunToken == null,
+            activeWorkflows: tracker?.activeWorkflows.size || 0,
+            pendingRuntimeResponses: window.__chromeRuntimePendingCount || 0,
+            returnInFlight: Boolean(scraper?._returnToSavedInFlight),
+            stopReturnInFlight: Boolean(scraper?._activeStopReturn)
+        };
+    });
+}
+
+function expectTask8ControllerIdle(settlement) {
+    expect(settlement).toEqual({
+        scraperIdle: true,
+        batchIdle: true,
+        activeWorkflows: 0,
+        pendingRuntimeResponses: 0,
+        returnInFlight: false,
+        stopReturnInFlight: false
+    });
+}
+
 async function readSavedNegativeEvidence(page) {
     return page.evaluate(() => ({
         openedIdentities: [...(window.__savedOpenedIdentities || [])],
@@ -1538,8 +1919,9 @@ async function readSavedNegativeEvidence(page) {
 }
 
 async function expectNoLateSavedMutation(page, expectedOpenedIdentities, expectedTransferCount) {
+    expectTask8ControllerIdle(await settleTask8Controller(page));
     const before = await readSavedNegativeEvidence(page);
-    await page.waitForTimeout(20);
+    expectTask8ControllerIdle(await settleTask8Controller(page));
     const after = await readSavedNegativeEvidence(page);
     expect(after.openedIdentities).toEqual(expectedOpenedIdentities);
     expect(after.openedIdentities).toEqual(before.openedIdentities);
@@ -1587,6 +1969,7 @@ test.describe('Grok Power Tools E2E', () => {
             window.__chromeMessageListeners = [];
             window.__chromeEvents = [];
             window.__chromeEventSequence = 0;
+            window.__chromeRuntimePendingCount = 0;
             window.__chromeStorageSetObservers = [];
             window.__chromeStorageChangeListeners = [];
             window.__chromeStorageLocalState = localState;
@@ -1691,11 +2074,14 @@ test.describe('Grok Power Tools E2E', () => {
                         window.__chromeRuntimeMessages.push(copiedMessage);
                         record('runtime_message', { message: copiedMessage });
                         const response = getRuntimeResponse(message);
+                        window.__chromeRuntimePendingCount++;
                         return Promise.resolve(response).then((value) => {
                             const copiedResponse = clone(value);
                             record('runtime_response', { action: message?.action, response: copiedResponse });
                             if (callback) callback(copiedResponse);
                             return copiedResponse;
+                        }).finally(() => {
+                            window.__chromeRuntimePendingCount--;
                         });
                     },
                     onMessage: {
@@ -1968,6 +2354,11 @@ test.describe('Grok Power Tools E2E', () => {
         ));
         expect(evidence.agentGalleryScrollCalls).toBe(0);
         expect(evidence.openedIdentities).toEqual(mediaUuids);
+        expect(evidence.openedGenerations.map(({ identity }) => identity)).toEqual(mediaUuids);
+        expect(evidence.openedGenerations.every(({ generation }, index, entries) => (
+            index === 0 || generation > entries[index - 1].generation
+        ))).toBe(true);
+        expect(evidence.rejectedActivations).toEqual([]);
         expect(evidence.validReceiptReturns).toBe(30);
         expect(new Set(evidence.savedRenderGenerations).size).toBe(
             evidence.savedRenderGenerations.length
@@ -1984,44 +2375,79 @@ test.describe('Grok Power Tools E2E', () => {
             '30000000-0000-4000-8000-000000000014',
             '30000000-0000-4000-8000-000000000025'
         ];
-        const dualWriteIds = mediaUuids.map((identity) => (
-            `https://assets.grok.com/users/${accountUuid}/generated/${identity}/image.jpg`
-        ));
-
-        await evaluateExtensionContent(page);
-        await setupVirtualizedSavedSync(page, {
-            accountUuid,
-            mediaUuids,
-            runToken: 'e2e-virtualized-dual-write-sync',
-            transferMode: 'dual_write'
-        });
-        await expect(page.evaluate(() => window.__gptE2e.scraper.start(
-            window.__gptE2eRunLease
-        ))).resolves.toMatchObject({ status: 'started' });
-
-        await expect.poll(() => page.evaluate(() => (
-            window.__virtualSyncEvidence.completionReason
-        )), { timeout: 15000 }).toBe('complete');
-        const evidence = await page.evaluate(() => {
-            const result = { ...window.__virtualSyncEvidence };
-            window.__restoreVirtualSyncDateNow();
-            return result;
+        const runToken = 'e2e-virtualized-dual-write-sync';
+        const productionBackground = await createProductionDualWriteHarness({
+            runToken,
+            mediaUuids
         });
 
-        expect(evidence.transferredIdentities).toEqual(mediaUuids);
-        expect(evidence.processedBeforeDurability).toEqual([]);
-        expect(evidence.processedAfterDurability).toEqual(expect.arrayContaining(dualWriteIds));
-        expect(evidence.processedAfterDurability).toHaveLength(3);
-        expect(evidence.completionReason).toBe('complete');
-        for (const identity of mediaUuids) {
-            const queuedIndex = evidence.dualWriteTransitions.indexOf(`queued:${identity}`);
-            const downloadIndex = evidence.dualWriteTransitions.indexOf(`download_complete:${identity}`);
-            const r2Index = evidence.dualWriteTransitions.indexOf(`r2_uploaded:${identity}`);
-            const processedIndex = evidence.dualWriteTransitions.indexOf(`processed:${identity}`);
-            expect(queuedIndex).toBeGreaterThanOrEqual(0);
-            expect(downloadIndex).toBeGreaterThan(queuedIndex);
-            expect(r2Index).toBeGreaterThan(downloadIndex);
-            expect(processedIndex).toBeGreaterThan(r2Index);
+        try {
+            await page.exposeFunction(
+                '__productionBackgroundRequest',
+                (message) => productionBackground.request(message)
+            );
+            await evaluateExtensionContent(page);
+            await setupVirtualizedSavedSync(page, {
+                accountUuid,
+                mediaUuids,
+                runToken,
+                transferMode: 'dual_write'
+            });
+            await expect(page.evaluate(() => window.__gptE2e.scraper.start(
+                window.__gptE2eRunLease
+            ))).resolves.toMatchObject({ status: 'started' });
+
+            await expect.poll(() => page.evaluate(() => (
+                window.__virtualSyncEvidence.completionReason
+            )), { timeout: 15000 }).not.toBeNull();
+            await productionBackground.settle();
+            const pageEvidence = await page.evaluate(() => {
+                const result = { ...window.__virtualSyncEvidence };
+                window.__restoreVirtualSyncDateNow();
+                return result;
+            });
+            const evidence = {
+                ...pageEvidence,
+                ...productionBackground.evidence()
+            };
+            expect({
+                completionReason: evidence.completionReason,
+                durabilitySnapshots: evidence.durabilitySnapshots,
+                pendingOperations: evidence.pendingOperations
+            }).toMatchObject({
+                completionReason: 'complete',
+                pendingOperations: {}
+            });
+            expect(evidence.transferredIdentities).toEqual(mediaUuids);
+            expect(evidence.openedGenerations.map(({ identity }) => identity)).toEqual(mediaUuids);
+            expect(evidence.openedGenerations.every(({ generation }, index, entries) => (
+                index === 0 || generation > entries[index - 1].generation
+            ))).toBe(true);
+            expect(evidence.rejectedActivations).toEqual([]);
+            expect(evidence.processedBeforeDurability).toEqual([]);
+            expect(evidence.processedAfterDurability).toEqual(mediaUuids);
+            expect(evidence.processedIds).toEqual(mediaUuids);
+            expect(evidence.processedWrites).toBe(3);
+            expect(evidence.pendingOperations).toEqual({});
+            expect(evidence.completionReason).toBe('complete');
+            expect(evidence.productionRequestActions.filter((action) => (
+                action === 'DOWNLOAD_MEDIA'
+            ))).toHaveLength(3);
+            expect(evidence.productionRequestActions).toContain('GET_SCRAPE_DURABILITY');
+            for (const identity of mediaUuids) {
+                const queuedIndex = evidence.productionBackgroundTransitions.indexOf(`queued:${identity}`);
+                const downloadIndex = evidence.productionBackgroundTransitions.indexOf(
+                    `download_complete:${identity}`
+                );
+                const r2Index = evidence.productionBackgroundTransitions.indexOf(`r2_present:${identity}`);
+                const processedIndex = evidence.productionBackgroundTransitions.indexOf(`processed:${identity}`);
+                expect(queuedIndex).toBeGreaterThanOrEqual(0);
+                expect(downloadIndex).toBeGreaterThan(queuedIndex);
+                expect(r2Index).toBeGreaterThan(downloadIndex);
+                expect(processedIndex).toBeGreaterThan(r2Index);
+            }
+        } finally {
+            productionBackground.dispose();
         }
     });
 
@@ -2584,42 +3010,50 @@ test.describe('Grok Power Tools E2E', () => {
     test('durability failure causes no late next-item action or processed-ID mutation', async ({ page }) => {
         const accountUuid = 'dededede-dede-4ede-8ede-dededededede';
         const mediaUuid = '40000000-0000-4000-8000-000000000003';
-
-        await evaluateExtensionContent(page);
-        await setupVirtualizedSavedSync(page, {
-            accountUuid,
+        const runToken = 'e2e-sync-durability-failure';
+        const productionBackground = await createProductionDualWriteHarness({
+            runToken,
             mediaUuids: [mediaUuid],
-            runToken: 'e2e-sync-durability-failure',
-            transferMode: 'dual_write'
+            terminalOutcome: 'failed'
         });
-        await page.evaluate(() => {
-            window.__savedOpenedIdentities = window.__virtualSyncEvidence.openedIdentities;
-            let durabilityChecks = 0;
-            window.__chromeRuntimeResponseByAction.GET_SCRAPE_DURABILITY = () => ({
-                ...(++durabilityChecks <= 8 ? {
-                    status: 'durable',
-                    inFlightTasks: 0,
-                    pendingDownloads: 0,
-                    pendingOperations: 0,
-                    pendingQueueItems: 0,
-                    failedItems: 0
-                } : {
-                    status: 'failed',
-                    inFlightTasks: 0,
-                    pendingDownloads: 0,
-                    pendingOperations: 1,
-                    pendingQueueItems: 0,
-                    failedItems: 1
-                })
-            });
-        });
-        await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
 
-        await expect.poll(() => page.evaluate(() => (
-            window.__virtualSyncEvidence.completionReason
-        ))).toBe('durability_failed');
-        await expectNoLateSavedMutation(page, [mediaUuid], 1);
-        await page.evaluate(() => window.__restoreVirtualSyncDateNow());
+        try {
+            await page.exposeFunction(
+                '__productionBackgroundRequest',
+                (message) => productionBackground.request(message)
+            );
+            await evaluateExtensionContent(page);
+            await setupVirtualizedSavedSync(page, {
+                accountUuid,
+                mediaUuids: [mediaUuid],
+                runToken,
+                transferMode: 'dual_write'
+            });
+            await page.evaluate(() => {
+                window.__savedOpenedIdentities = window.__virtualSyncEvidence.openedIdentities;
+                let stopRequested = false;
+                window.__chromeStorageSetObservers.push((values) => {
+                    if (stopRequested
+                        || values.scrapeNavigation !== null
+                        || values.currentItemId !== null
+                        || Object.keys(values).length !== 2) {
+                        return;
+                    }
+                    stopRequested = true;
+                    void window.__gptE2e.scraper.stop('complete');
+                });
+            });
+            await page.evaluate(() => window.__gptE2e.scraper.start(window.__gptE2eRunLease));
+
+            await expect.poll(() => page.evaluate(() => (
+                window.__virtualSyncEvidence.completionReason
+            ))).toBe('durability_failed');
+            await expectNoLateSavedMutation(page, [mediaUuid], 1);
+            expect(productionBackground.evidence().processedIds).toEqual([]);
+            await page.evaluate(() => window.__restoreVirtualSyncDateNow());
+        } finally {
+            productionBackground.dispose();
+        }
     });
 
     test('Stop after source click causes no late next-item action or processed-ID mutation', async ({ page }) => {
@@ -3268,23 +3702,32 @@ test.describe('Grok Power Tools E2E', () => {
                 ...window.__promptedResultsEvents,
                 items: window.__promptedResultsItemEvents
             },
+            mountEvidence: window.__promptedResultsMountEvidence,
             status: window.__gptE2e.overlay.el.querySelector('#gptStatusBadge')?.textContent
         }));
-        expect(evidence.events.opened).toHaveLength(5);
-        expect(evidence.events.submitted).toHaveLength(5);
-        expect(evidence.events.returned).toHaveLength(5);
+        expect(evidence.events.opened).toEqual(mediaUuids);
+        expect(evidence.events.submitted.map(({ mediaUuid }) => mediaUuid)).toEqual(mediaUuids);
+        expect(evidence.events.returned).toEqual(mediaUuids);
         expect(evidence.events.preciseEditClicks).toBe(0);
         expect(evidence.events.items).toEqual(mediaUuids.map((sourceIdentity, index) => ({
             sourceIdentity,
+            openIdentity: sourceIdentity,
             makeVideoClicks: 1,
             addPromptClicks: 1,
             preciseEditClicks: 0,
             promptWrites: ['Subtle natural movement with a slow steady camera push.'],
             submitClicks: 1,
+            submitIdentity: sourceIdentity,
             acceptedConversationId: 'prompted-batch-conversation',
             returnStatus: 'returned',
+            returnIdentity: sourceIdentity,
             nextIdentity: mediaUuids[index + 1] || null
         })));
+        expect(evidence.mountEvidence.openedGenerations.map(({ identity }) => identity)).toEqual(mediaUuids);
+        expect(evidence.mountEvidence.openedGenerations.every(({ generation }, index, entries) => (
+            index === 0 || generation > entries[index - 1].generation
+        ))).toBe(true);
+        expect(evidence.mountEvidence.rejectedActivations).toEqual([]);
         expect(evidence.status).toBe('Prompted Batch [results]: Complete (5/5)');
     });
 
@@ -3304,11 +3747,15 @@ test.describe('Grok Power Tools E2E', () => {
             }, { once: true });
         });
 
-        await page.evaluate(() => window.__gptE2e.retry.startBatch(
-            'prompted',
-            'this write revokes the active prompted batch',
-            { galleryLimit: 2, videoGoal: 2 }
-        ));
+        await page.evaluate(async () => {
+            window.__task8PromptedWorkflow = window.__gptE2e.retry.startBatch(
+                'prompted',
+                'this write revokes the active prompted batch',
+                { galleryLimit: 2, videoGoal: 2 }
+            );
+            return window.__task8PromptedWorkflow;
+        });
+        expectTask8ControllerIdle(await settleTask8Controller(page));
         const before = await page.evaluate(() => ({
             events: window.__promptedResultsEvents,
             processedWrites: window.__chromeEvents.filter((event) => (
@@ -3316,7 +3763,7 @@ test.describe('Grok Power Tools E2E', () => {
                 && Object.prototype.hasOwnProperty.call(event.values || {}, 'processedIds')
             ))
         }));
-        await page.waitForTimeout(20);
+        expectTask8ControllerIdle(await settleTask8Controller(page));
         const after = await page.evaluate(() => ({
             events: window.__promptedResultsEvents,
             processedWrites: window.__chromeEvents.filter((event) => (
