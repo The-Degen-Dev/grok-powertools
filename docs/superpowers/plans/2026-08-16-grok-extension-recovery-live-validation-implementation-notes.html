@@ -200,6 +200,14 @@
                 </tbody>
             </table>
 
+            <h2>Pause Checkpoint: 2026-08-17</h2>
+            <div class="panel">
+                <p>The corrected acceptance image canary was started for run <code>extension-recovery-20260816-231810</code>, correlation <code>img-20260817-1715-4667e2f0</code>, target image <code>4833be6e-811d-4465-8987-1fdd4667e2f0</code>. It remained on Grok Saved and repeatedly traversed virtualized windows without finding or transferring the unique target. Acceptance inventory stayed at the two baseline objects during the observed run, so no image object was written during that observation window.</p>
+                <p>The run exceeded a reasonable live-canary duration. A DevTools page-command stop and two native toolbar attempts did not register; the console continued to report <code>Scanning 54/55 items...</code> and <code>No new items visible. Scrolling...</code>. At the user's pause request, the canary was therefore still believed active. Do not infer a terminal stop reason or no-late-write result until both are checked on resume.</p>
+                <p>Chrome window <code>318</code> was temporarily moved to the primary display while attempting the visible popup Stop path, then restored to its prior bounds <code>3210,-323 1958x1440</code>. One additional exact-window Peekaboo element capture exposed visible tab-strip elements in its output; no tab was enumerated programmatically, selected, opened, closed, or navigated, and that route was abandoned. Resume with an exact-target CDP execution-context or direct popup action, never whole-profile tab discovery.</p>
+                <p>No runtime or test file changed in this interval. Resume by stopping the current run, proving terminal state, checking immediate and delayed acceptance inventory, processed-ID digest, and current-run queue ownership, then reproduce the traversal termination defect with a deterministic failing test before editing runtime code.</p>
+            </div>
+
             <h2>Safety And Restoration</h2>
             <ul>
                 <li>No processed IDs have been reset, exported, or rewritten.</li>
