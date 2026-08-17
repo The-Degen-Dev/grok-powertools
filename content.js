@@ -1022,6 +1022,8 @@ const MINIMUM_STABLE_BOTTOM_MS = 6000;
 const BACKUP_MAX_SCROLL_ATTEMPTS = 1000;
 const SYNC_MAX_SCROLL_ATTEMPTS = 200;
 const SAVED_BOTTOM_PROBE_WAIT_MS = 750;
+const CANARY_TARGET_TYPE_SETTLE_ATTEMPTS = 10;
+const CANARY_TARGET_TYPE_SETTLE_INTERVAL_MS = 200;
 
 function createSavedScanLedger(now = Date.now()) {
     return {
@@ -6381,10 +6383,11 @@ class GrokScraper {
         };
     }
 
-    async ensureSavedGalleryAllScope(runToken = this.runToken) {
-        if (!this.isRunActive(runToken)) return false;
+    async ensureSavedGalleryAllScope(runToken = this.runToken, runEpoch = this.runEpoch) {
+        if (!this.isRunActive(runToken, runEpoch)) return false;
         const drift = this.getSavedGalleryScopeDrift();
         if (!drift) return true;
+        if (!this.isRunActive(runToken, runEpoch)) return false;
         await this.failRun(drift.error, 'saved_scope_drift');
         return false;
     }
@@ -6432,12 +6435,19 @@ class GrokScraper {
         targetLabel,
         galleryContext
     }) {
-        if (!this.isRunActive(runToken)) return true;
-        const matches = (galleryContext?.entries || [])
+        const runEpoch = this.runEpoch;
+        if (!this.isRunActive(runToken, runEpoch)) return true;
+        const failCurrentRun = async (message, stopReason) => {
+            if (!this.isRunActive(runToken, runEpoch)) return false;
+            await this.failRun(message, stopReason);
+            return true;
+        };
+        let currentContext = galleryContext;
+        let matches = (galleryContext?.entries || [])
             .map((entry, index) => ({ entry, index }))
             .filter(({ entry }) => entry.sourceIdentity === targetIdentity);
         if (matches.length > 1) {
-            await this.failRun(
+            await failCurrentRun(
                 `Canary target ${targetLabel} is ambiguous in Saved.`,
                 'canary_target_ambiguous'
             );
@@ -6445,17 +6455,58 @@ class GrokScraper {
         }
         if (matches.length === 0) return false;
 
-        const { entry, index } = matches[0];
-        const actualMediaType = getSavedGalleryEntryMediaType(entry);
+        let { entry, index } = matches[0];
+        let actualMediaType = getSavedGalleryEntryMediaType(entry);
+        for (
+            let attempt = 0;
+            targetMediaType && !actualMediaType && attempt < CANARY_TARGET_TYPE_SETTLE_ATTEMPTS;
+            attempt++
+        ) {
+            await this.sleep(CANARY_TARGET_TYPE_SETTLE_INTERVAL_MS);
+            if (!this.isRunActive(runToken, runEpoch)) return true;
+            if (this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) {
+                await failCurrentRun(
+                    `Canary target ${targetLabel} left Saved before its media type could be verified.`,
+                    'canary_target_seek_failed'
+                );
+                return true;
+            }
+            if (!await this.ensureSavedGalleryAllScope(runToken, runEpoch)) return true;
+            if (!this.isRunActive(runToken, runEpoch)) return true;
+
+            const refreshedContext = getSavedGalleryContext(document);
+            currentContext = refreshedContext;
+            matches = (refreshedContext?.entries || [])
+                .map((candidate, candidateIndex) => ({ entry: candidate, index: candidateIndex }))
+                .filter(({ entry: candidate }) => candidate.sourceIdentity === targetIdentity);
+            if (matches.length > 1) {
+                await failCurrentRun(
+                    `Canary target ${targetLabel} is ambiguous in Saved.`,
+                    'canary_target_ambiguous'
+                );
+                return true;
+            }
+            if (matches.length === 0) continue;
+            ({ entry, index } = matches[0]);
+            actualMediaType = getSavedGalleryEntryMediaType(entry);
+        }
+        if (!this.isRunActive(runToken, runEpoch)) return true;
         if (targetMediaType && !actualMediaType) {
-            await this.failRun(
-                `Could not verify whether canary target ${targetLabel} is an image or video.`,
-                'canary_target_type_unknown'
-            );
+            if (matches.length === 0) {
+                await failCurrentRun(
+                    `Could not reacquire canary target ${targetLabel} in Saved.`,
+                    'canary_target_seek_failed'
+                );
+            } else {
+                await failCurrentRun(
+                    `Could not verify whether canary target ${targetLabel} is an image or video.`,
+                    'canary_target_type_unknown'
+                );
+            }
             return true;
         }
         if (targetMediaType && actualMediaType !== targetMediaType) {
-            await this.failRun(
+            await failCurrentRun(
                 `Canary target ${targetLabel} is ${actualMediaType}, expected ${targetMediaType}.`,
                 'canary_target_type_mismatch'
             );
@@ -6464,19 +6515,20 @@ class GrokScraper {
 
         const cleanId = this.getCleanId(entry.sourceUrl);
         if (!cleanId) {
-            await this.failRun(
+            await failCurrentRun(
                 `Could not identify canary target ${targetLabel} in Saved.`,
                 'canary_target_seek_failed'
             );
             return true;
         }
-        const expectedNextIdentity = galleryContext.entries[index + 1]?.sourceIdentity || null;
+        if (!this.isRunActive(runToken, runEpoch)) return true;
+        const expectedNextIdentity = currentContext?.entries?.[index + 1]?.sourceIdentity || null;
         this.log(`new item: ...${cleanId.slice(-6)}`, 'success');
         await this.processItem(
             entry.image,
             cleanId,
             runToken,
-            this.runEpoch,
+            runEpoch,
             expectedNextIdentity
         );
         return true;

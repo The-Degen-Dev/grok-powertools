@@ -1288,6 +1288,210 @@ describe('Grok scrape surface transitions', () => {
         );
     });
 
+    test('targeted canary waits for a lazy Saved video before failing media type proof', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34310000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/preview_image.jpg`;
+        const nextIdentity = '34310000-0000-4000-8000-000000000100';
+        const nextUrl = `https://assets.grok.com/users/u/generated/${nextIdentity}/image.jpg`;
+        const { scroller, list, card } = mountSemanticSavedImage(targetUrl);
+        appendSemanticSavedEntry(list, nextUrl, 'image');
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 800 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        scroller.scrollBy = jest.fn();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: { targetIdentity, targetMediaType: 'video', stopAfterMediaAttempt: true }
+        };
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        let now = 1000;
+        let replacementImage = null;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => {
+            now += delay;
+            if (delay === 200 && !replacementImage) {
+                const replacementCard = document.createElement('article');
+                replacementCard.setAttribute('role', 'listitem');
+                replacementImage = document.createElement('img');
+                replacementImage.alt = 'Generated image';
+                replacementImage.src = targetUrl;
+                replacementCard.append(replacementImage, document.createElement('video'));
+                card.replaceWith(replacementCard);
+            }
+        });
+
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
+
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(scraper.processItem).toHaveBeenCalledTimes(1);
+        expect(scraper.processItem).toHaveBeenCalledWith(
+            replacementImage,
+            targetUrl,
+            'run-1',
+            1,
+            nextIdentity
+        );
+    });
+
+    test('targeted canary stops lazy media settling after cancellation', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34320000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/preview_image.jpg`;
+        mountSemanticSavedImage(targetUrl);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        scraper.sleep = jest.fn(async () => {
+            scraper.state.isRunning = false;
+            scraper.runToken = null;
+            scraper.runEpoch = null;
+        });
+
+        await GrokScraper.prototype.processUniqueCanaryTarget.call(scraper, {
+            runToken: 'run-1',
+            targetIdentity,
+            targetMediaType: 'video',
+            targetLabel: '...00000099',
+            galleryContext: getSavedGalleryContext(document)
+        });
+
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(scraper.processItem).not.toHaveBeenCalled();
+    });
+
+    test('stale canary media settling cannot fail a replacement run', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34330000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/preview_image.jpg`;
+        mountSemanticSavedImage(targetUrl);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        scraper.sleep = jest.fn(async () => {
+            scraper.runToken = 'run-2';
+            scraper.runEpoch = 2;
+        });
+
+        await GrokScraper.prototype.processUniqueCanaryTarget.call(scraper, {
+            runToken: 'run-1',
+            targetIdentity,
+            targetMediaType: 'video',
+            targetLabel: '...00000099',
+            galleryContext: getSavedGalleryContext(document)
+        });
+
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.runToken).toBe('run-2');
+        expect(scraper.runEpoch).toBe(2);
+    });
+
+    test('targeted canary fails closed if Saved changes surface during media settling', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34340000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/preview_image.jpg`;
+        mountSemanticSavedImage(targetUrl);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        scraper.sleep = jest.fn(async () => {
+            scraper.getCurrentSurface.mockReturnValue(SCRAPE_SURFACES.agentMedia);
+        });
+
+        await GrokScraper.prototype.processUniqueCanaryTarget.call(scraper, {
+            runToken: 'run-1',
+            targetIdentity,
+            targetMediaType: 'video',
+            targetLabel: '...00000099',
+            galleryContext: getSavedGalleryContext(document)
+        });
+
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Canary target ...00000099 left Saved before its media type could be verified.',
+            'canary_target_seek_failed'
+        );
+    });
+
+    test('targeted canary fails closed when its card disappears during media settling', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34350000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/preview_image.jpg`;
+        const { card } = mountSemanticSavedImage(targetUrl);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        scraper.sleep = jest.fn(async () => card.remove());
+
+        await GrokScraper.prototype.processUniqueCanaryTarget.call(scraper, {
+            runToken: 'run-1',
+            targetIdentity,
+            targetMediaType: 'video',
+            targetLabel: '...00000099',
+            galleryContext: getSavedGalleryContext(document)
+        });
+
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Could not reacquire canary target ...00000099 in Saved.',
+            'canary_target_seek_failed'
+        );
+    });
+
+    test('targeted canary fails closed when a duplicate mounts during media settling', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const targetIdentity = '34360000-0000-4000-8000-000000000099';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/preview_image.jpg`;
+        const { list } = mountSemanticSavedImage(targetUrl);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.failRun = jest.fn().mockResolvedValue();
+        let duplicateMounted = false;
+        scraper.sleep = jest.fn(async () => {
+            if (duplicateMounted) return;
+            duplicateMounted = true;
+            appendSemanticSavedEntry(list, `${targetUrl}?duplicate=1`, 'video');
+        });
+
+        await GrokScraper.prototype.processUniqueCanaryTarget.call(scraper, {
+            runToken: 'run-1',
+            targetIdentity,
+            targetMediaType: 'video',
+            targetLabel: '...00000099',
+            galleryContext: getSavedGalleryContext(document)
+        });
+
+        expect(scraper.processItem).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Canary target ...00000099 is ambiguous in Saved.',
+            'canary_target_ambiguous'
+        );
+    });
+
     test('targeted canary processes one mounted unique target without exhaustively scanning Saved', async () => {
         mockContentChrome();
         const scraper = createScraper();
