@@ -12,6 +12,10 @@ const {
 const { redactEvidence } = require('../lib/run-contract.js');
 
 const RUN_ID_RE = /^[a-z0-9][a-z0-9-]{5,80}$/;
+const LOCK_FILE_NAME = 'extension-recovery.lock';
+const LOCK_MAX_ATTEMPTS = 100;
+const LOCK_RETRY_MS = 25;
+const STALE_LOCK_MS = 30_000;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 function parseArguments(argv) {
@@ -48,32 +52,79 @@ function writeJsonAtomically(filePath, value) {
     fs.renameSync(tempPath, filePath);
 }
 
-const args = parseArguments(process.argv.slice(2));
-const runId = args['--run-id'];
-if (!RUN_ID_RE.test(runId)) {
-    throw new Error('run ID must match ^[a-z0-9][a-z0-9-]{5,80}$');
+function wait(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-const workbookPath = path.join(repoRoot, 'acceptance/runs', runId, 'extension-recovery.json');
-if (!fs.existsSync(workbookPath)) {
-    throw new Error('Extension recovery run workbook does not exist');
+async function acquireWorkbookLock(workbookPath) {
+    const lockPath = path.join(path.dirname(workbookPath), LOCK_FILE_NAME);
+    for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt += 1) {
+        try {
+            const descriptor = fs.openSync(lockPath, 'wx');
+            fs.writeFileSync(descriptor, `${process.pid}\n`);
+            return { descriptor, lockPath };
+        } catch (error) {
+            if (error.code !== 'EEXIST') throw error;
+
+            try {
+                if (Date.now() - fs.statSync(lockPath).mtimeMs > STALE_LOCK_MS) {
+                    fs.unlinkSync(lockPath);
+                    continue;
+                }
+            } catch (statError) {
+                if (statError.code !== 'ENOENT') throw statError;
+            }
+            await wait(LOCK_RETRY_MS);
+        }
+    }
+    throw new Error('Timed out waiting for extension recovery workbook lock');
 }
 
-const workbook = JSON.parse(fs.readFileSync(workbookPath, 'utf8'));
-const updatedWorkbook = upsertExtensionRecoveryLane(workbook, {
-    laneId: args['--lane'],
-    status: args['--status'],
-    evidence: parseEvidence(args['--evidence'])
-});
-const releaseGate = evaluateExtensionRecoveryReleaseGate(updatedWorkbook);
-const persistedWorkbook = redactEvidence({
-    ...updatedWorkbook,
-    releaseGate
-});
+function releaseWorkbookLock(lock) {
+    fs.closeSync(lock.descriptor);
+    try {
+        fs.unlinkSync(lock.lockPath);
+    } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+    }
+}
 
-writeJsonAtomically(workbookPath, persistedWorkbook);
-console.log(JSON.stringify({
-    laneId: args['--lane'],
-    status: args['--status'],
-    verdict: releaseGate.verdict
-}));
+async function main() {
+    const args = parseArguments(process.argv.slice(2));
+    const runId = args['--run-id'];
+    if (!RUN_ID_RE.test(runId)) {
+        throw new Error('run ID must match ^[a-z0-9][a-z0-9-]{5,80}$');
+    }
+
+    const workbookPath = path.join(repoRoot, 'acceptance/runs', runId, 'extension-recovery.json');
+    if (!fs.existsSync(workbookPath)) {
+        throw new Error('Extension recovery run workbook does not exist');
+    }
+
+    const evidence = parseEvidence(args['--evidence']);
+    const lock = await acquireWorkbookLock(workbookPath);
+    try {
+        const workbook = JSON.parse(fs.readFileSync(workbookPath, 'utf8'));
+        const updatedWorkbook = upsertExtensionRecoveryLane(workbook, {
+            laneId: args['--lane'],
+            status: args['--status'],
+            evidence
+        });
+        const releaseGate = evaluateExtensionRecoveryReleaseGate(updatedWorkbook);
+        const persistedWorkbook = redactEvidence({
+            ...updatedWorkbook,
+            releaseGate
+        });
+
+        writeJsonAtomically(workbookPath, persistedWorkbook);
+        console.log(JSON.stringify({
+            laneId: args['--lane'],
+            status: args['--status'],
+            verdict: releaseGate.verdict
+        }));
+    } finally {
+        releaseWorkbookLock(lock);
+    }
+}
+
+await main();

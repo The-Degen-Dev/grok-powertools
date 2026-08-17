@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const {
     REQUIRED_EXTENSION_RECOVERY_LANES,
     evaluateExtensionRecoveryReleaseGate,
+    parseExtensionRecoveryStatusFiles,
     upsertExtensionRecoveryLane
 } = require('../lib/extension-recovery-evidence.js');
 
@@ -38,18 +39,6 @@ function readUpstream() {
     }
 }
 
-function statusFiles(statusShort) {
-    const dirtyFiles = [];
-    const untrackedFiles = [];
-    for (const line of statusShort.split('\n')) {
-        if (!line) continue;
-        const fileName = line.slice(3);
-        if (line.startsWith('?? ')) untrackedFiles.push(fileName);
-        else dirtyFiles.push(fileName);
-    }
-    return { dirtyFiles, untrackedFiles };
-}
-
 function writeJsonAtomically(filePath, value) {
     const tempPath = `${filePath}.${process.pid}.tmp`;
     fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`);
@@ -65,10 +54,10 @@ if (fs.existsSync(runDir)) {
     throw new Error('Refusing to overwrite an existing extension recovery run directory');
 }
 
-const statusShort = git(['status', '--short']);
+const statusOutput = git(['status', '--porcelain=v1', '-z']);
 const baselinePatch = git(['diff', '--binary']);
 const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'manifest.json'), 'utf8'));
-const { dirtyFiles, untrackedFiles } = statusFiles(statusShort);
+const { dirtyFiles, untrackedFiles } = parseExtensionRecoveryStatusFiles(statusOutput);
 
 let workbook = {
     schemaVersion: 1,
