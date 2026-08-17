@@ -994,19 +994,116 @@ function isBackupScrollerAtBottom(state) {
     return (state.scrollTop || 0) + (state.clientHeight || 0) >= (state.scrollHeight || 0) - 8;
 }
 
-function resolveBackupScrollAttempt({ before, after, beforeSignature, afterSignature, staleRetries = 0, maxStaleRetries = 30 }) {
+const REQUIRED_STABLE_BOTTOM_ROUNDS = 8;
+const MINIMUM_STABLE_BOTTOM_MS = 6000;
+const BACKUP_MAX_SCROLL_ATTEMPTS = 1000;
+const SYNC_MAX_SCROLL_ATTEMPTS = 200;
+const SAVED_BOTTOM_PROBE_WAIT_MS = 750;
+
+function createSavedScanLedger(now = Date.now()) {
+    return {
+        seenIdentities: new Set(),
+        durableIdentities: new Set(),
+        stableBottomRounds: 0,
+        lastNewIdentityAt: now,
+        scanAttempts: 0
+    };
+}
+
+function recordSavedScan(ledger, { identities, now = Date.now() }) {
+    let newIdentityCount = 0;
+    for (const value of identities.map(getGrokMediaIdentity).filter(Boolean)) {
+        if (ledger.seenIdentities.has(value)) continue;
+        ledger.seenIdentities.add(value);
+        newIdentityCount++;
+    }
+    if (newIdentityCount > 0) {
+        ledger.lastNewIdentityAt = now;
+        ledger.stableBottomRounds = 0;
+    }
+    ledger.scanAttempts++;
+    return { newIdentityCount, totalUniqueSeen: ledger.seenIdentities.size };
+}
+
+function getSavedScanSummary(ledger) {
+    return {
+        totalUniqueSeen: ledger.seenIdentities.size,
+        durableIdentityCount: ledger.durableIdentities.size,
+        stableBottomRounds: ledger.stableBottomRounds,
+        lastNewIdentityAt: ledger.lastNewIdentityAt,
+        scanAttempts: ledger.scanAttempts,
+        updatedAt: Date.now()
+    };
+}
+
+function isSavedGalleryLoading(root = document) {
+    return Array.from(root.querySelectorAll('[aria-busy="true"], [role="progressbar"]'))
+        .some((element) => element.getClientRects().length > 0);
+}
+
+function resolveBackupScrollAttempt({
+    before,
+    after,
+    beforeSignature,
+    afterSignature,
+    newIdentityCount = 0,
+    loading = false,
+    transferPending = false,
+    stableBottomRounds,
+    lastNewIdentityAt = Date.now(),
+    now = Date.now(),
+    scanAttempts = 0,
+    maxScrollAttempts = Number.POSITIVE_INFINITY,
+    requiredStableBottomRounds = REQUIRED_STABLE_BOTTOM_ROUNDS,
+    minimumStableBottomMs = MINIMUM_STABLE_BOTTOM_MS,
+    staleRetries = 0,
+    maxStaleRetries = 30
+}) {
     const scrollMoved = Math.abs((after.scrollTop || 0) - (before.scrollTop || 0)) > 1;
     const heightChanged = Math.abs((after.scrollHeight || 0) - (before.scrollHeight || 0)) > 1;
     const signatureChanged = beforeSignature !== afterSignature;
     const progressed = scrollMoved || heightChanged || signatureChanged;
     const atBottom = isBackupScrollerAtBottom(after);
-    const nextStaleRetries = atBottom && !progressed ? staleRetries + 1 : 0;
+
+    if (stableBottomRounds === undefined) {
+        const nextStaleRetries = atBottom && !progressed ? staleRetries + 1 : 0;
+        return {
+            progressed,
+            atBottom,
+            nextStaleRetries,
+            exhausted: nextStaleRetries >= maxStaleRetries
+        };
+    }
+
+    if (scanAttempts >= maxScrollAttempts) {
+        return { progressed, atBottom, stableBottomRounds, exhausted: false, reason: 'scan_limit' };
+    }
+    if (newIdentityCount > 0) {
+        return { progressed, atBottom, stableBottomRounds: 0, exhausted: false, reason: 'new_identity' };
+    }
+    if (loading) {
+        return { progressed, atBottom, stableBottomRounds: 0, exhausted: false, reason: 'loading' };
+    }
+    if (transferPending) {
+        return { progressed, atBottom, stableBottomRounds: 0, exhausted: false, reason: 'transfer_pending' };
+    }
+    if (!atBottom) {
+        return { progressed, atBottom, stableBottomRounds: 0, exhausted: false, reason: 'not_at_bottom' };
+    }
+    if (scrollMoved || heightChanged || signatureChanged) {
+        return { progressed, atBottom, stableBottomRounds: 0, exhausted: false, reason: 'gallery_changed' };
+    }
+
+    const nextStableBottomRounds = stableBottomRounds + 1;
+    const exhausted = nextStableBottomRounds >= requiredStableBottomRounds
+        && now - lastNewIdentityAt >= minimumStableBottomMs;
 
     return {
         progressed,
         atBottom,
-        nextStaleRetries,
-        exhausted: nextStaleRetries >= maxStaleRetries
+        stableBottomRounds: nextStableBottomRounds,
+        exhausted,
+        reason: exhausted ? 'exhausted' : 'stable_bottom'
     };
 }
 
@@ -5742,6 +5839,7 @@ class GrokScraper {
         };
         this._backupVisited = new Set();
         this._runVisited = new Set();
+        this._savedScanLedger = null;
         this.runToken = null;
         this.runEpoch = null;
         this.pendingNavigation = null;
@@ -5875,6 +5973,7 @@ class GrokScraper {
         this.pendingNavigation = null;
         this._runVisited = new Set();
         this._backupVisited = new Set();
+        this._savedScanLedger = null;
     }
 
     async clearStaleRunState(stopReason = 'stale_session') {
@@ -5949,6 +6048,7 @@ class GrokScraper {
                 await this.clearStaleRunState('stale_session');
             }
         }
+        if (this.state.isRunning) this._savedScanLedger = createSavedScanLedger();
 
         // --- USER IDENTIFICATION LOGIC (Restored) ---
         try {
@@ -6215,6 +6315,44 @@ class GrokScraper {
             .join('|');
     }
 
+    getSavedScanLedger() {
+        if (!this._savedScanLedger) this._savedScanLedger = createSavedScanLedger();
+        return this._savedScanLedger;
+    }
+
+    async queryRunDurabilitySnapshot(runToken = this.runToken) {
+        const runEpoch = this.runEpoch;
+        const kind = this.backupMode ? 'r2_backup' : 'sync';
+        const timeout = Symbol('scrape_durability_query_timeout');
+        let timeoutId = null;
+        let result;
+        try {
+            result = await Promise.race([
+                safeChromeRuntimeSendMessage({
+                    action: 'GET_SCRAPE_DURABILITY',
+                    runToken,
+                    runEpoch,
+                    kind
+                }, 'probe scrape durability'),
+                new Promise((resolve) => {
+                    timeoutId = setTimeout(() => resolve(timeout), 1000);
+                })
+            ]);
+        } catch {
+            return this.isRunActive(runToken, runEpoch)
+                ? { status: 'pending', reason: 'query_failed' }
+                : { status: 'ignored', reason: 'stale_authority' };
+        } finally {
+            if (timeoutId !== null) clearTimeout(timeoutId);
+        }
+        if (!this.isRunActive(runToken, runEpoch)) return { status: 'ignored', reason: 'stale_authority' };
+        if (result === timeout) return { status: 'pending', reason: 'query_timeout' };
+        if (result.invalidated) return { status: 'ignored', reason: 'context_invalidated' };
+        return result.value && typeof result.value === 'object'
+            ? result.value
+            : { status: 'pending', reason: 'missing_response' };
+    }
+
     async start(options = {}) {
         const surface = this.getCurrentSurface();
         if (surface !== SCRAPE_SURFACES.savedGallery) {
@@ -6246,6 +6384,7 @@ class GrokScraper {
         this.pendingNavigation = null;
         this.backupMode = false;
         this._runVisited = new Set();
+        this._savedScanLedger = createSavedScanLedger();
         const result = await this.queueRunStateWrite({
             scraperState: 'running',
             currentIndex: 0,
@@ -6552,6 +6691,8 @@ class GrokScraper {
         };
         this._backupVisited = new Set();
         this._runVisited = new Set();
+        this._savedScanLedger = createSavedScanLedger();
+        this.backupStats.scan = getSavedScanSummary(this._savedScanLedger);
         this.state.isRunning = true;
         this.state.currentIndex = 0;
         this.pendingNavigation = null;
@@ -6804,12 +6945,15 @@ class GrokScraper {
         }
         if (!await this.ensureSavedGalleryAllScope(runToken)) return;
 
-        let staleRetries = 0;
         let missingContextRetries = 0;
         let scrollAttempts = 0;
-        const MAX_STALE_RETRIES = this.backupMode ? 30 : 15;
-        const MAX_SCROLL_ATTEMPTS = this.backupMode ? 1000 : 50;
+        const MAX_MISSING_CONTEXT_RETRIES = this.backupMode ? 30 : 15;
+        const MAX_SCROLL_ATTEMPTS = this.backupMode
+            ? BACKUP_MAX_SCROLL_ATTEMPTS
+            : SYNC_MAX_SCROLL_ATTEMPTS;
+        const scanLedger = this.getSavedScanLedger();
         let exhausted = false;
+        let scanLimitReached = false;
 
         await this.sleep(300);
 
@@ -6822,7 +6966,7 @@ class GrokScraper {
             const galleryContext = getSavedGalleryContext(document);
             if (!galleryContext) {
                 missingContextRetries++;
-                if (missingContextRetries >= MAX_STALE_RETRIES) {
+                if (missingContextRetries >= MAX_MISSING_CONTEXT_RETRIES) {
                     await this.failRun(
                         'Could not identify one semantic Saved gallery. Refresh Saved before restarting.',
                         'gallery_context_missing'
@@ -6834,6 +6978,9 @@ class GrokScraper {
             }
             missingContextRetries = 0;
             const semanticItems = galleryContext.entries;
+            const scan = recordSavedScan(scanLedger, {
+                identities: semanticItems.map((entry) => entry.sourceIdentity || entry.sourceUrl)
+            });
 
             console.log(`Scanning ${semanticItems.length} items...`);
             if (scrollAttempts % 5 === 0) this.log(`Scanning... (${semanticItems.length} items visible)`);
@@ -6844,9 +6991,9 @@ class GrokScraper {
             for (let i = 0; i < semanticItems.length; i++) {
                 const entry = semanticItems[i];
                 const cleanId = this.getCleanId(entry.sourceUrl);
-                const alreadyDone = this.isMediaProcessed(entry.sourceUrl)
-                    || this._runVisited.has(cleanId)
-                    || (this.backupMode && this._backupVisited.has(cleanId));
+                const alreadyDone = this.backupMode
+                    ? this._backupVisited.has(cleanId)
+                    : this.isMediaProcessed(entry.sourceUrl) || this._runVisited.has(cleanId);
                 if (cleanId && !alreadyDone) {
                     targetItem = entry.image;
                     expectedNextIdentity = semanticItems[i + 1]?.sourceIdentity || null;
@@ -6865,6 +7012,26 @@ class GrokScraper {
             // Scroll if no action
             if (!await this.ensureSavedGalleryAllScope(runToken)) return;
             console.log('No new items visible. Scrolling...');
+            const durability = await this.queryRunDurabilitySnapshot(runToken);
+            if (!this.isRunActive(runToken)) return;
+            const transferPending = durability.status !== 'durable';
+            if (!transferPending) {
+                for (const identity of scanLedger.seenIdentities) {
+                    scanLedger.durableIdentities.add(identity);
+                }
+            }
+            if (this.backupMode) {
+                this.backupStats.scan = getSavedScanSummary(scanLedger);
+                if (!await this.persistBackupProgress(runToken)) {
+                    if (this.isRunActive(runToken)) {
+                        await this.failRun(
+                            'Could not persist Saved scan progress.',
+                            'scan_progress_persist_failed'
+                        );
+                    }
+                    return;
+                }
+            }
             const scroller = galleryContext.scroller;
             const before = this.getScrollerSnapshot(scroller);
             const beforeSignature = this.getGalleryCardSignature();
@@ -6877,42 +7044,70 @@ class GrokScraper {
                 scroller.scrollTop = Number(scroller.scrollTop || 0) + scrollAmount;
                 scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
             }
-            await this.sleep(600);
+            await this.sleep(SAVED_BOTTOM_PROBE_WAIT_MS);
             if (!this.isRunActive(runToken)) return;
             if (!await this.ensureSavedGalleryAllScope(runToken)) return;
             const after = this.getScrollerSnapshot(scroller);
             const afterSignature = this.getGalleryCardSignature();
+            const afterContext = getSavedGalleryContext(document);
+            const afterScan = recordSavedScan(scanLedger, {
+                identities: (afterContext?.entries || []).map((entry) => entry.sourceIdentity || entry.sourceUrl)
+            });
+            const loadingRoot = afterContext?.scroller && afterContext.scroller !== window
+                ? afterContext.scroller
+                : (afterContext?.list?.parentElement || afterContext?.list || document);
+            scrollAttempts++;
             const outcome = resolveBackupScrollAttempt({
                 before,
                 after,
                 beforeSignature,
                 afterSignature,
-                staleRetries,
-                maxStaleRetries: MAX_STALE_RETRIES
+                newIdentityCount: scan.newIdentityCount + afterScan.newIdentityCount,
+                loading: isSavedGalleryLoading(loadingRoot),
+                transferPending,
+                stableBottomRounds: scanLedger.stableBottomRounds,
+                lastNewIdentityAt: scanLedger.lastNewIdentityAt,
+                now: Date.now(),
+                scanAttempts: scrollAttempts,
+                maxScrollAttempts: MAX_SCROLL_ATTEMPTS,
+                requiredStableBottomRounds: REQUIRED_STABLE_BOTTOM_ROUNDS,
+                minimumStableBottomMs: MINIMUM_STABLE_BOTTOM_MS
             });
-            staleRetries = outcome.nextStaleRetries;
-            scrollAttempts++;
+            scanLedger.stableBottomRounds = outcome.stableBottomRounds;
+            if (this.backupMode) this.backupStats.scan = getSavedScanSummary(scanLedger);
+            if (outcome.reason === 'scan_limit') {
+                scanLimitReached = true;
+                break;
+            }
             if (outcome.exhausted) {
                 exhausted = true;
                 break;
             }
         }
 
-        if (exhausted || scrollAttempts >= MAX_SCROLL_ATTEMPTS) {
+        if (exhausted || scanLimitReached || scrollAttempts >= MAX_SCROLL_ATTEMPTS) {
             if (!this.isRunActive(runToken)) return;
             if (!await this.ensureSavedGalleryAllScope(runToken)) return;
-            if (this.backupMode) {
-                if (exhausted) {
-                    this.log('Saved scan exhausted. Waiting for pending transfers...', 'neutral');
-                    await this.stopBackupMode('complete');
-                } else {
-                    this.log('Backup paused: scan safety limit reached before confirming the gallery end.', 'warning');
-                    await this.stopBackupMode('scan_limit');
-                }
-            } else {
-                this.log('Saved scan exhausted. Waiting for pending transfers...', 'neutral');
-                await this.stop('complete');
+            if (!exhausted) {
+                this.log('Saved scan paused: safety limit reached before confirming the gallery end.', 'warning');
+                if (this.backupMode) await this.stopBackupMode('scan_limit');
+                else await this.stop('scan_limit');
+                return;
             }
+
+            const durability = await this.waitForRunDurability(runToken);
+            if (!this.isRunActive(runToken)) return;
+            if (durability.status === 'durable') {
+                this.log('Saved scan exhausted. Waiting for pending transfers...', 'neutral');
+                if (this.backupMode) await this.stopBackupMode('complete');
+                else await this.stop('complete');
+                return;
+            }
+            const stopReason = durability.status === 'timeout'
+                ? 'durability_timeout'
+                : (durability.status === 'ignored' ? 'stale_authority' : 'durability_failed');
+            if (this.backupMode) await this.stopBackupMode(stopReason);
+            else await this.stop(stopReason);
         }
     }
 
@@ -7553,6 +7748,7 @@ if (typeof module === 'undefined') {
         GALLERY_RECEIPT_VERSION,
         captureGalleryReceipt,
         captureSavedViewportReceipt,
+        createSavedScanLedger,
         detectSavedGalleryScope,
         detectGrokScrapeSurface,
         evaluateGalleryReceipt,
@@ -7561,8 +7757,10 @@ if (typeof module === 'undefined') {
         getSavedGalleryContext,
         getGrokMediaIdentity,
         hasOrderedSavedNeighborhood,
+        isSavedGalleryLoading,
         isSuccessfulMediaTransferStatus,
         normalizeSavedViewportReceipt,
+        recordSavedScan,
         shouldStopScraperForStorageChanges,
         fetchMediaDataUrlViaBridge,
         recordBackupUploadStatus,

@@ -289,6 +289,171 @@ async function setupMockSavedAgentSync(page, {
     });
 }
 
+async function setupVirtualizedSavedBackup(page, { accountUuid, mediaUuids, runToken }) {
+    await page.evaluate(({ accountUuid, mediaUuids, runToken }) => {
+        const { scraper } = window.__gptE2e;
+        const savedUrl = 'https://grok.com/imagine/saved';
+        const pageSize = 6;
+        let windowIndex = 0;
+        let clock = 1800000000000;
+        const originalDateNow = Date.now;
+        Date.now = () => clock;
+        scraper.Config = { actionWait: 0, navWait: 0, surfaceWait: 100, historyWait: 0 };
+        scraper.sleep = async (delay = 0) => {
+            clock += Number(delay) || 0;
+        };
+        window.__restoreVirtualDateNow = () => { Date.now = originalDateNow; };
+        window.__virtualTransfers = [];
+        window.__virtualAgentScrollCalls = [];
+        window.__virtualSavedScrollCalls = [];
+        window.__virtualValidReceiptReturns = 0;
+        window.__virtualFirstUnchangedBottom = null;
+        window.__gptE2eRunLease = { runToken, runEpoch: 1 };
+        window.__chromeRuntimeResponseByAction = {
+            R2_BACKUP_UPLOAD: (message) => {
+                window.__virtualTransfers.push({
+                    identity: message.url.match(/generated\/([^/]+)/)?.[1] || '',
+                    isVideo: message.isVideo
+                });
+                return {
+                    status: 'uploaded',
+                    backupProcessedId: `r2/virtual/${message.url.match(/generated\/([^/]+)/)?.[1] || 'unknown'}`
+                };
+            }
+        };
+
+        const currentWindowIdentities = () => mediaUuids.slice(
+            windowIndex * pageSize,
+            (windowIndex + 1) * pageSize
+        );
+        const appendScope = () => {
+            const toolbar = document.createElement('div');
+            const all = document.createElement('button');
+            const liked = document.createElement('button');
+            all.textContent = 'All';
+            all.className = 'bg-primary text-background hover:bg-primary';
+            liked.textContent = 'Liked';
+            toolbar.append(all, liked);
+            document.body.appendChild(toolbar);
+        };
+        const validatePendingReceipt = () => {
+            const receipt = window.__chromeStorageLocalState.scrapeNavigation?.savedViewportReceipt;
+            if (!receipt) return;
+            const identities = currentWindowIdentities();
+            const sourceIndex = identities.indexOf(receipt.sourceIdentity);
+            const expectedNext = sourceIndex >= 0 ? identities[sourceIndex + 1] || null : null;
+            if (receipt.version === 3
+                && sourceIndex >= 0
+                && receipt.expectedNextIdentity === expectedNext
+                && receipt.origin?.pathname === '/imagine/saved'
+                && receipt.origin?.scope === 'all') {
+                window.__virtualValidReceiptReturns++;
+            }
+        };
+
+        const renderAgent = (identity) => {
+            window.history.pushState({}, '', `/imagine/agent/virtual?conversation=${identity}`);
+            document.body.innerHTML = '';
+            const scroller = document.createElement('div');
+            scroller.className = 'overflow-scroll';
+            scroller.id = 'virtual-agent-gallery';
+            scroller.scrollBy = (...args) => window.__virtualAgentScrollCalls.push(args);
+            const node = document.createElement('div');
+            node.className = 'react-flow__node-asset';
+            const mediaIndex = mediaUuids.indexOf(identity);
+            const isVideo = mediaIndex % 5 === 0;
+            const media = document.createElement(isVideo ? 'video' : 'img');
+            if (!isVideo) media.alt = 'Agent media';
+            media.src = `https://assets.grok.com/users/${accountUuid}/generated/${identity}/${isVideo ? 'video.mp4' : 'preview.jpg'}`;
+            node.appendChild(media);
+            scroller.appendChild(node);
+            document.body.appendChild(scroller);
+        };
+
+        const renderSaved = () => {
+            document.body.innerHTML = '';
+            appendScope();
+            const scroller = document.createElement('div');
+            scroller.className = 'overflow-scroll';
+            scroller.id = 'virtual-saved-gallery';
+            let scrollTop = windowIndex * 600;
+            Object.defineProperties(scroller, {
+                scrollTop: {
+                    configurable: true,
+                    get: () => scrollTop,
+                    set: (value) => { scrollTop = Number(value); }
+                },
+                scrollHeight: { configurable: true, value: 3000 },
+                clientHeight: { configurable: true, value: 600 }
+            });
+            const list = document.createElement('div');
+            list.setAttribute('role', 'list');
+            currentWindowIdentities().forEach((identity) => {
+                const card = document.createElement('article');
+                card.setAttribute('role', 'listitem');
+                const image = document.createElement('img');
+                image.alt = 'Generated image';
+                image.src = `https://assets.grok.com/users/${accountUuid}/generated/${identity}/image.jpg`;
+                image.addEventListener('click', () => renderAgent(identity));
+                card.appendChild(image);
+                list.appendChild(card);
+            });
+            scroller.appendChild(list);
+            scroller.scrollBy = (_x, y) => {
+                window.__virtualSavedScrollCalls.push({
+                    windowIndex,
+                    y,
+                    durabilityChecks: window.__chromeRuntimeMessages.filter((message) => (
+                        message.action === 'GET_SCRAPE_DURABILITY'
+                    )).length
+                });
+                const nextScrollTop = Math.min(2400, scrollTop + Number(y || 0));
+                const unchangedBottom = windowIndex === 4 && nextScrollTop === scrollTop;
+                scrollTop = nextScrollTop;
+                if (unchangedBottom && window.__virtualFirstUnchangedBottom === null) {
+                    window.__virtualFirstUnchangedBottom = {
+                        transferCount: window.__virtualTransfers.length,
+                        completionSeen: window.__chromeRuntimeMessages.some((message) => (
+                            message.action === 'R2_BACKUP_COMPLETE'
+                        ))
+                    };
+                }
+                const nextWindowIndex = Math.min(4, Math.floor(scrollTop / 600));
+                if (nextWindowIndex !== windowIndex) {
+                    windowIndex = nextWindowIndex;
+                    renderSaved();
+                }
+            };
+            document.body.appendChild(scroller);
+            validatePendingReceipt();
+        };
+
+        document.addEventListener('__gpt_fetch_media', (event) => {
+            const isVideo = String(event.detail.url || '').endsWith('.mp4');
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+                detail: {
+                    requestId: event.detail.requestId,
+                    dataUrl: isVideo
+                        ? 'data:video/mp4;base64,dmlkZW8='
+                        : 'data:image/jpeg;base64,aW1hZ2U=',
+                    size: 5,
+                    type: isVideo ? 'video/mp4' : 'image/jpeg'
+                }
+            }));
+        });
+        Object.defineProperty(window.history, 'back', {
+            configurable: true,
+            value: () => {
+                window.history.replaceState({}, '', savedUrl);
+                renderSaved();
+                window.dispatchEvent(new PopStateEvent('popstate'));
+            }
+        });
+        window.history.replaceState({}, '', savedUrl);
+        renderSaved();
+    }, { accountUuid, mediaUuids, runToken });
+}
+
 async function setupMockSavedLegacyDetailSync(page, {
     accountUuid,
     mediaUuids,
@@ -1391,6 +1556,147 @@ test.describe('Grok Power Tools E2E', () => {
             pendingTransfers: 1
         });
         expect(completion.stats.stopReason).not.toBe('complete');
+    });
+
+    test('virtualized Saved backup transfers thirty mixed identities once before durable exhaustion', async ({ page }) => {
+        const accountUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        const mediaUuids = Array.from({ length: 30 }, (_, index) => (
+            `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`
+        ));
+
+        await evaluateExtensionContent(page);
+        await setupVirtualizedSavedBackup(page, {
+            accountUuid,
+            mediaUuids,
+            runToken: 'e2e-virtualized-saved-backup'
+        });
+        await expect(page.evaluate(() => window.__gptE2e.scraper.startBackupMode({
+            ...window.__gptE2eRunLease,
+            mode: 'full'
+        }))).resolves.toMatchObject({ status: 'started' });
+
+        await expect.poll(() => page.evaluate(() => (
+            window.__chromeStorageLocalState.r2BackupState?.stopReason || null
+        )), { timeout: 15000 }).toBe('complete');
+        const result = await page.evaluate(() => {
+            const completionIndex = window.__chromeRuntimeMessages.findIndex((message) => (
+                message.action === 'R2_BACKUP_COMPLETE'
+            ));
+            const lastDurabilityIndex = window.__chromeRuntimeMessages.findLastIndex((message) => (
+                message.action === 'GET_SCRAPE_DURABILITY'
+            ));
+            const completion = window.__chromeRuntimeMessages[completionIndex];
+            const scan = window.__chromeStorageLocalState.r2BackupState?.scan;
+            window.__restoreVirtualDateNow();
+            return {
+                transfers: window.__virtualTransfers,
+                agentScrollCalls: window.__virtualAgentScrollCalls,
+                validReceiptReturns: window.__virtualValidReceiptReturns,
+                firstUnchangedBottom: window.__virtualFirstUnchangedBottom,
+                completionIndex,
+                lastDurabilityIndex,
+                completion,
+                scan,
+                savedScrollCalls: window.__virtualSavedScrollCalls
+            };
+        });
+
+        expect(result.transfers).toHaveLength(30);
+        expect(new Set(result.transfers.map((transfer) => transfer.identity))).toEqual(new Set(mediaUuids));
+        expect(result.transfers.some((transfer) => transfer.isVideo)).toBe(true);
+        expect(result.transfers.some((transfer) => !transfer.isVideo)).toBe(true);
+        expect(result.agentScrollCalls).toEqual([]);
+        expect(result.validReceiptReturns).toBe(30);
+        expect(result.firstUnchangedBottom).toEqual({ transferCount: 30, completionSeen: false });
+        expect(result.completion.stats).toMatchObject({ totalSeen: 30, stopReason: 'complete' });
+        expect(result.completionIndex).toBeGreaterThan(result.lastDurabilityIndex);
+        expect(result.savedScrollCalls.length).toBeGreaterThan(8);
+        expect(result.savedScrollCalls.every((call, index) => call.durabilityChecks >= index + 1)).toBe(true);
+        expect(result.scan).toMatchObject({
+            totalUniqueSeen: 30,
+            durableIdentityCount: 30,
+            stableBottomRounds: 8
+        });
+        expect(Object.keys(result.scan).sort()).toEqual([
+            'durableIdentityCount',
+            'lastNewIdentityAt',
+            'scanAttempts',
+            'stableBottomRounds',
+            'totalUniqueSeen',
+            'updatedAt'
+        ]);
+        expect(Object.values(result.scan).every(Number.isFinite)).toBe(true);
+        expect(Object.values(result.scan).some(Array.isArray)).toBe(false);
+    });
+
+    test('virtualized Saved backup reports scan_limit after all one thousand guarded attempts', async ({ page }) => {
+        await evaluateExtensionContent(page);
+        const result = await page.evaluate(async () => {
+            const { scraper } = window.__gptE2e;
+            const identity = '20000000-0000-4000-8000-000000000001';
+            let clock = 1900000000000;
+            let scrollCalls = 0;
+            const originalDateNow = Date.now;
+            Date.now = () => clock;
+            scraper.sleep = async (delay = 0) => { clock += Number(delay) || 0; };
+            scraper.state.isRunning = true;
+            scraper.runToken = 'e2e-virtualized-scan-limit';
+            scraper.runEpoch = 1;
+            scraper.backupMode = true;
+            scraper.backupOptions = { mode: 'full', limit: null, options: {} };
+            scraper.backupStats = {
+                totalSeen: 0,
+                uploaded: 0,
+                alreadyPresent: 0,
+                queued: 0,
+                pendingTransfers: 0,
+                errors: 0,
+                startedAt: clock
+            };
+            scraper._backupVisited = new Set([
+                `https://assets.grok.com/users/account/generated/${identity}/image.jpg`
+            ]);
+            scraper._runVisited = new Set();
+            scraper._savedScanLedger = null;
+            document.body.innerHTML = `
+                <div>
+                    <button class="bg-primary text-background hover:bg-primary">All</button>
+                    <button>Liked</button>
+                </div>
+                <div id="limit-scroller" class="overflow-scroll">
+                    <div role="list">
+                        <article role="listitem">
+                            <img alt="Generated image"
+                                src="https://assets.grok.com/users/account/generated/${identity}/image.jpg">
+                        </article>
+                    </div>
+                    <div id="limit-loader" role="progressbar" style="display:block;width:10px;height:10px"></div>
+                </div>`;
+            const scroller = document.querySelector('#limit-scroller');
+            Object.defineProperties(scroller, {
+                scrollTop: { configurable: true, value: 0, writable: true },
+                scrollHeight: { configurable: true, value: 600 },
+                clientHeight: { configurable: true, value: 600 }
+            });
+            scroller.scrollBy = () => { scrollCalls++; };
+            await scraper.executeListView(scraper.runToken);
+            Date.now = originalDateNow;
+            const completion = window.__chromeRuntimeMessages.findLast((message) => (
+                message.action === 'R2_BACKUP_COMPLETE'
+            ));
+            return {
+                scrollCalls,
+                completion,
+                transferCount: window.__chromeRuntimeMessages.filter((message) => (
+                    message.action === 'R2_BACKUP_UPLOAD'
+                )).length
+            };
+        });
+
+        expect(result.scrollCalls).toBe(1000);
+        expect(result.transferCount).toBe(0);
+        expect(result.completion.stats.stopReason).toBe('scan_limit');
+        expect(result.completion.stats.stopReason).not.toBe('complete');
     });
 
     test('cold reinjection registers one scraper listener before deferred hydration completes', async ({ page }) => {

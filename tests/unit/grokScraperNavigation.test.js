@@ -5,6 +5,7 @@ const {
     GALLERY_RECEIPT_VERSION,
     captureGalleryReceipt,
     captureSavedViewportReceipt,
+    createSavedScanLedger,
     detectSavedGalleryScope,
     detectGrokScrapeSurface,
     evaluateGalleryReceipt,
@@ -12,8 +13,11 @@ const {
     getSavedGalleryContext,
     getGrokMediaIdentity,
     hasOrderedSavedNeighborhood,
+    isSavedGalleryLoading,
     isSuccessfulMediaTransferStatus,
     normalizeSavedViewportReceipt,
+    recordSavedScan,
+    resolveBackupScrollAttempt,
     shouldStopScraperForStorageChanges
 } = require('../../content.js');
 const CloudSyncUtils = require('../../cloudSyncUtils.js');
@@ -910,6 +914,40 @@ describe('Grok scrape surface transitions', () => {
         expect(scrollSpy).not.toHaveBeenCalled();
         expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
         scrollSpy.mockRestore();
+    });
+
+    test.each([
+        ['normal Sync', false, 1],
+        ['R2 backup', true, 0]
+    ])('%s uses its exact historical processed-ID eligibility rule', async (_label, backupMode, expectedIndex) => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const firstUrl = 'https://assets.grok.com/users/u/generated/31000000-0000-4000-8000-000000000001/image.jpg';
+        const secondUrl = 'https://assets.grok.com/users/u/generated/31000000-0000-4000-8000-000000000002/image.jpg';
+        const { list } = mountSemanticSavedImage(firstUrl);
+        const secondCard = document.createElement('article');
+        secondCard.setAttribute('role', 'listitem');
+        const secondImage = document.createElement('img');
+        secondImage.alt = 'Generated image';
+        secondImage.src = secondUrl;
+        secondCard.appendChild(secondImage);
+        list.appendChild(secondCard);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = backupMode;
+        scraper.processedIds = new Set([firstUrl]);
+        scraper.sleep = jest.fn().mockResolvedValue();
+        scraper.processItem = jest.fn().mockResolvedValue();
+
+        await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+
+        expect(scraper.processItem).toHaveBeenCalledWith(
+            expectedIndex === 0 ? expect.anything() : secondImage,
+            expectedIndex === 0 ? firstUrl : secondUrl,
+            'run-1',
+            1,
+            expectedIndex === 0 ? '31000000-0000-4000-8000-000000000002' : null
+        );
     });
 
     test('stops on a post-return Saved scope drift before receipt cleanup or list continuation', async () => {
@@ -2994,6 +3032,153 @@ describe('storage stop signals', () => {
         expect(scraper.state.isRunning).toBe(false);
         expect(chrome.storage.local.set).not.toHaveBeenCalled();
         delete global.chrome;
+    });
+});
+
+describe('Saved scan ledger and exhaustion proof', () => {
+    const bottom = { scrollTop: 1200, scrollHeight: 2000, clientHeight: 800 };
+
+    afterEach(() => {
+        document.body.textContent = '';
+    });
+
+    test('scan ledger records unique semantic identities in memory', () => {
+        const ledger = createSavedScanLedger(1000);
+        const first = recordSavedScan(ledger, {
+            identities: [
+                'https://assets.grok.com/users/account/generated/11111111-1111-4111-8111-111111111111/image.jpg',
+                'https://assets.grok.com/users/account/generated/22222222-2222-4222-8222-222222222222/video.mp4'
+            ],
+            now: 2000
+        });
+        const repeated = recordSavedScan(ledger, {
+            identities: [
+                'https://assets.grok.com/users/account/generated/11111111-1111-4111-8111-111111111111/preview.jpg'
+            ],
+            now: 3000
+        });
+
+        expect(first).toEqual({ newIdentityCount: 2, totalUniqueSeen: 2 });
+        expect(repeated).toEqual({ newIdentityCount: 0, totalUniqueSeen: 2 });
+        expect(ledger.lastNewIdentityAt).toBe(2000);
+        expect(ledger.scanAttempts).toBe(2);
+        expect(ledger.seenIdentities).toEqual(new Set([
+            '11111111-1111-4111-8111-111111111111',
+            '22222222-2222-4222-8222-222222222222'
+        ]));
+    });
+
+    test.each([
+        [
+            'loading',
+            {
+                before: bottom,
+                after: bottom,
+                beforeSignature: 'a',
+                afterSignature: 'a',
+                newIdentityCount: 0,
+                loading: true,
+                transferPending: false,
+                stableBottomRounds: 7,
+                lastNewIdentityAt: 0,
+                now: 10000,
+                requiredStableBottomRounds: 8,
+                minimumStableBottomMs: 6000
+            }
+        ],
+        [
+            'new_identity',
+            {
+                before: bottom,
+                after: bottom,
+                beforeSignature: 'a',
+                afterSignature: 'b',
+                newIdentityCount: 1,
+                loading: false,
+                transferPending: false,
+                stableBottomRounds: 7,
+                lastNewIdentityAt: 9000,
+                now: 10000,
+                requiredStableBottomRounds: 8,
+                minimumStableBottomMs: 6000
+            }
+        ]
+    ])('resets stable bottom proof for %s', (reason, input) => {
+        expect(resolveBackupScrollAttempt(input)).toMatchObject({
+            exhausted: false,
+            stableBottomRounds: 0,
+            reason
+        });
+    });
+
+    test('exhausts only after eight unchanged durable bottom probes spanning six seconds', () => {
+        let stableBottomRounds = 0;
+        let outcome = null;
+        for (let round = 1; round <= 8; round++) {
+            outcome = resolveBackupScrollAttempt({
+                before: bottom,
+                after: bottom,
+                beforeSignature: 'same',
+                afterSignature: 'same',
+                newIdentityCount: 0,
+                loading: false,
+                transferPending: false,
+                stableBottomRounds,
+                lastNewIdentityAt: 4000,
+                now: 4000 + (round * 750),
+                requiredStableBottomRounds: 8,
+                minimumStableBottomMs: 6000
+            });
+            stableBottomRounds = outcome.stableBottomRounds;
+            if (round < 8) expect(outcome.exhausted).toBe(false);
+        }
+
+        expect(outcome).toMatchObject({
+            exhausted: true,
+            stableBottomRounds: 8,
+            reason: 'exhausted'
+        });
+    });
+
+    test('scan safety limit wins over bottom stability and never reports complete', () => {
+        const outcome = resolveBackupScrollAttempt({
+            before: bottom,
+            after: bottom,
+            beforeSignature: 'same',
+            afterSignature: 'same',
+            newIdentityCount: 0,
+            loading: false,
+            transferPending: false,
+            stableBottomRounds: 8,
+            lastNewIdentityAt: 0,
+            now: 10000,
+            scanAttempts: 1000,
+            maxScrollAttempts: 1000,
+            requiredStableBottomRounds: 8,
+            minimumStableBottomMs: 6000
+        });
+
+        expect(outcome).toMatchObject({ exhausted: false, reason: 'scan_limit' });
+        expect(outcome.reason).not.toBe('complete');
+    });
+
+    test('loading detection is semantic, visible, and scoped to the Saved surface', () => {
+        const saved = document.createElement('section');
+        const visibleLoader = document.createElement('div');
+        const hiddenLoader = document.createElement('div');
+        const outsideLoader = document.createElement('div');
+        visibleLoader.setAttribute('role', 'progressbar');
+        hiddenLoader.setAttribute('aria-busy', 'true');
+        outsideLoader.setAttribute('role', 'progressbar');
+        visibleLoader.getClientRects = () => [{ width: 20, height: 20 }];
+        hiddenLoader.getClientRects = () => [];
+        outsideLoader.getClientRects = () => [{ width: 20, height: 20 }];
+        saved.append(visibleLoader, hiddenLoader);
+        document.body.append(saved, outsideLoader);
+
+        expect(isSavedGalleryLoading(saved)).toBe(true);
+        visibleLoader.remove();
+        expect(isSavedGalleryLoading(saved)).toBe(false);
     });
 });
 
