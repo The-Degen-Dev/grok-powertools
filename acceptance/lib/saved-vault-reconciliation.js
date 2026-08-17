@@ -19,7 +19,32 @@ function sorted(values) {
     return [...values].sort();
 }
 
+function hasOwn(item, key) {
+    return Object.prototype.hasOwnProperty.call(item, key);
+}
+
+function validateInventoryItem(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+    if (hasOwn(item, 'assetId') && typeof item.assetId !== 'string') return false;
+    if (hasOwn(item, 'canonicalObjectKey') && typeof item.canonicalObjectKey !== 'string') return false;
+    if (hasOwn(item, 'legacyObjectKeys')
+        && (!Array.isArray(item.legacyObjectKeys) || item.legacyObjectKeys.some((key) => typeof key !== 'string'))) {
+        return false;
+    }
+    if (hasOwn(item, 'verificationStatus') && typeof item.verificationStatus !== 'string') return false;
+    return Boolean(normalizeSavedAssetIdentity(item.assetId) || normalizeSavedAssetIdentity(item.canonicalObjectKey));
+}
+
+function validateInventoryItems(items) {
+    return Array.isArray(items) && items.every(validateInventoryItem);
+}
+
+function assertValidInventoryItems(items) {
+    if (!validateInventoryItems(items)) throw new Error('inventory_items_invalid');
+}
+
 function reconcileSavedVaultInventory({ savedIdentities = [], inventoryItems = [] }) {
+    assertValidInventoryItems(inventoryItems);
     const saved = new Set(savedIdentities.map(normalizeSavedAssetIdentity).filter(Boolean));
     const byIdentity = new Map();
     for (const item of inventoryItems) {
@@ -77,6 +102,7 @@ function redactVerificationStatus(value) {
 }
 
 function redactInventoryItem(item) {
+    assertValidInventoryItems([item]);
     return {
         identity: redactIdentity(item.assetId || item.canonicalObjectKey),
         verificationStatus: redactVerificationStatus(item.verificationStatus),
@@ -109,6 +135,8 @@ function redactReconciliationOutput(value, key = '') {
 module.exports = {
     normalizeSavedAssetIdentity,
     reconcileSavedVaultInventory,
+    validateInventoryItem,
+    validateInventoryItems,
     redactIdentity,
     redactObjectKey,
     redactInventoryItem,

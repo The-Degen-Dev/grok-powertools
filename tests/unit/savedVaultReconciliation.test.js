@@ -6,7 +6,8 @@ const { spawnSync } = require('child_process');
 const {
     normalizeSavedAssetIdentity,
     reconcileSavedVaultInventory,
-    redactInventoryItem
+    redactInventoryItem,
+    validateInventoryItems
 } = require('../../acceptance/lib/saved-vault-reconciliation.js');
 
 const repoRoot = path.resolve(__dirname, '../..');
@@ -108,6 +109,16 @@ describe('Saved vault reconciliation', () => {
             legacyObjectKeys: [null]
         });
     });
+
+    test.each([
+        [null],
+        [[[]]],
+        [{ assetId: 'SENTINEL_NOT_AN_IDENTITY' }],
+        [{ assetId: ID_1, legacyObjectKeys: 'SENTINEL_NOT_AN_ARRAY' }]
+    ])('rejects malformed inventory rows without dereferencing them', (items) => {
+        expect(validateInventoryItems(items)).toBe(false);
+        expect(() => reconcileSavedVaultInventory({ savedIdentities: [ID_1], inventoryItems: items })).toThrow('inventory_items_invalid');
+    });
 });
 
 describe('reconciliation CLI', () => {
@@ -156,6 +167,27 @@ describe('reconciliation CLI', () => {
         });
         expect(result.status).toBe(1);
         expect(`${result.stdout}${result.stderr}`).toBe('blocked: inventory_cursor_invalid\n');
+        fs.rmSync(directory, { recursive: true, force: true });
+    });
+
+    test.each([
+        [null],
+        [[[]]],
+        [{ assetId: 'SENTINEL_NOT_AN_IDENTITY' }],
+        [{ assetId: ID_1, canonicalObjectKey: `private/${ID_1}.jpg`, legacyObjectKeys: 'SENTINEL_NOT_AN_ARRAY' }]
+    ])('rejects malformed successful inventory rows with fixed output and no evidence', (items) => {
+        const directory = createTempDir();
+        const { outputPath, result } = runCli(directory, {
+            observer: completeObserver([ID_1]),
+            pages: [{ items, nextCursor: null }]
+        });
+        const output = `${result.stdout}${result.stderr}`;
+        expect(result.status).toBe(1);
+        expect(output).toBe('blocked: inventory_response_invalid\n');
+        expect(output).not.toContain('SENTINEL');
+        expect(output).not.toContain(directory);
+        expect(output).not.toContain('private/');
+        expect(fs.existsSync(outputPath)).toBe(false);
         fs.rmSync(directory, { recursive: true, force: true });
     });
 

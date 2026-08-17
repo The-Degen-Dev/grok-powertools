@@ -10,7 +10,8 @@ const {
     reconcileSavedVaultInventory,
     redactInventoryItem,
     redactReconciliationOutput,
-    sortRedactedInventory
+    sortRedactedInventory,
+    validateInventoryItems
 } = require('../lib/saved-vault-reconciliation.js');
 const INVENTORY_ERROR_CODES = new Set([
     'inventory_cursor_invalid',
@@ -88,9 +89,14 @@ async function fetchInventory({ worker, apiKey, fetchImpl = fetch }) {
         } catch {
             throw inventoryError('inventory_response_invalid');
         }
-        if (!page || !Array.isArray(page.items)) throw inventoryError('inventory_response_invalid');
-        if (page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor.trim())) {
-            throw inventoryError('inventory_cursor_invalid');
+        try {
+            if (!page || !validateInventoryItems(page.items)) throw inventoryError('inventory_response_invalid');
+            if (page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor.trim())) {
+                throw inventoryError('inventory_cursor_invalid');
+            }
+        } catch (error) {
+            if (error?.code === 'inventory_cursor_invalid' || error?.code === 'inventory_response_invalid') throw error;
+            throw inventoryError('inventory_response_invalid');
         }
         items.push(...page.items);
         cursor = page.nextCursor;
@@ -124,15 +130,21 @@ async function main() {
         return blocked(inventoryErrorCode(error));
     }
 
-    const reconciliation = reconcileSavedVaultInventory({
-        savedIdentities: observer.identities,
-        inventoryItems
-    });
-    const output = redactReconciliationOutput({
-        schemaVersion: 1,
-        ...reconciliation,
-        inventory: sortRedactedInventory(inventoryItems.map(redactInventoryItem))
-    });
+    let output;
+    let reconciliation;
+    try {
+        reconciliation = reconcileSavedVaultInventory({
+            savedIdentities: observer.identities,
+            inventoryItems
+        });
+        output = redactReconciliationOutput({
+            schemaVersion: 1,
+            ...reconciliation,
+            inventory: sortRedactedInventory(inventoryItems.map(redactInventoryItem))
+        });
+    } catch {
+        return blocked('inventory_response_invalid');
+    }
     try {
         fs.mkdirSync(path.dirname(args.output), { recursive: true });
         fs.writeFileSync(args.output, `${JSON.stringify(output, null, 2)}\n`);
@@ -146,7 +158,7 @@ async function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-    main();
+    main().catch(() => blocked('reconciliation_failed'));
 }
 
 export { fetchInventory, hasValidObserverEvidence, inventoryErrorCode, parseArguments, workerUrl };
