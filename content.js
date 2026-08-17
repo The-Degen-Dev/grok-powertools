@@ -1028,22 +1028,16 @@ function createSavedScanLedger(now = Date.now()) {
         seenIdentities: new Set(),
         durableIdentities: new Set(),
         identityOccurrenceCounts: new Map(),
-        occurrenceIdentityByElement: new WeakMap(),
         lastWindowIdentities: [],
+        lastWindowPosition: null,
         stableBottomRounds: 0,
         lastNewIdentityAt: now,
         scanAttempts: 0
     };
 }
 
-function recordSavedScan(ledger, { identities, occurrenceElements = null, now = Date.now() }) {
-    const observations = identities
-        .map((value, index) => ({
-            identity: getGrokMediaIdentity(value),
-            element: Array.isArray(occurrenceElements) ? occurrenceElements[index] : null
-        }))
-        .filter(({ identity }) => Boolean(identity));
-    const normalizedIdentities = observations.map(({ identity }) => identity);
+function recordSavedScan(ledger, { identities, windowPosition = null, now = Date.now() }) {
+    const normalizedIdentities = identities.map(getGrokMediaIdentity).filter(Boolean);
     let newIdentityCount = 0;
     for (const value of normalizedIdentities) {
         if (ledger.seenIdentities.has(value)) continue;
@@ -1051,23 +1045,27 @@ function recordSavedScan(ledger, { identities, occurrenceElements = null, now = 
         newIdentityCount++;
     }
 
-    if (Array.isArray(occurrenceElements)) {
-        for (const { identity, element } of observations) {
-            if (element && (typeof element === 'object' || typeof element === 'function')) {
-                if (ledger.occurrenceIdentityByElement.get(element) === identity) continue;
-                ledger.occurrenceIdentityByElement.set(element, identity);
-            }
-            ledger.identityOccurrenceCounts.set(
-                identity,
-                (ledger.identityOccurrenceCounts.get(identity) || 0) + 1
-            );
-        }
-    } else {
-        const previousWindow = Array.isArray(ledger.lastWindowIdentities)
-            ? ledger.lastWindowIdentities
-            : [];
-        let overlapLength = 0;
-        let overlapStart = 0;
+    const previousWindow = Array.isArray(ledger.lastWindowIdentities)
+        ? ledger.lastWindowIdentities
+        : [];
+    const sameWindowPosition = Number.isFinite(windowPosition)
+        && Number.isFinite(ledger.lastWindowPosition)
+        && Math.abs(windowPosition - ledger.lastWindowPosition) <= 2;
+    const sameWindow = sameWindowPosition
+        && previousWindow.length === normalizedIdentities.length
+        && previousWindow.every((identity, index) => identity === normalizedIdentities[index]);
+    const hasWindowPositions = Number.isFinite(windowPosition)
+        && Number.isFinite(ledger.lastWindowPosition);
+    const windowPositionDelta = hasWindowPositions
+        ? windowPosition - ledger.lastWindowPosition
+        : 0;
+    let stableOverlap = sameWindow
+        ? { currentStart: 0, length: normalizedIdentities.length }
+        : null;
+
+    if (!stableOverlap && previousWindow.length && normalizedIdentities.length) {
+        let longestLength = 0;
+        const candidates = [];
         for (let previousStart = 0; previousStart < previousWindow.length; previousStart++) {
             for (let currentStart = 0; currentStart < normalizedIdentities.length; currentStart++) {
                 let length = 0;
@@ -1076,21 +1074,40 @@ function recordSavedScan(ledger, { identities, occurrenceElements = null, now = 
                     && currentStart + length < normalizedIdentities.length
                     && previousWindow[previousStart + length] === normalizedIdentities[currentStart + length]
                 ) length++;
-                if (length > overlapLength) {
-                    overlapLength = length;
-                    overlapStart = currentStart;
+                const overlap = normalizedIdentities.slice(currentStart, currentStart + length);
+                const logicalOffset = previousStart - currentStart;
+                const directionAligned = !hasWindowPositions
+                    || (windowPositionDelta > 2 && logicalOffset >= 0)
+                    || (windowPositionDelta < -2 && logicalOffset <= 0)
+                    || (Math.abs(windowPositionDelta) <= 2 && logicalOffset === 0);
+                const movedWholeWindow = length === previousWindow.length
+                    && length === normalizedIdentities.length
+                    && !sameWindowPosition;
+                if (length < 2
+                    || new Set(overlap).size < 2
+                    || movedWholeWindow
+                    || !directionAligned) continue;
+                if (length > longestLength) {
+                    longestLength = length;
+                    candidates.length = 0;
                 }
+                if (length === longestLength) candidates.push({ previousStart, currentStart, length });
             }
         }
-        normalizedIdentities.forEach((identity, index) => {
-            if (index >= overlapStart && index < overlapStart + overlapLength) return;
-            ledger.identityOccurrenceCounts.set(
-                identity,
-                (ledger.identityOccurrenceCounts.get(identity) || 0) + 1
-            );
-        });
+        if (candidates.length === 1) stableOverlap = candidates[0];
     }
+
+    normalizedIdentities.forEach((identity, index) => {
+        if (stableOverlap
+            && index >= stableOverlap.currentStart
+            && index < stableOverlap.currentStart + stableOverlap.length) return;
+        ledger.identityOccurrenceCounts.set(
+            identity,
+            (ledger.identityOccurrenceCounts.get(identity) || 0) + 1
+        );
+    });
     ledger.lastWindowIdentities = normalizedIdentities;
+    ledger.lastWindowPosition = Number.isFinite(windowPosition) ? windowPosition : null;
 
     if (newIdentityCount > 0) {
         ledger.lastNewIdentityAt = now;
@@ -7163,15 +7180,14 @@ class GrokScraper {
             const semanticItems = galleryContext.entries;
             const scan = recordSavedScan(scanLedger, {
                 identities: semanticItems.map((entry) => entry.sourceIdentity || entry.sourceUrl),
-                occurrenceElements: semanticItems.map((entry) => entry.card)
+                windowPosition: this.getScrollerSnapshot(galleryContext.scroller).scrollTop
             });
 
             if (canaryTargetIdentity) {
                 const targetMatches = semanticItems.filter(
                     (entry) => entry.sourceIdentity === canaryTargetIdentity
                 );
-                const targetOccurrences = scanLedger.identityOccurrenceCounts.get(canaryTargetIdentity) || 0;
-                if (targetMatches.length > 1 || targetOccurrences > 1) {
+                if (targetMatches.length > 1) {
                     await this.failRun(
                         `Canary target ${canaryTargetLabel} is ambiguous in Saved.`,
                         'canary_target_ambiguous'
@@ -7260,14 +7276,13 @@ class GrokScraper {
             const afterContext = getSavedGalleryContext(document);
             const afterScan = recordSavedScan(scanLedger, {
                 identities: (afterContext?.entries || []).map((entry) => entry.sourceIdentity || entry.sourceUrl),
-                occurrenceElements: (afterContext?.entries || []).map((entry) => entry.card)
+                windowPosition: after.scrollTop
             });
             if (canaryTargetIdentity) {
                 const afterTargetMatches = (afterContext?.entries || []).filter(
                     (entry) => entry.sourceIdentity === canaryTargetIdentity
                 );
-                const targetOccurrences = scanLedger.identityOccurrenceCounts.get(canaryTargetIdentity) || 0;
-                if (afterTargetMatches.length > 1 || targetOccurrences > 1) {
+                if (afterTargetMatches.length > 1) {
                     await this.failRun(
                         `Canary target ${canaryTargetLabel} is ambiguous in Saved.`,
                         'canary_target_ambiguous'

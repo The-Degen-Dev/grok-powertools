@@ -1088,6 +1088,71 @@ describe('Grok scrape surface transitions', () => {
         );
     });
 
+    test('targeted canary treats an overlap-aligned remount as one logical card', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const beforeUrl = 'https://assets.grok.com/users/u/generated/34010000-0000-4000-8000-000000000001/image.jpg';
+        const targetIdentity = '34010000-0000-4000-8000-000000000002';
+        const targetUrl = `https://assets.grok.com/users/u/generated/${targetIdentity}/image.jpg`;
+        const afterOneUrl = 'https://assets.grok.com/users/u/generated/34010000-0000-4000-8000-000000000003/image.jpg';
+        const afterTwoUrl = 'https://assets.grok.com/users/u/generated/34010000-0000-4000-8000-000000000004/image.jpg';
+        const tailUrl = 'https://assets.grok.com/users/u/generated/34010000-0000-4000-8000-000000000005/image.jpg';
+        const { scroller, list } = mountSemanticSavedImage(beforeUrl);
+        appendSemanticSavedEntry(list, targetUrl, 'image');
+        appendSemanticSavedEntry(list, afterOneUrl, 'image');
+        appendSemanticSavedEntry(list, afterTwoUrl, 'image');
+        Object.defineProperties(scroller, {
+            scrollHeight: { configurable: true, value: 1600 },
+            clientHeight: { configurable: true, value: 800 }
+        });
+        let remountedTarget = null;
+        scroller.scrollBy = jest.fn(() => {
+            scroller.scrollTop = 800;
+            if (remountedTarget) return;
+            list.textContent = '';
+            remountedTarget = appendSemanticSavedEntry(list, targetUrl, 'image');
+            appendSemanticSavedEntry(list, afterOneUrl, 'image');
+            appendSemanticSavedEntry(list, afterTwoUrl, 'image');
+            appendSemanticSavedEntry(list, tailUrl, 'image');
+        });
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: { targetIdentity, targetMediaType: 'image', stopAfterMediaAttempt: true }
+        };
+        scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
+        scraper.persistBackupProgress = jest.fn().mockResolvedValue(true);
+        let scrollCallsAtProcess = null;
+        scraper.processItem = jest.fn(async () => {
+            scrollCallsAtProcess = scroller.scrollBy.mock.calls.length;
+        });
+        scraper.failRun = jest.fn().mockResolvedValue();
+        let now = 1000;
+        const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+        scraper.sleep = jest.fn(async (delay) => { now += delay; });
+
+        try {
+            await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
+        } finally {
+            dateSpy.mockRestore();
+        }
+
+        expect(remountedTarget).not.toBeNull();
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(scraper.processItem).toHaveBeenCalledTimes(1);
+        expect(scrollCallsAtProcess).toBeGreaterThanOrEqual(8);
+        expect(scraper.processItem).toHaveBeenCalledWith(
+            remountedTarget.image,
+            targetUrl,
+            'run-1',
+            1,
+            '34010000-0000-4000-8000-000000000003'
+        );
+    });
+
     test('targeted canary fails closed for duplicate identities in one mounted window', async () => {
         mockContentChrome();
         const scraper = createScraper();
@@ -3711,21 +3776,39 @@ describe('Saved scan ledger and exhaustion proof', () => {
         ]));
     });
 
-    test('scan ledger tracks card occurrences across overlapping and non-overlapping windows', () => {
+    test('scan ledger tracks logical card occurrences across anchored overlapping windows', () => {
         const ledger = createSavedScanLedger(1000);
         const first = '11111111-1111-4111-8111-111111111111';
         const second = '22222222-2222-4222-8222-222222222222';
         const third = '33333333-3333-4333-8333-333333333333';
+        const fourth = '44444444-4444-4444-8444-444444444444';
 
-        recordSavedScan(ledger, { identities: [first, second], now: 2000 });
-        recordSavedScan(ledger, { identities: [second, third], now: 3000 });
-        recordSavedScan(ledger, { identities: [third, first], now: 4000 });
-        recordSavedScan(ledger, { identities: [third, first], now: 5000 });
+        recordSavedScan(ledger, {
+            identities: [first, second, third],
+            windowPosition: 0,
+            now: 2000
+        });
+        recordSavedScan(ledger, {
+            identities: [second, third, fourth],
+            windowPosition: 800,
+            now: 3000
+        });
+        recordSavedScan(ledger, {
+            identities: [third, fourth, first],
+            windowPosition: 1600,
+            now: 4000
+        });
+        recordSavedScan(ledger, {
+            identities: [third, fourth, first],
+            windowPosition: 1600,
+            now: 5000
+        });
 
         expect(ledger.identityOccurrenceCounts).toEqual(new Map([
             [first, 2],
             [second, 1],
-            [third, 1]
+            [third, 1],
+            [fourth, 1]
         ]));
     });
 
