@@ -310,6 +310,7 @@ async function setupVirtualizedSavedBackup(page, { accountUuid, mediaUuids, runT
         window.__virtualFirstUnchangedBottom = null;
         window.__gptE2eRunLease = { runToken, runEpoch: 1 };
         window.__chromeRuntimeResponseByAction = {
+            R2_BACKUP_CHECK_PRESENT: { status: 'missing' },
             R2_BACKUP_UPLOAD: (message) => {
                 window.__virtualTransfers.push({
                     identity: message.url.match(/generated\/([^/]+)/)?.[1] || '',
@@ -2250,11 +2251,10 @@ test.describe('Grok Power Tools E2E', () => {
         }));
     });
 
-    test('R2 backup persists only after the R2 action acknowledges the Agent media', async ({ page }) => {
+    test('R2 presence skips Grok bytes and persists only after the read-only proof', async ({ page }) => {
         const accountUuid = '01234567-89ab-4cde-8fab-0123456789ab';
         const mediaUuid = 'fedcba98-7654-4cba-8fed-cba987654321';
-        const blobDataUrl = 'data:image/jpeg;base64,ci0yLWZpeHR1cmU=';
-        const backupProcessedId = 'r2/agent-media/fedcba98-7654-4cba-8fed-cba987654321';
+        const backupProcessedId = `media_${mediaUuid}`;
         const acceptance = { runId: 'e2e-r2-run', correlationId: 'e2e-r2-correlation' };
 
         await evaluateExtensionContent(page);
@@ -2263,10 +2263,9 @@ test.describe('Grok Power Tools E2E', () => {
             mediaUuids: [mediaUuid],
             responseByAction: {
                 VALIDATE_CLOUD_CONFIG: { valid: true },
-                R2_BACKUP_UPLOAD: { status: 'already_present', backupProcessedId }
+                R2_BACKUP_CHECK_PRESENT: { status: 'already_present', assetId: backupProcessedId }
             },
-            runToken: 'e2e-r2-backup',
-            bridgeResponse: { dataUrl: blobDataUrl, size: 12, type: 'image/jpeg' }
+            runToken: 'e2e-r2-backup'
         });
 
         await expect(page.evaluate((acceptance) => window.__gptE2e.scraper.startBackupMode({
@@ -2284,22 +2283,19 @@ test.describe('Grok Power Tools E2E', () => {
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).toContainEqual({ action: 'VALIDATE_CLOUD_CONFIG' });
         expect(runtimeMessages).toContainEqual({
-            action: 'R2_BACKUP_UPLOAD',
+            action: 'R2_BACKUP_CHECK_PRESENT',
             runToken: 'e2e-r2-backup',
             runEpoch: 1,
             kind: 'r2_backup',
             url: `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`,
-            isVideo: false,
-            promptText: '',
-            blobDataUrl,
-            skipLocalDownload: false,
-            acceptance
+            isVideo: false
         });
+        expect(runtimeMessages).not.toContainEqual(expect.objectContaining({ action: 'R2_BACKUP_UPLOAD' }));
 
         const backupEvents = await page.evaluate(() => window.__chromeEvents);
         const acknowledgementIndex = backupEvents.findIndex((event) =>
             event.type === 'runtime_response'
-            && event.action === 'R2_BACKUP_UPLOAD'
+            && event.action === 'R2_BACKUP_CHECK_PRESENT'
             && event.response?.status === 'already_present'
         );
         const processedIdIndex = backupEvents.findIndex((event) =>
@@ -2323,6 +2319,7 @@ test.describe('Grok Power Tools E2E', () => {
             mediaUuids: [mediaUuid],
             responseByAction: {
                 VALIDATE_CLOUD_CONFIG: { valid: true },
+                R2_BACKUP_CHECK_PRESENT: { status: 'missing' },
                 R2_BACKUP_UPLOAD: {
                     status: 'error',
                     error: 'mock R2 rejection',

@@ -43,9 +43,11 @@ function mockContentChrome() {
                         }
                     : (message?.action === 'SCRAPE_RUN_STATE_WRITE'
                         ? { status: 'ok' }
+                        : (message?.action === 'R2_BACKUP_CHECK_PRESENT'
+                            ? { status: 'missing' }
                         : (message?.action === 'SCRAPE_PROCESSED_IDS_ADD'
                             ? { status: 'ok', processedIds: message.ids || [] }
-                            : undefined)))
+                            : undefined))))
             )),
             onMessage: { addListener: jest.fn() }
         },
@@ -919,7 +921,7 @@ describe('Grok scrape surface transitions', () => {
     test.each([
         ['normal Sync', false, 1],
         ['R2 backup', true, 0]
-    ])('%s uses its exact historical processed-ID eligibility rule', async (_label, backupMode, expectedIndex) => {
+    ])('%s uses its exact historical processed IDs eligibility rule', async (_label, backupMode, expectedIndex) => {
         mockContentChrome();
         const scraper = createScraper();
         const firstUrl = 'https://assets.grok.com/users/u/generated/31000000-0000-4000-8000-000000000001/image.jpg';
@@ -2292,7 +2294,11 @@ describe('Grok scrape surface transitions', () => {
                 detail: { requestId: event.detail.requestId, dataUrl: 'data:image/png;base64,AA==', size: 1 }
             }));
         }, { once: true });
-        chrome.runtime.sendMessage.mockResolvedValue({ status: 'queued' });
+        chrome.runtime.sendMessage.mockImplementation(async (message) => (
+            message.action === 'R2_BACKUP_CHECK_PRESENT'
+                ? { status: 'missing' }
+                : { status: 'queued' }
+        ));
 
         await expect(GrokScraper.prototype.performBackupUpload.call(
             scraper,
@@ -2327,6 +2333,9 @@ describe('Grok scrape surface transitions', () => {
             }));
         }, { once: true });
         chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'R2_BACKUP_CHECK_PRESENT') {
+                return { status: 'missing' };
+            }
             if (message.action === 'R2_BACKUP_UPLOAD') {
                 return { status: 'uploaded', backupProcessedId: mediaId };
             }
@@ -2354,6 +2363,58 @@ describe('Grok scrape surface transitions', () => {
         expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
             processedIds: expect.any(Array)
         }));
+    });
+
+    test('an R2 presence hit records durable success before any Grok media fetch', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {};
+        scraper.backupStats = { totalSeen: 1, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
+        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
+        const mediaId = '22222222-2222-4222-8222-222222222222';
+        const media = document.createElement('img');
+        media.src = `https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/${mediaId}/image.jpg`;
+        const bridgeFetch = jest.fn();
+        document.addEventListener('__gpt_fetch_media', bridgeFetch);
+        chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.action === 'R2_BACKUP_CHECK_PRESENT') {
+                return { status: 'already_present', assetId: `media_${mediaId}` };
+            }
+            if (message.action === 'SCRAPE_PROCESSED_IDS_ADD') {
+                return { status: 'ok', processedIds: ['saved-media-url', media.src, `media_${mediaId}`] };
+            }
+            return { status: 'error', error: 'unexpected_action' };
+        });
+
+        await expect(GrokScraper.prototype.performBackupUpload.call(
+            scraper,
+            media,
+            'saved-media-url',
+            'run-1'
+        )).resolves.toEqual({ status: 'already_present', assetId: `media_${mediaId}` });
+
+        expect(chrome.runtime.sendMessage).toHaveBeenNthCalledWith(1, {
+            action: 'R2_BACKUP_CHECK_PRESENT',
+            runToken: 'run-1',
+            runEpoch: 1,
+            kind: 'r2_backup',
+            url: media.src,
+            isVideo: false
+        });
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            action: 'R2_BACKUP_UPLOAD'
+        }));
+        expect(bridgeFetch).not.toHaveBeenCalled();
+        expect(scraper.backupStats).toMatchObject({ alreadyPresent: 1, errors: 0 });
+        expect(scraper.processedIds).toEqual(new Set([
+            'saved-media-url',
+            media.src,
+            `media_${mediaId}`
+        ]));
+        document.removeEventListener('__gpt_fetch_media', bridgeFetch);
     });
 
     test('sends authenticated media data for Cloud only Agent transfers', async () => {
@@ -3611,6 +3672,238 @@ describe('background scrape lease authority', () => {
         global.Blob = originalBlob;
         delete global.chrome;
         jest.resetModules();
+    });
+
+    function r2PresenceLocalState(lease) {
+        return {
+            scraperState: 'running',
+            scrapeRunToken: lease.token,
+            scrapeRunEpoch: lease.epoch,
+            isScraping: true,
+            isR2Backup: true,
+            processedIds: [],
+            downloadPath: 'GrokVault',
+            activeGrokUserId: 'user-1',
+            cloudConfig: {
+                enabled: true,
+                mode: 'cloud_only',
+                workerUrl: 'https://unit-placeholder.workers.dev',
+                apiKey: 'unit-placeholder',
+                keyPrefix: 'grok-powertools/v1'
+            }
+        };
+    }
+
+    async function loadR2PresenceHarness(lease = createLeaseRecord({ kind: 'r2_backup' })) {
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: r2PresenceLocalState(lease)
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        await background.ensureScrapeLeaseHydrated();
+        return { background, harness, lease };
+    }
+
+    function dispatchR2Presence(harness, lease, sourceUrl, overrides = {}) {
+        const dispatched = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'R2_BACKUP_CHECK_PRESENT',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: 'r2_backup',
+            url: sourceUrl,
+            isVideo: false,
+            ...overrides
+        }, { tab: { id: lease.tabId } });
+        expect(dispatched.returnValue).toBe(true);
+        return dispatched.response;
+    }
+
+    test('R2 presence inventory paginates once per lease and requires HEAD proof', async () => {
+        const firstMediaId = '41000000-0000-4000-8000-000000000001';
+        const secondMediaId = '41000000-0000-4000-8000-000000000002';
+        const firstUrl = `https://assets.grok.com/users/u/generated/${firstMediaId}/image.jpg`;
+        const secondUrl = `https://assets.grok.com/users/u/generated/${secondMediaId}/image.jpg`;
+        const firstAssetId = `media_${firstMediaId}`;
+        const secondAssetId = `media_${secondMediaId}`;
+        const firstObjectKey = `grok-powertools/v1/users/user-1/media/by-asset/${firstAssetId}.jpg`;
+        const secondObjectKey = `grok-powertools/v1/users/user-1/media/by-asset/${secondAssetId}.jpg`;
+        const inventoryCursors = [];
+        global.fetch = jest.fn(async (url, options = {}) => {
+            const parsed = new URL(String(url));
+            if (parsed.pathname === '/v1/vault/inventory') {
+                expect(options.method).toBeUndefined();
+                expect(parsed.searchParams.get('limit')).toBe('1000');
+                const cursor = parsed.searchParams.get('cursor');
+                inventoryCursors.push(cursor);
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => cursor
+                        ? {
+                            items: [{
+                                assetId: secondAssetId,
+                                canonicalObjectKey: secondObjectKey,
+                                mediaType: 'image',
+                                verificationStatus: 'verified'
+                            }],
+                            nextCursor: null
+                        }
+                        : {
+                            items: [{
+                                assetId: firstAssetId,
+                                canonicalObjectKey: firstObjectKey,
+                                mediaType: 'image',
+                                verificationStatus: 'verified'
+                            }],
+                            nextCursor: 'cursor-2'
+                        }
+                };
+            }
+            if (parsed.pathname === '/v1/objects/verify') {
+                expect(options.method).toBe('HEAD');
+                expect([firstObjectKey, secondObjectKey]).toContain(parsed.searchParams.get('objectKey'));
+                return {
+                    ok: true,
+                    status: 200,
+                    headers: new Headers({
+                        'content-type': 'image/jpeg',
+                        'x-r2-size-bytes': '2048',
+                        'x-r2-sha256': 'sha-redacted'
+                    })
+                };
+            }
+            throw new Error(`Unexpected fetch URL: ${String(url)}`);
+        });
+        const { harness, lease } = await loadR2PresenceHarness();
+
+        await expect(dispatchR2Presence(harness, lease, firstUrl)).resolves.toMatchObject({
+            status: 'already_present',
+            assetId: firstAssetId,
+            bytes: 2048,
+            contentType: 'image/jpeg'
+        });
+        await expect(dispatchR2Presence(harness, lease, secondUrl)).resolves.toMatchObject({
+            status: 'already_present',
+            assetId: secondAssetId
+        });
+
+        expect(inventoryCursors).toEqual([null, 'cursor-2']);
+        expect(global.fetch.mock.calls.filter(([url]) => String(url).includes('/v1/vault/inventory'))).toHaveLength(2);
+        expect(global.fetch.mock.calls.filter(([url]) => String(url).includes('/v1/objects/verify'))).toHaveLength(2);
+        expect(global.fetch.mock.calls.filter(([url]) => String(url).includes('/v1/presign'))).toHaveLength(0);
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(harness.chromeApi.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
+            processedIds: expect.any(Array)
+        }));
+    });
+
+    test.each([
+        [404, 'missing', undefined],
+        [401, 'error', 'r2_head_401'],
+        [429, 'error', 'r2_head_429'],
+        [500, 'error', 'r2_head_500']
+    ])('R2 presence HEAD %i returns %s without mutation', async (headStatus, status, error) => {
+        const mediaId = '42000000-0000-4000-8000-000000000001';
+        const sourceUrl = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        const assetId = `media_${mediaId}`;
+        const objectKey = `grok-powertools/v1/users/user-1/media/by-asset/${assetId}.jpg`;
+        global.fetch = jest.fn(async (url, options = {}) => {
+            const parsed = new URL(String(url));
+            if (parsed.pathname === '/v1/vault/inventory') {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        items: [{
+                            assetId,
+                            canonicalObjectKey: objectKey,
+                            mediaType: 'image',
+                            verificationStatus: 'verified'
+                        }],
+                        nextCursor: null
+                    })
+                };
+            }
+            expect(parsed.pathname).toBe('/v1/objects/verify');
+            expect(options.method).toBe('HEAD');
+            return { ok: false, status: headStatus, headers: new Headers() };
+        });
+        const { harness, lease } = await loadR2PresenceHarness();
+
+        await expect(dispatchR2Presence(harness, lease, sourceUrl)).resolves.toEqual({
+            status,
+            ...(error ? { error } : { assetId })
+        });
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(global.fetch.mock.calls.filter(([url]) => String(url).includes('/v1/presign'))).toHaveLength(0);
+    });
+
+    test.each([
+        ['repeated cursor', 'cursor-repeat', (assetId) => ({
+            items: [],
+            nextCursor: 'cursor-repeat',
+            assetId
+        }), 'vault_inventory_cursor_repeated'],
+        ['wrong key prefix', null, (assetId) => ({
+            items: [{
+                assetId,
+                canonicalObjectKey: `other-prefix/users/user-1/media/by-asset/${assetId}.jpg`,
+                mediaType: 'image',
+                verificationStatus: 'verified'
+            }],
+            nextCursor: null
+        }), 'vault_inventory_object_key_prefix_mismatch']
+    ])('R2 presence inventory rejects %s', async (_label, repeatedCursor, buildPage, expectedError) => {
+        const mediaId = '43000000-0000-4000-8000-000000000001';
+        const sourceUrl = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        const assetId = `media_${mediaId}`;
+        global.fetch = jest.fn(async (url) => {
+            const parsed = new URL(String(url));
+            expect(parsed.pathname).toBe('/v1/vault/inventory');
+            const page = buildPage(assetId);
+            if (repeatedCursor && parsed.searchParams.get('cursor') === null) {
+                return { ok: true, status: 200, json: async () => ({ ...page, nextCursor: repeatedCursor }) };
+            }
+            return { ok: true, status: 200, json: async () => page };
+        });
+        const { harness, lease } = await loadR2PresenceHarness();
+
+        await expect(dispatchR2Presence(harness, lease, sourceUrl)).resolves.toEqual({
+            status: 'error',
+            error: expectedError
+        });
+        expect(harness.storedLocal.processedIds).toEqual([]);
+        expect(global.fetch.mock.calls.some(([url]) => String(url).includes('/v1/objects/verify'))).toBe(false);
+    });
+
+    test.each([
+        ['stale token', { runToken: 'stale-run' }, null],
+        ['wrong kind', { kind: 'sync' }, null],
+        ['wrong tab', {}, { tab: { id: 99 } }]
+    ])('R2 presence ignores %s before network access', async (_label, overrides, sender) => {
+        global.fetch = jest.fn();
+        const { harness, lease } = await loadR2PresenceHarness();
+        const request = {
+            action: 'R2_BACKUP_CHECK_PRESENT',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: 'r2_backup',
+            url: 'https://assets.grok.com/users/u/generated/44000000-0000-4000-8000-000000000001/image.jpg',
+            isVideo: false,
+            ...overrides
+        };
+        const dispatched = dispatchBackgroundMessageThroughPort(
+            harness.chromeApi,
+            request,
+            sender || { tab: { id: lease.tabId } }
+        );
+        expect(dispatched.returnValue).toBe(true);
+
+        await expect(dispatched.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
+        expect(global.fetch).not.toHaveBeenCalled();
+        expect(harness.storedLocal.processedIds).toEqual([]);
     });
 
     test('waits for deferred hydration before Stop and cannot resurrect the prior active lease', async () => {

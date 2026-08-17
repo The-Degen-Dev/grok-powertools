@@ -17,7 +17,10 @@ describe('R2 media backup popup guidance', () => {
         expect(backupTitle).toMatch(/Grok Imagine Saved/i);
         expect(canaryTitle).toMatch(/one unprocessed media item/i);
         expect(backupTitle).toMatch(/scans the complete Grok Imagine Saved view/i);
-        expect(backupTitle).toMatch(/uploads unprocessed media/i);
+        expect(backupTitle).toMatch(/every Saved identity/i);
+        expect(backupTitle).toMatch(/verifies current R2 presence/i);
+        expect(backupTitle).toMatch(/uploads only missing media/i);
+        expect(backupTitle).not.toMatch(/unprocessed media/i);
         expect(`${canaryTitle} ${backupTitle}`).not.toMatch(/reset\s+processed\s+IDs/i);
     });
 });

@@ -246,6 +246,7 @@ let scrapeLeaseMutationQueue = Promise.resolve();
 let scrapeStopPending = false;
 const activeScrapeTransferTasks = new Map();
 const activeScrapeTransferAbortControllers = new Map();
+const r2BackupInventoryPromises = new Map();
 let backgroundStateReadyPromise = null;
 const MAX_LOGS = 100;
 const CLOUD_ALARM_NAME = 'gptCloudRetry';
@@ -1273,6 +1274,70 @@ async function fetchWithScrapeAuthority(url, options = {}, assertAuthorized = nu
         if (signal?.aborted) throw createScrapeAuthorityRevokedError();
         throw error;
     }
+}
+
+async function loadVerifiedVaultInventory(config, assertAuthorized = null) {
+    const items = new Map();
+    const seenCursors = new Set();
+    const keyPrefix = CloudSync.sanitizeKeyPrefix
+        ? CloudSync.sanitizeKeyPrefix(config.keyPrefix)
+        : String(config.keyPrefix || '').trim().replace(/^\/+/, '').replace(/\/+$/, '');
+    const requiredObjectKeyPrefix = `${keyPrefix}/`;
+    let cursor = null;
+
+    do {
+        if (cursor && seenCursors.has(cursor)) throw new Error('vault_inventory_cursor_repeated');
+        if (cursor) seenCursors.add(cursor);
+        if (assertAuthorized) await assertAuthorized();
+        const url = new URL('/v1/vault/inventory', config.workerUrl);
+        url.searchParams.set('limit', '1000');
+        if (cursor) url.searchParams.set('cursor', cursor);
+        const response = await fetchWithScrapeAuthority(url.toString(), {
+            headers: { [API_KEY_HEADER]: config.apiKey }
+        }, assertAuthorized);
+        if (!response.ok) throw new Error(`vault_inventory_${response.status}`);
+        const page = await response.json();
+        if (assertAuthorized) await assertAuthorized();
+        for (const item of page.items || []) {
+            if (item.canonicalObjectKey
+                && !String(item.canonicalObjectKey).startsWith(requiredObjectKeyPrefix)) {
+                throw new Error('vault_inventory_object_key_prefix_mismatch');
+            }
+            if (item.verificationStatus !== 'verified'
+                || !['image', 'video'].includes(item.mediaType)
+                || !item.assetId
+                || !item.canonicalObjectKey) continue;
+            items.set(item.assetId, item);
+        }
+        cursor = page.nextCursor || null;
+    } while (cursor);
+
+    return items;
+}
+
+async function headVerifiedVaultObject(config, item, assertAuthorized = null) {
+    const url = new URL('/v1/objects/verify', config.workerUrl);
+    url.searchParams.set('objectKey', item.canonicalObjectKey);
+    const response = await fetchWithScrapeAuthority(url.toString(), {
+        method: 'HEAD',
+        headers: { [API_KEY_HEADER]: config.apiKey }
+    }, assertAuthorized);
+    if (response.status === 404) return { status: 'missing', assetId: item.assetId };
+    if (!response.ok) return { status: 'error', error: `r2_head_${response.status}` };
+    const bytes = Number(response.headers.get('x-r2-size-bytes') || 0);
+    const contentType = response.headers.get('content-type') || '';
+    const expectedType = item.mediaType === 'video' ? 'video/' : 'image/';
+    if (bytes <= 0 || !contentType.startsWith(expectedType)) {
+        return { status: 'error', error: 'r2_head_metadata_mismatch' };
+    }
+    return {
+        status: 'already_present',
+        assetId: item.assetId,
+        objectKey: item.canonicalObjectKey,
+        bytes,
+        contentType,
+        sha256: response.headers.get('x-r2-sha256') || ''
+    };
 }
 
 async function verifyR2Object(config, descriptor, expected = {}, assertAuthorized = null) {
@@ -3080,6 +3145,7 @@ function getScrapeDurabilitySnapshot(lease) {
 }
 
 async function revokeScrapeDownloadAuthority(lease) {
+    clearR2BackupInventoryCache(lease);
     abortScrapeTransferControllers(lease);
     for (const receipts of pendingScrapeDownloadReceiptsByUrl.values()) {
         for (const receipt of [...receipts]) {
@@ -3114,6 +3180,26 @@ async function revokeScrapeDownloadAuthority(lease) {
 
 function scrapeTransferKey(lease) {
     return `${lease.kind}:${lease.epoch}:${lease.token}:${lease.tabId}`;
+}
+
+function clearR2BackupInventoryCache(lease) {
+    if (!lease) return;
+    r2BackupInventoryPromises.delete(scrapeTransferKey(lease));
+}
+
+function getR2BackupInventoryForLease(config, lease, assertAuthorized) {
+    const key = scrapeTransferKey(lease);
+    let inventoryPromise = r2BackupInventoryPromises.get(key);
+    if (!inventoryPromise) {
+        inventoryPromise = loadVerifiedVaultInventory(config, assertAuthorized);
+        r2BackupInventoryPromises.set(key, inventoryPromise);
+        inventoryPromise.catch(() => {
+            if (r2BackupInventoryPromises.get(key) === inventoryPromise) {
+                r2BackupInventoryPromises.delete(key);
+            }
+        });
+    }
+    return inventoryPromise;
 }
 
 function registerScrapeTransferAbortController(lease) {
@@ -3379,6 +3465,7 @@ async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
             scrapeStopPending = true;
             markScrapeCompletionTransitionRevoked(lease);
             const tombstone = await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
+            clearR2BackupInventoryCache(lease);
             abortScrapeTransferControllers(lease);
             scrapeStartPending = false;
             isScraping = false;
@@ -3443,6 +3530,7 @@ async function completeScrapeRun(request, sender, kind) {
         if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
         const stored = await readEffectiveScrapeRunState(lease, ['r2BackupState']);
         if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
+        clearR2BackupInventoryCache(lease);
         await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
         scrapeStartPending = false;
         isScraping = false;
@@ -3491,6 +3579,52 @@ async function uploadDirectMediaData(request, finalPath, acceptanceSource = 'dir
     if (assertAuthorized) await assertAuthorized();
 
     return buildDirectBackupUploadResponse(result, request.url);
+}
+
+async function checkR2BackupPresence(request, sender) {
+    const lease = await getAuthorizedScrapeTransferLease(request, sender);
+    if (!lease || lease.kind !== 'r2_backup') {
+        return { status: 'ignored', reason: 'stale_authority' };
+    }
+
+    return trackScrapeTransferTask(lease, async (signal) => {
+        const assertAuthorized = createScrapeTransferAuthorityGuard(lease, signal);
+        try {
+            await assertAuthorized();
+            const config = await getCloudConfig();
+            await assertAuthorized();
+            if (!CloudSync.isCloudEnabled(config)) {
+                return { status: 'error', error: 'r2_presence_cloud_disabled' };
+            }
+            const extHint = request.isVideo ? 'mp4' : null;
+            const finalPath = await generateFilenameForBackup(request.url, extHint);
+            await assertAuthorized();
+            const identity = CloudSync.resolveMediaAssetIdentity({
+                sourceUrl: request.url,
+                finalPath,
+                mediaType: request.isVideo ? 'video' : 'image'
+            });
+            const inventory = await getR2BackupInventoryForLease(config, lease, assertAuthorized);
+            await assertAuthorized();
+            const item = inventory.get(identity.assetId);
+            if (!item) return { status: 'missing', assetId: identity.assetId };
+            if (item.mediaType !== identity.mediaType) {
+                return { status: 'error', error: 'r2_inventory_media_type_mismatch' };
+            }
+            const result = await headVerifiedVaultObject(config, item, assertAuthorized);
+            await assertAuthorized();
+            if (result.status === 'error') clearR2BackupInventoryCache(lease);
+            return result;
+        } catch (error) {
+            clearR2BackupInventoryCache(lease);
+            if (isScrapeAuthorityRevokedError(error)) throw error;
+            const code = String(error?.message || '');
+            return {
+                status: 'error',
+                error: /^[a-z0-9_]+$/.test(code) ? code : 'r2_presence_check_failed'
+            };
+        }
+    });
 }
 
 // Handle messages
@@ -3583,6 +3717,17 @@ function handleRuntimeMessage(request, sender, sendResponse) {
     if (request.action === 'STOP_R2_BACKUP') {
         stopScrapeRun('r2_backup').then(sendResponse).catch((error) => {
             sendResponse({ status: 'error', error: error.message || 'Failed to stop backup.' });
+        });
+        return true;
+    }
+
+    if (request.action === 'R2_BACKUP_CHECK_PRESENT') {
+        checkR2BackupPresence(request, sender).then(sendResponse).catch((error) => {
+            if (isScrapeAuthorityRevokedError(error)) {
+                sendResponse({ status: 'ignored', reason: 'stale_authority' });
+                return;
+            }
+            sendResponse({ status: 'error', error: 'r2_presence_check_failed' });
         });
         return true;
     }
@@ -3969,6 +4114,7 @@ const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
     'GET_SCRAPE_DURABILITY',
     'START_SCRAPE',
     'START_R2_BACKUP',
+    'R2_BACKUP_CHECK_PRESENT',
     'R2_BACKUP_UPLOAD',
     'R2_BACKUP_PROGRESS',
     'R2_BACKUP_COMPLETE',
@@ -5745,6 +5891,7 @@ if (typeof module !== 'undefined') {
         getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
         getScrapeDurabilitySnapshot,
         generateFilename,
+        headVerifiedVaultObject,
         handleDownloadChanged,
         handleDownloadFilename,
         initializeBackgroundState,
@@ -5753,6 +5900,7 @@ if (typeof module !== 'undefined') {
         ensureScrapeLeaseHydrated,
         isGrokSavedUrl,
         isR2BackupCompletionSuccessful,
+        loadVerifiedVaultInventory,
         queueChromeDownload,
         stopScrapeRun,
         validateScrapeResume,

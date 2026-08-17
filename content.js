@@ -7513,10 +7513,30 @@ class GrokScraper {
             return { status: 'error', error: 'No media element found for backup.' };
         }
 
-        const alreadyLocal = this.isMediaProcessed(src) || this.isMediaProcessed(currentItemId);
-        const promptText = this.overlay?.readCurrentPromptInput?.() || '';
-
         try {
+            const presenceResult = await safeChromeRuntimeSendMessage({
+                action: 'R2_BACKUP_CHECK_PRESENT',
+                runToken,
+                runEpoch: this.runEpoch,
+                kind: 'r2_backup',
+                url: src,
+                isVideo
+            }, 'check R2 backup presence');
+            if (presenceResult.invalidated) {
+                this.handleExtensionContextInvalidated();
+                return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
+            }
+            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
+            const presence = presenceResult.value;
+            if (presence?.status === 'already_present') {
+                return this.recordDurableBackupResult(presence, src, currentItemId, runToken);
+            }
+            if (presence?.status !== 'missing') {
+                return { status: 'error', error: presence?.error || 'r2_presence_check_failed' };
+            }
+
+            const alreadyLocal = this.isMediaProcessed(src) || this.isMediaProcessed(currentItemId);
+            const promptText = this.overlay?.readCurrentPromptInput?.() || '';
             let blobData = null;
             try {
                 const result = await fetchMediaDataUrlViaBridge(src);
@@ -7546,45 +7566,7 @@ class GrokScraper {
             }
             const response = responseResult.value;
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
-            if (recordBackupUploadStatus(this.backupStats, response?.status)) {
-                const actionLabel = response.status === 'queued'
-                    ? 'Queued for R2'
-                    : (response.status === 'already_present' ? 'Already in R2' : 'Uploaded to R2');
-                this.log(
-                    `${actionLabel}: ${formatBackupMediaLog(response.status, src)}`,
-                    response.status === 'conflict_uploaded' ? 'warning' : 'success'
-                );
-                // Mark as processed only after R2 says the asset is present.
-                const cleanId = this.getCleanId(src);
-                if (cleanId && shouldPersistBackupProcessedId(response.status)) {
-                    const ids = [currentItemId, cleanId, response.backupProcessedId].filter(Boolean);
-                    const mutationResult = await safeChromeRuntimeSendMessage({
-                        action: 'SCRAPE_PROCESSED_IDS_ADD',
-                        ids,
-                        runToken,
-                        runEpoch: this.runEpoch,
-                        kind: 'r2_backup'
-                    }, 'save backup processed IDs');
-                    if (mutationResult.invalidated) {
-                        this.handleExtensionContextInvalidated();
-                        return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
-                    }
-                    if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
-                    if (mutationResult.value?.status !== 'ok') {
-                        return { status: 'error', error: 'processed_ids_mutation_failed' };
-                    }
-                    if (Array.isArray(mutationResult.value.processedIds)) {
-                        this.processedIds = new Set(mutationResult.value.processedIds);
-                    }
-                }
-            } else {
-                this.backupStats.errors++;
-                this.log(`Backup failed: ${formatBackupMediaLog(response?.status || 'error', src)}`, 'error');
-            }
-            await this.persistBackupProgress(runToken);
-            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
-            await this.sleep(this.Config.actionWait);
-            return response || { status: 'error', error: 'R2 backup returned no response.' };
+            return this.recordDurableBackupResult(response, src, currentItemId, runToken);
         } catch {
             this.backupStats.errors++;
             return {
@@ -7592,6 +7574,53 @@ class GrokScraper {
                 error: formatBackupMediaError('backup_runtime', 'backup_failed', src)
             };
         }
+    }
+
+    async recordDurableBackupResult(response, src, currentItemId, runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
+        if (recordBackupUploadStatus(this.backupStats, response?.status)) {
+            const actionLabel = response.status === 'queued'
+                ? 'Queued for R2'
+                : (response.status === 'already_present' ? 'Already in R2' : 'Uploaded to R2');
+            this.log(
+                `${actionLabel}: ${formatBackupMediaLog(response.status, src)}`,
+                response.status === 'conflict_uploaded' ? 'warning' : 'success'
+            );
+            const cleanId = this.getCleanId(src);
+            if (cleanId && shouldPersistBackupProcessedId(response.status)) {
+                const ids = [
+                    currentItemId,
+                    cleanId,
+                    response.backupProcessedId,
+                    response.assetId
+                ].filter(Boolean);
+                const mutationResult = await safeChromeRuntimeSendMessage({
+                    action: 'SCRAPE_PROCESSED_IDS_ADD',
+                    ids,
+                    runToken,
+                    runEpoch: this.runEpoch,
+                    kind: 'r2_backup'
+                }, 'save backup processed IDs');
+                if (mutationResult.invalidated) {
+                    this.handleExtensionContextInvalidated();
+                    return { status: 'error', error: EXTENSION_CONTEXT_REFRESHED_MESSAGE };
+                }
+                if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
+                if (mutationResult.value?.status !== 'ok') {
+                    return { status: 'error', error: 'processed_ids_mutation_failed' };
+                }
+                if (Array.isArray(mutationResult.value.processedIds)) {
+                    this.processedIds = new Set(mutationResult.value.processedIds);
+                }
+            }
+        } else {
+            this.backupStats.errors++;
+            this.log(`Backup failed: ${formatBackupMediaLog(response?.status || 'error', src)}`, 'error');
+        }
+        await this.persistBackupProgress(runToken);
+        if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
+        await this.sleep(this.Config.actionWait);
+        return response || { status: 'error', error: 'R2 backup returned no response.' };
     }
 
     async performDownload(mediaEl = null, currentItemId = null, runToken = this.runToken) {
