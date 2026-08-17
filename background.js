@@ -255,6 +255,7 @@ const PENDING_DOWNLOAD_OPERATIONS_KEY = 'pendingDownloadOperations';
 const SCRAPE_COMPLETION_TXN_KEY = 'scrapeCompletionTxn';
 const SCRAPE_COMPLETION_JOURNAL_PREFIX = 'scrapeCompletionJournal:';
 const SCRAPE_RUN_STATE_RECORD_PREFIX = 'scrapeRunStateRecord:';
+const SCRAPE_PERSISTENCE_WRITER_PREFIX = 'scrapePersistenceWriter:';
 
 // Global History Set
 let processedUUIDs = new Set();
@@ -277,10 +278,16 @@ let cloudStatePersistenceRevision = 0;
 let scrapeCompletionTxn = null;
 let scrapeCompletionTransition = null;
 let scrapeCompletionJournalRevision = 0;
+let scrapeCompletionCheckpoint = {
+    version: 1,
+    retiredThroughWriterEpoch: 0,
+    retiredThroughEpoch: 0,
+    committed: []
+};
 let scrapeRunStateRecordRevision = 0;
 let latestScrapeRunStateAttemptRevision = 0;
+let scrapePersistenceWriterEpoch = 0;
 let activeScrapeRunMirror = null;
-const scrapeRunStateRecordKeys = new Set();
 let cloudSyncState = {
     unsyncedCount: 0,
     lastError: null,
@@ -1890,6 +1897,7 @@ async function generateFilenameForBackup(url, extHint) {
 
 async function initializeBackgroundState() {
     const stored = await chrome.storage.local.get(null);
+    await initializeScrapePersistenceWriter(stored);
 
     if (stored[PROCESSED_IDS_KEY]) {
         processedUUIDs = new Set(normalizeProcessedIds(stored[PROCESSED_IDS_KEY]));
@@ -1925,7 +1933,7 @@ async function initializeBackgroundState() {
         (latest, item) => Math.max(latest, Number.isInteger(item?.queueRevision) ? item.queueRevision : 0),
         cloudQueueRevision
     );
-    hydrateScrapeCompletionJournal(stored);
+    await hydrateScrapeCompletionJournal(stored);
     hydrateScrapeRunStateRecordRevision(stored);
     const startupDownloadOperations = Array.from(pendingDownloadOperations.values())
         .map((operation) => ({ ...operation }));
@@ -2127,6 +2135,9 @@ function normalizeScrapeLease(value) {
     const status = ['starting', 'active', 'idle'].includes(value.status) ? value.status : null;
     const kind = value.kind === 'sync' || value.kind === 'r2_backup' ? value.kind : null;
     const epoch = Number.isInteger(value.epoch) && value.epoch >= 0 ? value.epoch : null;
+    const writerEpoch = Number.isInteger(value.writerEpoch) && value.writerEpoch >= 0
+        ? value.writerEpoch
+        : 0;
     if (!status || epoch === null || value.version !== SCRAPE_LEASE_VERSION) return null;
     if (status !== 'idle') {
         if (!kind || typeof value.token !== 'string' || !value.token) return null;
@@ -2134,6 +2145,7 @@ function normalizeScrapeLease(value) {
     }
     return {
         version: SCRAPE_LEASE_VERSION,
+        writerEpoch,
         epoch,
         token: status !== 'idle' ? value.token : null,
         tabId: status === 'active' ? value.tabId : null,
@@ -2146,6 +2158,7 @@ function normalizeScrapeLease(value) {
 function createIdleScrapeLease(epoch = 0) {
     return {
         version: SCRAPE_LEASE_VERSION,
+        writerEpoch: scrapePersistenceWriterEpoch,
         epoch: Math.max(0, Number.isInteger(epoch) ? epoch : 0),
         token: null,
         tabId: null,
@@ -2162,6 +2175,7 @@ function scrapeLeaseMatches(left, right) {
         && left.status === 'active'
         && right.status === 'active'
         && left.version === right.version
+        && (left.writerEpoch || 0) === (right.writerEpoch || 0)
         && left.epoch === right.epoch
         && left.token === right.token
         && left.tabId === right.tabId
@@ -2176,6 +2190,7 @@ function scrapeLeaseIdentityMatches(left, right) {
         && left.status !== 'idle'
         && right.status !== 'idle'
         && left.version === right.version
+        && (left.writerEpoch || 0) === (right.writerEpoch || 0)
         && left.epoch === right.epoch
         && left.token === right.token
         && left.kind === right.kind
@@ -2232,6 +2247,86 @@ function buildImmutableStorageKey(prefix, revision, identity) {
     return `${prefix}${revision}:${identity}:${Date.now()}:${suffix}`;
 }
 
+function getScrapePersistenceOrder(value = {}) {
+    const checkpointFence = value?.checkpoint?.fence;
+    const source = checkpointFence
+        && Number.isInteger(checkpointFence.writerEpoch)
+        && Number.isInteger(checkpointFence.revision)
+        ? checkpointFence
+        : value;
+    return {
+        writerEpoch: Number.isInteger(source.writerEpoch) && source.writerEpoch >= 0
+            ? source.writerEpoch
+            : 0,
+        revision: Number.isInteger(source.revision) && source.revision >= 0
+            ? source.revision
+            : 0
+    };
+}
+
+function compareScrapePersistenceOrder(left, right) {
+    const leftOrder = getScrapePersistenceOrder(left);
+    const rightOrder = getScrapePersistenceOrder(right);
+    if (leftOrder.writerEpoch !== rightOrder.writerEpoch) {
+        return leftOrder.writerEpoch - rightOrder.writerEpoch;
+    }
+    return leftOrder.revision - rightOrder.revision;
+}
+
+function getScrapePersistenceWriterRecords(stored = {}) {
+    return Object.entries(stored).reduce((records, [key, value]) => {
+        if (!key.startsWith(SCRAPE_PERSISTENCE_WRITER_PREFIX)
+            || value?.kind !== 'scrape_persistence_writer'
+            || !Number.isInteger(value.writerEpoch)
+            || value.writerEpoch < 0) {
+            return records;
+        }
+        records.push({ ...value, storageKey: key });
+        return records;
+    }, []).sort((left, right) => (
+        right.writerEpoch - left.writerEpoch
+        || right.storageKey.localeCompare(left.storageKey)
+    ));
+}
+
+async function removeScrapePersistenceWriterRecords(records) {
+    const keys = records.map((record) => record.storageKey).filter(Boolean);
+    if (keys.length === 0) return;
+    if (typeof chrome.storage?.local?.remove !== 'function') {
+        throw new Error('scrape_persistence_writer_compaction_unavailable');
+    }
+    await chrome.storage.local.remove(keys);
+}
+
+async function initializeScrapePersistenceWriter(stored = {}) {
+    const writerRecords = getScrapePersistenceWriterRecords(stored);
+    const retainedWriter = writerRecords[0] || null;
+    await removeScrapePersistenceWriterRecords(writerRecords.slice(1));
+    const observedEpoch = Object.values(stored).reduce((latest, value) => {
+        if (value?.kind !== 'scrape_run_state_record'
+            && value?.kind !== 'scrape_completion_journal') {
+            return latest;
+        }
+        return Math.max(latest, getScrapePersistenceOrder(value).writerEpoch);
+    }, retainedWriter?.writerEpoch || 0);
+    const writerEpoch = observedEpoch + 1;
+    const record = {
+        kind: 'scrape_persistence_writer',
+        version: 1,
+        writerEpoch
+    };
+    const storageKey = buildImmutableStorageKey(
+        SCRAPE_PERSISTENCE_WRITER_PREFIX,
+        writerEpoch,
+        'writer'
+    );
+    await chrome.storage.local.set({
+        [storageKey]: record
+    });
+    await removeScrapePersistenceWriterRecords(retainedWriter ? [retainedWriter] : []);
+    scrapePersistenceWriterEpoch = writerEpoch;
+}
+
 function getScrapeRunStateRecords(stored = {}) {
     return Object.entries(stored).reduce((records, [key, value]) => {
         if (!key.startsWith(SCRAPE_RUN_STATE_RECORD_PREFIX)
@@ -2249,24 +2344,30 @@ function getScrapeRunStateRecords(stored = {}) {
 
 function hydrateScrapeRunStateRecordRevision(stored = {}) {
     const records = getScrapeRunStateRecords(stored);
-    for (const record of records) scrapeRunStateRecordKeys.add(record.storageKey);
-    const latest = records.reduce(
-        (revision, record) => Math.max(revision, record.revision),
-        0
-    );
+    const latest = records
+        .filter((record) => getScrapePersistenceOrder(record).writerEpoch === scrapePersistenceWriterEpoch)
+        .reduce(
+            (revision, record) => Math.max(revision, record.revision),
+            0
+        );
     scrapeRunStateRecordRevision = Math.max(scrapeRunStateRecordRevision, latest);
     latestScrapeRunStateAttemptRevision = Math.max(latestScrapeRunStateAttemptRevision, latest);
 }
 
 function getLatestScrapeRunStateRecord(stored, lease) {
-    return getScrapeRunStateRecords(stored)
+    const records = getScrapeRunStateRecords(stored)
         .filter((record) => scrapeLeaseMatches(normalizeScrapeLease(record.lease), lease))
-        .sort((left, right) => right.revision - left.revision)[0] || null;
+        .sort((left, right) => compareScrapePersistenceOrder(right, left));
+    if (records.length > 1 && compareScrapePersistenceOrder(records[0], records[1]) === 0) {
+        return null;
+    }
+    return records[0] || null;
 }
 
 function setActiveScrapeRunMirror(record) {
     activeScrapeRunMirror = record ? {
         lease: copyScrapeLeaseAuthority(record.lease),
+        writerEpoch: getScrapePersistenceOrder(record).writerEpoch,
         revision: record.revision,
         storageKey: record.storageKey || null,
         mirror: { ...record.mirror }
@@ -2277,18 +2378,23 @@ function removeScrapeRunStateRecords(storageKeys) {
     const keys = Array.from(new Set(storageKeys)).filter(Boolean);
     if (keys.length === 0 || typeof chrome.storage?.local?.remove !== 'function') return;
     try {
-        Promise.resolve(chrome.storage.local.remove(keys)).then(() => {
-            for (const key of keys) scrapeRunStateRecordKeys.delete(key);
-        }).catch(() => {});
+        Promise.resolve(chrome.storage.local.remove(keys)).catch(() => {});
     } catch {
         // Cleanup is opportunistic; unique records cannot overwrite newer keys.
     }
 }
 
-function pruneScrapeRunStateRecords(retainedStorageKey = null) {
-    removeScrapeRunStateRecords(
-        Array.from(scrapeRunStateRecordKeys).filter((key) => key !== retainedStorageKey)
-    );
+function pruneScrapeRunStateRecords(retainedStorageKey = null, cutoff = {
+    writerEpoch: scrapePersistenceWriterEpoch,
+    revision: latestScrapeRunStateAttemptRevision
+}) {
+    Promise.resolve(chrome.storage.local.get(null)).then((stored) => {
+        const keys = getScrapeRunStateRecords(stored)
+            .filter((record) => record.storageKey !== retainedStorageKey)
+            .filter((record) => compareScrapePersistenceOrder(record, cutoff) <= 0)
+            .map((record) => record.storageKey);
+        removeScrapeRunStateRecords(keys);
+    }).catch(() => {});
 }
 
 function getActiveScrapeRunMirror(lease = activeScrapeLease) {
@@ -2386,12 +2492,23 @@ function makeScrapeRunToken() {
 
 function getRequestedLease(value, senderTabId = null) {
     if (value && typeof value === 'object') {
+        const token = value.token ?? value.runToken;
+        const epoch = value.epoch ?? value.runEpoch;
+        const kind = value.kind || (value.isR2Backup ? 'r2_backup' : 'sync');
+        const writerEpoch = activeScrapeLease?.status === 'active'
+            && activeScrapeLease.token === token
+            && activeScrapeLease.epoch === epoch
+            && activeScrapeLease.kind === kind
+            && activeScrapeLease.tabId === senderTabId
+            ? activeScrapeLease.writerEpoch
+            : 0;
         return normalizeScrapeLease({
             version: SCRAPE_LEASE_VERSION,
-            epoch: value.epoch ?? value.runEpoch,
-            token: value.token ?? value.runToken,
+            writerEpoch,
+            epoch,
+            token,
             tabId: Number.isInteger(senderTabId) ? senderTabId : value.tabId,
-            kind: value.kind || (value.isR2Backup ? 'r2_backup' : 'sync'),
+            kind,
             status: 'active',
             startedAt: value.startedAt || Date.now()
         });
@@ -2484,7 +2601,8 @@ async function commitScrapeRunState(request, sender) {
         latestScrapeRunStateAttemptRevision = revision;
         const record = {
             kind: 'scrape_run_state_record',
-            version: 1,
+            version: 2,
+            writerEpoch: scrapePersistenceWriterEpoch,
             revision,
             lease: copyScrapeLeaseAuthority(requested),
             mirror: buildAuthorizedRunningMirror(requested, request.values),
@@ -2495,13 +2613,11 @@ async function commitScrapeRunState(request, sender) {
             storageKey: buildImmutableStorageKey(
                 SCRAPE_RUN_STATE_RECORD_PREFIX,
                 revision,
-                `${requested.epoch}:${requested.token}`
+                `${scrapePersistenceWriterEpoch}:${requested.epoch}:${requested.token}`
             )
         };
     });
     if (prepared.response) return prepared.response;
-    scrapeRunStateRecordKeys.add(prepared.storageKey);
-
     const timeout = Symbol('scrape_run_state_persist_timeout');
     const failed = Symbol('scrape_run_state_persist_failed');
     const write = Promise.resolve(chrome.storage.local.set({
@@ -2514,7 +2630,7 @@ async function commitScrapeRunState(request, sender) {
     );
     if (Date.now() >= deadlineAt || result !== true) {
         write.then(() => removeScrapeRunStateRecords([prepared.storageKey]), () => {
-            scrapeRunStateRecordKeys.delete(prepared.storageKey);
+            // A rejected unique write has no persisted key to prune.
         });
         return {
             status: 'ignored',
@@ -2529,11 +2645,12 @@ async function commitScrapeRunState(request, sender) {
             return { status: 'ignored', reason: 'persistence_timeout' };
         }
         if (!scrapeLeaseMatches(activeScrapeLease, requested)
+            || prepared.record.writerEpoch !== scrapePersistenceWriterEpoch
             || prepared.record.revision !== latestScrapeRunStateAttemptRevision) {
             return { status: 'ignored', reason: 'stale_authority' };
         }
         setActiveScrapeRunMirror({ ...prepared.record, storageKey: prepared.storageKey });
-        pruneScrapeRunStateRecords(prepared.storageKey);
+        pruneScrapeRunStateRecords(prepared.storageKey, prepared.record);
         return { status: 'ok' };
     });
 }
@@ -2584,6 +2701,7 @@ function createScrapeTransferAuthorityGuard(lease, signal = null) {
 function copyScrapeLeaseAuthority(lease) {
     return {
         version: SCRAPE_LEASE_VERSION,
+        writerEpoch: Number.isInteger(lease.writerEpoch) ? lease.writerEpoch : 0,
         epoch: lease.epoch,
         token: lease.token,
         tabId: lease.tabId,
@@ -2843,6 +2961,7 @@ async function reserveScrapeStartIntent(kind) {
         }
         const lease = {
             version: SCRAPE_LEASE_VERSION,
+            writerEpoch: scrapePersistenceWriterEpoch,
             epoch: (activeScrapeLease?.epoch || 0) + 1,
             token: makeScrapeRunToken(),
             tabId: null,
@@ -3847,21 +3966,128 @@ function getScrapeCompletionJournalRecords(stored = {}) {
         }
         records.push({ ...value, storageKey: key });
         return records;
-    }, []).sort((left, right) => left.revision - right.revision);
+    }, []).sort(compareScrapePersistenceOrder);
 }
 
-function makeScrapeCompletionJournalRecord(lease, phase, txn = null) {
+function scrapeCompletionLeaseKey(lease) {
+    return `${lease.writerEpoch || 0}:${lease.epoch}:${lease.token}:${lease.tabId}:${lease.kind}`;
+}
+
+function getScrapeLeaseOrder(lease) {
+    return {
+        writerEpoch: Number.isInteger(lease?.writerEpoch) && lease.writerEpoch >= 0
+            ? lease.writerEpoch
+            : 0,
+        epoch: Number.isInteger(lease?.epoch) && lease.epoch >= 0 ? lease.epoch : 0
+    };
+}
+
+function compareScrapeLeaseOrder(left, right) {
+    if (left.writerEpoch !== right.writerEpoch) return left.writerEpoch - right.writerEpoch;
+    return left.epoch - right.epoch;
+}
+
+function normalizeScrapeCompletionCheckpoint(value) {
+    if (!value || value.version !== 1 || !Number.isInteger(value.retiredThroughEpoch)) return null;
+    const committed = Array.isArray(value.committed) ? value.committed.reduce((entries, entry) => {
+        const lease = normalizeScrapeLease(entry?.lease);
+        const txn = entry?.txn && typeof entry.txn === 'object' ? { ...entry.txn } : null;
+        if (!lease || !txn?.id || txn.phase !== 'committed') return entries;
+        entries.push({ lease: copyScrapeLeaseAuthority(lease), txn });
+        return entries;
+    }, []) : [];
+    return {
+        version: 1,
+        retiredThroughWriterEpoch: Number.isInteger(value.retiredThroughWriterEpoch)
+            && value.retiredThroughWriterEpoch >= 0
+            ? value.retiredThroughWriterEpoch
+            : 0,
+        retiredThroughEpoch: Math.max(0, value.retiredThroughEpoch),
+        committed,
+        ...(Number.isInteger(value.fence?.writerEpoch) && Number.isInteger(value.fence?.revision)
+            ? {
+                fence: {
+                    writerEpoch: value.fence.writerEpoch,
+                    revision: value.fence.revision
+                }
+            }
+            : {})
+    };
+}
+
+function completionDecisionIsReferenced(decision, queue, operations) {
+    const matches = (record) => (
+        record?.completionTxnId === decision.txn.id
+        && scrapeLeaseMatches(normalizeScrapeLease(record.revocationLease), decision.lease)
+    );
+    return queue.some(matches) || Array.from(operations.values()).some(matches);
+}
+
+function buildScrapeCompletionCheckpoint(queue, operations, lease, phase, txn = null) {
+    const committed = new Map(scrapeCompletionCheckpoint.committed.map((entry) => [
+        scrapeCompletionLeaseKey(entry.lease),
+        { lease: copyScrapeLeaseAuthority(entry.lease), txn: { ...entry.txn } }
+    ]));
+    const leaseKey = scrapeCompletionLeaseKey(lease);
+    if (phase === 'committed' && txn) {
+        committed.set(leaseKey, {
+            lease: copyScrapeLeaseAuthority(lease),
+            txn: { ...txn, phase: 'committed' }
+        });
+    } else if (phase === 'revoked') {
+        committed.delete(leaseKey);
+    }
+    const referenced = Array.from(committed.values())
+        .filter((decision) => completionDecisionIsReferenced(decision, queue, operations))
+        .sort((left, right) => (
+            compareScrapeLeaseOrder(getScrapeLeaseOrder(left.lease), getScrapeLeaseOrder(right.lease))
+            || left.lease.token.localeCompare(right.lease.token)
+        ));
+    const priorRetiredOrder = {
+        writerEpoch: scrapeCompletionCheckpoint.retiredThroughWriterEpoch || 0,
+        epoch: scrapeCompletionCheckpoint.retiredThroughEpoch
+    };
+    const leaseOrder = getScrapeLeaseOrder(lease);
+    const retiredOrder = compareScrapeLeaseOrder(priorRetiredOrder, leaseOrder) >= 0
+        ? priorRetiredOrder
+        : leaseOrder;
+    return {
+        version: 1,
+        retiredThroughWriterEpoch: retiredOrder.writerEpoch,
+        retiredThroughEpoch: retiredOrder.epoch,
+        committed: referenced
+    };
+}
+
+function makeScrapeCompletionJournalRecord(lease, phase, txn = null, snapshots = null) {
     const revision = ++scrapeCompletionJournalRevision;
     const normalizedTxn = txn ? { ...txn, phase } : null;
-    return {
+    const record = {
         kind: 'scrape_completion_journal',
-        version: 1,
+        version: 2,
+        writerEpoch: scrapePersistenceWriterEpoch,
         revision,
         phase,
         lease: copyScrapeLeaseAuthority(lease),
         txn: normalizedTxn,
         createdAt: Date.now()
     };
+    if ((phase === 'committed' || phase === 'revoked') && snapshots) {
+        record.checkpoint = {
+            ...buildScrapeCompletionCheckpoint(
+                snapshots.queue,
+                snapshots.operations,
+                lease,
+                phase,
+                normalizedTxn
+            ),
+            fence: {
+                writerEpoch: record.writerEpoch,
+                revision: record.revision
+            }
+        };
+    }
+    return record;
 }
 
 function startScrapeCompletionJournalWrite(record) {
@@ -3869,9 +4095,67 @@ function startScrapeCompletionJournalWrite(record) {
     const storageKey = buildImmutableStorageKey(
         SCRAPE_COMPLETION_JOURNAL_PREFIX,
         record.revision,
-        `${identity}:${record.phase}`
+        `${record.writerEpoch}:${identity}:${record.phase}`
     );
-    return Promise.resolve(chrome.storage.local.set({ [storageKey]: record }));
+    return {
+        storageKey,
+        write: Promise.resolve(chrome.storage.local.set({ [storageKey]: record }))
+    };
+}
+
+async function compactScrapeCompletionJournal(retainedRecord) {
+    const stored = await chrome.storage.local.get(null);
+    const keys = getScrapeCompletionJournalRecords(stored)
+        .filter((record) => record.storageKey !== retainedRecord.storageKey)
+        .filter((record) => compareScrapePersistenceOrder(record, retainedRecord) <= 0)
+        .map((record) => record.storageKey);
+    if (keys.length === 0) return true;
+    if (typeof chrome.storage?.local?.remove !== 'function') {
+        throw new Error('scrape_completion_journal_compaction_unavailable');
+    }
+    await chrome.storage.local.remove(keys);
+    return true;
+}
+
+function applyScrapeCompletionCheckpoint(checkpoint) {
+    const normalized = normalizeScrapeCompletionCheckpoint(checkpoint);
+    if (!normalized) return false;
+    let queue = cloneCloudQueue();
+    let operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
+    const committed = new Map(normalized.committed.map((entry) => [
+        scrapeCompletionLeaseKey(entry.lease),
+        entry
+    ]));
+    for (const decision of committed.values()) {
+        const snapshots = buildCompletionRetrySnapshots(
+            decision.lease,
+            decision.txn,
+            queue,
+            operations
+        );
+        queue = snapshots.queue;
+        operations = snapshots.operations;
+    }
+    const shouldRevoke = (record) => {
+        const lease = normalizeScrapeLease(record?.scrapeLease)
+            || normalizeScrapeLease(record?.revocationLease);
+        const retiredOrder = {
+            writerEpoch: normalized.retiredThroughWriterEpoch,
+            epoch: normalized.retiredThroughEpoch
+        };
+        return Boolean(
+            lease
+            && compareScrapeLeaseOrder(getScrapeLeaseOrder(lease), retiredOrder) <= 0
+            && !committed.has(scrapeCompletionLeaseKey(lease))
+        );
+    };
+    queue = queue.filter((item) => !shouldRevoke(item));
+    for (const [downloadId, operation] of operations) {
+        if (shouldRevoke(operation)) operations.delete(downloadId);
+    }
+    applyCompletionRetrySnapshots(queue, operations, scrapeCompletionTxn);
+    scrapeCompletionCheckpoint = normalized;
+    return true;
 }
 
 function applyScrapeCompletionJournalRecord(record) {
@@ -3886,23 +4170,58 @@ function applyScrapeCompletionJournalRecord(record) {
         }
         const nextTxn = completionTxnMatchesLease(scrapeCompletionTxn, lease) ? null : scrapeCompletionTxn;
         applyCompletionRetrySnapshots(queue, operations, nextTxn);
+        scrapeCompletionCheckpoint = normalizeScrapeCompletionCheckpoint(record.checkpoint)
+            || buildScrapeCompletionCheckpoint(queue, operations, lease, 'revoked');
         return true;
     }
     if (!record.txn || typeof record.txn !== 'object') return false;
     const txn = { ...record.txn, phase: record.phase };
     const snapshots = buildCompletionRetrySnapshots(lease, txn);
     applyCompletionRetrySnapshots(snapshots.queue, snapshots.operations, txn);
+    if (record.phase === 'committed') {
+        scrapeCompletionCheckpoint = normalizeScrapeCompletionCheckpoint(record.checkpoint)
+            || buildScrapeCompletionCheckpoint(
+                snapshots.queue,
+                snapshots.operations,
+                lease,
+                'committed',
+                txn
+            );
+    }
     return true;
 }
 
-function hydrateScrapeCompletionJournal(stored = {}) {
+async function hydrateScrapeCompletionJournal(stored = {}) {
     const records = getScrapeCompletionJournalRecords(stored);
-    for (const record of records) applyScrapeCompletionJournalRecord(record);
+    const latestRevision = records
+        .filter((record) => getScrapePersistenceOrder(record).writerEpoch === scrapePersistenceWriterEpoch)
+        .reduce((latest, record) => Math.max(latest, record.revision), 0);
+    scrapeCompletionJournalRevision = Math.max(scrapeCompletionJournalRevision, latestRevision);
+    const retainedRecord = records
+        .filter((record) => (
+            (record.phase === 'committed' || record.phase === 'revoked')
+            && normalizeScrapeCompletionCheckpoint(record.checkpoint)
+        ))
+        .sort((left, right) => compareScrapePersistenceOrder(right, left))[0] || null;
+    if (retainedRecord) {
+        applyScrapeCompletionCheckpoint(retainedRecord.checkpoint);
+        applyScrapeCompletionJournalRecord(retainedRecord);
+    }
+    for (const record of records) {
+        if (retainedRecord && compareScrapePersistenceOrder(record, retainedRecord) <= 0) continue;
+        applyScrapeCompletionJournalRecord(record);
+    }
+    if (retainedRecord) await compactScrapeCompletionJournal(retainedRecord);
     return records;
 }
 
-function buildCompletionRetrySnapshots(lease, txn) {
-    const queue = cloneCloudQueue().map((item) => {
+function buildCompletionRetrySnapshots(
+    lease,
+    txn,
+    queueSource = cloudSyncQueue,
+    operationsSource = pendingDownloadOperations
+) {
+    const queue = cloneCloudQueue(queueSource).map((item) => {
         if (!scrapeLeaseMatches(item.scrapeLease, lease)) return item;
         const { scrapeLease: _scrapeLease, ...detached } = item;
         return {
@@ -3913,7 +4232,7 @@ function buildCompletionRetrySnapshots(lease, txn) {
             updatedAt: Date.now()
         };
     });
-    const operations = deserializeDownloadOperations(serializeDownloadOperations(pendingDownloadOperations));
+    const operations = deserializeDownloadOperations(serializeDownloadOperations(operationsSource));
     for (const [downloadId, operation] of operations) {
         if (!scrapeLeaseMatches(getDownloadOperationScrapeLease(operation), lease)) continue;
         const { scrapeLease: _scrapeLease, ...detached } = operation;
@@ -4080,16 +4399,24 @@ async function recoverPreparedScrapeCompletionTransfer() {
         cloudQueueMutationQueue = barrier;
         pendingDownloadOperationsMutationQueue = barrier;
         try {
-            const journalRecord = makeScrapeCompletionJournalRecord(lease, 'committed', committedTxn);
-            const write = startScrapeCompletionJournalWrite(journalRecord);
+            const snapshots = buildCompletionRetrySnapshots(lease, committedTxn);
+            const journalRecord = makeScrapeCompletionJournalRecord(
+                lease,
+                'committed',
+                committedTxn,
+                snapshots
+            );
+            const startedWrite = startScrapeCompletionJournalWrite(journalRecord);
             const persisted = await withTimeout(
-                write.then(() => true, () => false),
+                startedWrite.write.then(() => true, () => false),
                 CLOUD_QUEUE_MUTATION_TIMEOUT_MS,
                 false
             );
             if (!persisted) return false;
-            const snapshots = buildCompletionRetrySnapshots(lease, committedTxn);
+            const retainedRecord = { ...journalRecord, storageKey: startedWrite.storageKey };
+            await compactScrapeCompletionJournal(retainedRecord);
             applyCompletionRetrySnapshots(snapshots.queue, snapshots.operations, committedTxn);
+            scrapeCompletionCheckpoint = journalRecord.checkpoint;
             return true;
         } finally {
             releaseBarrier();
@@ -4099,16 +4426,34 @@ async function recoverPreparedScrapeCompletionTransfer() {
 
 async function persistCompletionRetrySnapshots(queue, operations, txn, transition, stage) {
     transition.status = stage;
-    const journalRecord = makeScrapeCompletionJournalRecord(txn.lease, txn.phase, txn);
-    const rawWrite = startScrapeCompletionJournalWrite(journalRecord);
-    const pendingWrite = rawWrite.then(async () => {
+    const snapshots = { queue, operations };
+    const journalRecord = makeScrapeCompletionJournalRecord(
+        txn.lease,
+        txn.phase,
+        txn,
+        snapshots
+    );
+    const startedWrite = startScrapeCompletionJournalWrite(journalRecord);
+    const pendingWrite = startedWrite.write.then(async () => {
         transition.persisted = true;
         if (transition.revoked
             || transition.abandoned
             || scrapeCompletionTransition !== transition) {
             throw createScrapeAuthorityRevokedError();
         }
+        if (journalRecord.checkpoint) {
+            await compactScrapeCompletionJournal({
+                ...journalRecord,
+                storageKey: startedWrite.storageKey
+            });
+        }
+        if (transition.revoked
+            || transition.abandoned
+            || scrapeCompletionTransition !== transition) {
+            throw createScrapeAuthorityRevokedError();
+        }
         applyCompletionRetrySnapshots(queue, operations, txn);
+        if (journalRecord.checkpoint) scrapeCompletionCheckpoint = journalRecord.checkpoint;
     });
     transition.pendingWritePromise = pendingWrite;
     try {
@@ -4228,10 +4573,19 @@ async function revokeScrapeRetryAuthorityAtomically(lease) {
     cloudStatePersistenceRevision += 1;
     pendingDownloadOperationsRevision += 1;
     applyCompletionRetrySnapshots(queue, operations, nextTxn);
-    const journalRecord = makeScrapeCompletionJournalRecord(lease, 'revoked');
-    const write = startScrapeCompletionJournalWrite(journalRecord);
+    const snapshots = { queue, operations };
+    const journalRecord = makeScrapeCompletionJournalRecord(lease, 'revoked', null, snapshots);
+    const startedWrite = startScrapeCompletionJournalWrite(journalRecord);
+    const persistence = startedWrite.write.then(async () => {
+        await compactScrapeCompletionJournal({
+            ...journalRecord,
+            storageKey: startedWrite.storageKey
+        });
+        scrapeCompletionCheckpoint = journalRecord.checkpoint;
+        return true;
+    });
     return withTimeout(
-        write.then(() => true, () => false),
+        persistence.then(() => true, () => false),
         Math.max(CLOUD_QUEUE_MUTATION_TIMEOUT_MS, PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS),
         false
     );

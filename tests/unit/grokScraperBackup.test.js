@@ -184,6 +184,7 @@ function mockChromeForBackground() {
         storage: {
             local: {
                 get: jest.fn(() => Promise.resolve({})),
+                remove: jest.fn(() => Promise.resolve()),
                 set: jest.fn(() => Promise.resolve())
             },
             onChanged: { addListener: jest.fn() }
@@ -271,6 +272,9 @@ function createDurableBackgroundHarness(initialStorage = {}, initialDownloads = 
             storageState[key] = cloneJson(value);
         }
         storageListeners.forEach((listener) => listener(changes, 'local'));
+    });
+    chromeApi.storage.local.remove.mockImplementation(async (keys) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) delete storageState[key];
     });
     chromeApi.storage.session = {
         get: jest.fn(async (keys) => {
@@ -542,6 +546,7 @@ describe('Grok backup background processed ID persistence', () => {
             if (Array.isArray(keys) && keys.includes('processedIds')) return { processedIds: [] };
             return {};
         });
+        await background.ensureBackgroundStateReady();
         background.setProcessedUUIDsForTest([]);
 
         await expect(background.enqueueCloudMediaUpload(
