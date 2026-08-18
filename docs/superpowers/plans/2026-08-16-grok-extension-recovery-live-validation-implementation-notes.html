@@ -240,6 +240,16 @@
                 <p>Live DOM inspection showed why: Grok initially mounted the exact Saved video as <code>preview_image.jpg</code>, then added <code>generated_video.mp4</code> in a lazy <code>video</code> node about one second later. The correction polls only an explicitly typed exact canary, reacquires fresh semantic React state each time, and never infers video from the preview filename or requested type. A stale lease, cancellation, surface or scope drift, disappearance, ambiguity, unknown type, and mismatch all remain fail-closed.</p>
             </div>
 
+            <h2>Cancellation Authority Hardening: 2026-08-18</h2>
+            <div class="panel">
+                <p><strong>Design decisions.</strong> Commit <code>07a0c3e</code> makes Stop optionally lease-scoped while preserving the existing unscoped popup Stop contract. A scoped request is accepted only when token, epoch, kind, and runtime sender tab match the active lease. Stop now returns <code>transferDrained</code>, and durability reports deterministic per-lease task counts such as <code>media_upload</code>, <code>media_transfer</code>, and <code>processed_ids</code>.</p>
+                <p><strong>Harness interpretation.</strong> The ignored acceptance controller now arms its watcher before Start, observes the newly mirrored owner lease from extension storage, polls at 10 ms, and stops only after <code>media_upload</code> is active. It requires abort acknowledgement, successful drain, stale Stop rejection, stale transfer rejection, zero run-owned queue or pending work, and an unchanged processed-ID count, digest, and exact-target membership.</p>
+                <p><strong>Tradeoff.</strong> No test-only delay or acceptance-only runtime hook was added. Pre-arming through the existing owner-tab storage mirror avoids changing production start timing while closing the response-before-watcher race.</p>
+                <p><strong>Deviation and proof boundary.</strong> No fresh absent target was run during this correction. The next live action is an already-present dry cancellation check after exact extension reload. A fresh absent video remains blocked until that dry run proves the watcher contract and immediate plus delayed external inventory checks are ready.</p>
+                <p><strong>Verification.</strong> Focused RED failed in all five intended contract locations. Green validation passed 306 navigation tests, 857 full unit tests, 48 Playwright tests, 26 Cloud acceptance tests, lint, source syntax, Cloud typecheck, and diff checks. The 17-file extension package SHA-256 is <code>65059e1070a411504cbe1a1357920d28abd6321024369242b7873665cf877e3d</code>; packaged <code>background.js</code> and <code>content.js</code> hashes exactly match source.</p>
+                <p><strong>Open question.</strong> No user decision is required for the dry run. The production reconciliation CLI header mismatch remains a separate RED-test blocker before its later lane.</p>
+            </div>
+
             <h2>Safety And Restoration</h2>
             <ul>
                 <li>No processed IDs have been reset, exported, or rewritten.</li>
