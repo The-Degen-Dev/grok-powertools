@@ -254,6 +254,7 @@ let scrapeLeaseHydrationPromise = null;
 let scrapeLeaseMutationQueue = Promise.resolve();
 let scrapeStopPending = false;
 const activeScrapeTransferTasks = new Map();
+const activeScrapeTransferKinds = new Map();
 const activeScrapeTransferAbortControllers = new Map();
 const r2BackupInventoryPromises = new Map();
 let backgroundStateReadyPromise = null;
@@ -3367,6 +3368,11 @@ function countPendingScrapeDownloadReceipts(lease) {
 function getScrapeDurabilitySnapshot(lease) {
     const key = scrapeTransferKey(lease);
     const inFlightTasks = activeScrapeTransferTasks.get(key)?.size || 0;
+    const inFlightByKind = Object.fromEntries(
+        Array.from(activeScrapeTransferKinds.get(key)?.entries() || [])
+            .filter(([, count]) => count > 0)
+            .sort(([left], [right]) => (left < right ? -1 : (left > right ? 1 : 0)))
+    );
     const pendingDownloads = countPendingScrapeDownloadReceipts(lease);
     const ownedOperations = Array.from(pendingDownloadOperations.values())
         .filter((record) => recordOwnedByScrapeLease(record, lease));
@@ -3387,6 +3393,7 @@ function getScrapeDurabilitySnapshot(lease) {
             ? 'failed'
             : (pendingCount > 0 ? 'pending' : 'durable'),
         inFlightTasks,
+        inFlightByKind,
         pendingDownloads,
         pendingOperations,
         pendingQueueItems,
@@ -3477,17 +3484,27 @@ function abortScrapeTransferControllers(lease) {
     activeScrapeTransferAbortControllers.delete(key);
 }
 
-function trackScrapeTransferTask(lease, operation) {
+function trackScrapeTransferTask(lease, operation, taskKind = 'generic') {
     const key = scrapeTransferKey(lease);
     const tasks = activeScrapeTransferTasks.get(key) || new Set();
+    const kinds = activeScrapeTransferKinds.get(key) || new Map();
+    const kind = typeof taskKind === 'string' && /^[a-z_]+$/.test(taskKind)
+        ? taskKind
+        : 'generic';
     const controller = registerScrapeTransferAbortController(lease);
     const task = Promise.resolve().then(() => operation(controller.signal));
     tasks.add(task);
     activeScrapeTransferTasks.set(key, tasks);
+    kinds.set(kind, (kinds.get(kind) || 0) + 1);
+    activeScrapeTransferKinds.set(key, kinds);
     task.finally(() => {
         releaseScrapeTransferAbortController(lease, controller);
         tasks.delete(task);
         if (tasks.size === 0) activeScrapeTransferTasks.delete(key);
+        const remaining = (kinds.get(kind) || 1) - 1;
+        if (remaining > 0) kinds.set(kind, remaining);
+        else kinds.delete(kind);
+        if (kinds.size === 0) activeScrapeTransferKinds.delete(key);
     }).catch(() => {});
     return task;
 }
@@ -3501,7 +3518,10 @@ async function waitForScrapeTransferTasks(lease) {
         SCRAPE_TRANSFER_DRAIN_TIMEOUT_MS,
         false
     );
-    if (!drained) activeScrapeTransferTasks.delete(key);
+    if (!drained) {
+        activeScrapeTransferTasks.delete(key);
+        activeScrapeTransferKinds.delete(key);
+    }
     return drained;
 }
 
@@ -3688,7 +3708,7 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false, source
     }
 }
 
-async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
+async function stopScrapeRun(requestedKind = null, stopReason = 'stopped', expectedAuthority = null) {
     await ensureScrapePersistenceWriterForRevocation();
     let prepared;
     try {
@@ -3696,6 +3716,9 @@ async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
             const lease = activeScrapeLease?.status === 'active' || activeScrapeLease?.status === 'starting'
                 ? { ...activeScrapeLease }
                 : null;
+            if (expectedAuthority && !scrapeLeaseMatches(lease, expectedAuthority)) {
+                return { response: { status: 'ignored', reason: 'stale_authority' } };
+            }
             if (!lease) {
                 const incompleteLease = scrapeCompletionTxn?.phase === 'prepared'
                     ? normalizeScrapeLease(scrapeCompletionTxn.lease)
@@ -3706,7 +3729,13 @@ async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
                 }
                 const stored = await chrome.storage.local.get(['r2BackupState']);
                 await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
-                return { response: { status: 'stopped', abortAcknowledged: false } };
+                return {
+                    response: {
+                        status: 'stopped',
+                        abortAcknowledged: false,
+                        transferDrained: true
+                    }
+                };
             }
             if (requestedKind && lease.kind !== requestedKind) {
                 return { response: { status: 'error', error: `The active run is ${lease.kind}.` } };
@@ -3734,16 +3763,16 @@ async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
     if (prepared.response) return prepared.response;
     const { lease, tombstone, stopNavigation } = prepared;
     try {
-        const [abortAcknowledged] = await Promise.all([
+        const [abortAcknowledged, transferDrained] = await Promise.all([
             lease.status === 'active' ? sendScrapeAbort(lease, stopNavigation) : false,
             waitForScrapeTransferTasks(lease)
         ]);
         return await enqueueScrapeLeaseOperation(async () => {
             scrapeStopPending = false;
             if (activeScrapeLease?.status !== 'idle' || activeScrapeLease.epoch !== tombstone.epoch) {
-                return { status: 'stopped', abortAcknowledged };
+                return { status: 'stopped', abortAcknowledged, transferDrained };
             }
-            return { status: 'stopped', abortAcknowledged };
+            return { status: 'stopped', abortAcknowledged, transferDrained };
         });
     } catch (error) {
         await enqueueScrapeLeaseOperation(async () => {
@@ -3751,6 +3780,24 @@ async function stopScrapeRun(requestedKind = null, stopReason = 'stopped') {
         }).catch(() => {});
         throw error;
     }
+}
+
+function getStopScrapeAuthority(request, sender, expectedKind) {
+    const scoped = ['runToken', 'runEpoch', 'token', 'epoch', 'kind']
+        .some((key) => Object.prototype.hasOwnProperty.call(request || {}, key));
+    if (!scoped) return { scoped: false, authority: null };
+    return {
+        scoped: true,
+        authority: getRunScopedScrapeLease(request, sender?.tab?.id ?? null, expectedKind)
+    };
+}
+
+function stopScrapeRunFromMessage(request, sender, kind) {
+    const scope = getStopScrapeAuthority(request, sender, kind);
+    if (scope.scoped && !scope.authority) {
+        return Promise.resolve({ status: 'ignored', reason: 'stale_authority' });
+    }
+    return stopScrapeRun(kind, 'stopped', scope.authority);
 }
 
 async function handleR2BackupProgress(request, sender) {
@@ -3875,7 +3922,7 @@ async function checkR2BackupPresence(request, sender) {
                 error: /^[a-z0-9_]+$/.test(code) ? code : 'r2_presence_check_failed'
             };
         }
-    });
+    }, 'presence');
 }
 
 // Handle messages
@@ -3926,7 +3973,7 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                 );
                 await assertAuthorized();
                 return { status: 'ok', processedIds };
-            });
+            }, 'processed_ids');
         })().then(sendResponse).catch((error) => {
             if (isScrapeAuthorityRevokedError(error)) {
                 sendResponse({ status: 'ignored', reason: 'stale_authority' });
@@ -3947,7 +3994,7 @@ function handleRuntimeMessage(request, sender, sendResponse) {
     }
 
     if (request.action === 'STOP_SCRAPE') {
-        stopScrapeRun('sync').then(sendResponse).catch((error) => {
+        stopScrapeRunFromMessage(request, sender, 'sync').then(sendResponse).catch((error) => {
             sendResponse({ status: 'error', error: error.message || 'Failed to stop sync.' });
         });
         return true;
@@ -3966,7 +4013,7 @@ function handleRuntimeMessage(request, sender, sendResponse) {
     }
 
     if (request.action === 'STOP_R2_BACKUP') {
-        stopScrapeRun('r2_backup').then(sendResponse).catch((error) => {
+        stopScrapeRunFromMessage(request, sender, 'r2_backup').then(sendResponse).catch((error) => {
             sendResponse({ status: 'error', error: error.message || 'Failed to stop backup.' });
         });
         return true;
@@ -4050,7 +4097,7 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                 isR2Backup = false;
                 return { status: 'not_queued', error: 'Cloud sync is not enabled. Check Cloud R2 Settings.' };
             }
-            });
+            }, 'media_upload');
         })().catch((e) => {
             if (isScrapeAuthorityRevokedError(e)) {
                 sendResponse({ status: 'ignored', reason: 'stale_authority' });
@@ -4179,7 +4226,7 @@ function handleRuntimeMessage(request, sender, sendResponse) {
             );
             await assertAuthorized();
             return response;
-            });
+            }, 'media_transfer');
         })().catch((e) => {
             if (isScrapeAuthorityRevokedError(e)) {
                 sendResponse({ status: 'ignored', reason: 'stale_authority' });
@@ -4455,7 +4502,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
                     updateCloudError(formatRedactedMediaError(error, url, 'tab_queue_failed'));
                     await persistCloudState().catch(() => {});
                 }
-            });
+            }, 'media_intercept');
         }
     }
 });
@@ -6083,7 +6130,7 @@ async function handleDownloadChanged(delta) {
                 if (removed) cancelDownload(delta.id);
             }
         };
-        if (scrapeLease) await trackScrapeTransferTask(scrapeLease, operation);
+        if (scrapeLease) await trackScrapeTransferTask(scrapeLease, operation, 'download_finalize');
         else await operation();
         return;
     }
@@ -6118,7 +6165,7 @@ async function handleDownloadChanged(delta) {
             if (removed) cancelDownload(delta.id);
         }
     };
-    if (scrapeLease) await trackScrapeTransferTask(scrapeLease, operation);
+    if (scrapeLease) await trackScrapeTransferTask(scrapeLease, operation, 'download_finalize');
     else await operation();
 }
 

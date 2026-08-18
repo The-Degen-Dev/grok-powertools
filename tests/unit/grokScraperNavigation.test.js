@@ -5238,6 +5238,162 @@ describe('background scrape lease authority', () => {
         expect(harness.storedLocal.scraperState).toBe('idle');
     });
 
+    test('scoped R2 Stop rejects stale authority without stopping the active successor', async () => {
+        const lease = createLeaseRecord({
+            token: 'successor-run',
+            epoch: 5,
+            kind: 'r2_backup'
+        });
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: true
+            }
+        });
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+
+        const response = await dispatchBackgroundMessage(harness.chromeApi, {
+            action: 'STOP_R2_BACKUP',
+            runToken: 'prior-run',
+            runEpoch: lease.epoch - 1,
+            kind: 'r2_backup'
+        }, { tab: { id: lease.tabId } });
+
+        expect(response).toEqual({ status: 'ignored', reason: 'stale_authority' });
+        expect(harness.sessionState.activeScrapeRunToken).toEqual(lease);
+        expect(harness.chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
+            lease.tabId,
+            expect.objectContaining({ action: 'ABORT_R2_BACKUP' }),
+            expect.any(Function)
+        );
+    });
+
+    test('scoped R2 Stop rejects the right lease when it comes from a different tab', async () => {
+        const lease = createLeaseRecord({ kind: 'r2_backup' });
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: true
+            }
+        });
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+
+        const response = await dispatchBackgroundMessage(harness.chromeApi, {
+            action: 'STOP_R2_BACKUP',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId + 1 } });
+
+        expect(response).toEqual({ status: 'ignored', reason: 'stale_authority' });
+        expect(harness.sessionState.activeScrapeRunToken).toEqual(lease);
+        expect(harness.chromeApi.tabs.sendMessage).not.toHaveBeenCalledWith(
+            lease.tabId,
+            expect.objectContaining({ action: 'ABORT_R2_BACKUP' }),
+            expect.any(Function)
+        );
+    });
+
+    test('scoped R2 Stop accepts the sender-owned lease and reports transfer drain', async () => {
+        const lease = createLeaseRecord({ kind: 'r2_backup' });
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: true
+            }
+        });
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+
+        const response = await dispatchBackgroundMessage(harness.chromeApi, {
+            action: 'STOP_R2_BACKUP',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } });
+
+        expect(response).toEqual({
+            status: 'stopped',
+            abortAcknowledged: true,
+            transferDrained: true
+        });
+        expect(harness.sessionState.activeScrapeRunToken.status).toBe('idle');
+    });
+
+    test('Stop exposes a transfer drain timeout instead of reporting an unqualified stop', async () => {
+        jest.useFakeTimers();
+        const configRead = deferred();
+        try {
+            const lease = createLeaseRecord();
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    isScraping: true,
+                    isR2Backup: false,
+                    cloudConfig: { enabled: false, mode: 'local_only' }
+                }
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureBackgroundStateReady();
+            await background.ensureScrapeLeaseHydrated();
+            const configReadStarted = deferred();
+            const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+            harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+                if (Array.isArray(keys) && keys.length === 1 && keys[0] === 'cloudConfig') {
+                    configReadStarted.resolve();
+                    return configRead.promise;
+                }
+                return baseGet(keys);
+            });
+
+            const transfer = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+                action: 'DOWNLOAD_MEDIA',
+                runToken: lease.token,
+                runEpoch: lease.epoch,
+                kind: lease.kind,
+                url: 'https://assets.grok.com/generated/stalled-transfer/image.jpg',
+                isVideo: false
+            }, { tab: { id: lease.tabId } });
+            await configReadStarted.promise;
+
+            const stopping = background.stopScrapeRun('sync');
+            await flushAsyncTurns(16);
+            await jest.advanceTimersByTimeAsync(2000);
+
+            await expect(stopping).resolves.toEqual({
+                status: 'stopped',
+                abortAcknowledged: true,
+                transferDrained: false
+            });
+            configRead.resolve({ cloudConfig: { enabled: false, mode: 'local_only' } });
+            await expect(transfer.response).resolves.toEqual({
+                status: 'ignored',
+                reason: 'stale_authority'
+            });
+        } finally {
+            configRead.resolve({ cloudConfig: { enabled: false, mode: 'local_only' } });
+            jest.useRealTimers();
+        }
+    });
+
     test('ignores stale or cross-tab progress and completion', async () => {
         const lease = createLeaseRecord({ kind: 'r2_backup' });
         const harness = createLeaseBackgroundHarness({
@@ -5317,6 +5473,7 @@ describe('background scrape lease authority', () => {
         await expect(owner.response).resolves.toEqual({
             status: 'durable',
             inFlightTasks: 0,
+            inFlightByKind: {},
             pendingDownloads: 0,
             pendingOperations: 0,
             pendingQueueItems: 0,
@@ -5368,9 +5525,24 @@ describe('background scrape lease authority', () => {
             kind: lease.kind
         }, { tab: { id: lease.tabId } });
 
-        expect(response).toMatchObject({ status: 'pending', inFlightTasks: 1 });
+        expect(response).toMatchObject({
+            status: 'pending',
+            inFlightTasks: 1,
+            inFlightByKind: { processed_ids: 1 }
+        });
         processedWrite.resolve();
         await expect(transfer.response).resolves.toMatchObject({ status: 'ok' });
+
+        await expect(dispatchDurabilityMessage(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } })).resolves.toMatchObject({
+            status: 'durable',
+            inFlightTasks: 0,
+            inFlightByKind: {}
+        });
     });
 
     test('durability deduplicates one owner download receipt across URL and download ID indexes', async () => {
@@ -5541,6 +5713,7 @@ describe('background scrape lease authority', () => {
         expect(response).toEqual({
             status: 'durable',
             inFlightTasks: 0,
+            inFlightByKind: {},
             pendingDownloads: 0,
             pendingOperations: 0,
             pendingQueueItems: 0,
@@ -6629,11 +6802,22 @@ describe('background scrape lease authority', () => {
             isVideo: false
         });
         await filenameReadStarted.promise;
+
+        await expect(dispatchDurabilityMessage(harness.chromeApi, {
+            action: 'GET_SCRAPE_DURABILITY',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind
+        }, { tab: { id: lease.tabId } })).resolves.toMatchObject({
+            status: 'pending',
+            inFlightTasks: 1,
+            inFlightByKind: { media_upload: 1 }
+        });
         const stopping = background.stopScrapeRun('r2_backup');
         filenameRead.resolve({ downloadPath: 'GrokVault', activeGrokUserId: 'Shared_Account' });
 
         await expect(transfer.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
-        await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+        await expect(stopping).resolves.toMatchObject({ status: 'stopped', transferDrained: true });
         expect(background.getCloudSyncQueueForTest()).toEqual([]);
     });
 
@@ -9847,7 +10031,8 @@ describe('background scrape lease authority', () => {
             expect(stopDispatch.returnValue).toBe(true);
             await expect(stopDispatch.response).resolves.toEqual({
                 status: 'stopped',
-                abortAcknowledged: true
+                abortAcknowledged: true,
+                transferDrained: true
             });
             expect(harness.sessionState.activeScrapeRunToken.status).toBe('idle');
             expect(harness.storedLocal).toMatchObject({
@@ -9892,7 +10077,11 @@ describe('background scrape lease authority', () => {
             const stop = background.stopScrapeRun('sync');
             await flushAsyncTurns();
             await jest.advanceTimersByTimeAsync(2000);
-            await expect(stop).resolves.toEqual({ status: 'stopped', abortAcknowledged: false });
+            await expect(stop).resolves.toEqual({
+                status: 'stopped',
+                abortAcknowledged: false,
+                transferDrained: true
+            });
             const tombstone = { ...harness.sessionState.activeScrapeRunToken };
 
             await jest.advanceTimersByTimeAsync(500);
