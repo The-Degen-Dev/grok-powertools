@@ -1,6 +1,10 @@
 const fs = require('fs');
 const path = require('path');
-const { VideoRetryManager, fetchMediaDataUrlViaBridge } = require('../../content.js');
+const {
+    VideoRetryManager,
+    fetchGrokAssetMetadataViaBridge,
+    fetchMediaDataUrlViaBridge
+} = require('../../content.js');
 
 const bridgeSource = fs.readFileSync(path.resolve(__dirname, '../../bridge.js'), 'utf8');
 const contentSource = fs.readFileSync(path.resolve(__dirname, '../../content.js'), 'utf8');
@@ -93,6 +97,19 @@ describe('bridge prompted video editor targeting', () => {
             resolveFetchResult();
         };
         document.addEventListener('__gpt_fetch_media_result', fetchResultListener);
+        const readyResults = [];
+        const readyListener = (event) => {
+            readyResults.push(event.detail);
+        };
+        document.addEventListener('__gpt_media_fetch_bridge_ready', readyListener);
+        const metadataResults = [];
+        let resolveMetadataResult;
+        const metadataResultPromise = new Promise((resolve) => { resolveMetadataResult = resolve; });
+        const metadataResultListener = (event) => {
+            metadataResults.push(event.detail);
+            resolveMetadataResult();
+        };
+        document.addEventListener('__gpt_fetch_asset_metadata_result', metadataResultListener);
         const setIntervalSpy = jest.spyOn(global, 'setInterval').mockImplementation(() => 1);
         const retryManager = new VideoRetryManager(
             { setStatus: jest.fn(), el: document.createElement('div') },
@@ -129,6 +146,83 @@ describe('bridge prompted video editor targeting', () => {
                 blobUrl: 'blob:bridge-fetch',
                 type: 'image/png'
             })]);
+            document.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_probe', {
+                detail: { requestId: 'probe-1' }
+            }));
+            expect(readyResults).toEqual([{ requestId: 'probe-1' }]);
+
+            const conversationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+            const assetId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+            const decoyAssetId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+            fetchMock.mockImplementationOnce(async (url) => {
+                expect(String(url)).toBe(`/rest/app-chat/conversations/${conversationId}/responses`);
+                return {
+                    ok: true,
+                    json: async () => ({
+                        responses: [
+                            {
+                                responseId: 'decoy-response',
+                                fileAttachmentAssetMetadata: [{ assetId: decoyAssetId }],
+                                mediaGenInput: { prompt: 'wrong prompt' }
+                            },
+                            {
+                                responseId: 'target-response',
+                                parentResponseId: 'parent-response',
+                                rootResponseId: 'root-response',
+                                fileAttachmentAssetMetadata: [{
+                                    assetId,
+                                    key: `users/example/generated/${assetId}/image.jpg`,
+                                    mimeType: 'image/jpeg',
+                                    width: 1024,
+                                    height: 1024,
+                                    accessToken: 'must-not-cross-the-bridge'
+                                }],
+                                mediaGenInput: {
+                                    imageToVideo: {
+                                        prompt: 'target prompt',
+                                        inputAssets: [{
+                                            sourceImageUrl: 'https://assets.grok.com/source.jpg?signature=secret'
+                                        }]
+                                    }
+                                }
+                            }
+                        ]
+                    })
+                };
+            });
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_asset_metadata', {
+                detail: { requestId: 'metadata-1', conversationId, assetId }
+            }));
+            await metadataResultPromise;
+
+            expect(metadataResults).toEqual([{
+                requestId: 'metadata-1',
+                metadata: expect.objectContaining({
+                    schemaVersion: 2,
+                    evidenceSource: 'grok_conversation_response',
+                    conversationId,
+                    assetId,
+                    responseId: 'target-response',
+                    parentResponseId: 'parent-response',
+                    rootResponseId: 'root-response',
+                    promptText: 'target prompt',
+                    assetMetadata: expect.objectContaining({
+                        assetId,
+                        mimeType: 'image/jpeg',
+                        width: 1024,
+                        height: 1024
+                    }),
+                    mediaGenInput: expect.objectContaining({
+                        imageToVideo: expect.objectContaining({
+                            prompt: 'target prompt',
+                            inputAssets: [{
+                                sourceImageUrl: 'https://assets.grok.com/source.jpg'
+                            }]
+                        })
+                    })
+                })
+            }]);
+            expect(metadataResults[0].metadata.assetMetadata.accessToken).toBeUndefined();
 
             let resolveLateFetch;
             fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
@@ -156,27 +250,70 @@ describe('bridge prompted video editor targeting', () => {
             retryManager.generateMoreObserver.disconnect();
             document.removeEventListener('__gpt_set_prompted_video_content_result', resultListener);
             document.removeEventListener('__gpt_fetch_media_result', fetchResultListener);
+            document.removeEventListener('__gpt_media_fetch_bridge_ready', readyListener);
+            document.removeEventListener('__gpt_fetch_asset_metadata_result', metadataResultListener);
             setIntervalSpy.mockRestore();
         }
     });
 
-    test('media helper revokes the bridge blob URL and removes its listener when decoding fails', async () => {
+    test('asset metadata helper returns only the exact bridge result', async () => {
+        const root = document.createElement('div');
+        const conversationId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+        const assetId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+        root.addEventListener('__gpt_media_fetch_bridge_probe', (event) => {
+            root.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+                detail: { requestId: event.detail.requestId }
+            }));
+        });
+        root.addEventListener('__gpt_fetch_asset_metadata', (event) => {
+            root.dispatchEvent(new CustomEvent('__gpt_fetch_asset_metadata_result', {
+                detail: {
+                    requestId: event.detail.requestId,
+                    metadata: {
+                        schemaVersion: 2,
+                        evidenceSource: 'grok_conversation_response',
+                        conversationId,
+                        assetId,
+                        promptText: 'exact prompt',
+                        assetMetadata: { assetId },
+                        mediaGenInput: { prompt: 'exact prompt' }
+                    }
+                }
+            }));
+        });
+
+        await expect(fetchGrokAssetMetadataViaBridge(
+            conversationId,
+            assetId,
+            root,
+            100
+        )).resolves.toEqual(expect.objectContaining({
+            conversationId,
+            assetId,
+            promptText: 'exact prompt'
+        }));
+    });
+
+    test('media helper uses the page-world data URL bridge without refetching a blob URL', async () => {
         const root = document.createElement('div');
         const removeListenerSpy = jest.spyOn(root, 'removeEventListener');
         const releases = [];
         const originalFetch = global.fetch;
-        const originalRevokeObjectURL = URL.revokeObjectURL;
         global.fetch = jest.fn(async () => {
-            throw new Error('blob decode failed');
+            throw new Error('isolated-world blob URLs are not fetchable');
         });
-        URL.revokeObjectURL = jest.fn();
-        root.addEventListener('__gpt_fetch_media', (event) => {
-            root.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+        root.addEventListener('__gpt_media_fetch_bridge_probe', (event) => {
+            root.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+                detail: { requestId: event.detail.requestId }
+            }));
+        });
+        root.addEventListener('__gpt_fetch_media_data_url', (event) => {
+            root.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
                 detail: {
                     requestId: event.detail.requestId,
-                    blobUrl: 'blob:bridge-fetch-failure',
+                    dataUrl: 'data:video/mp4;base64,bWVkaWE=',
                     size: 5,
-                    type: 'image/png'
+                    type: 'video/mp4'
                 }
             }));
         });
@@ -189,19 +326,91 @@ describe('bridge prompted video editor targeting', () => {
                 'https://assets.grok.com/media.png',
                 root,
                 100
-            )).rejects.toThrow('blob decode failed');
+            )).resolves.toEqual({
+                dataUrl: 'data:video/mp4;base64,bWVkaWE=',
+                size: 5,
+                type: 'video/mp4'
+            });
             expect(removeListenerSpy).toHaveBeenCalledWith(
-                '__gpt_fetch_media_result',
+                '__gpt_fetch_media_data_url_result',
                 expect.any(Function)
             );
-            expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:bridge-fetch-failure');
+            expect(global.fetch).not.toHaveBeenCalled();
             expect(releases).toEqual([
                 expect.objectContaining({ requestId: expect.stringMatching(/^fetch_/) })
             ]);
         } finally {
             global.fetch = originalFetch;
-            URL.revokeObjectURL = originalRevokeObjectURL;
             removeListenerSpy.mockRestore();
+        }
+    });
+
+    test('media helper waits for a delayed page-world bridge before dispatching its fetch', async () => {
+        const root = document.createElement('div');
+        const fetches = [];
+        const eventOrder = [];
+        let probeListener;
+        let fetchListener;
+
+        root.addEventListener('__gpt_fetch_media_data_url', () => {
+            eventOrder.push('fetch-observed');
+        });
+
+        const installBridge = setTimeout(() => {
+            probeListener = (event) => {
+                eventOrder.push('ready');
+                root.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+                    detail: { requestId: event.detail.requestId }
+                }));
+            };
+            fetchListener = (event) => {
+                fetches.push(event.detail);
+                root.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
+                    detail: {
+                        requestId: event.detail.requestId,
+                        dataUrl: 'data:image/jpeg;base64,bWVkaWE=',
+                        size: 5,
+                        type: 'image/jpeg'
+                    }
+                }));
+            };
+            root.addEventListener('__gpt_media_fetch_bridge_probe', probeListener);
+            root.addEventListener('__gpt_fetch_media_data_url', fetchListener);
+        }, 25);
+
+        try {
+            await expect(fetchMediaDataUrlViaBridge(
+                'https://assets.grok.com/users/example/image.jpg',
+                root,
+                250
+            )).resolves.toEqual({
+                dataUrl: 'data:image/jpeg;base64,bWVkaWE=',
+                size: 5,
+                type: 'image/jpeg'
+            });
+            expect(fetches).toHaveLength(1);
+            expect(eventOrder).toEqual(['ready', 'fetch-observed']);
+        } finally {
+            clearTimeout(installBridge);
+            if (probeListener) root.removeEventListener('__gpt_media_fetch_bridge_probe', probeListener);
+            if (fetchListener) root.removeEventListener('__gpt_fetch_media_data_url', fetchListener);
+        }
+    });
+
+    test('media helper fails clearly when the page-world bridge never becomes ready', async () => {
+        const root = document.createElement('div');
+        const fetchListener = jest.fn();
+        root.addEventListener('__gpt_fetch_media_data_url', fetchListener);
+
+        try {
+            await expect(fetchMediaDataUrlViaBridge(
+                'https://assets.grok.com/users/example/image.jpg',
+                root,
+                30
+            )).rejects.toThrow('Media fetch bridge not ready');
+            expect(fetchListener).not.toHaveBeenCalled();
+        } finally {
+            root.removeEventListener('__gpt_fetch_media_data_url', fetchListener);
         }
     });
 

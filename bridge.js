@@ -211,6 +211,165 @@ document.addEventListener('__gpt_fetch_media', function(e) {
         });
 });
 
+document.addEventListener('__gpt_media_fetch_bridge_probe', function(e) {
+    var requestId = e.detail && e.detail.requestId;
+    if (!requestId) return;
+    document.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+        detail: { requestId: requestId }
+    }));
+});
+
+var sensitiveMetadataKeyPattern = /(?:authorization|bearer|cookie|credential|password|secret|signature|token)/i;
+
+function sanitizeMetadataString(value) {
+    var text = String(value || '');
+    if (/^https?:\/\//i.test(text)) {
+        try {
+            var parsed = new URL(text);
+            parsed.search = '';
+            parsed.hash = '';
+            return parsed.toString();
+        } catch {
+            // Keep non-URL metadata text unchanged.
+        }
+    }
+    return text;
+}
+
+function sanitizeAssetMetadataValue(value, depth) {
+    if (depth > 8) throw new Error('asset_metadata_too_deep');
+    if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+    if (typeof value === 'string') return sanitizeMetadataString(value);
+    if (Array.isArray(value)) {
+        return value.map(function(item) {
+            return sanitizeAssetMetadataValue(item, depth + 1);
+        });
+    }
+    if (!value || typeof value !== 'object') return null;
+
+    return Object.keys(value).sort().reduce(function(result, key) {
+        if (sensitiveMetadataKeyPattern.test(key)) return result;
+        result[key] = sanitizeAssetMetadataValue(value[key], depth + 1);
+        return result;
+    }, {});
+}
+
+function readPromptText(mediaGenInput) {
+    if (typeof mediaGenInput === 'string' && mediaGenInput.trim()) return mediaGenInput;
+    if (!mediaGenInput || typeof mediaGenInput !== 'object') return '';
+    var keys = ['prompt', 'promptText', 'text'];
+    for (var index = 0; index < keys.length; index++) {
+        var value = mediaGenInput[keys[index]];
+        if (typeof value === 'string' && value.trim()) return value;
+    }
+
+    var candidates = [];
+    function collectPromptText(value, depth) {
+        if (!value || typeof value !== 'object' || depth > 8) return;
+        if (Array.isArray(value)) {
+            value.forEach(function(item) {
+                collectPromptText(item, depth + 1);
+            });
+            return;
+        }
+        keys.forEach(function(key) {
+            var candidate = value[key];
+            if (typeof candidate === 'string' && candidate.trim()) candidates.push(candidate);
+        });
+        Object.keys(value).sort().forEach(function(key) {
+            if (keys.indexOf(key) !== -1) return;
+            collectPromptText(value[key], depth + 1);
+        });
+    }
+    collectPromptText(mediaGenInput, 0);
+
+    var uniqueCandidates = [];
+    candidates.forEach(function(candidate) {
+        var normalized = candidate.trim();
+        if (!uniqueCandidates.some(function(existing) {
+            return existing.trim() === normalized;
+        })) {
+            uniqueCandidates.push(candidate);
+        }
+    });
+    return uniqueCandidates.length === 1 ? uniqueCandidates[0] : '';
+}
+
+function buildAssetCaptureMetadata(payload, conversationId, assetId) {
+    var responses = Array.isArray(payload && payload.responses)
+        ? payload.responses
+        : (Array.isArray(payload && payload.data && payload.data.responses) ? payload.data.responses : []);
+    var normalizedAssetId = String(assetId || '').toLowerCase();
+    var matches = [];
+
+    responses.forEach(function(response) {
+        var assets = Array.isArray(response && response.fileAttachmentAssetMetadata)
+            ? response.fileAttachmentAssetMetadata
+            : [];
+        assets.forEach(function(assetMetadata) {
+            if (String(assetMetadata && assetMetadata.assetId || '').toLowerCase() !== normalizedAssetId) return;
+            matches.push({ response: response, assetMetadata: assetMetadata });
+        });
+    });
+
+    if (matches.length === 0) throw new Error('asset_metadata_missing');
+    if (matches.length !== 1) throw new Error('asset_metadata_ambiguous');
+
+    var match = matches[0];
+    var response = match.response || {};
+    var mediaGenInput = response.mediaGenInput !== undefined
+        ? response.mediaGenInput
+        : match.assetMetadata.mediaGenInput;
+    var metadata = {
+        schemaVersion: 2,
+        evidenceSource: 'grok_conversation_response',
+        conversationId: String(conversationId),
+        assetId: String(match.assetMetadata.assetId),
+        responseId: String(response.responseId || response.id || ''),
+        parentResponseId: String(response.parentResponseId || ''),
+        rootResponseId: String(response.rootResponseId || ''),
+        promptText: readPromptText(mediaGenInput),
+        assetMetadata: sanitizeAssetMetadataValue(match.assetMetadata, 0),
+        mediaGenInput: sanitizeAssetMetadataValue(mediaGenInput === undefined ? null : mediaGenInput, 0)
+    };
+    var responseCreatedAt = response.createdAt || response.createTime || response.created_at;
+    if (responseCreatedAt !== undefined && responseCreatedAt !== null && responseCreatedAt !== '') {
+        metadata.responseCreatedAt = sanitizeMetadataString(responseCreatedAt);
+    }
+    if (JSON.stringify(metadata).length > 262144) throw new Error('asset_metadata_too_large');
+    return metadata;
+}
+
+document.addEventListener('__gpt_fetch_asset_metadata', function(e) {
+    var detail = e.detail || {};
+    var requestId = detail.requestId;
+    var conversationId = String(detail.conversationId || '');
+    var assetId = String(detail.assetId || '');
+    var uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!requestId || !uuidPattern.test(conversationId) || !uuidPattern.test(assetId)) return;
+
+    fetch('/rest/app-chat/conversations/' + encodeURIComponent(conversationId) + '/responses', {
+        credentials: 'include'
+    })
+        .then(function(response) {
+            if (!response.ok) throw new Error('asset_metadata_http_' + response.status);
+            return response.json();
+        })
+        .then(function(payload) {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_asset_metadata_result', {
+                detail: {
+                    requestId: requestId,
+                    metadata: buildAssetCaptureMetadata(payload, conversationId, assetId)
+                }
+            }));
+        })
+        .catch(function(error) {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_asset_metadata_result', {
+                detail: { requestId: requestId, error: String(error && error.message || 'asset_metadata_failed') }
+            }));
+        });
+});
+
 document.addEventListener('__gpt_fetch_media_data_url', function(e) {
     var url = e.detail && e.detail.url;
     var requestId = e.detail && e.detail.requestId;

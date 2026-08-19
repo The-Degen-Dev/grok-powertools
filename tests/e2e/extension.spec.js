@@ -269,8 +269,8 @@ async function setupMockSavedAgentSync(page, {
             });
         }
         if (bridgeResponse) {
-            document.addEventListener('__gpt_fetch_media', (event) => {
-                document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+            document.addEventListener('__gpt_fetch_media_data_url', (event) => {
+                document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
                     detail: { requestId: event.detail.requestId, ...bridgeResponse }
                 }));
             });
@@ -432,9 +432,9 @@ async function setupVirtualizedSavedBackup(page, { accountUuid, mediaUuids, runT
             validatePendingReceipt();
         };
 
-        document.addEventListener('__gpt_fetch_media', (event) => {
+        document.addEventListener('__gpt_fetch_media_data_url', (event) => {
             const isVideo = String(event.detail.url || '').endsWith('.mp4');
-            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
                 detail: {
                     requestId: event.detail.requestId,
                     dataUrl: isVideo
@@ -928,9 +928,9 @@ async function setupVirtualizedSavedSync(page, {
             validatePendingReceipt();
         };
 
-        document.addEventListener('__gpt_fetch_media', (event) => {
+        document.addEventListener('__gpt_fetch_media_data_url', (event) => {
             const isVideo = String(event.detail.url || '').endsWith('.mp4');
-            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
                 detail: {
                     requestId: event.detail.requestId,
                     dataUrl: isVideo
@@ -995,8 +995,8 @@ async function setupMockSavedLegacyDetailSync(page, {
                 return { status: 'uploaded' };
             }
         };
-        document.addEventListener('__gpt_fetch_media', (event) => {
-            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+        document.addEventListener('__gpt_fetch_media_data_url', (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
                 detail: {
                     requestId: event.detail.requestId,
                     dataUrl: blobDataUrl,
@@ -1021,7 +1021,7 @@ async function setupMockSavedLegacyDetailSync(page, {
         };
 
         const renderDetail = (mediaUuid) => {
-            window.history.pushState({}, '', `/imagine/post/${mediaUuid}?conversation=mock`);
+            window.history.pushState({}, '', `/imagine/post/${mediaUuid}?conversation=${mediaUuid}`);
             document.body.innerHTML = '';
             window.__legacyDetailEvents.opened.push(mediaUuid);
 
@@ -1084,7 +1084,11 @@ async function setupMockSavedLegacyDetailSync(page, {
                 button.addEventListener('click', () => {
                     window.__legacyDetailEvents.thumbnailClicks.push(timelineMediaUuid);
                     media.src = thumbnail.src;
-                    window.history.replaceState({}, '', `/imagine/post/${timelineMediaUuid}?conversation=mock`);
+                    window.history.replaceState(
+                        {},
+                        '',
+                        `/imagine/post/${timelineMediaUuid}?conversation=${timelineMediaUuid}`
+                    );
                 });
                 button.appendChild(thumbnail);
                 timeline.appendChild(button);
@@ -1506,13 +1510,15 @@ async function setupMockPromptedResultsBatch(page, {
     mediaUuids,
     insertVideoBeforeSource = false,
     insertGeneratedBeforeSource = false,
-    deferGeneratedResult = false
+    deferGeneratedResult = false,
+    leaveSubmitUnsettled = false
 }) {
     await page.evaluate(({
         accountUuid,
         mediaUuids,
         insertVideoBeforeSource,
-        deferGeneratedResult
+        deferGeneratedResult,
+        leaveSubmitUnsettled
     }) => {
         const { retry } = window.__gptE2e;
         const conversationId = 'prompted-batch-conversation';
@@ -1545,7 +1551,8 @@ async function setupMockPromptedResultsBatch(page, {
                 ?.querySelector('button[aria-label="Send"], button[aria-label="Make video"]');
             const candidates = [
                 submit,
-                ...document.querySelectorAll('button[aria-label="Back"], a[aria-label="Back"]')
+                ...document.querySelectorAll('button[aria-label="Back"], a[aria-label="Back"]'),
+                ...document.querySelectorAll('article[role="listitem"] a[href*="/imagine/post/"]')
             ].filter(Boolean);
             return candidates.find((candidate) => {
                 const rect = candidate.getBoundingClientRect();
@@ -1665,7 +1672,7 @@ async function setupMockPromptedResultsBatch(page, {
                             mediaUuid,
                             prompt: input.textContent
                         });
-                        submit.disabled = true;
+                        if (!leaveSubmitUnsettled) submit.disabled = true;
                         if (!deferGeneratedResult) {
                             if (insertVideoBeforeSource) {
                                 window.__promptedResultsCompleted[mediaUuid] = `a${mediaUuid.slice(1)}`;
@@ -1731,6 +1738,7 @@ async function setupMockPromptedResultsBatch(page, {
                     insertedCard.setAttribute('role', 'listitem');
                     const insertedLink = document.createElement('a');
                     insertedLink.href = `/imagine/post/${insertedMediaUuid}`;
+                    makeVisible(insertedLink, index * 280, 20);
                     const insertedImage = document.createElement('img');
                     insertedImage.alt = 'Generated image';
                     insertedImage.src = `https://assets.grok.com/users/${accountUuid}/generated/${insertedMediaUuid}/image.jpg`;
@@ -1749,6 +1757,8 @@ async function setupMockPromptedResultsBatch(page, {
                 card.setAttribute('role', 'listitem');
                 const link = document.createElement('a');
                 link.href = `/imagine/post/${currentMediaUuid}`;
+                makeVisible(link, cardTop, 20);
+                link.scrollIntoView = () => makeVisible(link, 60, 20);
                 const image = document.createElement('img');
                 image.alt = 'Generated image';
                 image.src = `https://assets.grok.com/users/${accountUuid}/generated/${currentMediaUuid}/image.jpg`;
@@ -1791,7 +1801,8 @@ async function setupMockPromptedResultsBatch(page, {
         accountUuid,
         mediaUuids,
         insertVideoBeforeSource: insertVideoBeforeSource || insertGeneratedBeforeSource,
-        deferGeneratedResult
+        deferGeneratedResult,
+        leaveSubmitUnsettled
     });
 }
 
@@ -1975,6 +1986,40 @@ test.describe('Grok Power Tools E2E', () => {
             window.__chromeStorageLocalState = localState;
             window.__chromeStorageSyncState = syncState;
             window.__recordChromeEvent = record;
+            document.addEventListener('__gpt_media_fetch_bridge_probe', (event) => {
+                document.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+                    detail: { requestId: event.detail.requestId }
+                }));
+            });
+            document.addEventListener('__gpt_fetch_asset_metadata', (event) => {
+                const { requestId, conversationId, assetId } = event.detail || {};
+                if (!requestId || !conversationId || !assetId) return;
+                const configured = window.__gptAssetMetadataResponse;
+                const metadata = typeof configured === 'function'
+                    ? configured({ conversationId, assetId })
+                    : configured;
+                if (metadata?.error) {
+                    document.dispatchEvent(new CustomEvent('__gpt_fetch_asset_metadata_result', {
+                        detail: { requestId, error: metadata.error }
+                    }));
+                    return;
+                }
+                document.dispatchEvent(new CustomEvent('__gpt_fetch_asset_metadata_result', {
+                    detail: {
+                        requestId,
+                        metadata: metadata || {
+                            schemaVersion: 2,
+                            evidenceSource: 'grok_conversation_response',
+                            conversationId,
+                            assetId,
+                            responseId: `response-${assetId}`,
+                            promptText: 'authoritative saved prompt',
+                            assetMetadata: { assetId, mimeType: 'image/jpeg' },
+                            mediaGenInput: { prompt: 'authoritative saved prompt' }
+                        }
+                    }
+                }));
+            });
             const setLocalStorage = (data) => {
                 record('storage_set', { area: 'local', values: clone(data || {}) });
                 const changes = Object.fromEntries(Object.entries(data || {}).map(([key, value]) => [
@@ -3249,16 +3294,21 @@ test.describe('Grok Power Tools E2E', () => {
         await expect.poll(async () => page.evaluate(() => window.__chromeStorageLocalState.processedIds || [])).toEqual([savedUrl]);
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).toContainEqual({ action: 'GET_CLOUD_CONFIG' });
-        expect(runtimeMessages).toContainEqual({
+        expect(runtimeMessages).toContainEqual(expect.objectContaining({
             action: 'DOWNLOAD_MEDIA',
             runToken: 'e2e-cloud-only',
             runEpoch: 1,
             kind: 'sync',
             url: agentUrl,
             isVideo: false,
-            promptText: '',
+            promptText: 'authoritative saved prompt',
+            captureMetadata: expect.objectContaining({
+                schemaVersion: 2,
+                conversationId: mediaUuid,
+                assetId: mediaUuid
+            }),
             blobDataUrl
-        });
+        }));
 
         const transferEvents = await page.evaluate(() => window.__chromeEvents);
         const uploadedResponseIndex = transferEvents.findIndex((event) =>
@@ -3378,14 +3428,20 @@ test.describe('Grok Power Tools E2E', () => {
         expect(await page.evaluate(() => window.__historyBackCalls)).toBe(1);
         expect(await page.evaluate(() => window.__savedScrollByCalls)).toEqual([]);
         expect(await page.evaluate(() => window.__agentScrollCalls)).toEqual([]);
-        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual({
+        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual(expect.objectContaining({
             action: 'R2_BACKUP_CHECK_PRESENT',
             runToken: 'e2e-targeted-r2-canary',
             runEpoch: 1,
             kind: 'r2_backup',
             url: targetUrl,
-            isVideo: false
-        });
+            isVideo: false,
+            promptText: 'authoritative saved prompt',
+            captureMetadata: expect.objectContaining({
+                schemaVersion: 2,
+                conversationId: targetUuid,
+                assetId: targetUuid
+            })
+        }));
         expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual({
             action: 'SCRAPE_PROCESSED_IDS_ADD',
             ids: [targetSavedUrl, targetUrl, `media_${targetUuid}`],
@@ -3434,14 +3490,20 @@ test.describe('Grok Power Tools E2E', () => {
 
         const runtimeMessages = await page.evaluate(() => window.__chromeRuntimeMessages);
         expect(runtimeMessages).toContainEqual({ action: 'VALIDATE_CLOUD_CONFIG' });
-        expect(runtimeMessages).toContainEqual({
+        expect(runtimeMessages).toContainEqual(expect.objectContaining({
             action: 'R2_BACKUP_CHECK_PRESENT',
             runToken: 'e2e-r2-backup',
             runEpoch: 1,
             kind: 'r2_backup',
             url: `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`,
-            isVideo: false
-        });
+            isVideo: false,
+            promptText: 'authoritative saved prompt',
+            captureMetadata: expect.objectContaining({
+                schemaVersion: 2,
+                conversationId: mediaUuid,
+                assetId: mediaUuid
+            })
+        }));
         expect(runtimeMessages).not.toContainEqual(expect.objectContaining({ action: 'R2_BACKUP_UPLOAD' }));
 
         const backupEvents = await page.evaluate(() => window.__chromeEvents);
@@ -3499,18 +3561,23 @@ test.describe('Grok Power Tools E2E', () => {
             stopReason: 'media_transfer_failed'
         });
 
-        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual({
+        expect(await page.evaluate(() => window.__chromeRuntimeMessages)).toContainEqual(expect.objectContaining({
             action: 'R2_BACKUP_UPLOAD',
             runToken: 'e2e-r2-upload-error',
             runEpoch: 1,
             kind: 'r2_backup',
             url: `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/preview.jpg`,
             isVideo: false,
-            promptText: '',
+            promptText: 'authoritative saved prompt',
+            captureMetadata: expect.objectContaining({
+                schemaVersion: 2,
+                conversationId: mediaUuid,
+                assetId: mediaUuid
+            }),
             blobDataUrl,
             skipLocalDownload: false,
             acceptance: null
-        });
+        }));
         const backupEvents = await page.evaluate(() => window.__chromeEvents);
         expect(backupEvents).toContainEqual(expect.objectContaining({
             type: 'runtime_response',
@@ -3748,7 +3815,7 @@ test.describe('Grok Power Tools E2E', () => {
         });
         expect(await page.evaluate(() => window.__chromeRuntimeMessages
             .filter((message) => message.action === 'GPT_PROMPTED_VIDEO_NATIVE_CLICK')))
-            .toHaveLength(4);
+            .toHaveLength(6);
     });
 
     test('Prompted Batch completes five generated results with trusted controls and returns', async ({ page }) => {
@@ -3871,7 +3938,8 @@ test.describe('Grok Power Tools E2E', () => {
         await setupMockPromptedResultsBatch(page, {
             accountUuid,
             mediaUuids,
-            deferGeneratedResult: true
+            deferGeneratedResult: true,
+            leaveSubmitUnsettled: true
         });
 
         await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
@@ -3910,7 +3978,7 @@ test.describe('Grok Power Tools E2E', () => {
         });
         expect(await page.evaluate(() => window.__chromeRuntimeMessages
             .filter((message) => message.action === 'GPT_PROMPTED_VIDEO_NATIVE_CLICK')))
-            .toHaveLength(4);
+            .toHaveLength(6);
     });
 
     test('Prompted Batch continues after Grok inserts each generated video before its source image', async ({ page }) => {

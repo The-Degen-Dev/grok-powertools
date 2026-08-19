@@ -91,6 +91,19 @@ function createScraper(surface = SCRAPE_SURFACES.savedGallery) {
     return scraper;
 }
 
+function captureMetadata(assetId, promptText = 'authoritative prompt') {
+    return {
+        schemaVersion: 2,
+        evidenceSource: 'grok_conversation_response',
+        conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        assetId,
+        responseId: 'response-1',
+        promptText,
+        assetMetadata: { assetId },
+        mediaGenInput: { prompt: promptText }
+    };
+}
+
 function makeVisible(element, width = 120, height = 32) {
     element.getBoundingClientRect = () => ({
         width,
@@ -855,6 +868,49 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
         })).toBeNull();
     });
 
+    test('uses unique Saved post identities when distinct cards reuse one media asset', () => {
+        mountSavedScope('all');
+        const list = document.createElement('div');
+        list.setAttribute('role', 'list');
+        const sharedMediaId = '11111111-1111-4111-8111-111111111111';
+        const firstPostId = '22222222-2222-4222-8222-222222222222';
+        const secondPostId = '33333333-3333-4333-8333-333333333333';
+        const appendPost = (postId) => {
+            const card = document.createElement('article');
+            card.setAttribute('role', 'listitem');
+            const image = document.createElement('img');
+            image.alt = 'Generated image';
+            image.src = `https://assets.grok.com/users/u/generated/${sharedMediaId}/image.jpg`;
+            const link = document.createElement('a');
+            link.href = `/imagine/post/${postId}`;
+            card.append(image, link);
+            list.appendChild(card);
+        };
+        appendPost(firstPostId);
+        appendPost(secondPostId);
+        document.body.appendChild(list);
+
+        const context = getSavedGalleryContext(document);
+        expect(context.entries.map((entry) => entry.sourceIdentity)).toEqual([
+            sharedMediaId,
+            sharedMediaId
+        ]);
+        expect(context.entries.map((entry) => entry.cardIdentity)).toEqual([
+            firstPostId,
+            secondPostId
+        ]);
+        expect(captureSavedViewportReceipt({
+            root: document,
+            sourceIdentity: firstPostId,
+            expectedNextIdentity: secondPostId
+        })).toMatchObject({
+            identityKind: 'saved_post',
+            sourceIdentity: firstPostId,
+            expectedNextIdentity: secondPostId,
+            visibleIdentities: [firstPostId, secondPostId]
+        });
+    });
+
     test.each(['liked', 'unknown'])(
         'rejects Saved receipt capture when the native scope is %s',
         (scope) => {
@@ -873,11 +929,20 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
 });
 
 describe('Grok scrape surface transitions', () => {
+    let bridgeProbeListener;
+
     beforeEach(() => {
         mountSavedScope('all');
+        bridgeProbeListener = (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+                detail: { requestId: event.detail.requestId }
+            }));
+        };
+        document.addEventListener('__gpt_media_fetch_bridge_probe', bridgeProbeListener);
     });
 
     afterEach(() => {
+        document.removeEventListener('__gpt_media_fetch_bridge_probe', bridgeProbeListener);
         delete global.chrome;
         document.body.textContent = '';
     });
@@ -1829,6 +1894,9 @@ describe('Grok scrape surface transitions', () => {
             'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content?size=small',
             640
         );
+        const makeVideo = document.createElement('button');
+        makeVideo.setAttribute('aria-label', 'Make Video');
+        target.parentElement.appendChild(makeVideo);
         const activationEvents = recordPointerActivationEvents(target);
 
         await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
@@ -1841,11 +1909,43 @@ describe('Grok scrape surface transitions', () => {
                 runToken: 'run-1',
                 currentItemId: 'gallery-clean-id',
                 expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
+                expectedMediaType: 'image',
                 galleryScrollTop: 640
                 })
             })
         }));
         expect(activationEvents).toEqual(FULL_POINTER_ACTIVATION_EVENTS);
+        expect(scraper.determineModeAndExecute).toHaveBeenCalledWith('run-1');
+    });
+
+    test('captures one exact card-scoped Saved video source for detail recovery', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        const mediaId = '73737373-7373-4737-8737-737373737373';
+        const imageUrl = `https://assets.grok.com/users/u/generated/${mediaId}/preview_image.jpg`;
+        const videoUrl = `https://assets.grok.com/users/u/generated/${mediaId}/generated_video.mp4`;
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.getGalleryScroller = jest.fn(() => ({ scrollTop: 640, scrollHeight: 2000, clientHeight: 800 }));
+        scraper.waitForSurface = jest.fn(() => Promise.resolve(SCRAPE_SURFACES.legacyDetail));
+        const { image: target, card } = mountSemanticSavedImage(imageUrl, 640);
+        const video = document.createElement('video');
+        video.src = videoUrl;
+        card.appendChild(video);
+
+        await GrokScraper.prototype.processItem.call(scraper, target, imageUrl, 'run-1');
+
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            values: expect.objectContaining({
+                scrapeNavigation: expect.objectContaining({
+                    expectedIdentity: mediaId,
+                    expectedMediaType: 'video',
+                    sourceUrl: imageUrl,
+                    sourceTransferUrl: videoUrl
+                })
+            })
+        }));
         expect(scraper.determineModeAndExecute).toHaveBeenCalledWith('run-1');
     });
 
@@ -1939,6 +2039,7 @@ describe('Grok scrape surface transitions', () => {
                 scrapeNavigation: expect.objectContaining({
                     savedViewportReceipt: {
                         version: 3,
+                        identityKind: 'saved_post',
                         sourceIdentity: sourceId,
                         expectedNextIdentity: nextId,
                         beforeIdentities: [],
@@ -1951,6 +2052,63 @@ describe('Grok scrape surface transitions', () => {
             })
         }));
         expect(unrelatedScroller.scrollTop).toBe(999);
+    });
+
+    test('captures a unique post neighborhood when adjacent Saved cards reuse one media asset', async () => {
+        mockContentChrome();
+        const scraper = createScraper();
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.waitForSurface = jest.fn(() => Promise.resolve(SCRAPE_SURFACES.agentMedia));
+        scraper.failRun = jest.fn().mockResolvedValue();
+
+        const list = document.createElement('div');
+        list.setAttribute('role', 'list');
+        const sharedMediaId = '41414141-1111-4111-8111-111111111111';
+        const firstPostId = '42424242-2222-4222-8222-222222222222';
+        const secondPostId = '43434343-3333-4333-8333-333333333333';
+        const appendPost = (postId) => {
+            const card = document.createElement('article');
+            card.setAttribute('role', 'listitem');
+            const image = document.createElement('img');
+            image.alt = 'Generated image';
+            image.src = `https://assets.grok.com/users/u/generated/${sharedMediaId}/image.jpg`;
+            const link = document.createElement('a');
+            link.href = `/imagine/post/${postId}`;
+            card.append(image, link);
+            list.appendChild(card);
+            return image;
+        };
+        const target = appendPost(firstPostId);
+        appendPost(secondPostId);
+        document.body.appendChild(list);
+        const activationEvents = recordPointerActivationEvents(target);
+
+        await GrokScraper.prototype.processItem.call(
+            scraper,
+            target,
+            target.src.split('?')[0],
+            'run-1',
+            1,
+            secondPostId
+        );
+
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            values: expect.objectContaining({
+                scrapeNavigation: expect.objectContaining({
+                    expectedIdentity: sharedMediaId,
+                    sourceCardIdentity: firstPostId,
+                    savedViewportReceipt: expect.objectContaining({
+                        sourceIdentity: firstPostId,
+                        expectedNextIdentity: secondPostId,
+                        visibleIdentities: [firstPostId, secondPostId]
+                    })
+                })
+            })
+        }));
+        expect(activationEvents).toEqual(FULL_POINTER_ACTIVATION_EVENTS);
     });
 
     test('stops explicitly when a selected Saved card never changes surfaces', async () => {
@@ -2161,6 +2319,7 @@ describe('Grok scrape surface transitions', () => {
             currentItemId
         };
         scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'matched', media }));
+        scraper.loadAuthoritativeCaptureMetadata = jest.fn(async () => captureMetadata(mediaId));
         scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
         scraper.stopBackupMode = jest.fn(() => Promise.resolve({ status: 'stopped' }));
         scraper.returnToSavedGallery = jest.fn();
@@ -2318,12 +2477,13 @@ describe('Grok scrape surface transitions', () => {
         expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
     });
 
-    test('transfers the exact legacy detail media and returns through the Saved restore path', async () => {
+    test('uses the pending Saved identity when legacy storage lacks the current item', async () => {
         mockContentChrome();
         const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
         const mediaId = '47474747-4747-4747-8747-474747474747';
         const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-        const media = document.createElement('img');
+        const media = document.createElement('video');
+        media.src = `https://assets.grok.com/users/u/generated/${mediaId}/generated_video.mp4`;
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
         scraper.pendingNavigation = {
@@ -2332,7 +2492,7 @@ describe('Grok scrape surface transitions', () => {
             expectedIdentity: mediaId,
             currentItemId
         };
-        chrome.storage.local.get.mockResolvedValue({ currentItemId });
+        chrome.storage.local.get.mockResolvedValue({ currentItemId: null });
         scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(media));
         scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
         scraper.persistProcessedId = jest.fn(() => Promise.resolve(true));
@@ -2360,7 +2520,156 @@ describe('Grok scrape surface transitions', () => {
             runToken: 'run-1',
             runEpoch: 1,
             expectedIdentity: mediaId,
-            currentItemId
+            currentItemId,
+            expectedMediaType: 'video',
+            sourceUrl: currentItemId
+        };
+        chrome.storage.local.get.mockResolvedValue({ currentItemId });
+        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
+        scraper.performDownload = jest.fn();
+        scraper.persistProcessedId = jest.fn();
+        scraper.returnToSavedGallery = jest.fn();
+        scraper.failRun = jest.fn(() => Promise.resolve());
+
+        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
+
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Legacy detail view did not expose the selected Saved media.',
+            'legacy_media_missing'
+        );
+        expect(scraper.performDownload).not.toHaveBeenCalled();
+        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
+        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
+    });
+
+    test('transfers the exact trusted Saved image when its legacy detail omits that media', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
+        const mediaId = '58585858-5858-4858-8858-585858585859';
+        const sourceUrl = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: mediaId,
+            currentItemId: sourceUrl,
+            expectedMediaType: 'image',
+            sourceUrl
+        };
+        chrome.storage.local.get.mockResolvedValue({ currentItemId: sourceUrl });
+        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
+        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
+        scraper.persistProcessedId = jest.fn(() => Promise.resolve(true));
+        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
+        scraper.failRun = jest.fn(() => Promise.resolve());
+
+        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
+
+        expect(scraper.performDownload).toHaveBeenCalledWith(
+            expect.objectContaining({ tagName: 'IMG', src: sourceUrl, currentSrc: sourceUrl }),
+            sourceUrl,
+            'run-1'
+        );
+        expect(scraper.persistProcessedId).toHaveBeenCalledWith(sourceUrl, 'run-1');
+        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
+        expect(scraper.failRun).not.toHaveBeenCalled();
+    });
+
+    test('transfers the exact trusted Saved video when its legacy detail omits that media', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
+        const mediaId = '59595959-5959-4959-8959-595959595958';
+        const sourceUrl = `https://assets.grok.com/users/u/generated/${mediaId}/preview_image.jpg`;
+        const sourceTransferUrl = `https://assets.grok.com/users/u/generated/${mediaId}/generated_video.mp4`;
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: mediaId,
+            currentItemId: sourceUrl,
+            expectedMediaType: 'video',
+            sourceUrl,
+            sourceTransferUrl
+        };
+        chrome.storage.local.get.mockResolvedValue({ currentItemId: sourceUrl });
+        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
+        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
+        scraper.persistProcessedId = jest.fn(() => Promise.resolve(true));
+        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
+        scraper.failRun = jest.fn(() => Promise.resolve());
+
+        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
+
+        expect(scraper.performDownload).toHaveBeenCalledWith(
+            expect.objectContaining({
+                tagName: 'VIDEO',
+                src: sourceTransferUrl,
+                currentSrc: sourceTransferUrl
+            }),
+            sourceUrl,
+            'run-1'
+        );
+        expect(scraper.persistProcessedId).toHaveBeenCalledWith(sourceUrl, 'run-1');
+        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
+        expect(scraper.failRun).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['identity mismatch', 'https://assets.grok.com/users/u/generated/60606060-6060-4060-8060-606060606060/generated_video.mp4'],
+        ['untrusted host', 'https://example.com/users/u/generated/61616161-6161-4161-8161-616161616161/generated_video.mp4']
+    ])('rejects a Saved video fallback with %s', async (_label, sourceTransferUrl) => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
+        const mediaId = '61616161-6161-4161-8161-616161616161';
+        const sourceUrl = `https://assets.grok.com/users/u/generated/${mediaId}/preview_image.jpg`;
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: mediaId,
+            currentItemId: sourceUrl,
+            expectedMediaType: 'video',
+            sourceUrl,
+            sourceTransferUrl
+        };
+        chrome.storage.local.get.mockResolvedValue({ currentItemId: sourceUrl });
+        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
+        scraper.performDownload = jest.fn();
+        scraper.persistProcessedId = jest.fn();
+        scraper.returnToSavedGallery = jest.fn();
+        scraper.failRun = jest.fn(() => Promise.resolve());
+
+        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
+
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Legacy detail view did not expose the selected Saved media.',
+            'legacy_media_missing'
+        );
+        expect(scraper.performDownload).not.toHaveBeenCalled();
+        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
+        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['identity mismatch', 'https://assets.grok.com/users/u/generated/68686868-6868-4868-8868-686868686868/image.jpg'],
+        ['untrusted host', 'https://example.com/users/u/generated/67676767-6767-4767-8767-676767676767/image.jpg']
+    ])('rejects a Saved image fallback with %s', async (_label, sourceUrl) => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
+        const mediaId = '67676767-6767-4767-8767-676767676767';
+        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: mediaId,
+            currentItemId,
+            expectedMediaType: 'image',
+            sourceUrl
         };
         chrome.storage.local.get.mockResolvedValue({ currentItemId });
         scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
@@ -2398,6 +2707,7 @@ describe('Grok scrape surface transitions', () => {
         };
         chrome.storage.local.get.mockResolvedValue({ currentItemId });
         scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(media));
+        scraper.loadAuthoritativeCaptureMetadata = jest.fn(async () => captureMetadata(mediaId));
         scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
         scraper.stopBackupMode = jest.fn(() => Promise.resolve({ status: 'stopped' }));
         scraper.returnToSavedGallery = jest.fn();
@@ -3026,8 +3336,11 @@ describe('Grok scrape surface transitions', () => {
         scraper.persistBackupProgress = jest.fn();
         const media = document.createElement('img');
         media.src = 'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content';
-        document.addEventListener('__gpt_fetch_media', (event) => {
-            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+        scraper.loadAuthoritativeCaptureMetadata = jest.fn(async () => captureMetadata(
+            '73e5e137-1334-49ea-b06b-a9d9ba891003'
+        ));
+        document.addEventListener('__gpt_fetch_media_data_url', (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
                 detail: { requestId: event.detail.requestId, dataUrl: 'data:image/png;base64,AA==' }
             }));
         }, { once: true });
@@ -3060,8 +3373,11 @@ describe('Grok scrape surface transitions', () => {
         scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
         const media = document.createElement('img');
         media.src = 'https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/22222222-2222-4222-8222-222222222222/image.jpg?request=33333333-3333-4333-8333-333333333333';
-        document.addEventListener('__gpt_fetch_media', (event) => {
-            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+        scraper.loadAuthoritativeCaptureMetadata = jest.fn(async () => captureMetadata(
+            '22222222-2222-4222-8222-222222222222'
+        ));
+        document.addEventListener('__gpt_fetch_media_data_url', (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
                 detail: { requestId: event.detail.requestId, dataUrl: 'data:image/png;base64,AA==', size: 1 }
             }));
         }, { once: true });
@@ -3098,8 +3414,9 @@ describe('Grok scrape surface transitions', () => {
         const mediaId = '22222222-2222-4222-8222-222222222222';
         const media = document.createElement('img');
         media.src = `https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/${mediaId}/image.jpg?request=33333333-3333-4333-8333-333333333333`;
-        document.addEventListener('__gpt_fetch_media', (event) => {
-            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+        scraper.loadAuthoritativeCaptureMetadata = jest.fn(async () => captureMetadata(mediaId));
+        document.addEventListener('__gpt_fetch_media_data_url', (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
                 detail: { requestId: event.detail.requestId, dataUrl: 'data:image/png;base64,AA==', size: 1 }
             }));
         }, { once: true });
@@ -3148,8 +3465,18 @@ describe('Grok scrape surface transitions', () => {
         const mediaId = '22222222-2222-4222-8222-222222222222';
         const media = document.createElement('img');
         media.src = `https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/${mediaId}/image.jpg`;
+        const captureMetadata = {
+            schemaVersion: 2,
+            evidenceSource: 'grok_conversation_response',
+            conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            assetId: mediaId,
+            promptText: 'saved prompt',
+            assetMetadata: { assetId: mediaId },
+            mediaGenInput: { prompt: 'saved prompt' }
+        };
+        scraper.loadAuthoritativeCaptureMetadata = jest.fn(async () => captureMetadata);
         const bridgeFetch = jest.fn();
-        document.addEventListener('__gpt_fetch_media', bridgeFetch);
+        document.addEventListener('__gpt_fetch_media_data_url', bridgeFetch);
         chrome.runtime.sendMessage.mockImplementation(async (message) => {
             if (message.action === 'R2_BACKUP_CHECK_PRESENT') {
                 return { status: 'already_present', assetId: `media_${mediaId}` };
@@ -3173,7 +3500,10 @@ describe('Grok scrape surface transitions', () => {
             runEpoch: 1,
             kind: 'r2_backup',
             url: media.src,
-            isVideo: false
+            isVideo: false,
+            promptText: 'saved prompt',
+            captureMetadata,
+            acceptance: undefined
         });
         expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
             action: 'R2_BACKUP_UPLOAD'
@@ -3185,7 +3515,7 @@ describe('Grok scrape surface transitions', () => {
             media.src,
             `media_${mediaId}`
         ]));
-        document.removeEventListener('__gpt_fetch_media', bridgeFetch);
+        document.removeEventListener('__gpt_fetch_media_data_url', bridgeFetch);
     });
 
     test('sends authenticated media data for Cloud only Agent transfers', async () => {
@@ -3193,11 +3523,22 @@ describe('Grok scrape surface transitions', () => {
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
-        scraper.overlay = { readCurrentPromptInput: jest.fn(() => 'saved prompt') };
+        scraper.overlay = { readCurrentPromptInput: jest.fn(() => 'unrelated composer text') };
         const media = document.createElement('img');
         media.src = 'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content';
-        document.addEventListener('__gpt_fetch_media', (event) => {
-            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_result', {
+        const captureMetadata = {
+            schemaVersion: 2,
+            evidenceSource: 'grok_conversation_response',
+            conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            assetId: '73e5e137-1334-49ea-b06b-a9d9ba891003',
+            responseId: 'response-1',
+            promptText: 'authoritative saved prompt',
+            assetMetadata: { assetId: '73e5e137-1334-49ea-b06b-a9d9ba891003' },
+            mediaGenInput: { prompt: 'authoritative saved prompt' }
+        };
+        scraper.loadAuthoritativeCaptureMetadata = jest.fn(async () => captureMetadata);
+        document.addEventListener('__gpt_fetch_media_data_url', (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url_result', {
                 detail: { requestId: event.detail.requestId, dataUrl: 'data:image/png;base64,AA==' }
             }));
         }, { once: true });
@@ -3217,12 +3558,14 @@ describe('Grok scrape surface transitions', () => {
             action: 'DOWNLOAD_MEDIA',
             url: media.src,
             isVideo: false,
-            promptText: 'saved prompt',
+            promptText: 'authoritative saved prompt',
+            captureMetadata,
             blobDataUrl: 'data:image/png;base64,AA==',
             runToken: 'run-1',
             runEpoch: 1,
             kind: 'sync'
         });
+        expect(scraper.overlay.readCurrentPromptInput).not.toHaveBeenCalled();
     });
 
     test('keeps local Agent transfers on the native download path without bridge data', async () => {
@@ -4514,6 +4857,8 @@ describe('background scrape lease authority', () => {
     }
 
     function dispatchR2Presence(harness, lease, sourceUrl, overrides = {}) {
+        const mediaId = CloudSyncUtils.extractGrokMediaId(sourceUrl);
+        const metadata = captureMetadata(mediaId);
         const dispatched = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
             action: 'R2_BACKUP_CHECK_PRESENT',
             runToken: lease.token,
@@ -4521,11 +4866,84 @@ describe('background scrape lease authority', () => {
             kind: 'r2_backup',
             url: sourceUrl,
             isVideo: false,
+            promptText: metadata.promptText,
+            captureMetadata: metadata,
             ...overrides
         }, { tab: { id: lease.tabId } });
         expect(dispatched.returnValue).toBe(true);
         return dispatched.response;
     }
+
+    test('reports authoritative running status until the active lease completes', async () => {
+        const lease = createLeaseRecord();
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false
+            }
+        });
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+
+        const running = dispatchBackgroundMessageThroughPort(
+            harness.chromeApi,
+            { action: 'GET_SCRAPE_STATUS' },
+            {}
+        );
+        expect(running.returnValue).toBe(true);
+        await expect(running.response).resolves.toMatchObject({
+            status: 'running',
+            isScraping: true,
+            isR2Backup: false,
+            kind: 'sync',
+            runToken: lease.token,
+            runEpoch: lease.epoch
+        });
+
+        const staleCompletion = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_COMPLETE',
+            runToken: 'stale-run',
+            runEpoch: lease.epoch - 1,
+            kind: 'sync'
+        }, { tab: { id: lease.tabId } });
+        await expect(staleCompletion.response).resolves.toEqual({ status: 'ignored' });
+
+        const stillRunning = dispatchBackgroundMessageThroughPort(
+            harness.chromeApi,
+            { action: 'GET_SCRAPE_STATUS' },
+            {}
+        );
+        await expect(stillRunning.response).resolves.toMatchObject({
+            status: 'running',
+            runToken: lease.token,
+            runEpoch: lease.epoch
+        });
+
+        const completion = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_COMPLETE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: 'sync',
+            stats: { stopReason: 'complete' }
+        }, { tab: { id: lease.tabId } });
+        await expect(completion.response).resolves.toEqual({ status: 'ok' });
+
+        const idle = dispatchBackgroundMessageThroughPort(
+            harness.chromeApi,
+            { action: 'GET_SCRAPE_STATUS' },
+            {}
+        );
+        await expect(idle.response).resolves.toMatchObject({
+            status: 'idle',
+            isScraping: false,
+            isR2Backup: false,
+            kind: null
+        });
+    });
 
     test('R2 presence inventory paginates once per lease and requires HEAD proof', async () => {
         const firstMediaId = '41000000-0000-4000-8000-000000000001';
@@ -4569,6 +4987,13 @@ describe('background scrape lease authority', () => {
                 };
             }
             if (parsed.pathname === '/v1/objects/verify') {
+                if (options.method === 'POST') {
+                    return {
+                        ok: true,
+                        status: 200,
+                        json: async () => ({ exists: true, verified: true })
+                    };
+                }
                 expect(options.method).toBe('HEAD');
                 expect([firstObjectKey, secondObjectKey]).toContain(parsed.searchParams.get('objectKey'));
                 return {
@@ -4598,7 +5023,12 @@ describe('background scrape lease authority', () => {
 
         expect(inventoryCursors).toEqual([null, 'cursor-2']);
         expect(global.fetch.mock.calls.filter(([url]) => String(url).includes('/v1/vault/inventory'))).toHaveLength(2);
-        expect(global.fetch.mock.calls.filter(([url]) => String(url).includes('/v1/objects/verify'))).toHaveLength(2);
+        expect(global.fetch.mock.calls.filter(([url, options]) => (
+            String(url).includes('/v1/objects/verify') && options?.method === 'HEAD'
+        ))).toHaveLength(2);
+        expect(global.fetch.mock.calls.filter(([url, options]) => (
+            String(url).includes('/v1/objects/verify') && options?.method === 'POST'
+        ))).toHaveLength(2);
         expect(global.fetch.mock.calls.filter(([url]) => String(url).includes('/v1/presign'))).toHaveLength(0);
         expect(harness.storedLocal.processedIds).toEqual([]);
         expect(harness.chromeApi.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -4883,6 +5313,70 @@ describe('background scrape lease authority', () => {
             expect(harness.sessionState.activeScrapeRunToken).toEqual(lease);
         }
     );
+
+    test('keeps Saved navigation in the active mirror across partial R2 progress writes', async () => {
+        const lease = createLeaseRecord({ token: 'partial-r2-mirror', kind: 'r2_backup' });
+        const navigation = {
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            currentItemId: 'saved-card-image',
+            expectedIdentity: '47474747-4747-4747-8747-474747474747',
+            galleryUrl: 'https://grok.com/imagine/saved'
+        };
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                currentIndex: 2,
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                scrapeNavigation: null,
+                currentItemId: null,
+                isScraping: true,
+                isR2Backup: true,
+                r2BackupState: { isRunning: true, totalSeen: 0 }
+            }
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureScrapeLeaseHydrated();
+
+        const navigationWrite = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            values: {
+                scrapeNavigation: navigation,
+                currentItemId: navigation.currentItemId
+            }
+        }, { tab: { id: lease.tabId } });
+        await expect(navigationWrite.response).resolves.toEqual({ status: 'ok' });
+
+        const progressWrite = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'SCRAPE_RUN_STATE_WRITE',
+            runToken: lease.token,
+            runEpoch: lease.epoch,
+            kind: lease.kind,
+            values: {
+                r2BackupState: { isRunning: true, totalSeen: 1 }
+            }
+        }, { tab: { id: lease.tabId } });
+        await expect(progressWrite.response).resolves.toEqual({ status: 'ok' });
+
+        const active = dispatchLatestBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'GET_ACTIVE_SCRAPE_RUN_STATE'
+        }, { tab: { id: lease.tabId } });
+        await expect(active.response).resolves.toMatchObject({
+            status: 'ok',
+            state: {
+                currentIndex: 2,
+                scrapeNavigation: navigation,
+                currentItemId: navigation.currentItemId,
+                r2BackupState: { isRunning: true, totalSeen: 1 }
+            }
+        });
+    });
 
     test.each(['sync', 'r2_backup'])(
         'restores finalized %s authority after another worker restart',
@@ -5206,6 +5700,51 @@ describe('background scrape lease authority', () => {
             expect.any(Function)
         );
         expect(harness.storedLocal.scrapeNavigation).toBeNull();
+    });
+
+    test('Stop retries the receipt-bearing abort when navigation destroys the first content context', async () => {
+        jest.useFakeTimers();
+        try {
+            const lease = createLeaseRecord();
+            const navigation = {
+                runToken: lease.token,
+                runEpoch: lease.epoch,
+                galleryUrl: 'https://grok.com/imagine/saved'
+            };
+            const harness = createLeaseBackgroundHarness({
+                lease,
+                localState: {
+                    scraperState: 'running',
+                    scrapeRunToken: lease.token,
+                    scrapeRunEpoch: lease.epoch,
+                    scrapeNavigation: navigation,
+                    isScraping: true,
+                    isR2Backup: false
+                }
+            });
+            let abortAttempts = 0;
+            harness.chromeApi.tabs.sendMessage.mockImplementation((_tabId, message, callback) => {
+                if (message.action !== 'ABORT_SCRAPE') return;
+                abortAttempts++;
+                if (abortAttempts === 2) callback({ status: 'stopped' });
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            await background.ensureScrapeLeaseHydrated();
+
+            const stopping = background.stopScrapeRun('sync');
+            await flushAsyncTurns(16);
+            await jest.advanceTimersByTimeAsync(2000);
+
+            await expect(stopping).resolves.toEqual({
+                status: 'stopped',
+                abortAcknowledged: true,
+                transferDrained: true
+            });
+            expect(abortAttempts).toBe(2);
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     test('dropped content abort cannot preserve run authority', async () => {
@@ -7266,12 +7805,74 @@ describe('background scrape lease authority', () => {
         expect(background.getProcessedUUIDsForTest()).toEqual(['post-startup-media']);
     });
 
+    test('storage changes received during the initial full read win over its older snapshot', async () => {
+        const harness = createLeaseBackgroundHarness({ localState: { processedIds: ['snapshot-media'] } });
+        const startupRead = deferred();
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        let firstFullRead = true;
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (keys === null && firstFullRead) {
+                firstFullRead = false;
+                return startupRead.promise;
+            }
+            return baseGet(keys);
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        const storageListener = harness.chromeApi.storage.onChanged.addListener.mock.calls[0][0];
+
+        storageListener({
+            processedIds: {
+                oldValue: ['snapshot-media'],
+                newValue: ['event-media']
+            }
+        }, 'local');
+        await flushAsyncTurns();
+        expect(background.getProcessedUUIDsForTest()).toEqual([]);
+
+        startupRead.resolve({ processedIds: ['snapshot-media'] });
+        await background.ensureBackgroundStateReady();
+
+        expect(background.getProcessedUUIDsForTest()).toEqual(['event-media']);
+    });
+
+    test('cloud status waits for the initial full read instead of exposing default state', async () => {
+        const harness = createLeaseBackgroundHarness();
+        const startupRead = deferred();
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        let firstFullRead = true;
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (keys === null && firstFullRead) {
+                firstFullRead = false;
+                return startupRead.promise;
+            }
+            return baseGet(keys);
+        });
+        global.chrome = harness.chromeApi;
+        require('../../background.js');
+
+        const status = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'CLOUD_GET_STATUS'
+        }, { id: harness.chromeApi.runtime.id });
+        let responded = false;
+        status.response.then(() => { responded = true; });
+        await flushAsyncTurns();
+        expect(responded).toBe(false);
+
+        startupRead.resolve({});
+        await expect(status.response).resolves.toMatchObject({ ok: true });
+    });
+
     test.each([
         'blob_fetch',
         'preflight_verify',
         'media_presign',
         'media_put',
         'post_upload_verify',
+        'metadata_preflight_verify',
+        'metadata_presign',
+        'metadata_put',
+        'metadata_post_verify',
         'sidecar_presign',
         'sidecar_put'
     ])('Stop at the %s boundary prevents later direct-upload side effects', async (blockedStage) => {
@@ -7305,7 +7906,8 @@ describe('background scrape lease authority', () => {
         const blocked = deferred();
         const release = deferred();
         const stages = [];
-        let verifyCount = 0;
+        let mediaVerifyCount = 0;
+        let metadataVerifyCount = 0;
 
         global.fetch = jest.fn((url, options = {}) => {
             const value = String(url);
@@ -7318,8 +7920,14 @@ describe('background scrape lease authority', () => {
                     blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
                 };
             } else if (value.endsWith('/v1/objects/verify')) {
-                verifyCount++;
-                stage = verifyCount === 1 ? 'preflight_verify' : 'post_upload_verify';
+                const body = JSON.parse(options.body || '{}');
+                const isMetadata = String(body.objectKey || '').includes('.metadata.v2.');
+                if (isMetadata) metadataVerifyCount++;
+                else mediaVerifyCount++;
+                const verifyCount = isMetadata ? metadataVerifyCount : mediaVerifyCount;
+                stage = isMetadata
+                    ? (verifyCount === 1 ? 'metadata_preflight_verify' : 'metadata_post_verify')
+                    : (verifyCount === 1 ? 'preflight_verify' : 'post_upload_verify');
                 response = {
                     ok: true,
                     status: 200,
@@ -7330,13 +7938,19 @@ describe('background scrape lease authority', () => {
                 };
             } else if (value.endsWith('/v1/presign')) {
                 const body = JSON.parse(options.body || '{}');
-                const sidecar = String(body.objectKey || '').endsWith('.prompt.json');
-                stage = sidecar ? 'sidecar_presign' : 'media_presign';
+                const objectKey = String(body.objectKey || '');
+                const isMetadata = objectKey.includes('.metadata.v2.');
+                const isPromptSidecar = objectKey.endsWith('.prompt.json');
+                stage = isMetadata
+                    ? 'metadata_presign'
+                    : (isPromptSidecar ? 'sidecar_presign' : 'media_presign');
                 response = {
                     ok: true,
                     status: 200,
                     json: async () => ({
-                        uploadUrl: sidecar ? 'https://upload.unit/sidecar' : 'https://upload.unit/media',
+                        uploadUrl: isMetadata
+                            ? 'https://upload.unit/metadata'
+                            : (isPromptSidecar ? 'https://upload.unit/sidecar' : 'https://upload.unit/media'),
                         method: 'PUT',
                         headers: {}
                     }),
@@ -7344,6 +7958,9 @@ describe('background scrape lease authority', () => {
                 };
             } else if (value === 'https://upload.unit/media') {
                 stage = 'media_put';
+                response = { ok: true, status: 200, text: async () => '' };
+            } else if (value === 'https://upload.unit/metadata') {
+                stage = 'metadata_put';
                 response = { ok: true, status: 200, text: async () => '' };
             } else if (value === 'https://upload.unit/sidecar') {
                 stage = 'sidecar_put';
@@ -7367,6 +7984,7 @@ describe('background scrape lease authority', () => {
             url: mediaUrl,
             blobDataUrl: 'data:image/png;base64,AQID',
             promptText: 'unit prompt',
+            captureMetadata: captureMetadata(mediaId, 'unit prompt'),
             isVideo: false,
             skipLocalDownload: true
         }, { tab: { id: lease.tabId } });
@@ -7382,7 +8000,7 @@ describe('background scrape lease authority', () => {
         expect(background.getProcessedUUIDsForTest()).toEqual([]);
     });
 
-    test.each(['media_put', 'sidecar_put'])('Stop aborts a stalled %s before returning', async (blockedStage) => {
+    test.each(['media_put', 'metadata_put', 'sidecar_put'])('Stop aborts a stalled %s before returning', async (blockedStage) => {
         jest.useFakeTimers();
         try {
             const lease = createLeaseRecord({ kind: 'r2_backup' });
@@ -7414,7 +8032,8 @@ describe('background scrape lease authority', () => {
             await background.ensureScrapeLeaseHydrated();
             const putStarted = deferred();
             let stalledSignal = null;
-            let verifyCount = 0;
+            let mediaVerifyCount = 0;
+            let metadataVerifyCount = 0;
 
             global.fetch = jest.fn((url, options = {}) => {
                 const value = String(url);
@@ -7425,7 +8044,11 @@ describe('background scrape lease authority', () => {
                     });
                 }
                 if (value.endsWith('/v1/objects/verify')) {
-                    verifyCount++;
+                    const body = JSON.parse(options.body || '{}');
+                    const isMetadata = String(body.objectKey || '').includes('.metadata.v2.');
+                    if (isMetadata) metadataVerifyCount++;
+                    else mediaVerifyCount++;
+                    const verifyCount = isMetadata ? metadataVerifyCount : mediaVerifyCount;
                     return Promise.resolve({
                         ok: true,
                         status: 200,
@@ -7437,19 +8060,25 @@ describe('background scrape lease authority', () => {
                 }
                 if (value.endsWith('/v1/presign')) {
                     const body = JSON.parse(options.body || '{}');
-                    const sidecar = String(body.objectKey || '').endsWith('.prompt.json');
+                    const objectKey = String(body.objectKey || '');
+                    const isMetadata = objectKey.includes('.metadata.v2.');
+                    const isPromptSidecar = objectKey.endsWith('.prompt.json');
                     return Promise.resolve({
                         ok: true,
                         status: 200,
                         json: async () => ({
-                            uploadUrl: sidecar ? 'https://upload.unit/sidecar' : 'https://upload.unit/media',
+                            uploadUrl: isMetadata
+                                ? 'https://upload.unit/metadata'
+                                : (isPromptSidecar ? 'https://upload.unit/sidecar' : 'https://upload.unit/media'),
                             method: 'PUT',
                             headers: {}
                         }),
                         text: async () => ''
                     });
                 }
-                const stage = value.endsWith('/sidecar') ? 'sidecar_put' : 'media_put';
+                const stage = value.endsWith('/metadata')
+                    ? 'metadata_put'
+                    : (value.endsWith('/sidecar') ? 'sidecar_put' : 'media_put');
                 if (stage !== blockedStage) {
                     return Promise.resolve({ ok: true, status: 200, text: async () => '' });
                 }
@@ -7472,6 +8101,7 @@ describe('background scrape lease authority', () => {
                 url: mediaUrl,
                 blobDataUrl: 'data:image/png;base64,AQID',
                 promptText: 'unit prompt',
+                captureMetadata: captureMetadata(mediaId, 'unit prompt'),
                 isVideo: false,
                 skipLocalDownload: true
             }, { tab: { id: lease.tabId } });
@@ -7536,6 +8166,100 @@ describe('background scrape lease authority', () => {
         expect(harness.storedLocal.processedIds).toEqual([]);
         expect(background.getProcessedUUIDsForTest()).toEqual([]);
         expect(background.getPendingDownloadOperationsForTest()).toEqual({});
+    });
+
+    test('download change event catches lifecycle persistence failures at the Chrome event boundary', async () => {
+        const { background, harness } = await seedRunOwnedDownloadOperation({
+            mode: 'local_only',
+            downloadId: 78,
+            mediaId: '73e5e137-1334-49ea-b06b-a9d9ba891078'
+        });
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let rejectedOperationWrite = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!rejectedOperationWrite
+                && Object.prototype.hasOwnProperty.call(values, 'pendingDownloadOperations')) {
+                rejectedOperationWrite = true;
+                return Promise.reject(new Error('[pending-download] write failed'));
+            }
+            return baseSet(values);
+        });
+        const downloadListener = harness.chromeApi.downloads.onChanged.addListener.mock.calls[0][0];
+
+        await expect(downloadListener({
+            id: 78,
+            state: { current: 'interrupted' }
+        })).resolves.toBeUndefined();
+
+        expect(rejectedOperationWrite).toBe(true);
+        expect(harness.storedLocal.cloudSyncState.lastError).toBe(
+            'stage=pending-download code=download_event_failed media=unknown'
+        );
+        expect(background.getBackgroundStateForTest()).toEqual({ status: 'ready', error: null });
+    });
+
+    test('download change survives a transient readiness timeout and finalizes after hydration', async () => {
+        jest.useFakeTimers();
+        try {
+            const lease = createLeaseRecord();
+            const downloadId = 81;
+            const localState = {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false,
+                cloudConfig: {
+                    enabled: true,
+                    mode: 'cloud_only',
+                    workerUrl: 'https://unit-placeholder.workers.dev',
+                    apiKey: 'unit-placeholder',
+                    keyPrefix: 'acceptance/unit-run'
+                },
+                pendingDownloadOperations: {
+                    [downloadId]: {
+                        downloadId,
+                        mediaId: '73e5e137-1334-49ea-b06b-a9d9ba891081',
+                        operationRevision: 1,
+                        allowLocal: false,
+                        cloudRequired: true,
+                        downloadState: 'in_progress',
+                        r2State: 'pending',
+                        attempts: 0,
+                        scrapeLease: lease
+                    }
+                }
+            };
+            const harness = createLeaseBackgroundHarness({ lease, localState });
+            const startupRead = deferred();
+            const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+            let firstFullRead = true;
+            harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+                if (keys === null && firstFullRead) {
+                    firstFullRead = false;
+                    return startupRead.promise;
+                }
+                return baseGet(keys);
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            const downloadListener = harness.chromeApi.downloads.onChanged.addListener.mock.calls[0][0];
+
+            const completion = downloadListener({
+                id: downloadId,
+                state: { current: 'interrupted' }
+            });
+            await jest.advanceTimersByTimeAsync(15001);
+            expect(harness.storedLocal.pendingDownloadOperations[downloadId]).toBeDefined();
+
+            startupRead.resolve({ ...localState });
+            await background.ensureBackgroundStateReady();
+            await completion;
+
+            expect(background.getPendingDownloadOperationsForTest()).toEqual({});
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     test('dual-write local completion does not persist before R2 is present', async () => {
@@ -8127,6 +8851,98 @@ describe('background scrape lease authority', () => {
         expect(background.getPendingDownloadOperationsForTest()['64']).toMatchObject({ attempts: 2 });
     });
 
+    test('cold storage hydration may exceed the post-load startup deadline without failing readiness', async () => {
+        jest.useFakeTimers();
+        const harness = createLeaseBackgroundHarness();
+        const storageRead = deferred();
+        const storageReadStarted = deferred();
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        let intercepted = false;
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (!intercepted && keys === null) {
+                intercepted = true;
+                storageReadStarted.resolve();
+                return storageRead.promise;
+            }
+            return baseGet(keys);
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        const ready = background.ensureBackgroundStateReady();
+        await storageReadStarted.promise;
+
+        await jest.advanceTimersByTimeAsync(7800);
+        storageRead.resolve({});
+        await flushAsyncTurns(20);
+
+        await expect(ready).resolves.toBe(true);
+        expect(background.getBackgroundStateForTest()).toEqual({ status: 'ready', error: null });
+    });
+
+    test('a caller can time out during cold storage hydration without permanently failing readiness', async () => {
+        jest.useFakeTimers();
+        const harness = createLeaseBackgroundHarness();
+        const storageRead = deferred();
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => (
+            keys === null ? storageRead.promise : Promise.resolve({})
+        ));
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        const ready = background.ensureBackgroundStateReady();
+        let outcome = 'pending';
+        ready.then(
+            () => { outcome = 'resolved'; },
+            (error) => { outcome = error.message; }
+        );
+
+        await jest.advanceTimersByTimeAsync(14900);
+        await flushAsyncTurns(20);
+        expect(outcome).toBe('pending');
+
+        await jest.advanceTimersByTimeAsync(200);
+
+        await expect(ready).rejects.toThrow('background_initialization_timeout');
+        expect(outcome).toBe('background_initialization_timeout');
+        expect(background.getBackgroundStateForTest()).toEqual({
+            status: 'initializing',
+            error: null
+        });
+
+        storageRead.resolve({});
+        await flushAsyncTurns(20);
+
+        await expect(background.ensureBackgroundStateReady()).resolves.toBe(true);
+        expect(background.getBackgroundStateForTest()).toEqual({ status: 'ready', error: null });
+    });
+
+    test('cold startup tolerates a delayed finite writer marker persistence', async () => {
+        jest.useFakeTimers();
+        const harness = createLeaseBackgroundHarness();
+        const writerWrite = deferred();
+        const writerWriteStarted = deferred();
+        const baseSet = harness.chromeApi.storage.local.set.getMockImplementation();
+        let intercepted = false;
+        harness.chromeApi.storage.local.set.mockImplementation((values) => {
+            if (!intercepted && findStoredRecord(values, 'scrape_persistence_writer')) {
+                intercepted = true;
+                writerWriteStarted.resolve();
+                return writerWrite.promise.then(() => baseSet(values));
+            }
+            return baseSet(values);
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        const ready = background.ensureBackgroundStateReady();
+        await writerWriteStarted.promise;
+
+        await jest.advanceTimersByTimeAsync(2500);
+        writerWrite.resolve();
+        await flushAsyncTurns(50);
+
+        await expect(ready).resolves.toBe(true);
+        expect(background.getBackgroundStateForTest()).toEqual({ status: 'ready', error: null });
+    });
+
     test.each(['marker persistence', 'marker cleanup'])(
         'background readiness fails closed when writer %s never settles, while Stop and a healthy replacement remain operable',
         async (failureMode) => {
@@ -8188,9 +9004,9 @@ describe('background scrape lease authority', () => {
                     () => ({ status: 'resolved' }),
                     (error) => ({ status: 'rejected', error: error.message })
                 ),
-                new Promise((resolve) => setTimeout(() => resolve({ status: 'watchdog_timeout' }), 3000))
+                new Promise((resolve) => setTimeout(() => resolve({ status: 'watchdog_timeout' }), 11000))
             ]);
-            await jest.advanceTimersByTimeAsync(3100);
+            await jest.advanceTimersByTimeAsync(10100);
 
             await expect(readyOutcome).resolves.toEqual({
                 status: 'rejected',
@@ -9839,6 +10655,72 @@ describe('background scrape lease authority', () => {
         expect(harness.storedLocal).toMatchObject({ scraperState: 'idle', isScraping: false });
     });
 
+    test('a tab close during cold hydration does not start a competing full storage read', async () => {
+        const harness = createLeaseBackgroundHarness();
+        const startupRead = deferred();
+        const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+        let fullReadCalls = 0;
+        harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+            if (keys === null) {
+                fullReadCalls++;
+                if (fullReadCalls === 1) return startupRead.promise;
+            }
+            return baseGet(keys);
+        });
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        const removed = harness.chromeApi.tabs.onRemoved.addListener.mock.calls[0][0];
+
+        removed(999, { isWindowClosing: false });
+        await flushAsyncTurns();
+        expect(fullReadCalls).toBe(1);
+
+        startupRead.resolve({});
+        await background.ensureBackgroundStateReady();
+        await flushAsyncTurns();
+    });
+
+    test('a tab close survives a transient readiness timeout and stops the owner after hydration', async () => {
+        jest.useFakeTimers();
+        try {
+            const lease = createLeaseRecord();
+            const localState = {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false
+            };
+            const harness = createLeaseBackgroundHarness({ lease, localState });
+            const startupRead = deferred();
+            const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+            let firstFullRead = true;
+            harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+                if (keys === null && firstFullRead) {
+                    firstFullRead = false;
+                    return startupRead.promise;
+                }
+                return baseGet(keys);
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            const removed = harness.chromeApi.tabs.onRemoved.addListener.mock.calls[0][0];
+
+            const removal = removed(lease.tabId, { isWindowClosing: false });
+            await jest.advanceTimersByTimeAsync(15001);
+            expect(harness.storedLocal.scraperState).toBe('running');
+
+            startupRead.resolve({ ...localState });
+            await background.ensureBackgroundStateReady();
+            if (removal?.then) await removal;
+            await flushAsyncTurns(20);
+
+            expect(harness.storedLocal).toMatchObject({ scraperState: 'idle', isScraping: false });
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     test.each([
         ['sync', { action: 'INIT_SCRAPE' }, 'INIT_SCRAPE'],
         ['r2_backup', { action: 'INIT_R2_BACKUP', mode: 'full' }, 'INIT_R2_BACKUP']
@@ -9876,6 +10758,99 @@ describe('background scrape lease authority', () => {
         expect(harness.chromeApi.downloads.download).not.toHaveBeenCalled();
         expect(harness.chromeApi.tabs.remove).not.toHaveBeenCalled();
         expect(harness.storedLocal.isScraping).toBe(false);
+    });
+
+    test('tab interception catches lease hydration failures at the Chrome event boundary', async () => {
+        const harness = createLeaseBackgroundHarness();
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        harness.chromeApi.storage.session.get.mockRejectedValueOnce(new Error('session read failed'));
+        const tabListener = harness.chromeApi.tabs.onUpdated.addListener.mock.calls[0][0];
+
+        await expect(tabListener(
+            42,
+            { url: 'https://imagine-public.x.ai/media/example.jpg' },
+            { id: 42 }
+        )).resolves.toBeUndefined();
+        expect(harness.chromeApi.downloads.download).not.toHaveBeenCalled();
+    });
+
+    test('tab interception survives a transient readiness timeout and processes after hydration', async () => {
+        jest.useFakeTimers();
+        try {
+            const lease = createLeaseRecord();
+            const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891080';
+            const localState = {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false,
+                processedIds: [mediaId]
+            };
+            const harness = createLeaseBackgroundHarness({ lease, localState });
+            const startupRead = deferred();
+            const baseGet = harness.chromeApi.storage.local.get.getMockImplementation();
+            let firstFullRead = true;
+            harness.chromeApi.storage.local.get.mockImplementation((keys) => {
+                if (keys === null && firstFullRead) {
+                    firstFullRead = false;
+                    return startupRead.promise;
+                }
+                return baseGet(keys);
+            });
+            global.chrome = harness.chromeApi;
+            const background = require('../../background.js');
+            const tabListener = harness.chromeApi.tabs.onUpdated.addListener.mock.calls[0][0];
+
+            const interception = tabListener(
+                lease.tabId,
+                { url: `https://imagine-public.x.ai/generated/${mediaId}/image.jpg` },
+                { id: lease.tabId }
+            );
+            await jest.advanceTimersByTimeAsync(15001);
+            expect(harness.chromeApi.tabs.remove).not.toHaveBeenCalled();
+
+            startupRead.resolve({ ...localState });
+            await background.ensureBackgroundStateReady();
+            await interception;
+
+            expect(harness.chromeApi.tabs.remove).toHaveBeenCalledWith(lease.tabId);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('tab interception contains a rejected media-tab close at the Chrome event boundary', async () => {
+        const lease = createLeaseRecord();
+        const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891079';
+        const harness = createLeaseBackgroundHarness({
+            lease,
+            localState: {
+                scraperState: 'running',
+                scrapeRunToken: lease.token,
+                scrapeRunEpoch: lease.epoch,
+                isScraping: true,
+                isR2Backup: false,
+                processedIds: [mediaId]
+            }
+        });
+        harness.chromeApi.tabs.remove.mockRejectedValueOnce(new Error('tab close failed'));
+        global.chrome = harness.chromeApi;
+        const background = require('../../background.js');
+        await background.ensureBackgroundStateReady();
+        const tabListener = harness.chromeApi.tabs.onUpdated.addListener.mock.calls[0][0];
+
+        await expect(tabListener(
+            lease.tabId,
+            { url: `https://imagine-public.x.ai/generated/${mediaId}/image.jpg` },
+            { id: lease.tabId }
+        )).resolves.toBeUndefined();
+
+        expect(harness.storedLocal.cloudSyncState.lastError).toBe(
+            'stage=runtime code=tab_queue_failed media=...ba891079'
+        );
     });
 
     test('hydrates matching authority before intercepting a restarted run media tab', async () => {

@@ -84,6 +84,24 @@ document.addEventListener('DOMContentLoaded', () => {
     let cloudConfig = { ...DEFAULT_CLOUD_CONFIG };
     let cloudState = { ...DEFAULT_CLOUD_STATE };
 
+    function reconcileScrapeState(fallbackIsRunning = null) {
+        chrome.runtime.sendMessage({ action: 'GET_SCRAPE_STATUS' }, (response) => {
+            if (chrome.runtime.lastError || !response || response.status === 'error') {
+                if (typeof fallbackIsRunning === 'boolean') setRunningState(fallbackIsRunning);
+                return;
+            }
+            if (response.status === 'running') {
+                setRunningState(true);
+            } else if (response.status === 'starting') {
+                setStartingState();
+            } else if (response.status === 'stopping') {
+                setStoppingState();
+            } else if (response.status === 'idle') {
+                setRunningState(false);
+            }
+        });
+    }
+
     // Load saved state
     chrome.storage.local.get([
         'isScraping',
@@ -96,9 +114,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'isR2Backup',
         'r2BackupState'
     ], (result) => {
-        if (result.isScraping) {
-            setRunningState(true);
-        }
+        setRunningState(Boolean(result.isScraping));
+        reconcileScrapeState(Boolean(result.isScraping));
         if (result.activityLogs) {
             renderLogs(result.activityLogs);
         }
@@ -407,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (message.action === 'UPDATE_PROGRESS') {
             progressFill.style.width = `${message.progress}%`;
         } else if (message.action === 'SCRAPE_COMPLETE') {
-            setRunningState(false);
+            reconcileScrapeState();
         } else if (message.action === 'UPDATE_CLOUD_STATUS') {
             renderCloudState(message.state || {});
         } else if (message.action === 'UPDATE_R2_BACKUP_PROGRESS') {
@@ -431,6 +448,12 @@ document.addEventListener('DOMContentLoaded', () => {
         startBtn.disabled = isRunning;
         stopBtn.disabled = !isRunning;
         statusText.textContent = isRunning ? 'Scanning timeline...' : 'Idle';
+    }
+
+    function setStartingState() {
+        startBtn.disabled = true;
+        stopBtn.disabled = true;
+        statusText.textContent = 'Starting...';
     }
 
     function setStoppingState() {

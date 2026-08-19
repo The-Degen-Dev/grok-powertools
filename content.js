@@ -464,6 +464,27 @@ function getGrokMediaIdentity(value) {
     }
 }
 
+function getGrokConversationId(value) {
+    try {
+        const url = new URL(String(value || ''), 'https://grok.com');
+        const candidate = url.searchParams.get('conversation') || url.searchParams.get('conversationId') || '';
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate)
+            ? candidate.toLowerCase()
+            : '';
+    } catch {
+        return '';
+    }
+}
+
+function getSavedCardConversationId(card) {
+    if (!card) return '';
+    const conversationIds = new Set(Array.from(card.querySelectorAll('a[href]'))
+        .filter((link) => findMediaCardRoot(link) === card)
+        .map((link) => getGrokConversationId(link.href))
+        .filter(Boolean));
+    return conversationIds.size === 1 ? Array.from(conversationIds)[0] : '';
+}
+
 function findMatchingAgentMedia(root = document, expectedIdentity = '') {
     const normalizedExpected = getGrokMediaIdentity(expectedIdentity);
     if (!normalizedExpected) return { status: 'missing', media: null, sourceUrl: '' };
@@ -491,6 +512,17 @@ function findMediaCardRoot(element) {
     const listItem = element?.closest?.('[role="listitem"]');
     if (listItem?.querySelector('img[alt="Generated image"]')) return listItem;
     return element?.closest?.('[class*="media-post-masonry-card"]') || null;
+}
+
+function getSavedCardIdentity(card, fallbackIdentity = '') {
+    if (!card) return getGrokMediaIdentity(fallbackIdentity);
+    const postIdentities = new Set(Array.from(card.querySelectorAll('a[href*="/imagine/post/"]'))
+        .filter((link) => findMediaCardRoot(link) === card)
+        .map((link) => getGrokMediaIdentity(link.href))
+        .filter(Boolean));
+    if (postIdentities.size === 1) return Array.from(postIdentities)[0];
+    if (postIdentities.size > 1) return '';
+    return getGrokMediaIdentity(fallbackIdentity);
 }
 
 function dispatchFullPointerClick(element) {
@@ -653,14 +685,16 @@ function getSavedGalleryEntries(root = document) {
         .map((image) => {
             const card = findMediaCardRoot(image);
             const sourceUrl = image.currentSrc || image.src || '';
+            const sourceIdentity = getGrokMediaIdentity(sourceUrl);
             return card && sourceUrl ? {
                 card,
                 image,
                 sourceUrl,
-                sourceIdentity: getGrokMediaIdentity(sourceUrl)
+                sourceIdentity,
+                cardIdentity: getSavedCardIdentity(card, sourceIdentity)
             } : null;
         })
-        .filter((entry) => entry?.sourceIdentity);
+        .filter((entry) => entry?.sourceIdentity && entry?.cardIdentity);
 }
 
 function getSavedGalleryEntryMediaType(entry) {
@@ -700,7 +734,11 @@ function getSavedGalleryList(entries) {
 
 function hasOrderedSavedNeighborhood(entries, receipt) {
     return evaluateGalleryReceipt({
-        identities: entries.map((entry) => entry?.sourceIdentity),
+        identities: entries.map((entry) => (
+            receipt?.identityKind === 'saved_post'
+                ? entry?.cardIdentity
+                : entry?.sourceIdentity
+        )),
         receipt,
         currentOrigin: {
             pathname: window.location.pathname,
@@ -782,14 +820,14 @@ function captureSavedViewportReceipt({
     const context = getSavedGalleryContext(root);
     if (!context) return null;
     const sourceIndices = context.entries
-        .map((entry, index) => entry.sourceIdentity === normalizedSource ? index : -1)
+        .map((entry, index) => entry.cardIdentity === normalizedSource ? index : -1)
         .filter((index) => index >= 0);
     if (sourceIndices.length !== 1) return null;
-    const derivedNextIdentity = context.entries[sourceIndices[0] + 1]?.sourceIdentity || null;
+    const derivedNextIdentity = context.entries[sourceIndices[0] + 1]?.cardIdentity || null;
     const requestedNextIdentity = getGrokMediaIdentity(expectedNextIdentity) || null;
     if (requestedNextIdentity && requestedNextIdentity !== derivedNextIdentity) return null;
-    const receipt = captureGalleryReceipt({
-        identities: context.entries.map((entry) => entry.sourceIdentity),
+    const captured = captureGalleryReceipt({
+        identities: context.entries.map((entry) => entry.cardIdentity),
         sourceIdentity: normalizedSource,
         origin: {
             pathname: window.location.pathname,
@@ -798,6 +836,7 @@ function captureSavedViewportReceipt({
         },
         scrollTop: getSavedScrollerSnapshot(context.scroller || fallbackScroller).scrollTop
     });
+    const receipt = captured ? { ...captured, identityKind: 'saved_post' } : null;
     return hasOrderedSavedNeighborhood(context.entries, receipt) ? receipt : null;
 }
 
@@ -814,6 +853,7 @@ function normalizeSavedViewportReceipt(value = {}) {
     if (!sourceIdentity) return null;
     return {
         version: GALLERY_RECEIPT_VERSION,
+        identityKind: receipt.identityKind === 'saved_post' ? 'saved_post' : 'media',
         sourceIdentity,
         expectedNextIdentity: getGrokMediaIdentity(receipt.expectedNextIdentity) || null,
         beforeIdentities: receipt.beforeIdentities.map(getGrokMediaIdentity).filter(Boolean),
@@ -890,46 +930,113 @@ function shouldStopScraperForStorageChanges(changes = {}, backupMode = false) {
     return changes.isScraping?.newValue === false;
 }
 
+function waitForMediaFetchBridgeReady(root = document, timeoutMs = 5000, pollIntervalMs = 100) {
+    const requestId = `probe_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let pollTimer = null;
+        let timeoutTimer = null;
+        const cleanup = () => {
+            root.removeEventListener('__gpt_media_fetch_bridge_ready', handleReady);
+            if (pollTimer !== null) clearInterval(pollTimer);
+            if (timeoutTimer !== null) clearTimeout(timeoutTimer);
+        };
+        const finish = (error) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (error) reject(error);
+            else resolve();
+        };
+        function handleReady(event) {
+            if (event.detail?.requestId !== requestId) return;
+            finish();
+        }
+        const probe = () => {
+            root.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_probe', {
+                detail: { requestId }
+            }));
+        };
+
+        root.addEventListener('__gpt_media_fetch_bridge_ready', handleReady);
+        timeoutTimer = setTimeout(() => {
+            finish(new Error('Media fetch bridge not ready'));
+        }, timeoutMs);
+        probe();
+        if (!settled) pollTimer = setInterval(probe, pollIntervalMs);
+    });
+}
+
 async function fetchMediaDataUrlViaBridge(sourceUrl, root = document, timeoutMs = 30000) {
+    await waitForMediaFetchBridgeReady(root, Math.min(5000, timeoutMs));
     const requestId = `fetch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    let result = null;
     try {
-        result = await new Promise((resolve, reject) => {
+        const result = await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
-                root.removeEventListener('__gpt_fetch_media_result', handleResult);
+                root.removeEventListener('__gpt_fetch_media_data_url_result', handleResult);
                 reject(new Error('Bridge fetch timeout'));
             }, timeoutMs);
             function handleResult(event) {
                 if (event.detail?.requestId !== requestId) return;
-                root.removeEventListener('__gpt_fetch_media_result', handleResult);
+                root.removeEventListener('__gpt_fetch_media_data_url_result', handleResult);
                 clearTimeout(timeout);
                 if (event.detail.error) reject(new Error(event.detail.error));
                 else resolve(event.detail);
             }
-            root.addEventListener('__gpt_fetch_media_result', handleResult);
-            root.dispatchEvent(new CustomEvent('__gpt_fetch_media', { detail: { url: sourceUrl, requestId } }));
+            root.addEventListener('__gpt_fetch_media_data_url_result', handleResult);
+            root.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url', {
+                detail: { url: sourceUrl, requestId }
+            }));
         });
 
-        if (result.blobUrl) {
-            try {
-                const blobResponse = await fetch(result.blobUrl);
-                const blob = await blobResponse.blob();
-                const reader = new FileReader();
-                const dataUrl = await new Promise((resolve, reject) => {
-                    reader.onerror = () => reject(reader.error || new Error('Media encoding failed'));
-                    reader.onloadend = () => resolve(reader.result);
-                    reader.readAsDataURL(blob);
-                });
-                return { dataUrl, size: result.size || blob.size, type: result.type || blob.type };
-            } finally {
-                URL.revokeObjectURL(result.blobUrl);
-            }
-        }
         if (result.dataUrl) return { dataUrl: result.dataUrl, size: result.size || 0, type: result.type || '' };
         throw new Error('Bridge fetch returned no media data');
     } finally {
         root.dispatchEvent(new CustomEvent('__gpt_fetch_media_release', { detail: { requestId } }));
     }
+}
+
+async function fetchGrokAssetMetadataViaBridge(
+    conversationId,
+    assetId,
+    root = document,
+    timeoutMs = 30000
+) {
+    await waitForMediaFetchBridgeReady(root, Math.min(5000, timeoutMs));
+    const normalizedConversationId = getGrokConversationId(`https://grok.com/?conversation=${conversationId}`);
+    const normalizedAssetId = getGrokMediaIdentity(assetId);
+    if (!normalizedConversationId || !normalizedAssetId) throw new Error('asset_metadata_identity_missing');
+    const requestId = `metadata_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const metadata = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            root.removeEventListener('__gpt_fetch_asset_metadata_result', handleResult);
+            reject(new Error('Asset metadata bridge timeout'));
+        }, timeoutMs);
+        function handleResult(event) {
+            if (event.detail?.requestId !== requestId) return;
+            root.removeEventListener('__gpt_fetch_asset_metadata_result', handleResult);
+            clearTimeout(timeout);
+            if (event.detail.error) reject(new Error(event.detail.error));
+            else resolve(event.detail.metadata);
+        }
+        root.addEventListener('__gpt_fetch_asset_metadata_result', handleResult);
+        root.dispatchEvent(new CustomEvent('__gpt_fetch_asset_metadata', {
+            detail: {
+                requestId,
+                conversationId: normalizedConversationId,
+                assetId: normalizedAssetId
+            }
+        }));
+    });
+
+    if (!metadata || typeof metadata !== 'object') throw new Error('asset_metadata_missing');
+    if (getGrokConversationId(`https://grok.com/?conversation=${metadata.conversationId}`) !== normalizedConversationId) {
+        throw new Error('asset_metadata_conversation_mismatch');
+    }
+    if (getGrokMediaIdentity(metadata.assetId) !== normalizedAssetId) {
+        throw new Error('asset_metadata_asset_mismatch');
+    }
+    return metadata;
 }
 
 function getBackupElementBox(el) {
@@ -947,6 +1054,55 @@ function isBackupMediaHost(src) {
     return src.includes('imagine-public.x.ai')
         || src.includes('assets.grok.com/users/')
         || src.includes('assets.grok.com/videos/');
+}
+
+function getVerifiedSavedCardVideoSource(card, expectedIdentity) {
+    const normalizedExpected = getGrokMediaIdentity(expectedIdentity);
+    if (!card || !normalizedExpected) return '';
+    const candidates = new Set(Array.from(card.querySelectorAll('video'))
+        .map(getBackupMediaElementSrc)
+        .filter((sourceUrl) => (
+            sourceUrl
+            && getGrokMediaIdentity(sourceUrl) === normalizedExpected
+        )));
+    return candidates.size === 1 ? Array.from(candidates)[0] : '';
+}
+
+function createVerifiedSavedMediaFallback(pendingNavigation) {
+    const expectedMediaType = pendingNavigation?.expectedMediaType;
+    if (expectedMediaType !== 'image' && expectedMediaType !== 'video') return null;
+    const sourceUrl = String(
+        expectedMediaType === 'video'
+            ? pendingNavigation.sourceTransferUrl
+            : pendingNavigation.sourceUrl
+    ).trim();
+    const expectedIdentity = getGrokMediaIdentity(pendingNavigation.expectedIdentity);
+    if (!sourceUrl || !expectedIdentity || getGrokMediaIdentity(sourceUrl) !== expectedIdentity) return null;
+
+    let parsed;
+    try {
+        parsed = new URL(sourceUrl);
+    } catch {
+        return null;
+    }
+    if (
+        parsed.protocol !== 'https:'
+        || parsed.username
+        || parsed.password
+        || (parsed.port && parsed.port !== '443')
+    ) return null;
+
+    const trustedPath = parsed.hostname === 'assets.grok.com'
+        ? parsed.pathname.startsWith('/users/')
+        : expectedMediaType === 'image' && parsed.hostname === 'imagine-public.x.ai';
+    const isVideoUrl = /\.(?:mp4|webm)$/i.test(parsed.pathname);
+    if (!trustedPath || isVideoUrl !== (expectedMediaType === 'video')) return null;
+
+    return {
+        tagName: expectedMediaType === 'video' ? 'VIDEO' : 'IMG',
+        src: sourceUrl,
+        currentSrc: sourceUrl
+    };
 }
 
 function isVisibleBackupMediaCandidate(el) {
@@ -3010,6 +3166,7 @@ const PROMPTED_VIDEO_FOCUS_POLL_MS = 100;
 const PROMPTED_VIDEO_FOCUS_WAIT_ATTEMPTS = 20;
 const PROMPTED_VIDEO_FOCUS_QUIESCENCE_MS = 500;
 const PROMPTED_VIDEO_SUBMIT_ACCEPTANCE_TIMEOUT_MS = 3000;
+const PROMPTED_RESULTS_CAPACITY_WAIT_MS = 60000;
 const AGENT_ACTION_QUIESCENCE_MS = 500;
 const PROMPTED_VIDEO_INPUT_SELECTOR =
     'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]';
@@ -3529,6 +3686,41 @@ class VideoRetryManager {
             if (agentBinding && !this._resolveCurrentAgentMediaBinding(agentBinding)) return null;
             const submitButton = this._findPromptedVideoSubmitButton();
             if (submitButton) return submitButton;
+            await this.sleep(PROMPTED_VIDEO_FOCUS_POLL_MS);
+        }
+        return null;
+    }
+
+    async _waitForPromptedResultsSubmitButton(runToken, agentBinding = null) {
+        const immediate = await this._waitForPromptedVideoSubmitButton(runToken, agentBinding);
+        if (immediate) return immediate;
+
+        const attempts = Math.max(1, Math.ceil(
+            PROMPTED_RESULTS_CAPACITY_WAIT_MS / PROMPTED_VIDEO_FOCUS_POLL_MS
+        ));
+        let announcedWait = false;
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            if (!this.isPromptedBatchTokenActive(runToken)) return null;
+            if (agentBinding && !this._resolveCurrentAgentMediaBinding(agentBinding)) return null;
+
+            const composer = this._getVerifiedPromptedVideoComposer(
+                this.promptedVideoComposerRoot,
+                false
+            );
+            if (!composer) return null;
+            const promptValue = composer.input instanceof HTMLTextAreaElement
+                ? composer.input.value
+                : composer.input.textContent;
+            if (String(promptValue || '').trim() !== String(this.batchPrompt || '').trim()) {
+                return null;
+            }
+
+            const submitButton = this._findPromptedVideoSubmitButton();
+            if (submitButton) return submitButton;
+            if (!announcedWait) {
+                announcedWait = true;
+                this.safeStatus('Prompted Batch [results]: Waiting for Grok capacity...', 'neutral');
+            }
             await this.sleep(PROMPTED_VIDEO_FOCUS_POLL_MS);
         }
         return null;
@@ -4342,6 +4534,19 @@ class VideoRetryManager {
         };
     }
 
+    _evaluatePromptedResultsReceipt(identities, receipt) {
+        return evaluateGalleryReceipt({
+            identities,
+            receipt,
+            currentOrigin: {
+                pathname: window.location.pathname,
+                conversationId: new URLSearchParams(window.location.search).get('conversation') || '',
+                scope: 'results'
+            },
+            allowSourceReplacement: true
+        });
+    }
+
     _hasOrderedResultsNeighborhood(entries, receipt) {
         const capturedIdentities = new Set([
             receipt?.sourceIdentity,
@@ -4357,16 +4562,7 @@ class VideoRetryManager {
                 return actions.length === 1;
             })
             .map((entry) => entry.sourceId);
-        return evaluateGalleryReceipt({
-            identities,
-            receipt,
-            currentOrigin: {
-                pathname: window.location.pathname,
-                conversationId: new URLSearchParams(window.location.search).get('conversation') || '',
-                scope: 'results'
-            },
-            allowSourceReplacement: true
-        }).status === 'matched';
+        return this._evaluatePromptedResultsReceipt(identities, receipt).status === 'matched';
     }
 
     _captureResultsGalleryReceipt(item) {
@@ -4462,10 +4658,11 @@ class VideoRetryManager {
             const returnStatus = await this._returnToPromptedBatchResults(receipt, runToken);
             if (returnStatus === 'cancelled') return false;
             if (returnStatus === 'failed') {
-                this.safeStatus(
-                    'Prompted Batch [results]: Could not return to the original results. Use Back to recover the gallery.',
-                    'warning'
-                );
+                const originalFailure = /[.!?]$/.test(message) ? message : `${message}.`;
+                const recoveryFailure = `${originalFailure} Also could not return to the original results. `
+                    + 'Use Back to recover the gallery.';
+                this.batchFailureMessage = recoveryFailure;
+                this.safeStatus(recoveryFailure, 'warning');
             }
         }
         if (!this.isBatchRunActive(runToken)) return false;
@@ -4500,7 +4697,20 @@ class VideoRetryManager {
 
         openTarget.scrollIntoView({ behavior: 'instant', block: 'center' });
         if (!this.isBatchRunActive(runToken)) return false;
-        openTarget.click();
+        const opened = await this._clickPromptedBatchNativeControl(
+            openTarget,
+            runToken,
+            'open prompted batch result',
+            () => this.detectBatchContext() === 'results_gallery'
+                && this._getResultsGalleryOpenTarget(item) === openTarget
+        );
+        if (!opened) {
+            return this._stopPromptedResultsItem(
+                'Prompted Batch [results]: Could not open result card',
+                receipt,
+                runToken
+            );
+        }
 
         const editorReady = await this.waitForPromptedBatchEditorReady(receipt.sourceIdentity, runToken);
         if (!this.isBatchRunActive(runToken)) return false;
@@ -4533,14 +4743,14 @@ class VideoRetryManager {
                 runToken
             );
         }
-        const submitReady = await this._waitForPromptedVideoSubmitButton(
+        const submitReady = await this._waitForPromptedResultsSubmitButton(
             runToken,
             editorReady.agentBinding || null
         );
         if (!this.isBatchRunActive(runToken)) return false;
         if (!submitReady) {
             return this._stopPromptedResultsItem(
-                'Prompted Batch [results]: Video submit button not ready',
+                'Prompted Batch [results]: Grok video capacity did not become available',
                 receipt,
                 runToken
             );
@@ -4563,19 +4773,11 @@ class VideoRetryManager {
         }
         this.lastClickTime = Date.now();
 
-        const submissionAccepted = await this._waitForPromptedVideoSubmissionAccepted(
+        await this._waitForPromptedVideoSubmissionAccepted(
             submissionReceipt,
             runToken
         );
         if (!this.isBatchRunActive(runToken)) return false;
-        if (!submissionAccepted) {
-            return this._stopPromptedResultsItem(
-                'Prompted Batch [results]: Video submission was not accepted',
-                receipt,
-                runToken
-            );
-        }
-        this.batchProcessedSrcs?.add(receipt.sourceIdentity);
 
         const returnStatus = await this._returnToPromptedBatchResults(receipt, runToken);
         if (returnStatus !== 'returned' || !this.isBatchRunActive(runToken)) {
@@ -4588,6 +4790,8 @@ class VideoRetryManager {
             }
             return false;
         }
+        this.batchProcessedSrcs?.add(receipt.sourceIdentity);
+        this._restorePromptedBatchResultsState(receipt, runToken);
 
         this.goalCount++;
         this.currentRetry = 0;
@@ -4902,12 +5106,14 @@ class VideoRetryManager {
     createPromptedBatchNavigationSnapshot(item) {
         const sourceUrl = this._getCardImageSrc(item.container);
         const sourceId = getGrokMediaIdentity(sourceUrl) || sourceUrl;
+        const sourceCardIdentity = getSavedCardIdentity(item.container, sourceId);
         const savedViewportReceipt = captureSavedViewportReceipt({
-            sourceIdentity: sourceId
+            sourceIdentity: sourceCardIdentity
         });
         return {
             galleryUrl: this.batchGalleryUrl || window.location.href,
             sourceId,
+            sourceCardIdentity,
             savedViewportReceipt,
             scrollY: savedViewportReceipt?.scrollTop
                 ?? Math.round(window.scrollY || document.documentElement.scrollTop || 0)
@@ -5033,16 +5239,21 @@ class VideoRetryManager {
         const receipt = normalizeSavedViewportReceipt(snapshot);
         const context = getSavedGalleryContext(document);
         if (!receipt || !context || !hasOrderedSavedNeighborhood(context.entries, receipt)) return false;
+        const getEntryIdentity = (entry) => (
+            receipt.identityKind === 'saved_post' ? entry.cardIdentity : entry.sourceIdentity
+        );
         const sourceIndices = context.entries
-            .map((entry, index) => entry.sourceIdentity === receipt.sourceIdentity ? index : -1)
+            .map((entry, index) => getEntryIdentity(entry) === receipt.sourceIdentity ? index : -1)
             .filter((index) => index >= 0);
         if (sourceIndices.length !== 1) return false;
         const queueIndexByIdentity = new Map(this.batchQueue.map((item, index) => (
-            [this._getCardSourceId(item.container), index]
+            [receipt.identityKind === 'saved_post'
+                ? getSavedCardIdentity(item.container, this._getCardSourceId(item.container))
+                : this._getCardSourceId(item.container), index]
         )));
         const nextQueueIndex = context.entries
             .slice(sourceIndices[0] + 1)
-            .map((entry) => queueIndexByIdentity.get(entry.sourceIdentity))
+            .map((entry) => queueIndexByIdentity.get(getEntryIdentity(entry)))
             .find((index) => Number.isInteger(index));
         this.batchQueue = Number.isInteger(nextQueueIndex)
             ? this.batchQueue.slice(nextQueueIndex)
@@ -6522,7 +6733,7 @@ class GrokScraper {
             return true;
         }
         if (!this.isRunActive(runToken, runEpoch)) return true;
-        const expectedNextIdentity = currentContext?.entries?.[index + 1]?.sourceIdentity || null;
+        const expectedNextIdentity = currentContext?.entries?.[index + 1]?.cardIdentity || null;
         this.log(`new item: ...${cleanId.slice(-6)}`, 'success');
         await this.processItem(
             entry.image,
@@ -7236,7 +7447,7 @@ class GrokScraper {
                     if (cleanId && !alreadyDone) {
                         targetCleanId = cleanId;
                         targetItem = entry.image;
-                        expectedNextIdentity = semanticItems[i + 1]?.sourceIdentity || null;
+                        expectedNextIdentity = semanticItems[i + 1]?.cardIdentity || null;
                         break;
                     }
                 }
@@ -7394,10 +7605,25 @@ class GrokScraper {
             await this.failRun('Could not identify the selected Saved media.', 'gallery_identity_missing');
             return;
         }
+        const sourceCard = findMediaCardRoot(targetItem);
+        const sourceCardIdentity = getSavedCardIdentity(sourceCard, expectedIdentity);
+        if (!sourceCardIdentity) {
+            await this.failRun('Could not identify the selected Saved card.', 'gallery_identity_missing');
+            return;
+        }
+        const conversationId = getSavedCardConversationId(sourceCard);
+        const expectedMediaType = getSavedGalleryEntryMediaType({
+            card: sourceCard,
+            image: targetItem,
+            sourceUrl
+        });
+        const sourceTransferUrl = expectedMediaType === 'video'
+            ? getVerifiedSavedCardVideoSource(sourceCard, expectedIdentity)
+            : sourceUrl;
 
         const scroller = this.getGalleryScroller();
         const savedViewportReceipt = captureSavedViewportReceipt({
-            sourceIdentity: expectedIdentity,
+            sourceIdentity: sourceCardIdentity,
             expectedNextIdentity,
             fallbackScroller: scroller
         });
@@ -7410,7 +7636,11 @@ class GrokScraper {
             runEpoch,
             currentItemId: cleanId,
             expectedIdentity,
+            expectedMediaType,
+            sourceCardIdentity,
+            conversationId,
             sourceUrl,
+            sourceTransferUrl,
             galleryUrl: window.location.href,
             savedViewportReceipt,
             galleryScrollTop: savedViewportReceipt.scrollTop,
@@ -7697,7 +7927,7 @@ class GrokScraper {
             return;
         }
         const storedState = storedStateResult.value;
-        let currentId = storedState.currentItemId;
+        let currentId = this.pendingNavigation?.currentItemId || storedState.currentItemId;
         const expectedIdentity = this.pendingNavigation?.expectedIdentity || getGrokMediaIdentity(currentId);
         if (!currentId) {
             const mediaEl = selectBackupMediaElement(document);
@@ -7718,11 +7948,18 @@ class GrokScraper {
         let normalTransferDurable = !this.backupMode;
 
         this.log('Processing selected Saved media...');
-        const mediaEl = await this.waitForMatchingLegacyDetailMedia(expectedIdentity, runToken);
+        const matchedMediaEl = await this.waitForMatchingLegacyDetailMedia(expectedIdentity, runToken);
         if (!this.isRunActive(runToken)) return;
+        const mediaEl = matchedMediaEl || createVerifiedSavedMediaFallback(this.pendingNavigation);
         if (!mediaEl) {
             await this.failRun('Legacy detail view did not expose the selected Saved media.', 'legacy_media_missing');
             return;
+        }
+        if (!matchedMediaEl) {
+            this.log(
+                `Detail media differed; transferring the exact Saved ${this.pendingNavigation.expectedMediaType} source.`,
+                'warning'
+            );
         }
         const response = await this.performDownload(mediaEl, currentId, runToken);
         if (!this.isRunActive(runToken)) return;
@@ -7758,6 +7995,17 @@ class GrokScraper {
         return videoEl.src || videoEl.currentSrc || videoEl.querySelector?.('source')?.src || null;
     }
 
+    async loadAuthoritativeCaptureMetadata(mediaIdentity, runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) throw new Error('Sync stopped.');
+        const assetId = getGrokMediaIdentity(mediaIdentity);
+        const conversationId = this.pendingNavigation?.conversationId
+            || getGrokConversationId(window.location.href);
+        if (!assetId || !conversationId) throw new Error('asset_metadata_identity_missing');
+        const metadata = await fetchGrokAssetMetadataViaBridge(conversationId, assetId);
+        if (!this.isRunActive(runToken)) throw new Error('Sync stopped.');
+        return metadata;
+    }
+
     async performBackupUpload(mediaEl = null, currentItemId = null, runToken = this.runToken) {
         if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
 
@@ -7780,13 +8028,27 @@ class GrokScraper {
         }
 
         try {
+            let captureMetadata;
+            try {
+                captureMetadata = await this.loadAuthoritativeCaptureMetadata(src, runToken);
+            } catch (error) {
+                if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
+                this.backupStats.errors++;
+                this.log('Could not prove the selected Saved asset metadata. Backup stopped.', 'error');
+                return { status: 'error', error: error?.message || 'asset_metadata_failed' };
+            }
+            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
+            const promptText = captureMetadata.promptText || '';
             const presenceResult = await safeChromeRuntimeSendMessage({
                 action: 'R2_BACKUP_CHECK_PRESENT',
                 runToken,
                 runEpoch: this.runEpoch,
                 kind: 'r2_backup',
                 url: src,
-                isVideo
+                isVideo,
+                promptText,
+                captureMetadata,
+                acceptance: this.backupOptions && this.backupOptions.acceptance
             }, 'check R2 backup presence');
             if (presenceResult.invalidated) {
                 this.handleExtensionContextInvalidated();
@@ -7805,7 +8067,6 @@ class GrokScraper {
             }
 
             const alreadyLocal = this.isMediaProcessed(src) || this.isMediaProcessed(currentItemId);
-            const promptText = this.overlay?.readCurrentPromptInput?.() || '';
             let blobData = null;
             try {
                 const result = await fetchMediaDataUrlViaBridge(src);
@@ -7825,6 +8086,7 @@ class GrokScraper {
                 url: src,
                 isVideo,
                 promptText,
+                captureMetadata,
                 blobDataUrl: blobData,
                 skipLocalDownload: alreadyLocal,
                 acceptance: this.backupOptions && this.backupOptions.acceptance
@@ -7906,7 +8168,21 @@ class GrokScraper {
             }
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
 
-            const cloudOnly = configResult.value?.config?.mode === 'cloud_only';
+            const cloudMode = configResult.value?.config?.mode;
+            const cloudOnly = cloudMode === 'cloud_only';
+            const cloudEnabled = cloudOnly || cloudMode === 'dual_write';
+            let captureMetadata = null;
+            let promptText = '';
+            if (cloudEnabled) {
+                try {
+                    captureMetadata = await this.loadAuthoritativeCaptureMetadata(src, runToken);
+                    promptText = captureMetadata.promptText || '';
+                } catch (error) {
+                    if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
+                    return { status: 'error', error: error?.message || 'asset_metadata_failed' };
+                }
+            }
+            if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
             let blobDataUrl = null;
             if (cloudOnly) {
                 try {
@@ -7921,7 +8197,6 @@ class GrokScraper {
             }
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
 
-            const promptText = this.overlay?.readCurrentPromptInput?.() || '';
             const responseResult = await safeChromeRuntimeSendMessage({
                 action: 'DOWNLOAD_MEDIA',
                 runToken,
@@ -7930,6 +8205,7 @@ class GrokScraper {
                 url: src,
                 isVideo: mediaEl.tagName?.toLowerCase() === 'video',
                 promptText,
+                ...(captureMetadata ? { captureMetadata } : {}),
                 blobDataUrl
             }, 'transfer Agent media');
             if (responseResult.invalidated) {
@@ -8057,9 +8333,12 @@ if (typeof module === 'undefined') {
         detectGrokScrapeSurface,
         evaluateGalleryReceipt,
         findMatchingAgentMedia,
+        fetchGrokAssetMetadataViaBridge,
         dispatchFullPointerClick,
         getSavedGalleryContext,
+        getGrokConversationId,
         getGrokMediaIdentity,
+        getSavedCardConversationId,
         hasOrderedSavedNeighborhood,
         isSavedGalleryLoading,
         isSuccessfulMediaTransferStatus,

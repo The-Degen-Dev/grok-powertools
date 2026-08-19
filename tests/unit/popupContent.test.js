@@ -134,6 +134,46 @@ describe('authoritative scrape Stop UI', () => {
         expect(document.getElementById('statusText').textContent).toBe('Idle');
     });
 
+    test('keeps Stop enabled when a stale content completion arrives during an active run', async () => {
+        document.documentElement.innerHTML = fs.readFileSync(path.join(__dirname, '../../popup.html'), 'utf8');
+        let runtimeListener;
+        let scrapeStatus = { status: 'running', isScraping: true, isR2Backup: false, kind: 'sync' };
+        chrome.runtime.onMessage.addListener.mockImplementation((listener) => {
+            runtimeListener = listener;
+        });
+        chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+            const response = message.action === 'GET_SCRAPE_STATUS'
+                ? scrapeStatus
+                : { ok: true, state: {} };
+            if (typeof callback === 'function') callback(response);
+            return Promise.resolve(response);
+        });
+        chrome.storage.local.get.mockImplementation((_keys, callback) => {
+            callback({ isScraping: true });
+        });
+
+        require('../../popup.js');
+        document.dispatchEvent(new Event('DOMContentLoaded'));
+        runtimeListener({ action: 'SCRAPE_COMPLETE' }, { tab: { id: 42 } });
+        await Promise.resolve();
+
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            { action: 'GET_SCRAPE_STATUS' },
+            expect.any(Function)
+        );
+        expect(document.getElementById('startBtn').disabled).toBe(true);
+        expect(document.getElementById('stopBtn').disabled).toBe(false);
+        expect(document.getElementById('statusText').textContent).toBe('Scanning timeline...');
+
+        scrapeStatus = { status: 'idle', isScraping: false, isR2Backup: false, kind: null };
+        runtimeListener({ action: 'SCRAPE_COMPLETE' }, {});
+        await Promise.resolve();
+
+        expect(document.getElementById('startBtn').disabled).toBe(false);
+        expect(document.getElementById('stopBtn').disabled).toBe(true);
+        expect(document.getElementById('statusText').textContent).toBe('Idle');
+    });
+
     test('keeps R2 controls disabled until the background confirms durable Stop', () => {
         document.documentElement.innerHTML = fs.readFileSync(path.join(__dirname, '../../popup.html'), 'utf8');
         let stopCallback;

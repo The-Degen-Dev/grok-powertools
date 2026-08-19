@@ -377,6 +377,19 @@ function activeScrapeLease({
     };
 }
 
+function authoritativeCaptureMetadata(assetId, promptText = 'authoritative prompt') {
+    return {
+        schemaVersion: 2,
+        evidenceSource: 'grok_conversation_response',
+        conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        assetId,
+        responseId: 'response-1',
+        promptText,
+        assetMetadata: { assetId, mimeType: 'image/jpeg' },
+        mediaGenInput: { prompt: promptText }
+    };
+}
+
 function installR2PresentFetch(sourceUrl, { sourcePromise = null } = {}) {
     global.fetch = jest.fn(async (url) => {
         const value = String(url);
@@ -961,6 +974,7 @@ describe('background-owned processed ID mutations', () => {
     test('refreshes the background cache on external processedIds changes without rewriting storage', async () => {
         const harness = createDurableBackgroundHarness({ processedIds: ['old-media'] });
         const background = await harness.load();
+        await background.ensureBackgroundStateReady();
         harness.chromeApi.storage.local.set.mockClear();
         const storageListener = harness.chromeApi.storage.onChanged.addListener.mock.calls.at(-1)[0];
 
@@ -1399,6 +1413,119 @@ describe('cloud-only download proof and cleanup ordering', () => {
         };
     }
 
+    test('an already-present media object is durable only after its immutable metadata sidecar verifies', async () => {
+        const harness = createDurableBackgroundHarness(cloudOnlyStorage());
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        const captureMetadata = {
+            schemaVersion: 2,
+            evidenceSource: 'grok_conversation_response',
+            conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            assetId: mediaId,
+            responseId: 'response-1',
+            promptText: 'authoritative prompt',
+            assetMetadata: { assetId: mediaId, mimeType: 'image/jpeg', width: 1024, height: 1024 },
+            mediaGenInput: { prompt: 'authoritative prompt' }
+        };
+        let metadataVerifyCount = 0;
+        let metadataObjectKey = '';
+        let uploadBody = '';
+        global.fetch = jest.fn(async (url, options = {}) => {
+            const value = String(url);
+            if (value.endsWith('/v1/objects/verify')) {
+                const body = JSON.parse(options.body);
+                if (String(body.objectKey).includes('.metadata.v2.')) {
+                    metadataObjectKey = body.objectKey;
+                    metadataVerifyCount++;
+                    return {
+                        ok: true,
+                        json: async () => ({
+                            exists: metadataVerifyCount > 1,
+                            verified: metadataVerifyCount > 1
+                        })
+                    };
+                }
+                return { ok: true, json: async () => ({ exists: true, verified: true }) };
+            }
+            if (value.endsWith('/v1/presign')) {
+                const body = JSON.parse(options.body);
+                expect(body.objectKey).toBe(metadataObjectKey);
+                expect(body.contentType).toBe('application/json');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        uploadUrl: 'https://r2-upload.example/metadata',
+                        method: 'PUT',
+                        headers: {}
+                    })
+                };
+            }
+            if (value === 'https://r2-upload.example/metadata') {
+                uploadBody = String(options.body);
+                return { ok: true };
+            }
+            throw new Error(`Unexpected test fetch: ${value}`);
+        });
+
+        const result = await background.uploadBlobWithR2Dedupe({
+            mode: 'cloud_only',
+            workerUrl: 'https://test-worker.example.workers.dev',
+            apiKey: 'unit-test-key',
+            keyPrefix: 'test/v1'
+        }, {
+            sourceUrl: authUrl,
+            finalPath: `GrokVault/user-1/${mediaId}.jpg`,
+            userId: 'user-1',
+            contentType: 'image/jpeg',
+            captureMetadata,
+            requireCaptureMetadata: true
+        }, mediaBlob());
+
+        expect(result).toEqual(expect.objectContaining({
+            status: 'already_present',
+            assetId: `media_${mediaId}`,
+            metadataStatus: 'uploaded',
+            metadataObjectKey
+        }));
+        expect(metadataObjectKey).toMatch(new RegExp(`/media_${mediaId}\\.jpg\\.metadata\\.v2\\.[a-f0-9]{24}\\.json$`));
+        expect(JSON.parse(uploadBody)).toEqual({
+            schemaVersion: 2,
+            mediaKey: `test/v1/users/user-1/media/by-asset/media_${mediaId}.jpg`,
+            assetId: `media_${mediaId}`,
+            capture: captureMetadata
+        });
+        expect(metadataVerifyCount).toBe(2);
+    });
+
+    test('rejects authoritative capture metadata with an empty prompt before any R2 write', async () => {
+        const harness = createDurableBackgroundHarness(cloudOnlyStorage());
+        const background = await harness.load();
+        await background.ensureBackgroundStateReady();
+        global.fetch = jest.fn();
+
+        await expect(background.uploadAssetMetadataSidecar({
+            mode: 'cloud_only',
+            workerUrl: 'https://test-worker.example.workers.dev',
+            apiKey: 'unit-test-key',
+            keyPrefix: 'test/v1'
+        }, {
+            objectKey: `test/v1/users/user-1/media/by-asset/media_${mediaId}.jpg`,
+            assetId: `media_${mediaId}`,
+            sourceUrlHash: 'source-url-hash',
+            captureMetadata: {
+                schemaVersion: 2,
+                evidenceSource: 'grok_conversation_response',
+                conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                assetId: mediaId,
+                promptText: '',
+                assetMetadata: { assetId: mediaId },
+                mediaGenInput: { imageToVideo: { prompt: 'nested but not extracted' } }
+            }
+        })).rejects.toThrow('asset_metadata_prompt_missing');
+
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+
     function installAuthenticatedUploadFailure(harness) {
         global.fetch = jest.fn(async (url) => {
             if (String(url).endsWith('/v1/objects/verify')) {
@@ -1600,7 +1727,8 @@ describe('cloud-only download proof and cleanup ordering', () => {
             kind: lease.kind,
             url: publicUrl,
             isVideo: false,
-            promptText: ''
+            promptText: 'authoritative prompt',
+            captureMetadata: authoritativeCaptureMetadata(mediaId)
         }, { tab: { id: lease.tabId } });
         await expect(upload.response).resolves.toEqual({ status: 'queued' });
         await waitForAssertion(() => expect(harness.storageState.cloudSyncQueue?.[0]?.attempts).toBe(1));
@@ -2333,7 +2461,8 @@ describe('cloud-only download proof and cleanup ordering', () => {
             kind: lease.kind,
             url: publicUrl,
             isVideo: false,
-            promptText: '',
+            promptText: 'authoritative prompt',
+            captureMetadata: authoritativeCaptureMetadata(mediaId),
             skipLocalDownload: true
         }, { tab: { id: lease.tabId } });
         await expect(upload.response).resolves.toEqual({ status: 'queued' });

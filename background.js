@@ -245,10 +245,15 @@ let scrapeStartPending = false;
 const ACTIVE_SCRAPE_RUN_TOKEN_KEY = 'activeScrapeRunToken';
 const SCRAPE_LEASE_VERSION = 1;
 const SCRAPE_ABORT_TIMEOUT_MS = 2000;
+const SCRAPE_ABORT_ATTEMPT_TIMEOUT_MS = 450;
+const SCRAPE_ABORT_RETRY_DELAY_MS = 100;
 const SCRAPE_TRANSFER_DRAIN_TIMEOUT_MS = 2000;
 const PENDING_DOWNLOAD_MUTATION_TIMEOUT_MS = 1000;
 const CLOUD_QUEUE_MUTATION_TIMEOUT_MS = 1000;
-const BACKGROUND_INITIALIZATION_TIMEOUT_MS = 2000;
+const BACKGROUND_READINESS_WAIT_TIMEOUT_MS = 15000;
+// A freshly reloaded Chrome worker can be paused for several seconds while its
+// first storage mutation is in flight, especially beside a large Saved tab.
+const BACKGROUND_INITIALIZATION_TIMEOUT_MS = 10000;
 let activeScrapeLease = null;
 let scrapeLeaseHydrationPromise = null;
 let scrapeLeaseMutationQueue = Promise.resolve();
@@ -307,6 +312,7 @@ let scrapePersistenceWriterClaimId = '';
 let ambiguousScrapePersistenceAuthorities = new Set();
 let activeScrapeRunMirror = null;
 let backgroundStateStatus = { status: 'initializing', error: null };
+const deferredLocalStorageChanges = [];
 let cloudSyncState = {
     unsyncedCount: 0,
     lastError: null,
@@ -459,6 +465,8 @@ function buildDirectBackupUploadResponse(result, sourceUrl) {
         status: result.status,
         objectKey: result.objectKey,
         assetId: result.assetId,
+        ...(result.metadataStatus ? { metadataStatus: result.metadataStatus } : {}),
+        ...(result.metadataObjectKey ? { metadataObjectKey: result.metadataObjectKey } : {}),
         backupProcessedId: CloudSync.extractGrokMediaId(sourceUrl) || null
     };
 }
@@ -1008,6 +1016,9 @@ async function enqueueCloudItem(queueItem, dedupeKey, assertAuthorized = null, o
                         assetIdentityKind: queueItem.assetIdentityKind || existing.assetIdentityKind,
                         contentType: queueItem.contentType || existing.contentType,
                         promptText: queueItem.promptText || existing.promptText || '',
+                        captureMetadata: queueItem.captureMetadata || existing.captureMetadata || null,
+                        requireCaptureMetadata: queueItem.requireCaptureMetadata === true
+                            || existing.requireCaptureMetadata === true,
                         backupProcessedId: queueItem.backupProcessedId || existing.backupProcessedId,
                         cleanupDownloadId: Number.isInteger(queueItem.cleanupDownloadId)
                             ? queueItem.cleanupDownloadId
@@ -1096,6 +1107,8 @@ async function enqueueCloudMediaUpload(sourceUrl, finalPath, promptText = '', ac
         assetIdentityKind: identity.kind,
         contentType: CloudSync.detectContentTypeFromUrl(sourceUrl),
         promptText: promptText || '',
+        captureMetadata: processOptions.captureMetadata || null,
+        requireCaptureMetadata: processOptions.requireCaptureMetadata === true,
         backupProcessedId: CloudSync.extractGrokMediaId(sourceUrl) || null,
         cleanupDownloadId: Number.isInteger(processOptions.cleanupDownloadId)
             ? processOptions.cleanupDownloadId
@@ -1588,6 +1601,122 @@ async function uploadPromptSidecar(config, descriptor, assertAuthorized = null) 
     }
 }
 
+function sortJsonValue(value) {
+    if (Array.isArray(value)) return value.map(sortJsonValue);
+    if (!value || typeof value !== 'object') return value;
+    return Object.keys(value).sort().reduce((result, key) => {
+        result[key] = sortJsonValue(value[key]);
+        return result;
+    }, {});
+}
+
+function validateCaptureMetadata(captureMetadata, assetId) {
+    if (!captureMetadata || typeof captureMetadata !== 'object' || Array.isArray(captureMetadata)) {
+        throw new Error('asset_metadata_required');
+    }
+    if (captureMetadata.schemaVersion !== 2
+        || captureMetadata.evidenceSource !== 'grok_conversation_response') {
+        throw new Error('asset_metadata_schema_invalid');
+    }
+    const captureAssetId = String(captureMetadata.assetId || '').toLowerCase();
+    const canonicalAssetId = String(assetId || '').toLowerCase();
+    const canonicalMediaId = CloudSync.extractGrokMediaId(canonicalAssetId);
+    if (captureAssetId !== canonicalAssetId && captureAssetId !== canonicalMediaId) {
+        throw new Error('asset_metadata_asset_mismatch');
+    }
+    if (!captureMetadata.conversationId || !captureMetadata.assetMetadata) {
+        throw new Error('asset_metadata_incomplete');
+    }
+    if (typeof captureMetadata.promptText !== 'string' || !captureMetadata.promptText.trim()) {
+        throw new Error('asset_metadata_prompt_missing');
+    }
+    return sortJsonValue(captureMetadata);
+}
+
+async function buildAssetMetadataSidecar(descriptor) {
+    const capture = validateCaptureMetadata(descriptor.captureMetadata, descriptor.assetId);
+    const payload = sortJsonValue({
+        schemaVersion: 2,
+        mediaKey: descriptor.objectKey,
+        assetId: descriptor.assetId,
+        capture
+    });
+    const body = JSON.stringify(payload);
+    const blob = new Blob([body], { type: 'application/json' });
+    const sha256 = await sha256Blob(blob);
+    return {
+        body,
+        blob,
+        sha256,
+        objectKey: `${descriptor.objectKey}.metadata.v2.${sha256.slice(0, 24)}.json`
+    };
+}
+
+async function uploadAssetMetadataSidecar(config, descriptor, assertAuthorized = null) {
+    if (assertAuthorized) await assertAuthorized();
+    const sidecar = await buildAssetMetadataSidecar(descriptor);
+    if (assertAuthorized) await assertAuthorized();
+    const sidecarDescriptor = {
+        objectKey: sidecar.objectKey,
+        contentType: 'application/json',
+        assetId: descriptor.assetId,
+        sourceUrlHash: descriptor.sourceUrlHash,
+        acceptance: descriptor.acceptance || null,
+        r2Metadata: sanitizeR2Metadata({
+            'asset-id': descriptor.assetId,
+            'sidecar-kind': 'asset-metadata-v2',
+            sha256: sidecar.sha256
+        })
+    };
+    const expected = {
+        sizeBytes: sidecar.blob.size,
+        sha256: sidecar.sha256,
+        contentType: 'application/json'
+    };
+    const existing = await verifyR2Object(config, sidecarDescriptor, expected, assertAuthorized);
+    if (assertAuthorized) await assertAuthorized();
+    if (existing.exists && existing.verified) {
+        return { status: 'already_present', objectKey: sidecar.objectKey, sha256: sidecar.sha256 };
+    }
+    if (existing.exists) throw new Error('asset_metadata_sidecar_conflict');
+
+    const presigned = await requestPresignedUrl(
+        config,
+        sidecarDescriptor,
+        sidecar.blob.size,
+        assertAuthorized
+    );
+    if (assertAuthorized) await assertAuthorized();
+    const uploadResponse = await fetchWithScrapeAuthority(presigned.uploadUrl, {
+        method: presigned.method || 'PUT',
+        headers: { ...(presigned.headers || {}), 'Content-Type': 'application/json' },
+        body: sidecar.body
+    }, assertAuthorized);
+    if (assertAuthorized) await assertAuthorized();
+    if (!uploadResponse.ok) {
+        const detail = await uploadResponse.text().catch(() => 'Unknown metadata sidecar error');
+        throw new Error(`asset_metadata_sidecar_put_${uploadResponse.status}: ${detail}`);
+    }
+
+    const verified = await verifyR2Object(config, sidecarDescriptor, expected, assertAuthorized);
+    if (assertAuthorized) await assertAuthorized();
+    if (!verified.exists || !verified.verified) throw new Error('asset_metadata_sidecar_verify_failed');
+    console.log('[CloudQueue]', formatRedactedMediaLog(
+        'metadata_sidecar_uploaded',
+        descriptor.assetId,
+        { bytes: sidecar.blob.size }
+    ));
+    return { status: 'uploaded', objectKey: sidecar.objectKey, sha256: sidecar.sha256 };
+}
+
+async function ensureCaptureMetadataDurable(config, descriptor, assertAuthorized = null) {
+    if (!descriptor.captureMetadata) {
+        if (descriptor.requireCaptureMetadata) throw new Error('asset_metadata_required');
+        return null;
+    }
+    return uploadAssetMetadataSidecar(config, descriptor, assertAuthorized);
+}
+
 async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAuthorized = null) {
     const contentType = uploadCandidate.contentType || blob.type || 'application/octet-stream';
     const contentSha256 = await sha256Blob(blob);
@@ -1614,6 +1743,8 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAutho
 
     if (preflight.exists && preflight.verified) {
         if (assertAuthorized) await assertAuthorized();
+        const metadataResult = await ensureCaptureMetadataDurable(config, descriptor, assertAuthorized);
+        if (assertAuthorized) await assertAuthorized();
         cloudSyncState.r2BytesVerifiedExisting += blob.size;
         cloudSyncState.r2DuplicateUploadsSkipped += 1;
         await persistCloudState();
@@ -1624,7 +1755,11 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAutho
             objectKey: descriptor.objectKey,
             assetId: descriptor.assetId,
             contentSha256,
-            bytes: blob.size
+            bytes: blob.size,
+            ...(metadataResult ? {
+                metadataStatus: metadataResult.status,
+                metadataObjectKey: metadataResult.objectKey
+            } : {})
         };
     }
 
@@ -1694,6 +1829,8 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAutho
     cloudSyncState.r2BytesUploadedNew += blob.size;
     await persistCloudState();
     if (assertAuthorized) await assertAuthorized();
+    const metadataResult = await ensureCaptureMetadataDurable(config, descriptor, assertAuthorized);
+    if (assertAuthorized) await assertAuthorized();
     await uploadPromptSidecar(config, descriptor, assertAuthorized);
     if (assertAuthorized) await assertAuthorized();
 
@@ -1703,7 +1840,11 @@ async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAutho
         assetId: descriptor.assetId,
         contentSha256,
         bytes: blob.size,
-        conflictOfObjectKey: descriptor.conflictOfObjectKey
+        conflictOfObjectKey: descriptor.conflictOfObjectKey,
+        ...(metadataResult ? {
+            metadataStatus: metadataResult.status,
+            metadataObjectKey: metadataResult.objectKey
+        } : {})
     };
 }
 
@@ -2222,8 +2363,8 @@ function assertBackgroundInitializationCurrent(context) {
     }
 }
 
-async function initializeBackgroundState(context = null) {
-    const stored = await chrome.storage.local.get(null);
+async function initializeBackgroundState(context = null, storedSnapshot = null) {
+    const stored = storedSnapshot || await chrome.storage.local.get(null);
     assertBackgroundInitializationCurrent(context);
 
     if (stored[PROCESSED_IDS_KEY]) {
@@ -2297,11 +2438,14 @@ async function initializeBackgroundState(context = null) {
 async function runBoundedBackgroundInitialization() {
     const context = {
         active: true,
-        deadlineAt: Date.now() + BACKGROUND_INITIALIZATION_TIMEOUT_MS
+        deadlineAt: Number.POSITIVE_INFINITY
     };
     const timeout = Symbol('background_initialization_timeout');
-    const initialization = initializeBackgroundState(context);
+    let initialization = null;
     try {
+        const stored = await chrome.storage.local.get(null);
+        context.deadlineAt = Date.now() + BACKGROUND_INITIALIZATION_TIMEOUT_MS;
+        initialization = initializeBackgroundState(context, stored);
         const result = await withTimeout(
             initialization.then(() => true),
             BACKGROUND_INITIALIZATION_TIMEOUT_MS,
@@ -2310,6 +2454,7 @@ async function runBoundedBackgroundInitialization() {
         if (result === timeout || Date.now() >= context.deadlineAt) {
             throw createBackgroundInitializationTimeoutError();
         }
+        flushDeferredLocalStorageChanges();
         backgroundStateStatus = { status: 'ready', error: null };
         return true;
     } catch (error) {
@@ -2323,7 +2468,7 @@ async function runBoundedBackgroundInitialization() {
         throw normalized;
     } finally {
         context.active = false;
-        initialization.catch(() => {});
+        initialization?.catch(() => {});
     }
 }
 
@@ -2332,8 +2477,19 @@ backgroundStateReadyPromise.catch((e) => {
     console.error('Background initialization failed:', e);
 });
 
-function ensureBackgroundStateReady() {
-    return backgroundStateReadyPromise || Promise.resolve();
+async function ensureBackgroundStateReady() {
+    const timeout = Symbol('background_readiness_wait_timeout');
+    const result = await withTimeout(
+        backgroundStateReadyPromise || Promise.resolve(true),
+        BACKGROUND_READINESS_WAIT_TIMEOUT_MS,
+        timeout
+    );
+    if (result === timeout) throw createBackgroundInitializationTimeoutError();
+    return result;
+}
+
+function waitForBackgroundInitialization() {
+    return backgroundStateReadyPromise || Promise.resolve(true);
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -2346,15 +2502,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
             }
             await processCloudQueue('alarm');
         })().catch((e) => {
+            if (e?.code === 'background_initialization_timeout') return;
             updateCloudError(sanitizeErrorToken(getUploadFailureStage(e), 'runtime'));
             persistCloudState().catch(() => { });
         });
     }
 });
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local') return;
-
+function applyLocalStorageChanges(changes) {
     if (changes[PROCESSED_IDS_KEY]) {
         processedUUIDs = new Set(normalizeProcessedIds(changes[PROCESSED_IDS_KEY].newValue));
     }
@@ -2381,6 +2536,21 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
 
     scheduleMetadataSyncForChanges(changes);
+}
+
+function flushDeferredLocalStorageChanges() {
+    while (deferredLocalStorageChanges.length > 0) {
+        applyLocalStorageChanges(deferredLocalStorageChanges.shift());
+    }
+}
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (backgroundStateStatus.status !== 'ready') {
+        deferredLocalStorageChanges.push(changes);
+        return;
+    }
+    applyLocalStorageChanges(changes);
 });
 
 function isGrokSavedUrl(value) {
@@ -2458,12 +2628,12 @@ function injectContentScripts(tabId) {
     });
 }
 
-function queueChromeDownload(options, scrapeLease = null) {
+function queueChromeDownload(options, scrapeLease = null, transferContext = null) {
     return new Promise((resolve, reject) => {
         let settled = false;
         let finishing = false;
         const receipt = scrapeLease
-            ? registerPendingScrapeDownload(options.url, scrapeLease)
+            ? registerPendingScrapeDownload(options.url, scrapeLease, transferContext)
             : null;
         const fail = (error) => {
             if (settled) return;
@@ -3176,7 +3346,10 @@ async function commitScrapeRunState(request, sender) {
             claimId: scrapePersistenceWriterClaimId,
             revision,
             lease: copyScrapeLeaseAuthority(requested),
-            mirror: buildAuthorizedRunningMirror(requested, request.values),
+            mirror: buildAuthorizedRunningMirror(requested, {
+                ...(getActiveScrapeRunMirror(requested) || {}),
+                ...request.values
+            }),
             createdAt: Date.now()
         };
         return {
@@ -3295,14 +3468,17 @@ function getDownloadOperationScrapeLease(operation) {
     return normalizeScrapeLease(operation?.scrapeLease);
 }
 
-function registerPendingScrapeDownload(url, lease) {
+function registerPendingScrapeDownload(url, lease, transferContext = null) {
     const key = String(url || '');
     const receipt = {
         url: key,
         lease: copyScrapeLeaseAuthority(lease),
         downloadId: null,
         claimed: false,
-        revoked: false
+        revoked: false,
+        promptText: String(transferContext?.promptText || ''),
+        captureMetadata: transferContext?.captureMetadata || null,
+        requireCaptureMetadata: transferContext?.requireCaptureMetadata === true
     };
     const receipts = pendingScrapeDownloadReceiptsByUrl.get(key) || [];
     receipts.push(receipt);
@@ -3556,22 +3732,31 @@ async function withTimeout(promise, timeoutMs, fallback) {
 async function sendScrapeAbort(lease, stopNavigation = null) {
     if (!lease || lease.status !== 'active') return false;
     const action = lease.kind === 'r2_backup' ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE';
-    try {
-        const message = {
-            action,
-            runToken: lease.token,
-            runEpoch: lease.epoch
-        };
-        if (stopNavigation) message.stopNavigation = stopNavigation;
-        const response = await withTimeout(
-            sendMessageToTab(lease.tabId, message),
-            SCRAPE_ABORT_TIMEOUT_MS,
-            null
-        );
-        return response?.status === 'stopped';
-    } catch {
-        return false;
+    const message = {
+        action,
+        runToken: lease.token,
+        runEpoch: lease.epoch
+    };
+    if (stopNavigation) message.stopNavigation = stopNavigation;
+
+    const deadline = Date.now() + SCRAPE_ABORT_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+        const remaining = deadline - Date.now();
+        try {
+            const response = await withTimeout(
+                sendMessageToTab(lease.tabId, message),
+                Math.min(SCRAPE_ABORT_ATTEMPT_TIMEOUT_MS, remaining),
+                null
+            );
+            if (response?.status === 'stopped') return true;
+        } catch { }
+
+        if (!stopNavigation) return false;
+        const retryDelay = Math.min(SCRAPE_ABORT_RETRY_DELAY_MS, deadline - Date.now());
+        if (retryDelay <= 0) break;
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
     }
+    return false;
 }
 
 async function reserveScrapeStartIntent(kind) {
@@ -3706,6 +3891,50 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false, source
         if (lease) await sendScrapeAbort(lease);
         return { status: 'error', surface: 'unsupported', error: error.message || 'Failed to start.' };
     }
+}
+
+async function getAuthoritativeScrapeStatus() {
+    return enqueueScrapeLeaseOperation(() => {
+        const lease = activeScrapeLease;
+        if (scrapeStopPending) {
+            return {
+                status: 'stopping',
+                isScraping: true,
+                isR2Backup: lease?.kind === 'r2_backup',
+                kind: lease?.kind || null,
+                runToken: lease?.token || null,
+                runEpoch: Number.isInteger(lease?.epoch) ? lease.epoch : null
+            };
+        }
+        if (lease?.status === 'active') {
+            return {
+                status: 'running',
+                isScraping: true,
+                isR2Backup: lease.kind === 'r2_backup',
+                kind: lease.kind,
+                runToken: lease.token,
+                runEpoch: lease.epoch
+            };
+        }
+        if (lease?.status === 'starting' || scrapeStartPending) {
+            return {
+                status: 'starting',
+                isScraping: false,
+                isR2Backup: lease?.kind === 'r2_backup',
+                kind: lease?.kind || null,
+                runToken: lease?.token || null,
+                runEpoch: Number.isInteger(lease?.epoch) ? lease.epoch : null
+            };
+        }
+        return {
+            status: 'idle',
+            isScraping: false,
+            isR2Backup: false,
+            kind: null,
+            runToken: null,
+            runEpoch: null
+        };
+    });
 }
 
 async function stopScrapeRun(requestedKind = null, stopReason = 'stopped', expectedAuthority = null) {
@@ -3871,6 +4100,8 @@ async function uploadDirectMediaData(request, finalPath, acceptanceSource = 'dir
         userId: activeUserId,
         contentType,
         promptText: request.promptText || '',
+        captureMetadata: request.captureMetadata || null,
+        requireCaptureMetadata: true,
         acceptance
     }, blob, assertAuthorized);
     if (assertAuthorized) await assertAuthorized();
@@ -3910,8 +4141,24 @@ async function checkR2BackupPresence(request, sender) {
             }
             const result = await headVerifiedVaultObject(config, item, assertAuthorized);
             await assertAuthorized();
-            if (result.status === 'error') clearR2BackupInventoryCache(lease);
-            return result;
+            if (result.status === 'error') {
+                clearR2BackupInventoryCache(lease);
+                return result;
+            }
+            if (result.status !== 'already_present') return result;
+            const metadataResult = await ensureCaptureMetadataDurable(config, {
+                objectKey: result.objectKey,
+                assetId: result.assetId,
+                captureMetadata: request.captureMetadata || null,
+                requireCaptureMetadata: true,
+                acceptance: request.acceptance || null
+            }, assertAuthorized);
+            await assertAuthorized();
+            return {
+                ...result,
+                metadataStatus: metadataResult.status,
+                metadataObjectKey: metadataResult.objectKey
+            };
         } catch (error) {
             clearR2BackupInventoryCache(lease);
             if (isScrapeAuthorityRevokedError(error)) throw error;
@@ -3957,6 +4204,13 @@ function handleRuntimeMessage(request, sender, sendResponse) {
             const lease = await getAuthorizedScrapeTransferLease(request, sender);
             return lease ? getScrapeDurabilitySnapshot(lease) : { status: 'ignored' };
         })().then(sendResponse).catch(() => sendResponse({ status: 'ignored' }));
+        return true;
+    }
+
+    if (request.action === 'GET_SCRAPE_STATUS') {
+        getAuthoritativeScrapeStatus().then(sendResponse).catch(() => {
+            sendResponse({ status: 'error', error: 'scrape_status_unavailable' });
+        });
         return true;
     }
 
@@ -4074,7 +4328,9 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                 request.acceptance || null,
                 {
                     scrapeLease: lease,
-                    assertAuthorized
+                    assertAuthorized,
+                    captureMetadata: request.captureMetadata || null,
+                    requireCaptureMetadata: true
                 }
             );
             await assertAuthorized();
@@ -4206,7 +4462,15 @@ function handleRuntimeMessage(request, sender, sendResponse) {
             if (allowLocalDownload) {
                 // This triggers onDeterminingFilename.
                 await assertAuthorized();
-                await queueChromeDownload({ url: request.url, conflictAction: 'overwrite' }, lease);
+                await queueChromeDownload(
+                    { url: request.url, conflictAction: 'overwrite' },
+                    lease,
+                    {
+                        promptText: request.promptText || '',
+                        captureMetadata: request.captureMetadata || null,
+                        requireCaptureMetadata: CloudSync.isCloudEnabled(config)
+                    }
+                );
                 await assertAuthorized();
                 return { status: 'queued' };
             }
@@ -4408,6 +4672,7 @@ const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
     'PROCESSED_IDS_RESET',
     'SCRAPE_RUN_STATE_WRITE',
     'GET_ACTIVE_SCRAPE_RUN_STATE',
+    'GET_SCRAPE_STATUS',
     'SCRAPE_PROCESSED_IDS_ADD',
     'GET_SCRAPE_DURABILITY',
     'START_SCRAPE',
@@ -4418,6 +4683,7 @@ const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
     'R2_BACKUP_COMPLETE',
     'SCRAPE_COMPLETE',
     'DOWNLOAD_MEDIA',
+    'CLOUD_GET_STATUS',
     'CLOUD_TEST_CONNECTION',
     'CLOUD_RETRY_UNSYNCED',
     'CLOUD_RUN_BACKFILL',
@@ -4454,64 +4720,72 @@ async function getActiveLeaseForTabEvent(tabId, tab = {}) {
 
 // --- NEW TAB INTERCEPTOR ---
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-    await ensureBackgroundStateReady();
-    const lease = await getActiveLeaseForTabEvent(tabId, tab);
-    if (!lease) return;
+    try {
+        await waitForBackgroundInitialization();
+        const lease = await getActiveLeaseForTabEvent(tabId, tab);
+        if (!lease) return;
 
-    if (changeInfo.url) {
-        const url = changeInfo.url;
-        if (url.includes('imagine-public.x.ai') || url.match(/\.(png|jpg|jpeg|mp4|webp)(\?|$)/i)) {
-            return trackScrapeTransferTask(lease, async (signal) => {
-                const assertAuthorized = createScrapeTransferAuthorityGuard(lease, signal);
-                try {
-                    console.log('Background:', formatRedactedMediaLog('media_tab_intercepted', url));
+        if (changeInfo.url) {
+            const url = changeInfo.url;
+            if (url.includes('imagine-public.x.ai') || url.match(/\.(png|jpg|jpeg|mp4|webp)(\?|$)/i)) {
+                await trackScrapeTransferTask(lease, async (signal) => {
+                    const assertAuthorized = createScrapeTransferAuthorityGuard(lease, signal);
+                    try {
+                        console.log('Background:', formatRedactedMediaLog('media_tab_intercepted', url));
 
-                    const finalPath = await generateFilename(url);
-                    await assertAuthorized();
-
-                    if (finalPath) {
-                        const config = await getCloudConfig();
+                        const finalPath = await generateFilename(url);
                         await assertAuthorized();
-                        const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
 
-                        if (allowLocalDownload) {
+                        if (finalPath) {
+                            const config = await getCloudConfig();
                             await assertAuthorized();
-                            await queueChromeDownload({
-                                url,
-                                filename: finalPath,
-                                conflictAction: 'overwrite'
-                            }, lease);
+                            const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
+
+                            if (allowLocalDownload) {
+                                await assertAuthorized();
+                                await queueChromeDownload({
+                                    url,
+                                    filename: finalPath,
+                                    conflictAction: 'overwrite'
+                                }, lease);
+                                await assertAuthorized();
+                            } else {
+                                console.log('Cloud-only mode active: local download skipped.');
+                            }
+
+                            await enqueueCloudMediaUpload(url, finalPath, '', null, {
+                                scrapeLease: lease,
+                                assertAuthorized
+                            });
                             await assertAuthorized();
+                            await chrome.tabs.remove(tabId);
                         } else {
-                            console.log('Cloud-only mode active: local download skipped.');
+                            await assertAuthorized();
+                            console.log('Download skipped (Duplicate). Closing tab.');
+                            await chrome.tabs.remove(tabId);
                         }
-
-                        await enqueueCloudMediaUpload(url, finalPath, '', null, {
-                            scrapeLease: lease,
-                            assertAuthorized
-                        });
-                        await assertAuthorized();
-                        chrome.tabs.remove(tabId);
-                    } else {
-                        await assertAuthorized();
-                        console.log('Download skipped (Duplicate). Closing tab.');
-                        chrome.tabs.remove(tabId);
+                    } catch (error) {
+                        if (isScrapeAuthorityRevokedError(error)) return;
+                        updateCloudError(formatRedactedMediaError(error, url, 'tab_queue_failed'));
+                        await persistCloudState().catch(() => {});
                     }
-                } catch (error) {
-                    if (isScrapeAuthorityRevokedError(error)) return;
-                    updateCloudError(formatRedactedMediaError(error, url, 'tab_queue_failed'));
-                    await persistCloudState().catch(() => {});
-                }
-            }, 'media_intercept');
+                }, 'media_intercept');
+                return;
+            }
         }
+    } catch {
+        return;
     }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-    getActiveLeaseForTabEvent(tabId).then((lease) => {
-        if (!lease || lease.tabId !== tabId) return;
-        return stopScrapeRun(lease.kind, 'owner_tab_closed');
-    }).catch(() => {});
+    return waitForBackgroundInitialization()
+        .then(() => getActiveLeaseForTabEvent(tabId))
+        .then((lease) => {
+            if (!lease || lease.tabId !== tabId) return;
+            return stopScrapeRun(lease.kind, 'owner_tab_closed');
+        })
+        .catch(() => {});
 });
 
 function deserializeDownloadOperations(value) {
@@ -5762,10 +6036,12 @@ async function ensurePublicDownloadQueued(operation, downloadItem, assertAuthori
                 cleanupDownloadId: operation.downloadId
             });
         }
-        await enqueueCloudMediaUpload(sourceUrl, operation.finalPath, '', null, {
+        await enqueueCloudMediaUpload(sourceUrl, operation.finalPath, operation.promptText || '', null, {
             cleanupDownloadId: operation.downloadId,
             scrapeLease: getDownloadOperationScrapeLease(operation),
-            assertAuthorized: authorityGuard
+            assertAuthorized: authorityGuard,
+            captureMetadata: operation.captureMetadata || null,
+            requireCaptureMetadata: operation.requireCaptureMetadata === true
         });
         if (authorityGuard) await authorityGuard();
     } catch (error) {
@@ -5822,6 +6098,9 @@ async function uploadAuthenticatedDownload(operation, downloadItem, assertAuthor
             finalPath: operation.finalPath,
             userId: userInfo.activeGrokUserId || 'Shared_Account',
             contentType: fileData.type,
+            promptText: operation.promptText || '',
+            captureMetadata: operation.captureMetadata || null,
+            requireCaptureMetadata: operation.requireCaptureMetadata === true,
             acceptance: buildAcceptanceContextFromCloudConfig(config, 'download-upload')
         }, blob, authorityGuard);
         if (authorityGuard) await authorityGuard();
@@ -6043,6 +6322,9 @@ async function handleDownloadFilename(item, suggestOnce) {
             attempts: 0,
             lastError: null,
             createdAt: Date.now(),
+            promptText: scrapeReceipt?.promptText || '',
+            captureMetadata: scrapeReceipt?.captureMetadata || null,
+            requireCaptureMetadata: scrapeReceipt?.requireCaptureMetadata === true,
             ...(scrapeLease ? { scrapeLease: copyScrapeLeaseAuthority(scrapeLease) } : {})
         };
 
@@ -6087,13 +6369,16 @@ function handleDownloadFilenameEvent(item, suggest) {
     };
     ensureBackgroundStateReady().then(() => handleDownloadFilename(item, suggestOnce)).catch(() => {
         suggestOnce();
-        cancelDownload(item.id);
     });
     return true;
 }
 
 async function handleDownloadChanged(delta) {
-    await ensureBackgroundStateReady();
+    try {
+        await waitForBackgroundInitialization();
+    } catch {
+        return;
+    }
     if (revokedScrapeDownloadIds.has(delta.id)) {
         revokedScrapeDownloadIds.delete(delta.id);
         await removeDownloadOperation(delta.id).catch(() => {});
@@ -6169,6 +6454,14 @@ async function handleDownloadChanged(delta) {
     else await operation();
 }
 
+function handleDownloadChangedEvent(delta) {
+    return handleDownloadChanged(delta).catch(async (error) => {
+        if (isScrapeAuthorityRevokedError(error)) return;
+        updateCloudError(formatRedactedMediaError(error, null, 'download_event_failed'));
+        await persistCloudState().catch(() => {});
+    });
+}
+
 if (typeof module !== 'undefined') {
     module.exports = {
         applyBackupProcessedIdPersistence,
@@ -6225,6 +6518,8 @@ if (typeof module !== 'undefined') {
         setProcessedUUIDsForTest: (ids) => { processedUUIDs = new Set(ids); },
         testCloudConnection,
         updateDownloadOperation,
+        uploadAssetMetadataSidecar,
+        uploadBlobWithR2Dedupe,
         uploadMetadataQueueItem,
         verifyR2Object
     };
@@ -6234,4 +6529,4 @@ if (typeof module !== 'undefined') {
 chrome.downloads.onDeterminingFilename.addListener(handleDownloadFilenameEvent);
 
 // --- POST-DOWNLOAD R2 UPLOAD (for auth URLs like assets.grok.com) ---
-chrome.downloads.onChanged.addListener(handleDownloadChanged);
+chrome.downloads.onChanged.addListener(handleDownloadChangedEvent);

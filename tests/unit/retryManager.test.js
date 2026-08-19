@@ -549,6 +549,60 @@ describe('VideoRetryManager', () => {
         expect(detailSpy).not.toHaveBeenCalled();
     });
 
+    test('results card opening fails closed when the trusted native click is unavailable', async () => {
+        const sourceUrl = 'https://assets.grok.com/users/example/generated/acdcacdc-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        window.history.pushState({}, '', '/imagine');
+        const { image } = createSavedBatchCard(sourceUrl);
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const token = 'results-native-open-failed';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        const directClickSpy = jest.spyOn(image, 'click');
+        nativeControlClickSpy.mockResolvedValue(false);
+        const editorSpy = jest.spyOn(retryManager, 'waitForPromptedBatchEditorReady');
+        const stopSpy = jest.spyOn(retryManager, '_stopPromptedResultsItem').mockResolvedValue(false);
+
+        await retryManager._processPromptedResultsItem(item, token);
+
+        expect(nativeControlClickSpy).toHaveBeenCalledWith(
+            image,
+            token,
+            'open prompted batch result',
+            expect.any(Function)
+        );
+        expect(directClickSpy).not.toHaveBeenCalled();
+        expect(editorSpy).not.toHaveBeenCalled();
+        expect(stopSpy).toHaveBeenCalledWith(
+            'Prompted Batch [results]: Could not open result card',
+            expect.any(Object),
+            token
+        );
+    });
+
+    test('results failure preserves its cause when returning to the gallery also fails', async () => {
+        window.history.pushState({}, '', '/imagine/post/result-card');
+        const token = 'results-preserve-original-failure';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager._returnToPromptedBatchResults = jest.fn().mockResolvedValue('failed');
+
+        await retryManager._stopPromptedResultsItem(
+            'Prompted Batch [results]: Video submit button not ready',
+            { sourceIdentity: 'source-id' },
+            token
+        );
+
+        const expected = 'Prompted Batch [results]: Video submit button not ready. '
+            + 'Also could not return to the original results. Use Back to recover the gallery.';
+        expect(retryManager.batchFailureMessage).toBe(expected);
+        expect(mockOverlay.setStatus).toHaveBeenLastCalledWith(expected, 'warning');
+    });
+
     test('prompted results gallery submits through detail and restores the same results grid', async () => {
         const sourceUrl = 'https://assets.grok.com/users/example/generated/adadadad-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
         let submittedPrompt = null;
@@ -909,6 +963,400 @@ describe('VideoRetryManager', () => {
             token
         );
         expect(retryManager.goalCount).toBe(1);
+    });
+
+    test('results batch advances after a verified submit click when Grok leaves the detail UI unsettled', async () => {
+        window.history.pushState({}, '', '/imagine');
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/d3d3d3d3-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/d4d4d4d4-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const token = 'results-submit-unsettled';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        retryManager.batchProcessedSrcs = new Set();
+        retryManager.waitForPromptedBatchEditorReady = jest.fn().mockResolvedValue({
+            status: 'ready',
+            makeVideoTrigger: document.createElement('button'),
+            agentBinding: null
+        });
+        retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(true);
+        retryManager._capturePromptedVideoSubmissionReceipt = jest.fn().mockReturnValue({
+            composerRoot: document.createElement('div')
+        });
+        retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmissionAccepted = jest.fn().mockResolvedValue(false);
+        retryManager._returnToPromptedBatchResults = jest.fn().mockResolvedValue('returned');
+
+        await expect(retryManager._processPromptedResultsItem(item, token)).resolves.toBe(true);
+
+        expect(retryManager.batchProcessedSrcs).toContain(
+            'd3d3d3d3-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        );
+        expect(retryManager.goalCount).toBe(1);
+    });
+
+    test('results batch waits for Grok capacity and resumes when the scoped submit re-enables', async () => {
+        const token = 'results-capacity-resumes';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        const { composer, input, submit } = mountFocusedGrok2VideoComposer({
+            submitDisabled: true
+        });
+        input.textContent = retryManager.batchPrompt;
+        retryManager.promptedVideoComposerRoot = composer;
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(null);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            submit.disabled = false;
+        });
+
+        await expect(retryManager._waitForPromptedResultsSubmitButton(token)).resolves.toBe(submit);
+
+        expect(mockOverlay.setStatus).toHaveBeenCalledWith(
+            'Prompted Batch [results]: Waiting for Grok capacity...',
+            'neutral'
+        );
+        expect(retryManager.sleep).toHaveBeenCalledTimes(1);
+    });
+
+    test('results capacity wait fails closed if the scoped prompt changes', async () => {
+        const token = 'results-capacity-prompt-changed';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        const { composer, input } = mountFocusedGrok2VideoComposer({
+            submitDisabled: true
+        });
+        input.textContent = retryManager.batchPrompt;
+        retryManager.promptedVideoComposerRoot = composer;
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(null);
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            input.textContent = 'different prompt';
+        });
+
+        await expect(retryManager._waitForPromptedResultsSubmitButton(token)).resolves.toBeNull();
+
+        expect(retryManager.sleep).toHaveBeenCalledTimes(1);
+    });
+
+    test('results batch advances without waiting for a source replacement after submit', async () => {
+        window.history.pushState({}, '', '/imagine');
+        const sourcePostId = 'e1e1e1e1-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const nextPostId = 'e2e2e2e2-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const afterPostId = 'e3e3e3e3-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const generatedPostId = 'e4e4e4e4-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const source = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/e1e1e1e1-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const next = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/e2e2e2e2-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const after = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/e3e3e3e3-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const sourceLink = document.createElement('a');
+        sourceLink.href = `/imagine/post/${sourcePostId}`;
+        sourceLink.scrollIntoView = jest.fn();
+        source.card.insertBefore(sourceLink, source.image);
+        sourceLink.appendChild(source.image);
+        const nextLink = document.createElement('a');
+        nextLink.href = `/imagine/post/${nextPostId}`;
+        next.card.insertBefore(nextLink, next.image);
+        nextLink.appendChild(next.image);
+        const afterLink = document.createElement('a');
+        afterLink.href = `/imagine/post/${afterPostId}`;
+        after.card.insertBefore(afterLink, after.image);
+        afterLink.appendChild(after.image);
+        makeVisible(source.card, { top: 0, bottom: 40 });
+        makeVisible(next.card, { top: 100, bottom: 140 });
+        makeVisible(after.card, { top: 200, bottom: 240 });
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const token = 'results-submit-source-replaced';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        retryManager.batchProcessedSrcs = new Set();
+        retryManager.waitForPromptedBatchEditorReady = jest.fn().mockResolvedValue({
+            status: 'ready',
+            makeVideoTrigger: document.createElement('button'),
+            agentBinding: null
+        });
+        retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(true);
+        retryManager._capturePromptedVideoSubmissionReceipt = jest.fn().mockReturnValue({
+            composerRoot: document.createElement('div')
+        });
+        retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmissionAccepted = jest.fn().mockResolvedValue(false);
+        retryManager._returnToPromptedBatchResults = jest.fn().mockResolvedValue('returned');
+        let replacementPolls = 0;
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            replacementPolls++;
+            if (replacementPolls === 400) {
+                sourceLink.href = `/imagine/post/${generatedPostId}?conversation=conversation-1`;
+                source.makeVideo.remove();
+                next.card.getBoundingClientRect.mockReturnValue({
+                    x: 0, y: 200, top: 200, left: 0, right: 40, bottom: 240, width: 40, height: 40
+                });
+                after.card.getBoundingClientRect.mockReturnValue({
+                    x: 0, y: 100, top: 100, left: 0, right: 40, bottom: 140, width: 40, height: 40
+                });
+            }
+        });
+
+        await expect(retryManager._processPromptedResultsItem(item, token)).resolves.toBe(true);
+
+        expect(retryManager.batchProcessedSrcs).toContain(
+            sourcePostId
+        );
+        expect(retryManager.goalCount).toBe(1);
+        expect(replacementPolls).toBe(0);
+        expect(mockOverlay.setStatus).not.toHaveBeenCalledWith(
+            'Prompted Batch [results]: Video submission was not accepted',
+            'warning'
+        );
+    });
+
+    test('results batch advances without waiting for a generated source video after submit', async () => {
+        window.history.pushState({}, '', '/imagine');
+        const sourcePostId = 'a1a1a1a1-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const nextPostId = 'a2a2a2a2-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const afterPostId = 'a3a3a3a3-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const generatedVideoId = 'a4a4a4a4-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const source = createSavedBatchCard(
+            `https://assets.grok.com/users/example/generated/${sourcePostId}/image.jpg`
+        );
+        const next = createSavedBatchCard(
+            `https://assets.grok.com/users/example/generated/${nextPostId}/image.jpg`
+        );
+        const after = createSavedBatchCard(
+            `https://assets.grok.com/users/example/generated/${afterPostId}/image.jpg`
+        );
+        const sourceLink = document.createElement('a');
+        sourceLink.href = `/imagine/post/${sourcePostId}`;
+        sourceLink.scrollIntoView = jest.fn();
+        source.card.insertBefore(sourceLink, source.image);
+        sourceLink.appendChild(source.image);
+        const nextLink = document.createElement('a');
+        nextLink.href = `/imagine/post/${nextPostId}`;
+        next.card.insertBefore(nextLink, next.image);
+        nextLink.appendChild(next.image);
+        const afterLink = document.createElement('a');
+        afterLink.href = `/imagine/post/${afterPostId}`;
+        after.card.insertBefore(afterLink, after.image);
+        afterLink.appendChild(after.image);
+        makeVisible(source.card, { top: 0, bottom: 40 });
+        makeVisible(next.card, { top: 100, bottom: 140 });
+        makeVisible(after.card, { top: 200, bottom: 240 });
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const token = 'results-submit-in-place-video';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        retryManager.batchProcessedSrcs = new Set();
+        retryManager.waitForPromptedBatchEditorReady = jest.fn().mockResolvedValue({
+            status: 'ready',
+            makeVideoTrigger: document.createElement('button'),
+            agentBinding: null
+        });
+        retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(true);
+        retryManager._capturePromptedVideoSubmissionReceipt = jest.fn().mockReturnValue({
+            composerRoot: document.createElement('div')
+        });
+        retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmissionAccepted = jest.fn().mockResolvedValue(false);
+        retryManager._returnToPromptedBatchResults = jest.fn().mockResolvedValue('returned');
+        let videoPolls = 0;
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            videoPolls++;
+            if (videoPolls === 80) {
+                source.makeVideo.remove();
+                const video = document.createElement('video');
+                video.src = `https://assets.grok.com/users/example/generated/${generatedVideoId}/generated_video.mp4`;
+                Object.defineProperty(video, 'readyState', { configurable: true, value: 4 });
+                Object.defineProperty(video, 'duration', { configurable: true, value: 6 });
+                Object.defineProperty(video, 'videoWidth', { configurable: true, value: 400 });
+                Object.defineProperty(video, 'videoHeight', { configurable: true, value: 736 });
+                source.card.appendChild(video);
+                next.card.getBoundingClientRect.mockReturnValue({
+                    x: 0, y: 200, top: 200, left: 0, right: 40, bottom: 240, width: 40, height: 40
+                });
+                after.card.getBoundingClientRect.mockReturnValue({
+                    x: 0, y: 100, top: 100, left: 0, right: 40, bottom: 140, width: 40, height: 40
+                });
+            }
+        });
+
+        await expect(retryManager._processPromptedResultsItem(item, token)).resolves.toBe(true);
+
+        expect(sourceLink.href).toBe(`http://localhost/imagine/post/${sourcePostId}`);
+        expect(retryManager.batchProcessedSrcs).toContain(sourcePostId);
+        expect(retryManager.goalCount).toBe(1);
+        expect(videoPolls).toBe(0);
+    });
+
+    test('results receipt keeps its source identity when neighboring cards change', () => {
+        window.history.pushState({}, '', '/imagine');
+        const source = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/c1c1c1c1-1111-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const next = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/c2c2c2c2-2222-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const after = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/c3c3c3c3-3333-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const links = [source, next, after].map(({ card, image }, index) => {
+            const link = document.createElement('a');
+            link.href = `/imagine/post/c${index + 1}c${index + 1}c${index + 1}c${index + 1}-${index + 1}${index + 1}${index + 1}${index + 1}-4ccc-8ddd-eeeeeeeeeeee`;
+            card.insertBefore(link, image);
+            link.appendChild(image);
+            makeVisible(card, { top: index * 100, bottom: (index * 100) + 40 });
+            return link;
+        });
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const receipt = retryManager._captureResultsGalleryReceipt(item);
+
+        links[0].href = '/imagine/post/d1d1d1d1-1111-4ccc-8ddd-eeeeeeeeeeee';
+        source.makeVideo.remove();
+        const generatedVideo = document.createElement('video');
+        generatedVideo.src = 'https://assets.grok.com/users/example/generated/d1d1d1d1-1111-4ccc-8ddd-eeeeeeeeeeee/generated_video.mp4';
+        source.card.appendChild(generatedVideo);
+        links[1].href = '/imagine/post/d2d2d2d2-2222-4ccc-8ddd-eeeeeeeeeeee';
+
+        expect(receipt.sourceIdentity).toBe(
+            'c1c1c1c1-1111-4ccc-8ddd-eeeeeeeeeeee'
+        );
+    });
+
+    test('results batch does not wait for a pre-existing source-card video to become ready', async () => {
+        window.history.pushState({}, '', '/imagine');
+        const sourcePostId = 'b1b1b1b1-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const source = createSavedBatchCard(
+            `https://assets.grok.com/users/example/generated/${sourcePostId}/image.jpg`
+        );
+        const next = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/b2b2b2b2-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const after = createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/b3b3b3b3-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        for (const { card, image } of [source, next, after]) {
+            const sourceId = retryManager._getCardSourceId(card);
+            const link = document.createElement('a');
+            link.href = `/imagine/post/${sourceId}`;
+            link.scrollIntoView = jest.fn();
+            card.insertBefore(link, image);
+            link.appendChild(image);
+        }
+        const existingVideo = document.createElement('video');
+        existingVideo.src = 'https://assets.grok.com/users/example/generated/b4b4b4b4-bbbb-4ccc-8ddd-eeeeeeeeeeee/generated_video.mp4';
+        Object.defineProperty(existingVideo, 'readyState', { configurable: true, value: 0 });
+        Object.defineProperty(existingVideo, 'duration', { configurable: true, value: 0 });
+        Object.defineProperty(existingVideo, 'videoWidth', { configurable: true, value: 0 });
+        Object.defineProperty(existingVideo, 'videoHeight', { configurable: true, value: 0 });
+        source.card.appendChild(existingVideo);
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const token = 'results-submit-existing-video';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        retryManager.batchProcessedSrcs = new Set();
+        retryManager.waitForPromptedBatchEditorReady = jest.fn().mockResolvedValue({
+            status: 'ready',
+            makeVideoTrigger: document.createElement('button'),
+            agentBinding: null
+        });
+        retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(true);
+        retryManager._capturePromptedVideoSubmissionReceipt = jest.fn().mockReturnValue({
+            composerRoot: document.createElement('div')
+        });
+        retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmissionAccepted = jest.fn().mockResolvedValue(false);
+        retryManager._returnToPromptedBatchResults = jest.fn().mockResolvedValue('returned');
+        retryManager.sleep = jest.fn().mockImplementation(async () => {
+            source.makeVideo.remove();
+            Object.defineProperty(existingVideo, 'readyState', { configurable: true, value: 4 });
+            Object.defineProperty(existingVideo, 'duration', { configurable: true, value: 6 });
+            Object.defineProperty(existingVideo, 'videoWidth', { configurable: true, value: 400 });
+            Object.defineProperty(existingVideo, 'videoHeight', { configurable: true, value: 736 });
+        });
+
+        await expect(retryManager._processPromptedResultsItem(item, token)).resolves.toBe(true);
+
+        expect(retryManager.batchProcessedSrcs).toContain(sourcePostId);
+        expect(retryManager.goalCount).toBe(1);
+    });
+
+    test('results batch advances after a verified quiet submit without waiting for replacement', async () => {
+        window.history.pushState({}, '', '/imagine');
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/f1f1f1f1-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/f2f2f2f2-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        createSavedBatchCard(
+            'https://assets.grok.com/users/example/generated/f3f3f3f3-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
+        );
+        const item = retryManager._getQualifiedResultsGalleryItems()[0];
+        const token = 'results-submit-source-unchanged';
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.batchContext = 'results_gallery';
+        retryManager.batchPrompt = 'slow camera move';
+        retryManager.batchProcessedSrcs = new Set();
+        retryManager.waitForPromptedBatchEditorReady = jest.fn().mockResolvedValue({
+            status: 'ready',
+            makeVideoTrigger: document.createElement('button'),
+            agentBinding: null
+        });
+        retryManager.selectMakeVideoMode = jest.fn().mockResolvedValue(true);
+        retryManager.injectPromptedVideoText = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmitButton = jest.fn().mockResolvedValue(true);
+        retryManager._capturePromptedVideoSubmissionReceipt = jest.fn().mockReturnValue({
+            composerRoot: document.createElement('div')
+        });
+        retryManager.clickPromptedVideoSubmitButton = jest.fn().mockReturnValue(true);
+        retryManager._waitForPromptedVideoSubmissionAccepted = jest.fn().mockResolvedValue(false);
+        retryManager._returnToPromptedBatchResults = jest.fn().mockResolvedValue('returned');
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager._processPromptedResultsItem(item, token)).resolves.toBe(true);
+
+        expect(retryManager.batchProcessedSrcs).toContain(
+            'f1f1f1f1-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        );
+        expect(retryManager.goalCount).toBe(1);
+        expect(mockOverlay.setStatus).not.toHaveBeenCalledWith(
+            'Prompted Batch [results]: Video submission was not accepted',
+            'warning'
+        );
     });
 
     test('Stop during results-card targeting prevents navigation and submission', async () => {
