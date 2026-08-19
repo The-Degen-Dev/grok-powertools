@@ -13,9 +13,9 @@
     "@aws-sdk/s3-request-presigner": "^3.1064.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260610.1",
+    "@cloudflare/workers-types": "^5.20260819.1",
     "@types/node": "^24.13.1",
     "typescript": "^5.9.3",
-    "wrangler": "^4.99.0"
+    "wrangler": "^4.124.0"
   }
 }
