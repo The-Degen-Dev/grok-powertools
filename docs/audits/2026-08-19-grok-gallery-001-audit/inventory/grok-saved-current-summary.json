@@ -1,0 +1,7 @@
+{
+  "generatedAt": "2026-08-19T15:22:28Z",
+  "status": "not_run",
+  "itemCount": null,
+  "reason": "A full current Grok Saved enumeration was outside the approved production R2 canary scope.",
+  "proofBoundary": "The approved canary proves one selected Saved asset can transfer to R2 and return to Saved. It does not prove full Saved-to-R2 completeness."
+}

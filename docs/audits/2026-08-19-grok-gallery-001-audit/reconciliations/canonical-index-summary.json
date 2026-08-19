@@ -1,0 +1,79 @@
+{
+  "generatedAt": "2026-08-19T16:55:16.323Z",
+  "snapshot": {
+    "snapshotId": "snapshot_4100f2c3c2d3837a",
+    "generatedAt": "2026-06-29T00:47:20.170Z",
+    "projectedAt": "2026-06-29T08:34:27.391Z",
+    "schemaVersion": "d1-canonical-projection/v1",
+    "logicalAssetCount": 8080,
+    "storageObjectCount": 15981,
+    "promptRefCount": 13914,
+    "gapRecordCount": 7696,
+    "classificationCounts": {
+      "orphan_candidate": 466,
+      "needs_human_review": 5553,
+      "date_folder_mapped": 5541,
+      "canonical": 4419,
+      "alternate_duplicate": 2
+    },
+    "gapCounts": {
+      "d1MissingCanonicalMedia": 1441,
+      "workerMissingCanonicalMedia": 1441,
+      "metadataLinkedMedia": 2090,
+      "metadataUnlinkedMedia": 13891,
+      "grokApiCoveredMedia": 6541,
+      "grokApiPromptLinkedMedia": 4707,
+      "grokMediaPostLinkedMedia": 6541,
+      "grokMediaPostPromptLinkedMedia": 3614,
+      "grokMediaPostUnlinkedMedia": 9440,
+      "grokApiUnlinkedMedia": 9440,
+      "needsHumanReview": 5553,
+      "orphanCandidates": 466,
+      "grokSavedInventoryBlocked": 0,
+      "grokSavedInventoryPartial": 0,
+      "grokSavedIdentityLimited": 0
+    }
+  },
+  "projectionRows": {
+    "assets": 8080,
+    "storageObjects": 15981,
+    "promptRefs": 13914,
+    "gaps": 7696
+  },
+  "r2Coverage": {
+    "projectedStorageMissingFromCurrentR2": 0,
+    "currentMediaNotInProjection": 515,
+    "currentMediaNotInProjectionByPathClass": {
+      "canonical-media": 515
+    }
+  },
+  "promptRefs": {
+    "bySource": {
+      "grok_conversation_response": 6606,
+      "grok_media_post": 7308
+    },
+    "withPromptHash": 13914,
+    "withOriginalPromptHash": 7308,
+    "linkedToAssets": 13914
+  },
+  "gaps": {
+    "byType": {
+      "grok_conversation_response_gap": 1463,
+      "grok_media_post_response_gap": 214,
+      "needs_human_review": 5553,
+      "orphan_candidate": 466
+    },
+    "byStatus": {
+      "404": 1676,
+      "500": 1,
+      "review_required": 6019
+    },
+    "bySeverity": {
+      "warning": 1677,
+      "blocking": 6019
+    },
+    "requiringHumanReview": 6019,
+    "requiringLiveGrok": 1677,
+    "requiringCloudWrite": 0
+  }
+}

@@ -32,8 +32,35 @@ AGENT_STATE.md
 AGENT_HANDOFF.md
 .agent/delegate-reports/
 .gstack/
+.wrangler/
 
 # Acceptance test artifacts
 cloud/wrangler.acceptance.generated.toml
 cloud/.tmp-test/
 acceptance/runs/
+
+# Audit-private raw artifacts
+docs/audits/**/private/
+docs/audits/2026-08-13-grok-gallery-001-audit/logs/
+docs/audits/2026-08-13-grok-gallery-001-audit/inventory/*
+!docs/audits/2026-08-13-grok-gallery-001-audit/inventory/r2-objects-summary.json
+!docs/audits/2026-08-13-grok-gallery-001-audit/inventory/grok-saved-current-summary.json
+!docs/audits/2026-08-13-grok-gallery-001-audit/inventory/media-sample-validation.json
+!docs/audits/2026-08-13-grok-gallery-001-audit/inventory/metadata-contract-summary.json
+!docs/audits/2026-08-13-grok-gallery-001-audit/inventory/prompt-sidecar-summary.json
+docs/audits/2026-08-13-grok-gallery-001-audit/reconciliations/*
+!docs/audits/2026-08-13-grok-gallery-001-audit/reconciliations/canonical-index-summary.json
+!docs/audits/2026-08-13-grok-gallery-001-audit/reconciliations/duplicate-classification-summary.json
+!docs/audits/2026-08-13-grok-gallery-001-audit/reconciliations/r2-integrity-summary.json
+docs/audits/2026-08-19-grok-gallery-001-audit/logs/
+docs/audits/2026-08-19-grok-gallery-001-audit/inventory/*
+!docs/audits/2026-08-19-grok-gallery-001-audit/inventory/r2-objects-summary.json
+!docs/audits/2026-08-19-grok-gallery-001-audit/inventory/grok-saved-current-summary.json
+!docs/audits/2026-08-19-grok-gallery-001-audit/inventory/media-sample-validation.json
+!docs/audits/2026-08-19-grok-gallery-001-audit/inventory/metadata-contract-summary.json
+!docs/audits/2026-08-19-grok-gallery-001-audit/inventory/asset-metadata-v2-summary.json
+!docs/audits/2026-08-19-grok-gallery-001-audit/inventory/prompt-sidecar-summary.json
+docs/audits/2026-08-19-grok-gallery-001-audit/reconciliations/*
+!docs/audits/2026-08-19-grok-gallery-001-audit/reconciliations/canonical-index-summary.json
+!docs/audits/2026-08-19-grok-gallery-001-audit/reconciliations/duplicate-classification-summary.json
+!docs/audits/2026-08-19-grok-gallery-001-audit/reconciliations/r2-integrity-summary.json

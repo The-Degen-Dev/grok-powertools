@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2026-08-19T16:55:16.288Z",
+  "total": 2,
+  "parseFailures": 0,
+  "valid": 1,
+  "exactParentLinks": 2,
+  "missingMediaTargets": 0,
+  "withAuthoritativePrompt": 1,
+  "withConversationId": 2,
+  "withRawAssetMetadata": 2,
+  "issueCounts": {
+    "prompt_missing_or_empty": 1
+  }
+}

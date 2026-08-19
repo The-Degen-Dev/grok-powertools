@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-08-17T02:44:08.077Z",
+  "exactByteGroups": 5116,
+  "objectsInExactByteGroups": 12073,
+  "excessExactCopies": 6957,
+  "excessExactBytes": 21227556071,
+  "exactClassificationCounts": {
+    "legacy_repeated_bytes": 2926,
+    "legacy_canonical_alias": 676,
+    "canonical_same_bytes_distinct_ids": 1514
+  },
+  "exactClassificationBytes": {
+    "legacy_repeated_bytes": 15088525479,
+    "legacy_canonical_alias": 2368513146,
+    "canonical_same_bytes_distinct_ids": 3770517446
+  },
+  "sizeMismatchGroups": 0,
+  "logicalIdentityGroups": 2929,
+  "logicalIdentityClassificationCounts": {
+    "logical_identity_exact_aliases": 2927,
+    "logical_identity_multiple_payloads": 2
+  },
+  "promptReuseGroups": 113,
+  "promptReuseClassificationCounts": {
+    "prompt_reuse_or_generation_variants_not_duplicates": 95,
+    "same_prompt_same_bytes": 18
+  },
+  "deletionAuthorized": false
+}

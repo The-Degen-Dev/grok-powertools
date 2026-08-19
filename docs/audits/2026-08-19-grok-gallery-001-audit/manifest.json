@@ -1,0 +1,450 @@
+{
+  "auditName": "grok-gallery-001 correctness and metadata audit",
+  "auditPlanDate": "2026-08-19",
+  "executionStartedAt": "2026-08-19T03:40:39.429Z",
+  "executionCompletedAt": "2026-08-19T17:04:09.765Z",
+  "status": "complete_with_gaps",
+  "productionTarget": {
+    "bucket": "grok-gallery-001",
+    "prefix": "grok-powertools/v1",
+    "d1Database": "grok-powertools-db",
+    "worker": "grok-r2-backup-worker"
+  },
+  "sourceSnapshot": {
+    "listingFingerprintSha256": "ac9aab1368ba4dced4f91102b7e1c6a208019f01fe4f1e0a1d3c01e92417d311",
+    "stableListingPasses": 2,
+    "stabilityWindowSeconds": 417,
+    "objectCount": 18738,
+    "totalBytes": 45501777314,
+    "mediaObjectCount": 16496,
+    "uniqueMediaSha256Count": 9539,
+    "uniqueMediaBytes": 24159208380
+  },
+  "repo": {
+    "path": "/Users/philipbankier/.codex/worktrees/grok-gallery-001-audit/chrome-extension-powertools",
+    "branch": "codex/grok-gallery-001-audit",
+    "commit": "b8d35e7e8b3ab5fb5c2b39698c01da68ef4c00b8",
+    "preflightGitStatusShort": null,
+    "gitStatusShort": " M .gitignore\n?? docs/audits/2026-08-13-grok-gallery-001-audit/\n?? docs/audits/2026-08-19-grok-gallery-001-audit/\n"
+  },
+  "subsystems": {
+    "preflight": "verified",
+    "rawR2": "verified",
+    "r2ByteHashes": "verified",
+    "d1": "verified",
+    "metadata": "verified",
+    "localFiles": "not_run",
+    "workerRoutes": "verified",
+    "liveGrok": "one_item_canary_verified",
+    "reconciliation": "dirty",
+    "mediaSamples": "verified"
+  },
+  "finalVerdicts": {
+    "productionR2InternalCorrectness": "dirty",
+    "currentGrokSavedCompleteness": "inconclusive",
+    "localSystemHealth": "inconclusive"
+  },
+  "blockers": [],
+  "limitations": [
+    "A full current Grok Saved enumeration was not run; one production canary does not prove full gallery completeness.",
+    "Local mirror coverage was not audited in this production R2 pass.",
+    "Metadata v2 has one valid corrected sidecar and one retained invalid predecessor; one verified asset does not prove full-gallery metadata completeness."
+  ],
+  "evidenceIndex": [
+    {
+      "path": "CLEANUP-PROPOSAL.md",
+      "bytes": 3607,
+      "updatedAt": "2026-08-19T17:00:41.958Z"
+    },
+    {
+      "path": "inventory/asset-metadata-v2-summary.json",
+      "bytes": 296,
+      "updatedAt": "2026-08-19T16:55:16.372Z"
+    },
+    {
+      "path": "inventory/d1-canonical-asset-projection.jsonl",
+      "bytes": 9883869,
+      "updatedAt": "2026-08-19T03:49:55.279Z"
+    },
+    {
+      "path": "inventory/d1-canonical-gap-projection.jsonl",
+      "bytes": 6717574,
+      "updatedAt": "2026-08-19T03:50:14.762Z"
+    },
+    {
+      "path": "inventory/d1-canonical-prompt-ref-projection.jsonl",
+      "bytes": 15738691,
+      "updatedAt": "2026-08-19T03:50:08.942Z"
+    },
+    {
+      "path": "inventory/d1-canonical-snapshot-index.jsonl",
+      "bytes": 1439,
+      "updatedAt": "2026-08-19T03:49:49.435Z"
+    },
+    {
+      "path": "inventory/d1-canonical-storage-object-projection.jsonl",
+      "bytes": 18400309,
+      "updatedAt": "2026-08-19T03:50:02.478Z"
+    },
+    {
+      "path": "inventory/d1-metadata-snapshot-index.jsonl",
+      "bytes": 1570,
+      "updatedAt": "2026-08-19T03:49:39.215Z"
+    },
+    {
+      "path": "inventory/d1-r2-dedupe-index.jsonl",
+      "bytes": 2756624,
+      "updatedAt": "2026-08-19T03:49:33.019Z"
+    },
+    {
+      "path": "inventory/d1-schema.json",
+      "bytes": 11766,
+      "updatedAt": "2026-08-19T03:49:27.202Z"
+    },
+    {
+      "path": "inventory/d1-vault-overlays.jsonl",
+      "bytes": 0,
+      "updatedAt": "2026-08-19T03:49:44.377Z"
+    },
+    {
+      "path": "inventory/grok-saved-current-summary.json",
+      "bytes": 357,
+      "updatedAt": "2026-08-19T15:22:34.170Z"
+    },
+    {
+      "path": "inventory/media-sample-validation.json",
+      "bytes": 36874,
+      "updatedAt": "2026-08-19T15:07:35.728Z"
+    },
+    {
+      "path": "inventory/metadata-contract-summary.json",
+      "bytes": 11222,
+      "updatedAt": "2026-08-19T16:55:16.372Z"
+    },
+    {
+      "path": "inventory/metadata-objects.json",
+      "bytes": 1244111,
+      "updatedAt": "2026-08-19T16:53:05.004Z"
+    },
+    {
+      "path": "inventory/metadata-references.json",
+      "bytes": 1236223,
+      "updatedAt": "2026-08-19T16:53:05.022Z"
+    },
+    {
+      "path": "inventory/preflight-d1-schema.json",
+      "bytes": 11911,
+      "updatedAt": "2026-08-19T03:41:22.061Z"
+    },
+    {
+      "path": "inventory/preflight-identity.json",
+      "bytes": 2320,
+      "updatedAt": "2026-08-19T03:41:22.062Z"
+    },
+    {
+      "path": "inventory/prompt-sidecar-summary.json",
+      "bytes": 442,
+      "updatedAt": "2026-08-19T16:55:16.371Z"
+    },
+    {
+      "path": "inventory/r2-listing-checkpoint.json",
+      "bytes": 481,
+      "updatedAt": "2026-08-19T16:56:49.634Z"
+    },
+    {
+      "path": "inventory/r2-media-hashes.jsonl",
+      "bytes": 8824933,
+      "updatedAt": "2026-08-19T16:58:12.257Z"
+    },
+    {
+      "path": "inventory/r2-objects-listing-checkpoint.jsonl",
+      "bytes": 4672919,
+      "updatedAt": "2026-08-19T16:56:49.633Z"
+    },
+    {
+      "path": "inventory/r2-objects-summary.json",
+      "bytes": 591,
+      "updatedAt": "2026-08-19T16:58:12.265Z"
+    },
+    {
+      "path": "inventory/r2-objects.jsonl",
+      "bytes": 10409977,
+      "updatedAt": "2026-08-19T16:58:11.998Z"
+    },
+    {
+      "path": "inventory/r2-pages.json",
+      "bytes": 4330,
+      "updatedAt": "2026-08-19T16:58:12.000Z"
+    },
+    {
+      "path": "inventory/worker-vault-assets.jsonl",
+      "bytes": 8061080,
+      "updatedAt": "2026-08-19T16:54:22.148Z"
+    },
+    {
+      "path": "inventory/worker-vault-pages.json",
+      "bytes": 13932,
+      "updatedAt": "2026-08-19T16:54:22.149Z"
+    },
+    {
+      "path": "logs/blocker-runner-1787152841981-4ouhk04hh.json",
+      "bytes": 900,
+      "updatedAt": "2026-08-19T15:20:41.982Z"
+    },
+    {
+      "path": "logs/d1-broad-token-select-only-approval.json",
+      "bytes": 410,
+      "updatedAt": "2026-08-19T03:41:22.063Z"
+    },
+    {
+      "path": "logs/d1-canonical_asset_projection.json",
+      "bytes": 686,
+      "updatedAt": "2026-08-19T03:49:55.107Z"
+    },
+    {
+      "path": "logs/d1-canonical_gap_projection.json",
+      "bytes": 679,
+      "updatedAt": "2026-08-19T03:50:14.671Z"
+    },
+    {
+      "path": "logs/d1-canonical_prompt_ref_projection.json",
+      "bytes": 702,
+      "updatedAt": "2026-08-19T03:50:08.694Z"
+    },
+    {
+      "path": "logs/d1-canonical_snapshot_index.json",
+      "bytes": 673,
+      "updatedAt": "2026-08-19T03:49:49.433Z"
+    },
+    {
+      "path": "logs/d1-canonical_storage_object_projection.json",
+      "bytes": 714,
+      "updatedAt": "2026-08-19T03:50:02.151Z"
+    },
+    {
+      "path": "logs/d1-metadata_snapshot_index.json",
+      "bytes": 670,
+      "updatedAt": "2026-08-19T03:49:39.214Z"
+    },
+    {
+      "path": "logs/d1-preflight-schema-smoke.json",
+      "bytes": 783,
+      "updatedAt": "2026-08-19T03:41:22.059Z"
+    },
+    {
+      "path": "logs/d1-r2_dedupe_index.json",
+      "bytes": 652,
+      "updatedAt": "2026-08-19T03:49:32.973Z"
+    },
+    {
+      "path": "logs/d1-schema.json",
+      "bytes": 767,
+      "updatedAt": "2026-08-19T03:49:27.192Z"
+    },
+    {
+      "path": "logs/d1-vault_overlays.json",
+      "bytes": 642,
+      "updatedAt": "2026-08-19T03:49:44.376Z"
+    },
+    {
+      "path": "logs/next-route-safety-source.json",
+      "bytes": 11422,
+      "updatedAt": "2026-08-19T03:41:14.365Z"
+    },
+    {
+      "path": "logs/next-route-safety-source.txt",
+      "bytes": 10768,
+      "updatedAt": "2026-08-19T03:41:14.371Z"
+    },
+    {
+      "path": "logs/preflight-git-branch.json",
+      "bytes": 275,
+      "updatedAt": "2026-08-19T03:40:47.922Z"
+    },
+    {
+      "path": "logs/preflight-git-diff-check.json",
+      "bytes": 240,
+      "updatedAt": "2026-08-19T03:40:47.965Z"
+    },
+    {
+      "path": "logs/preflight-git-head.json",
+      "bytes": 278,
+      "updatedAt": "2026-08-19T03:40:47.946Z"
+    },
+    {
+      "path": "logs/preflight-git-status.json",
+      "bytes": 355,
+      "updatedAt": "2026-08-19T03:40:47.905Z"
+    },
+    {
+      "path": "logs/preflight-git.txt",
+      "bytes": 443,
+      "updatedAt": "2026-08-19T03:41:14.367Z"
+    },
+    {
+      "path": "logs/preflight-node-version.json",
+      "bytes": 239,
+      "updatedAt": "2026-08-19T03:40:47.983Z"
+    },
+    {
+      "path": "logs/preflight-node24-version.json",
+      "bytes": 290,
+      "updatedAt": "2026-08-19T03:40:48.999Z"
+    },
+    {
+      "path": "logs/preflight-npm-version.json",
+      "bytes": 235,
+      "updatedAt": "2026-08-19T03:40:48.097Z"
+    },
+    {
+      "path": "logs/preflight-runtime.txt",
+      "bytes": 223,
+      "updatedAt": "2026-08-19T03:41:14.367Z"
+    },
+    {
+      "path": "logs/production-wrangler-config.txt",
+      "bytes": 450,
+      "updatedAt": "2026-08-19T03:41:14.366Z"
+    },
+    {
+      "path": "logs/r2-hash-resume-state.json",
+      "bytes": 231,
+      "updatedAt": "2026-08-19T16:58:12.187Z"
+    },
+    {
+      "path": "logs/r2-listing-passes.jsonl",
+      "bytes": 1758,
+      "updatedAt": "2026-08-19T16:56:49.586Z"
+    },
+    {
+      "path": "logs/r2-prior-hash-reuse.json",
+      "bytes": 490,
+      "updatedAt": "2026-08-19T16:58:12.112Z"
+    },
+    {
+      "path": "logs/route-safety-source.json",
+      "bytes": 1020,
+      "updatedAt": "2026-08-19T03:41:14.354Z"
+    },
+    {
+      "path": "logs/route-safety-source.txt",
+      "bytes": 568,
+      "updatedAt": "2026-08-19T03:41:14.370Z"
+    },
+    {
+      "path": "logs/validate-artifacts.json",
+      "bytes": 102,
+      "updatedAt": "2026-08-19T18:48:35.843Z"
+    },
+    {
+      "path": "logs/worker-metadata-summary.json",
+      "bytes": 476,
+      "updatedAt": "2026-08-19T16:54:26.373Z"
+    },
+    {
+      "path": "logs/worker-vault-identity.json",
+      "bytes": 278,
+      "updatedAt": "2026-08-19T16:54:05.270Z"
+    },
+    {
+      "path": "logs/wrangler-d1-execute-help.json",
+      "bytes": 2106,
+      "updatedAt": "2026-08-19T03:41:14.314Z"
+    },
+    {
+      "path": "logs/wrangler-d1-execute-help.txt",
+      "bytes": 1910,
+      "updatedAt": "2026-08-19T03:41:14.370Z"
+    },
+    {
+      "path": "logs/wrangler-r2-object-help.json",
+      "bytes": 1417,
+      "updatedAt": "2026-08-19T03:41:09.226Z"
+    },
+    {
+      "path": "logs/wrangler-r2-object-help.txt",
+      "bytes": 1234,
+      "updatedAt": "2026-08-19T03:41:14.369Z"
+    },
+    {
+      "path": "logs/wrangler-version.json",
+      "bytes": 316,
+      "updatedAt": "2026-08-19T03:41:04.167Z"
+    },
+    {
+      "path": "logs/wrangler-version.txt",
+      "bytes": 171,
+      "updatedAt": "2026-08-19T03:41:14.368Z"
+    },
+    {
+      "path": "logs/wrangler-whoami.json",
+      "bytes": 2076,
+      "updatedAt": "2026-08-19T03:40:58.502Z"
+    },
+    {
+      "path": "logs/wrangler-whoami.txt",
+      "bytes": 1119,
+      "updatedAt": "2026-08-19T03:41:14.368Z"
+    },
+    {
+      "path": "reconciliations/canonical-index-summary.json",
+      "bytes": 2142,
+      "updatedAt": "2026-08-19T16:55:16.373Z"
+    },
+    {
+      "path": "reconciliations/duplicate-classification-summary.json",
+      "bytes": 897,
+      "updatedAt": "2026-08-19T16:55:16.373Z"
+    },
+    {
+      "path": "reconciliations/duplicate-groups.json",
+      "bytes": 2975509,
+      "updatedAt": "2026-08-19T16:58:25.617Z"
+    },
+    {
+      "path": "reconciliations/malformed-keys.json",
+      "bytes": 514,
+      "updatedAt": "2026-08-19T16:58:25.620Z"
+    },
+    {
+      "path": "reconciliations/r2-d1-delta.json",
+      "bytes": 1462282,
+      "updatedAt": "2026-08-19T16:58:25.498Z"
+    },
+    {
+      "path": "reconciliations/r2-integrity-summary.json",
+      "bytes": 1592,
+      "updatedAt": "2026-08-19T16:55:16.373Z"
+    },
+    {
+      "path": "reconciliations/r2-local-delta.json",
+      "bytes": 3876633,
+      "updatedAt": "2026-08-19T16:58:25.572Z"
+    },
+    {
+      "path": "reconciliations/r2-metadata-delta.json",
+      "bytes": 1752300,
+      "updatedAt": "2026-08-19T16:58:25.526Z"
+    },
+    {
+      "path": "reconciliations/sample-set.json",
+      "bytes": 1156,
+      "updatedAt": "2026-08-19T16:58:25.641Z"
+    },
+    {
+      "path": "reconciliations/unresolved-items.json",
+      "bytes": 6367,
+      "updatedAt": "2026-08-19T16:58:25.629Z"
+    },
+    {
+      "path": "reconciliations/worker-raw-delta.json",
+      "bytes": 117,
+      "updatedAt": "2026-08-19T16:58:25.583Z"
+    },
+    {
+      "path": "REPORT.md",
+      "bytes": 7353,
+      "updatedAt": "2026-08-19T17:04:02.694Z"
+    }
+  ]
+}

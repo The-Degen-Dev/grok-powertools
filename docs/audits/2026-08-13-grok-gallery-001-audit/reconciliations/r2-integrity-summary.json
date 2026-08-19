@@ -1,0 +1,57 @@
+{
+  "generatedAt": "2026-08-17T02:44:08.062Z",
+  "mediaObjects": 16347,
+  "hashRows": 16347,
+  "missingOrFailedHashRows": 0,
+  "storedSha256Present": 6454,
+  "storedSha256Mismatch": 0,
+  "storedMediaTypeMismatch": 0,
+  "d1Rows": 5014,
+  "d1RowsWithMissingR2Object": 0,
+  "d1RowsPointingToNonMediaObject": 1,
+  "d1HashMismatch": 0,
+  "canonicalMediaMissingD1Index": 1441,
+  "d1DuplicateContentHashGroups": 228,
+  "zeroByteMedia": 0,
+  "headFailures": 0,
+  "issueCounts": {
+    "stored_sha256_missing": 9893,
+    "asset_id_missing": 9893,
+    "source_url_hash_missing": 9893,
+    "stored_media_type_missing": 9893,
+    "extension_version_missing": 9893,
+    "captured_at_missing": 9893,
+    "prompt_sidecar_missing": 14147,
+    "d1_index_missing": 1441
+  },
+  "byPathClass": {
+    "legacy-date-media": {
+      "mediaObjects": 9893,
+      "withPromptSidecar": 1876,
+      "fieldCoverage": {
+        "content-type": 9893,
+        "size": 9893,
+        "sha256": 0,
+        "asset-id": 0,
+        "source-url-hash": 0,
+        "media-type": 0,
+        "extension-version": 0,
+        "captured-at": 0
+      }
+    },
+    "canonical-media": {
+      "mediaObjects": 6454,
+      "withPromptSidecar": 324,
+      "fieldCoverage": {
+        "content-type": 6454,
+        "size": 6454,
+        "sha256": 6454,
+        "asset-id": 6454,
+        "source-url-hash": 6454,
+        "media-type": 6454,
+        "extension-version": 6454,
+        "captured-at": 6454
+      }
+    }
+  }
+}

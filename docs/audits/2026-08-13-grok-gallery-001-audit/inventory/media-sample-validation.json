@@ -1,0 +1,1336 @@
+{
+  "generatedAt": "2026-08-17T02:54:31.466Z",
+  "bucket": "grok-gallery-001",
+  "readOnly": true,
+  "selectionMethod": "oldest, quartiles, and newest from each canonical/legacy image/video cohort plus one representative per exact-duplicate class",
+  "sampleCount": 23,
+  "passed": 23,
+  "failed": 0,
+  "errors": 0,
+  "rangeChecksPassed": 23,
+  "magicChecksPassed": 23,
+  "decoderChecksPassed": 23,
+  "samples": [
+    {
+      "objectRef": "sha256:f3a0342fcd5f86b5d6f4",
+      "cohort": "canonical-media:image",
+      "pathClass": "canonical-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 433504,
+      "lastModified": null,
+      "head": {
+        "contentLength": 433504,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-06-15T04:21:01.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/433504",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 429408-433503/433504"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:a24771e757d06ebf38a1",
+      "cohort": "canonical-media:image",
+      "pathClass": "canonical-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 288288,
+      "lastModified": null,
+      "head": {
+        "contentLength": 288288,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-06-08T15:56:37.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/288288",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 284192-288287/288288"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:dfe7ec43b7e71a176602",
+      "cohort": "canonical-media:image",
+      "pathClass": "canonical-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 251309,
+      "lastModified": null,
+      "head": {
+        "contentLength": 251309,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-05-24T02:21:39.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/251309",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 247213-251308/251309"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:6261304756d2c4ef04a2",
+      "cohort": "canonical-media:image",
+      "pathClass": "canonical-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 229536,
+      "lastModified": null,
+      "head": {
+        "contentLength": 229536,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-06-15T01:08:48.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/229536",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 225440-229535/229536"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:31b4a7a2a4dbbdae73d2",
+      "cohort": "canonical-media:image",
+      "pathClass": "canonical-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 446172,
+      "lastModified": null,
+      "head": {
+        "contentLength": 446172,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-06-15T02:55:15.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/446172",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 442076-446171/446172"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:01f02ebbe4702af26909",
+      "cohort": "canonical-media:video",
+      "pathClass": "canonical-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 928996,
+      "lastModified": null,
+      "head": {
+        "contentLength": 928996,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-07-04T19:08:05.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/928996",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 924900-928995/928996"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 6.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 6.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 6,
+            "sampleRate": 48000,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 6.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:3e6c20098ec5074e4207",
+      "cohort": "canonical-media:video",
+      "pathClass": "canonical-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 1252502,
+      "lastModified": null,
+      "head": {
+        "contentLength": 1252502,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-06-19T15:41:28.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/1252502",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 1248406-1252501/1252502"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 6.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 6.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 6,
+            "sampleRate": 48000,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 6.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:6034579001bb85381de1",
+      "cohort": "canonical-media:video",
+      "pathClass": "canonical-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 2655216,
+      "lastModified": null,
+      "head": {
+        "contentLength": 2655216,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-05-24T01:28:51.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/2655216",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 2651120-2655215/2655216"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 10,
+            "sampleRate": 48000,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:56dc4e7edc50049c3cd8",
+      "cohort": "canonical-media:video",
+      "pathClass": "canonical-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 2610935,
+      "lastModified": null,
+      "head": {
+        "contentLength": 2610935,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-06-15T01:47:02.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/2610935",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 2606839-2610934/2610935"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 10,
+            "sampleRate": 48000,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:bc0efa16fdec9277a26c",
+      "cohort": "canonical-media:video",
+      "pathClass": "canonical-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 2303154,
+      "lastModified": null,
+      "head": {
+        "contentLength": 2303154,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-06-15T01:42:34.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/2303154",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 2299058-2303153/2303154"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 10,
+            "sampleRate": 48000,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 400,
+            "height": 736,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:59fd62eb51071927291c",
+      "cohort": "legacy-date-media:image",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 397302,
+      "lastModified": null,
+      "head": {
+        "contentLength": 397302,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-03-30T22:30:16.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/397302",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 393206-397301/397302"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 960,
+            "height": 960,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:813e32d934d72845d026",
+      "cohort": "legacy-date-media:image",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 657554,
+      "lastModified": null,
+      "head": {
+        "contentLength": 657554,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-04-05T04:45:42.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/657554",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 653458-657553/657554"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:a8985ab72329a63f0be3",
+      "cohort": "legacy-date-media:image",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 633709,
+      "lastModified": null,
+      "head": {
+        "contentLength": 633709,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-04-08T12:40:37.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/633709",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 629613-633708/633709"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 784,
+            "height": 1168,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:d152d037faf9219dffb4",
+      "cohort": "legacy-date-media:image",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 551062,
+      "lastModified": null,
+      "head": {
+        "contentLength": 551062,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-04-20T10:01:33.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/551062",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 546966-551061/551062"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:eac3548a08ba04638ce8",
+      "cohort": "legacy-date-media:image",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 667234,
+      "lastModified": null,
+      "head": {
+        "contentLength": 667234,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-03-06T18:19:28.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/667234",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 663138-667233/667234"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 784,
+            "height": 1168,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:71d3bb860dd96237b26b",
+      "cohort": "legacy-date-media:video",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 6875049,
+      "lastModified": null,
+      "head": {
+        "contentLength": 6875049,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-03-30T23:08:00.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/6875049",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 6870953-6875048/6875049"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 784,
+            "height": 1168,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 10.030998,
+            "sampleRate": 44100,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 784,
+            "height": 1168,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:125fd8c1bca53f6bc70e",
+      "cohort": "legacy-date-media:video",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 4312779,
+      "lastModified": null,
+      "head": {
+        "contentLength": 4312779,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-04-08T12:22:04.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/4312779",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 4308683-4312778/4312779"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 464,
+            "height": 688,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 10.030998,
+            "sampleRate": 44100,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 464,
+            "height": 688,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:2401e6b4922fc0bf3e51",
+      "cohort": "legacy-date-media:video",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 3257690,
+      "lastModified": null,
+      "head": {
+        "contentLength": 3257690,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-04-20T14:46:00.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/3257690",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 3253594-3257689/3257690"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 464,
+            "height": 688,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 10.030998,
+            "sampleRate": 44100,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 464,
+            "height": 688,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:694194781150dcd95a78",
+      "cohort": "legacy-date-media:video",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 2792456,
+      "lastModified": null,
+      "head": {
+        "contentLength": 2792456,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-04-20T14:14:26.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/2792456",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 2788360-2792455/2792456"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 464,
+            "height": 688,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 10.030998,
+            "sampleRate": 44100,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 464,
+            "height": 688,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:1c1c7616c978df14f424",
+      "cohort": "legacy-date-media:video",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 7967014,
+      "lastModified": null,
+      "head": {
+        "contentLength": 7967014,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-03-01T20:49:39.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/7967014",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 7962918-7967013/7967014"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 784,
+            "height": 1168,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 10.030998,
+            "sampleRate": 44100,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 784,
+            "height": 1168,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:7336068f276b21cf7033",
+      "cohort": "duplicate:legacy_repeated_bytes",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "image",
+      "contentType": "image/jpeg",
+      "sizeBytes": 555353,
+      "lastModified": null,
+      "head": {
+        "contentLength": 555353,
+        "contentType": "image/jpeg",
+        "etagPresent": true,
+        "lastModified": "2026-03-30T22:26:54.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/555353",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 551257-555352/555353"
+      },
+      "magic": {
+        "detected": "jpeg",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "jpeg_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:57a25db5d59a60d5259f",
+      "cohort": "duplicate:legacy_canonical_alias",
+      "pathClass": "legacy-date-media",
+      "mediaCategory": "image",
+      "contentType": "image/webp",
+      "sizeBytes": 7856,
+      "lastModified": null,
+      "head": {
+        "contentLength": 7856,
+        "contentType": "image/webp",
+        "etagPresent": true,
+        "lastModified": "2026-04-20T15:43:04.000Z",
+        "metadataKeys": []
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/7856",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 3760-7855/7856"
+      },
+      "magic": {
+        "detected": "webp",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "webp_pipe",
+        "durationSeconds": null,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "webp",
+            "width": 300,
+            "height": 300,
+            "durationSeconds": null,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    },
+    {
+      "objectRef": "sha256:9776f1477cda5b807abb",
+      "cohort": "duplicate:canonical_same_bytes_distinct_ids",
+      "pathClass": "canonical-media",
+      "mediaCategory": "video",
+      "contentType": "video/mp4",
+      "sizeBytes": 22176501,
+      "lastModified": null,
+      "head": {
+        "contentLength": 22176501,
+        "contentType": "video/mp4",
+        "etagPresent": true,
+        "lastModified": "2026-05-24T05:03:03.000Z",
+        "metadataKeys": [
+          "asset-id",
+          "asset-identity-kind",
+          "captured-at",
+          "extension-version",
+          "media-type",
+          "sha256",
+          "source-url-hash"
+        ]
+      },
+      "ranges": {
+        "firstStatus": 206,
+        "firstBytes": 4096,
+        "firstContentRange": "bytes 0-4095/22176501",
+        "tailStatus": 206,
+        "tailBytes": 4096,
+        "tailContentRange": "bytes 22172405-22176500/22176501"
+      },
+      "magic": {
+        "detected": "iso-bmff",
+        "matchesDeclaredType": true
+      },
+      "decoder": {
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.041667,
+        "streams": [
+          {
+            "codecType": "video",
+            "codecName": "h264",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          },
+          {
+            "codecType": "audio",
+            "codecName": "aac",
+            "width": null,
+            "height": null,
+            "durationSeconds": 10,
+            "sampleRate": 48000,
+            "channels": 2
+          },
+          {
+            "codecType": "video",
+            "codecName": "mjpeg",
+            "width": 720,
+            "height": 1280,
+            "durationSeconds": 10.041667,
+            "sampleRate": null,
+            "channels": null
+          }
+        ]
+      },
+      "status": "pass",
+      "error": null
+    }
+  ]
+}
