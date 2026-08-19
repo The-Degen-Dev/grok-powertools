@@ -1,0 +1,350 @@
+{
+  "generatedAt": "2026-08-17T02:44:08.093Z",
+  "bucket": "grok-gallery-001",
+  "productionPrefix": "grok-powertools/v1",
+  "mediaObjects": 16347,
+  "promptSidecars": {
+    "generatedAt": "2026-08-17T02:44:08.055Z",
+    "total": 2200,
+    "parseFailures": 0,
+    "fieldSets": {
+      "mediaKey,prompt,uploadedAt": 1876,
+      "assetId,mediaKey,prompt,uploadedAt": 324
+    },
+    "withPrompt": 2200,
+    "distinctNormalizedPrompts": 126,
+    "withDeclaredMediaKey": 2200,
+    "exactParentLinks": 2200,
+    "missingMediaTargets": 0,
+    "withAssetId": 324,
+    "withUploadedAt": 2200,
+    "issueCounts": {
+      "asset_id_missing": 1876
+    }
+  },
+  "promptAccuracyAgainstCanonicalEvidence": {
+    "sidecars": 2200,
+    "sidecarsInCanonicalProjection": 2090,
+    "sidecarsWithCanonicalPromptEvidence": 2074,
+    "sidecarsMatchingCanonicalPromptEvidence": 2037,
+    "sidecarsMismatchingCanonicalPromptEvidence": 37,
+    "sidecarsWithoutCanonicalPromptEvidence": 126,
+    "sidecarsWithPromptRefsOmittedByProjectionLimit": 2,
+    "comparisonMethod": "SHA-256 of the exact stored sidecar prompt compared with prompt and original-prompt SHA-256 values linked by the canonical storage projection"
+  },
+  "metadataSnapshots": {
+    "total": 10,
+    "parseFailures": 0,
+    "byKind": {
+      "backfillManifest": 3,
+      "processedIds": 2,
+      "promptHistory": 2,
+      "savedPrompts": 3
+    },
+    "recordsByKind": {
+      "backfillManifest": 12,
+      "processedIds": 12901,
+      "promptHistory": 100,
+      "savedPrompts": 40
+    },
+    "snapshots": [
+      {
+        "objectRef": "sha256:9b4996390fbbd3e553c0",
+        "kind": "backfillManifest",
+        "schemaVersion": 1,
+        "updatedAt": "2026-05-23T06:23:25.940Z",
+        "contentHashPresent": true,
+        "dataType": "object",
+        "recordCount": 4,
+        "topLevelFieldCoverage": {},
+        "privateStringEvidence": {
+          "promptValues": 0,
+          "nonEmptyPromptValues": 0,
+          "distinctPromptHashes": 0,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {}
+        },
+        "d1Indexed": false,
+        "d1ContentHashMatches": null,
+        "bodySha256": "6aa514f639073093284938849c7114f940397b0c89d50989cbf712c56ecb49c9",
+        "bytesRead": 482,
+        "status": "ok"
+      },
+      {
+        "objectRef": "sha256:2d5980a90a85fbf92b0c",
+        "kind": "backfillManifest",
+        "schemaVersion": 1,
+        "updatedAt": "2026-05-23T06:23:25.940Z",
+        "contentHashPresent": true,
+        "dataType": "object",
+        "recordCount": 4,
+        "topLevelFieldCoverage": {},
+        "privateStringEvidence": {
+          "promptValues": 0,
+          "nonEmptyPromptValues": 0,
+          "distinctPromptHashes": 0,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {}
+        },
+        "d1Indexed": true,
+        "d1ContentHashMatches": true,
+        "bodySha256": "6aa514f639073093284938849c7114f940397b0c89d50989cbf712c56ecb49c9",
+        "bytesRead": 482,
+        "status": "ok"
+      },
+      {
+        "objectRef": "sha256:fe0818fa1d0a2e3fd275",
+        "kind": "processedIds",
+        "schemaVersion": 1,
+        "updatedAt": "2026-08-15T22:14:28.045Z",
+        "contentHashPresent": true,
+        "dataType": "array",
+        "recordCount": 12825,
+        "topLevelFieldCoverage": {},
+        "privateStringEvidence": {
+          "promptValues": 0,
+          "nonEmptyPromptValues": 0,
+          "distinctPromptHashes": 0,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {}
+        },
+        "d1Indexed": true,
+        "d1ContentHashMatches": true,
+        "bodySha256": "9effe81cb8ab99331c4ed3c37bfb8d09556f8d9447e77f4b7293ec048e3e2278",
+        "bytesRead": 1193388,
+        "status": "ok"
+      },
+      {
+        "objectRef": "sha256:e3602a82e76535ae585d",
+        "kind": "promptHistory",
+        "schemaVersion": 1,
+        "updatedAt": "2026-08-16T18:44:55.351Z",
+        "contentHashPresent": true,
+        "dataType": "array",
+        "recordCount": 50,
+        "topLevelFieldCoverage": {
+          "id": 50,
+          "text": 50,
+          "timestamp": 50,
+          "type": 50
+        },
+        "privateStringEvidence": {
+          "promptValues": 50,
+          "nonEmptyPromptValues": 50,
+          "distinctPromptHashes": 47,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {
+            "id": 50
+          }
+        },
+        "d1Indexed": true,
+        "d1ContentHashMatches": true,
+        "bodySha256": "eeb5a457d8319e29584b145002487ae61ac2a1ea8c7eb370256f9271ae2e9d6a",
+        "bytesRead": 39536,
+        "status": "ok"
+      },
+      {
+        "objectRef": "sha256:a4742d1ec8981ce8909f",
+        "kind": "savedPrompts",
+        "schemaVersion": 1,
+        "updatedAt": "2026-08-13T16:43:07.405Z",
+        "contentHashPresent": true,
+        "dataType": "array",
+        "recordCount": 39,
+        "topLevelFieldCoverage": {
+          "createdAt": 39,
+          "id": 39,
+          "name": 39,
+          "text": 39,
+          "type": 39,
+          "updatedAt": 39
+        },
+        "privateStringEvidence": {
+          "promptValues": 39,
+          "nonEmptyPromptValues": 39,
+          "distinctPromptHashes": 39,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {
+            "id": 39
+          }
+        },
+        "d1Indexed": true,
+        "d1ContentHashMatches": true,
+        "bodySha256": "722dee306ee1a971896a78b6e7f017dec97815446d1a6e10ad1054d056d6f0e6",
+        "bytesRead": 30130,
+        "status": "ok"
+      },
+      {
+        "objectRef": "sha256:7cb11007733a930e08a5",
+        "kind": "backfillManifest",
+        "schemaVersion": 1,
+        "updatedAt": "2026-02-23T23:53:11.506Z",
+        "contentHashPresent": false,
+        "dataType": "object",
+        "recordCount": 4,
+        "topLevelFieldCoverage": {},
+        "privateStringEvidence": {
+          "promptValues": 0,
+          "nonEmptyPromptValues": 0,
+          "distinctPromptHashes": 0,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {}
+        },
+        "d1Indexed": false,
+        "d1ContentHashMatches": null,
+        "bodySha256": "3ebb2b51a08fe952c9fe744780b8c47891e9b78ce601d5fd5a2537bd7d27233f",
+        "bytesRead": 371,
+        "status": "ok"
+      },
+      {
+        "objectRef": "sha256:83bf0192bd9f1f724028",
+        "kind": "processedIds",
+        "schemaVersion": 1,
+        "updatedAt": "2026-03-06T18:19:30.545Z",
+        "contentHashPresent": false,
+        "dataType": "array",
+        "recordCount": 76,
+        "topLevelFieldCoverage": {},
+        "privateStringEvidence": {
+          "promptValues": 0,
+          "nonEmptyPromptValues": 0,
+          "distinctPromptHashes": 0,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {}
+        },
+        "d1Indexed": false,
+        "d1ContentHashMatches": null,
+        "bodySha256": "0eb01f450633ed7852b18f7198ef374d850bb433b1f10843767fe7b58e405b79",
+        "bytesRead": 6136,
+        "status": "ok"
+      },
+      {
+        "objectRef": "sha256:237e2ddce24e9b523f4b",
+        "kind": "promptHistory",
+        "schemaVersion": 1,
+        "updatedAt": "2026-03-16T00:00:57.437Z",
+        "contentHashPresent": false,
+        "dataType": "array",
+        "recordCount": 50,
+        "topLevelFieldCoverage": {
+          "id": 50,
+          "text": 50,
+          "timestamp": 50,
+          "type": 50
+        },
+        "privateStringEvidence": {
+          "promptValues": 50,
+          "nonEmptyPromptValues": 50,
+          "distinctPromptHashes": 44,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {
+            "id": 50
+          }
+        },
+        "d1Indexed": false,
+        "d1ContentHashMatches": null,
+        "bodySha256": "e6a2968ac45e92ea6f8c522db705ee2cf3a70dacd65174f4ae62265900eef95d",
+        "bytesRead": 39093,
+        "status": "ok"
+      },
+      {
+        "objectRef": "sha256:ea1685821d05246ea541",
+        "kind": "savedPrompts",
+        "schemaVersion": 1,
+        "updatedAt": "2026-03-10T05:51:04.939Z",
+        "contentHashPresent": false,
+        "dataType": "array",
+        "recordCount": 1,
+        "topLevelFieldCoverage": {
+          "createdAt": 1,
+          "id": 1,
+          "name": 1,
+          "text": 1,
+          "type": 1,
+          "updatedAt": 1
+        },
+        "privateStringEvidence": {
+          "promptValues": 1,
+          "nonEmptyPromptValues": 1,
+          "distinctPromptHashes": 1,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {
+            "id": 1
+          }
+        },
+        "d1Indexed": false,
+        "d1ContentHashMatches": null,
+        "bodySha256": "2225e4462738e11e981fc47731cfd6b1ee01a140a6c8868aeace110e47ad374e",
+        "bytesRead": 908,
+        "status": "ok"
+      },
+      {
+        "objectRef": "sha256:14b41e2ce6c1dca7bb16",
+        "kind": "savedPrompts",
+        "schemaVersion": 1,
+        "updatedAt": "2026-03-30T00:00:00Z",
+        "contentHashPresent": false,
+        "dataType": "array",
+        "recordCount": 0,
+        "topLevelFieldCoverage": {},
+        "privateStringEvidence": {
+          "promptValues": 0,
+          "nonEmptyPromptValues": 0,
+          "distinctPromptHashes": 0,
+          "distinctOriginalPromptHashes": 0,
+          "identityFieldCounts": {}
+        },
+        "d1Indexed": false,
+        "d1ContentHashMatches": null,
+        "bodySha256": "b2bc280343c02f86373c3dc86f6e7d73ba3f44a73a66e7e0247059c446be0b42",
+        "bytesRead": 77,
+        "status": "ok"
+      }
+    ]
+  },
+  "mediaFieldCoverage": {
+    "legacy-date-media": {
+      "mediaObjects": 9893,
+      "withPromptSidecar": 1876,
+      "fieldCoverage": {
+        "content-type": 9893,
+        "size": 9893,
+        "sha256": 0,
+        "asset-id": 0,
+        "source-url-hash": 0,
+        "media-type": 0,
+        "extension-version": 0,
+        "captured-at": 0
+      }
+    },
+    "canonical-media": {
+      "mediaObjects": 6454,
+      "withPromptSidecar": 324,
+      "fieldCoverage": {
+        "content-type": 6454,
+        "size": 6454,
+        "sha256": 6454,
+        "asset-id": 6454,
+        "source-url-hash": 6454,
+        "media-type": 6454,
+        "extension-version": 6454,
+        "captured-at": 6454
+      }
+    }
+  },
+  "requiredButNotPersistedPerMedia": [
+    "original versus effective prompt distinction",
+    "Grok post ID",
+    "Grok conversation ID",
+    "Grok response ID",
+    "model and generation settings",
+    "dimensions",
+    "duration",
+    "audio presence and codecs",
+    "created and saved timestamps",
+    "parent, reference, and variant relationships",
+    "metadata schema version",
+    "evidence source"
+  ],
+  "rawPromptsWrittenToAuditArtifacts": false
+}

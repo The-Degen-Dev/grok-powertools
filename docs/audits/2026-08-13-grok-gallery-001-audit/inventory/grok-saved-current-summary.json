@@ -1,0 +1,256 @@
+{
+  "source": "grok_saved_current_conversation_feed",
+  "endpoint": "/rest/app-chat/conversations?kind=CONVERSATION_KIND_IMAGINE",
+  "collectedAt": "2026-08-13T16:26:40.013Z",
+  "status": "listed",
+  "pages": 445,
+  "requestedPageSize": 100,
+  "observedPageCap": 30,
+  "conversations": {
+    "rows": 13323,
+    "unique": 13323,
+    "duplicates": 0
+  },
+  "workspaces": {
+    "unique": 30,
+    "detailRouteEligible": 30
+  },
+  "latestAssets": {
+    "rows": 9565,
+    "rowsMissingLatestAsset": 3758,
+    "uniqueIds": 9555,
+    "duplicateIdRows": 10,
+    "totalDeclaredBytes": 28268421611
+  },
+  "identityReconciliation": {
+    "r2LogicalIdentitySetSize": 11961,
+    "r2CanonicalIdentitySetSize": 6398,
+    "currentUniqueLatestAssetsInR2LogicalSet": 379,
+    "currentUniqueLatestAssetsInR2CanonicalSet": 379,
+    "currentUniqueLatestAssetsAbsentFromR2LogicalSet": 9176,
+    "r2LogicalIdentitiesNotRepresentedByCurrentLatestAssetIds": 11582,
+    "limitation": "identity comparison only; no live media-byte hashing was performed"
+  },
+  "prompts": {
+    "latestAssetRowsWithApiPrompt": 5476,
+    "distinctNormalizedApiPrompts": 1281,
+    "currentRowsLinkedToR2Sidecar": 175,
+    "comparable": 175,
+    "matches": 175,
+    "mismatches": 0,
+    "apiPromptMissingForLinked": 0
+  },
+  "ranges": {
+    "conversationCreateMin": "2025-11-03T22:31:31.863813Z",
+    "conversationCreateMax": "2026-08-12T20:05:01.825204Z",
+    "assetCreateMin": "2025-11-03T22:32:00.111Z",
+    "assetCreateMax": "2026-08-13T03:20:13.643Z"
+  },
+  "counts": {
+    "mimeType": {
+      "video/mp4": 6305,
+      "image/jpeg": 3115,
+      "image/png": 145
+    },
+    "generationKind": {
+      "imageToVideo": 6273,
+      "textToImage": 3224,
+      "imageToImage": 22,
+      "textToVideo": 11,
+      "template": 7,
+      "videoExtension": 4
+    },
+    "model": {
+      "imagine-video-gen": 6288,
+      "imagine-image-gen": 3224,
+      "imagine-image-edit": 22,
+      "missing": 7
+    },
+    "resolution": {
+      "missing": 5258,
+      "720p": 2366,
+      "480p": 1625,
+      "2mp": 281,
+      "1080p": 11
+    },
+    "aspectRatio": {
+      "9:16": 5963,
+      "missing": 2318,
+      "2:3": 1254,
+      "1:1": 3,
+      "16:9": 2,
+      "5:2": 1
+    },
+    "mode": {
+      "normal": 4420,
+      "missing": 2746,
+      "custom": 1820,
+      "quality": 427,
+      "fast": 95,
+      "extremely-spicy-or-crazy": 27,
+      "extremely-crazy": 6
+    },
+    "starred": {
+      "false": 13323
+    },
+    "taskResult": {
+      "[object Object]": 13323
+    },
+    "deleted": {
+      "false": 9565
+    },
+    "latest": {
+      "true": 9539,
+      "false": 26
+    },
+    "modelGenerated": {
+      "true": 9565
+    },
+    "fileSource": {
+      "IMAGINE_GENERATED_FILE_SOURCE": 9565
+    }
+  },
+  "fieldCoverage": {
+    "conversation": {
+      "conversationId": 13323,
+      "createTime": 13323,
+      "latestAssetMetadata": 13323,
+      "mediaTypes": 13323,
+      "modifyTime": 13323,
+      "starred": 13323,
+      "taskResult": 13323,
+      "temporary": 13323,
+      "title": 13323,
+      "workspaces": 13323,
+      "systemPromptName": 1123,
+      "workspaceId": 30
+    },
+    "metadata": {
+      "assetId": 9565,
+      "auxKeys": 9565,
+      "createTime": 9565,
+      "fileSource": 9565,
+      "inlineStatus": 9565,
+      "isDeleted": 9565,
+      "isLatest": 9565,
+      "isModelGenerated": 9565,
+      "isRootAssetCreatedByModel": 9565,
+      "key": 9565,
+      "lastUseTime": 9565,
+      "mimeType": 9565,
+      "name": 9565,
+      "ownerUserId": 9565,
+      "previewImageKey": 9565,
+      "sharedWithTeam": 9565,
+      "sharedWithUserIds": 9565,
+      "sizeBytes": 9565,
+      "summary": 9565,
+      "updateTime": 9565,
+      "responseId": 9563,
+      "rootAssetSourceConversationId": 9563,
+      "sourceConversationId": 9563,
+      "mediaGenInput": 9541,
+      "height": 9411,
+      "width": 9411,
+      "currentConversationId": 9217,
+      "thumbhash": 4332,
+      "rRated": 3239,
+      "rootAssetId": 2656,
+      "hdKey": 7,
+      "isPublic": 4,
+      "hd1080Key": 3
+    },
+    "mediaGenInput": {
+      "imageToVideo": 6273,
+      "textToImage": 3224,
+      "imageToImage": 22,
+      "textToVideo": 11,
+      "template": 7,
+      "videoExtension": 4
+    },
+    "textToImage": {
+      "modelName": 3224,
+      "prompt": 3224,
+      "numOfImages": 3222,
+      "aspectRatio": 3076,
+      "mode": 522,
+      "resolutionName": 281
+    },
+    "imageToVideo": {
+      "inputAssets": 6273,
+      "mode": 6273,
+      "modelName": 6273,
+      "skipAudio": 6273,
+      "duration": 6061,
+      "aspectRatio": 4125,
+      "resolutionName": 3987,
+      "prompt": 2241
+    },
+    "textToVideo": {
+      "aspectRatio": 11,
+      "duration": 11,
+      "modelName": 11,
+      "prompt": 11,
+      "resolutionName": 11,
+      "skipAudio": 11
+    },
+    "imageEdit": {},
+    "imageToImage": {
+      "inputAssets": 22,
+      "mediaReferences": 22,
+      "modelName": 22,
+      "prompt": 22,
+      "selectionRegions": 22,
+      "numOfImages": 12,
+      "aspectRatio": 11
+    },
+    "videoExtension": {
+      "duration": 4,
+      "inputAssets": 4,
+      "modelName": 4,
+      "prompt": 4,
+      "resolutionName": 4,
+      "skipAudio": 4,
+      "videoExtensionStartTime": 4
+    },
+    "template": {
+      "inputs": 7,
+      "outputName": 7,
+      "templateId": 7,
+      "templateVersion": 7
+    }
+  },
+  "sizeReconciliation": {
+    "method": "declared media category plus exact byte size; absence is strong missing evidence, presence is not content proof",
+    "uniqueCurrentLatestAssets": 9555,
+    "counts": {
+      "identityMatch": 379,
+      "noSameSizeMediaCandidate": 5640,
+      "oneSameSizeMediaCandidate": 1262,
+      "multipleSameSizeMediaCandidates": 2653,
+      "zeroOrMissingSize": 0
+    },
+    "byType": {
+      "image": {
+        "total": 3250,
+        "identityMatch": 42,
+        "noSameSizeMediaCandidate": 2032,
+        "oneSameSizeMediaCandidate": 605,
+        "multipleSameSizeMediaCandidates": 613
+      },
+      "video": {
+        "total": 6305,
+        "identityMatch": 337,
+        "noSameSizeMediaCandidate": 3608,
+        "oneSameSizeMediaCandidate": 657,
+        "multipleSameSizeMediaCandidates": 2040
+      }
+    },
+    "noSameSizeCandidateDeclaredBytes": 10607072367
+  },
+  "identityValidation": null,
+  "readOnly": true,
+  "secretsPersisted": false,
+  "rawPromptsPersisted": false,
+  "rawIdsPersisted": false
+}

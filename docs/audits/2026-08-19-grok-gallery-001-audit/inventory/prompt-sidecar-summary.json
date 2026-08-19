@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-08-19T16:55:16.286Z",
+  "total": 2226,
+  "parseFailures": 0,
+  "fieldSets": {
+    "mediaKey,prompt,uploadedAt": 1876,
+    "assetId,mediaKey,prompt,uploadedAt": 350
+  },
+  "withPrompt": 2226,
+  "distinctNormalizedPrompts": 136,
+  "withDeclaredMediaKey": 2226,
+  "exactParentLinks": 2226,
+  "missingMediaTargets": 0,
+  "withAssetId": 350,
+  "withUploadedAt": 2226,
+  "issueCounts": {
+    "asset_id_missing": 1876
+  }
+}

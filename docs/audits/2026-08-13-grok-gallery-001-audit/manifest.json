@@ -1,0 +1,513 @@
+{
+  "auditName": "grok-gallery-001 correctness and metadata audit",
+  "auditPlanDate": "2026-08-13",
+  "executionStartedAt": "2026-08-13T15:15:08.867Z",
+  "executionCompletedAt": "2026-08-17T02:58:56Z",
+  "status": "complete",
+  "productionTarget": {
+    "bucket": "grok-gallery-001",
+    "prefix": "grok-powertools/v1",
+    "d1Database": "grok-powertools-db",
+    "worker": "grok-r2-backup-worker"
+  },
+  "repo": {
+    "path": "/Users/philipbankier/.codex/worktrees/grok-gallery-001-audit/chrome-extension-powertools",
+    "branch": "codex/grok-gallery-001-audit",
+    "commit": "b8d35e7e8b3ab5fb5c2b39698c01da68ef4c00b8",
+    "preflightGitStatusShort": " M .gitignore\nAM docs/audits/2026-08-13-grok-gallery-001-audit/scripts/audit-grok-gallery-001.mjs\n?? docs/audits/2026-08-13-grok-gallery-001-audit/manifest.json\n"
+  },
+  "subsystems": {
+    "preflight": "verified",
+    "rawR2": "verified",
+    "r2ByteHashes": "verified",
+    "d1": "verified",
+    "metadata": "verified",
+    "workerRoutes": "verified",
+    "liveGrok": "verified",
+    "reconciliation": "dirty",
+    "mediaSamples": "verified"
+  },
+  "blockers": [],
+  "limitations": [
+    "Live Grok media bytes were not fully hashed; current-to-R2 identity and size reconciliation is not content proof.",
+    "The current Saved conversation feed returned 3758 rows without latest-asset metadata.",
+    "The Grok Saved feed was collected on 2026-08-13; R2, D1, Worker, and metadata evidence were refreshed through the stable 2026-08-16 bucket state without recollecting the live feed.",
+    "Raw keys, provider IDs, prompts, request headers, and cookies are excluded from tracked audit artifacts."
+  ],
+  "r2PostAuditDriftCheck": {
+    "checkedAt": "2026-08-17T02:40:08.942Z",
+    "objects": 18561,
+    "bytes": 45285432057,
+    "latestObjectModifiedAt": "2026-08-16T18:44:55.989Z",
+    "matchesInitialObjectCount": false,
+    "matchesInitialByteCount": false,
+    "listingFingerprint": "170feaa56fc7445ed950d450cf8d4ce2050122b30ed995380e41973203db8509"
+  },
+  "postSyncRefresh": {
+    "baselineCapturedAt": "2026-08-13T16:36:37Z",
+    "stableRefreshAt": "2026-08-17T02:40:08.942Z",
+    "quiescencePasses": 2,
+    "baseline": {
+      "objects": 18504,
+      "bytes": 45197720293,
+      "mediaObjects": 16293,
+      "mediaBytes": 45082762712,
+      "canonicalMedia": 6400,
+      "promptSidecars": 2197
+    },
+    "current": {
+      "objects": 18561,
+      "bytes": 45285432057,
+      "mediaObjects": 16347,
+      "mediaBytes": 45170455642,
+      "canonicalMedia": 6454,
+      "promptSidecars": 2200
+    },
+    "delta": {
+      "objects": 57,
+      "bytes": 87711764,
+      "mediaObjects": 54,
+      "mediaBytes": 87692930,
+      "canonicalMedia": 54,
+      "promptSidecars": 3,
+      "mediaWithoutPromptSidecars": 51
+    },
+    "deltaMediaHashing": {
+      "objectsHashed": 54,
+      "bytesHashed": 87692930,
+      "failures": 0,
+      "newExactDuplicateMemberships": 0
+    },
+    "indexRefresh": {
+      "d1MediaRows": 5013,
+      "workerMediaRows": 5013,
+      "canonicalMediaMissingD1": 1441
+    },
+    "liveGrokSnapshot": {
+      "collectedAt": "2026-08-13T16:26:40.013Z",
+      "recollectedDuringRefresh": false
+    }
+  },
+  "evidenceIndex": [
+    {
+      "path": "inventory/d1-canonical-asset-projection.jsonl",
+      "bytes": 9883869,
+      "updatedAt": "2026-08-17T02:43:26.213Z"
+    },
+    {
+      "path": "inventory/d1-canonical-gap-projection.jsonl",
+      "bytes": 6717574,
+      "updatedAt": "2026-08-17T02:43:30.798Z"
+    },
+    {
+      "path": "inventory/d1-canonical-prompt-ref-projection.jsonl",
+      "bytes": 15738691,
+      "updatedAt": "2026-08-17T02:43:29.655Z"
+    },
+    {
+      "path": "inventory/d1-canonical-snapshot-index.jsonl",
+      "bytes": 1439,
+      "updatedAt": "2026-08-17T02:43:24.884Z"
+    },
+    {
+      "path": "inventory/d1-canonical-storage-object-projection.jsonl",
+      "bytes": 18400309,
+      "updatedAt": "2026-08-17T02:43:28.016Z"
+    },
+    {
+      "path": "inventory/d1-metadata-snapshot-index.jsonl",
+      "bytes": 1570,
+      "updatedAt": "2026-08-17T02:43:23.699Z"
+    },
+    {
+      "path": "inventory/d1-r2-dedupe-index.jsonl",
+      "bytes": 2672264,
+      "updatedAt": "2026-08-17T02:43:23.147Z"
+    },
+    {
+      "path": "inventory/d1-schema.json",
+      "bytes": 11766,
+      "updatedAt": "2026-08-17T02:43:22.335Z"
+    },
+    {
+      "path": "inventory/d1-vault-overlays.jsonl",
+      "bytes": 0,
+      "updatedAt": "2026-08-17T02:43:24.270Z"
+    },
+    {
+      "path": "inventory/grok-saved-current-summary.json",
+      "bytes": 6370,
+      "updatedAt": "2026-08-13T16:30:04.723Z"
+    },
+    {
+      "path": "inventory/media-sample-validation.json",
+      "bytes": 36359,
+      "updatedAt": "2026-08-17T02:54:31.468Z"
+    },
+    {
+      "path": "inventory/metadata-contract-summary.json",
+      "bytes": 10802,
+      "updatedAt": "2026-08-17T02:44:08.113Z"
+    },
+    {
+      "path": "inventory/metadata-objects.json",
+      "bytes": 1228435,
+      "updatedAt": "2026-08-17T02:50:04.129Z"
+    },
+    {
+      "path": "inventory/metadata-references.json",
+      "bytes": 1219023,
+      "updatedAt": "2026-08-17T02:50:04.155Z"
+    },
+    {
+      "path": "inventory/preflight-d1-schema.json",
+      "bytes": 11911,
+      "updatedAt": "2026-08-13T15:15:41.670Z"
+    },
+    {
+      "path": "inventory/preflight-identity.json",
+      "bytes": 2320,
+      "updatedAt": "2026-08-13T15:15:41.673Z"
+    },
+    {
+      "path": "inventory/prompt-sidecar-summary.json",
+      "bytes": 442,
+      "updatedAt": "2026-08-17T02:44:08.113Z"
+    },
+    {
+      "path": "inventory/r2-listing-checkpoint.json",
+      "bytes": 354,
+      "updatedAt": "2026-08-17T02:39:07.966Z"
+    },
+    {
+      "path": "inventory/r2-media-hashes.jsonl",
+      "bytes": 8735863,
+      "updatedAt": "2026-08-17T02:40:08.939Z"
+    },
+    {
+      "path": "inventory/r2-objects-listing-checkpoint.jsonl",
+      "bytes": 4627581,
+      "updatedAt": "2026-08-17T02:39:07.958Z"
+    },
+    {
+      "path": "inventory/r2-objects-summary.json",
+      "bytes": 563,
+      "updatedAt": "2026-08-17T02:40:08.945Z"
+    },
+    {
+      "path": "inventory/r2-objects.jsonl",
+      "bytes": 10277360,
+      "updatedAt": "2026-08-17T02:40:08.693Z"
+    },
+    {
+      "path": "inventory/r2-pages.json",
+      "bytes": 4330,
+      "updatedAt": "2026-08-17T02:40:08.694Z"
+    },
+    {
+      "path": "inventory/worker-vault-assets.jsonl",
+      "bytes": 2704460,
+      "updatedAt": "2026-08-17T02:43:38.605Z"
+    },
+    {
+      "path": "inventory/worker-vault-pages.json",
+      "bytes": 2114,
+      "updatedAt": "2026-08-17T02:43:38.606Z"
+    },
+    {
+      "path": "logs/d1-broad-token-select-only-approval.json",
+      "bytes": 410,
+      "updatedAt": "2026-08-13T15:15:41.677Z"
+    },
+    {
+      "path": "logs/d1-canonical_asset_projection.json",
+      "bytes": 768,
+      "updatedAt": "2026-08-17T02:43:26.082Z"
+    },
+    {
+      "path": "logs/d1-canonical_gap_projection.json",
+      "bytes": 761,
+      "updatedAt": "2026-08-17T02:43:30.723Z"
+    },
+    {
+      "path": "logs/d1-canonical_prompt_ref_projection.json",
+      "bytes": 784,
+      "updatedAt": "2026-08-17T02:43:29.500Z"
+    },
+    {
+      "path": "logs/d1-canonical_snapshot_index.json",
+      "bytes": 755,
+      "updatedAt": "2026-08-17T02:43:24.883Z"
+    },
+    {
+      "path": "logs/d1-canonical_storage_object_projection.json",
+      "bytes": 796,
+      "updatedAt": "2026-08-17T02:43:27.760Z"
+    },
+    {
+      "path": "logs/d1-metadata_snapshot_index.json",
+      "bytes": 752,
+      "updatedAt": "2026-08-17T02:43:23.699Z"
+    },
+    {
+      "path": "logs/d1-preflight-schema-smoke.json",
+      "bytes": 783,
+      "updatedAt": "2026-08-13T15:15:41.668Z"
+    },
+    {
+      "path": "logs/d1-r2_dedupe_index.json",
+      "bytes": 734,
+      "updatedAt": "2026-08-17T02:43:23.111Z"
+    },
+    {
+      "path": "logs/d1-schema.json",
+      "bytes": 849,
+      "updatedAt": "2026-08-17T02:43:22.327Z"
+    },
+    {
+      "path": "logs/d1-vault_overlays.json",
+      "bytes": 724,
+      "updatedAt": "2026-08-17T02:43:24.270Z"
+    },
+    {
+      "path": "logs/next-route-safety-source.json",
+      "bytes": 11422,
+      "updatedAt": "2026-08-13T15:15:35.969Z"
+    },
+    {
+      "path": "logs/next-route-safety-source.txt",
+      "bytes": 10768,
+      "updatedAt": "2026-08-13T15:15:35.980Z"
+    },
+    {
+      "path": "logs/preflight-git-branch.json",
+      "bytes": 275,
+      "updatedAt": "2026-08-13T15:15:09.007Z"
+    },
+    {
+      "path": "logs/preflight-git-diff-check.json",
+      "bytes": 240,
+      "updatedAt": "2026-08-13T15:15:09.056Z"
+    },
+    {
+      "path": "logs/preflight-git-head.json",
+      "bytes": 278,
+      "updatedAt": "2026-08-13T15:15:09.034Z"
+    },
+    {
+      "path": "logs/preflight-git-status.json",
+      "bytes": 402,
+      "updatedAt": "2026-08-13T15:15:08.973Z"
+    },
+    {
+      "path": "logs/preflight-git.txt",
+      "bytes": 490,
+      "updatedAt": "2026-08-13T15:15:35.971Z"
+    },
+    {
+      "path": "logs/preflight-node-version.json",
+      "bytes": 239,
+      "updatedAt": "2026-08-13T15:15:09.094Z"
+    },
+    {
+      "path": "logs/preflight-node24-version.json",
+      "bytes": 290,
+      "updatedAt": "2026-08-13T15:15:09.239Z"
+    },
+    {
+      "path": "logs/preflight-npm-version.json",
+      "bytes": 235,
+      "updatedAt": "2026-08-13T15:15:09.206Z"
+    },
+    {
+      "path": "logs/preflight-runtime.txt",
+      "bytes": 223,
+      "updatedAt": "2026-08-13T15:15:35.973Z"
+    },
+    {
+      "path": "logs/production-wrangler-config.txt",
+      "bytes": 450,
+      "updatedAt": "2026-08-13T15:15:35.971Z"
+    },
+    {
+      "path": "logs/r2-hash-resume-state.json",
+      "bytes": 231,
+      "updatedAt": "2026-08-17T02:40:08.865Z"
+    },
+    {
+      "path": "logs/r2-prior-hash-reuse.json",
+      "bytes": 490,
+      "updatedAt": "2026-08-17T02:40:08.776Z"
+    },
+    {
+      "path": "logs/route-safety-source.json",
+      "bytes": 1020,
+      "updatedAt": "2026-08-13T15:15:35.958Z"
+    },
+    {
+      "path": "logs/route-safety-source.txt",
+      "bytes": 568,
+      "updatedAt": "2026-08-13T15:15:35.979Z"
+    },
+    {
+      "path": "logs/validate-artifacts.json",
+      "bytes": 102,
+      "updatedAt": "2026-08-17T02:59:40.880Z"
+    },
+    {
+      "path": "logs/worker-metadata-summary.json",
+      "bytes": 469,
+      "updatedAt": "2026-08-17T02:43:39.110Z"
+    },
+    {
+      "path": "logs/worker-vault-identity.json",
+      "bytes": 278,
+      "updatedAt": "2026-08-17T02:43:38.037Z"
+    },
+    {
+      "path": "logs/wrangler-d1-execute-help.json",
+      "bytes": 2106,
+      "updatedAt": "2026-08-13T15:15:35.939Z"
+    },
+    {
+      "path": "logs/wrangler-d1-execute-help.txt",
+      "bytes": 1910,
+      "updatedAt": "2026-08-13T15:15:35.977Z"
+    },
+    {
+      "path": "logs/wrangler-r2-object-help.json",
+      "bytes": 1417,
+      "updatedAt": "2026-08-13T15:15:31.486Z"
+    },
+    {
+      "path": "logs/wrangler-r2-object-help.txt",
+      "bytes": 1234,
+      "updatedAt": "2026-08-13T15:15:35.975Z"
+    },
+    {
+      "path": "logs/wrangler-version.json",
+      "bytes": 316,
+      "updatedAt": "2026-08-13T15:15:26.218Z"
+    },
+    {
+      "path": "logs/wrangler-version.txt",
+      "bytes": 171,
+      "updatedAt": "2026-08-13T15:15:35.974Z"
+    },
+    {
+      "path": "logs/wrangler-whoami.json",
+      "bytes": 2076,
+      "updatedAt": "2026-08-13T15:15:21.159Z"
+    },
+    {
+      "path": "logs/wrangler-whoami.txt",
+      "bytes": 1119,
+      "updatedAt": "2026-08-13T15:15:35.975Z"
+    },
+    {
+      "path": "reconciliations/canonical-index-summary.json",
+      "bytes": 2142,
+      "updatedAt": "2026-08-17T02:44:08.114Z"
+    },
+    {
+      "path": "reconciliations/duplicate-classification-summary.json",
+      "bytes": 897,
+      "updatedAt": "2026-08-17T02:44:08.114Z"
+    },
+    {
+      "path": "reconciliations/duplicate-groups.json",
+      "bytes": 2975509,
+      "updatedAt": "2026-08-17T02:50:13.396Z"
+    },
+    {
+      "path": "reconciliations/malformed-keys.json",
+      "bytes": 514,
+      "updatedAt": "2026-08-17T02:50:13.398Z"
+    },
+    {
+      "path": "reconciliations/r2-d1-delta.json",
+      "bytes": 1462151,
+      "updatedAt": "2026-08-17T02:50:13.303Z"
+    },
+    {
+      "path": "reconciliations/r2-integrity-summary.json",
+      "bytes": 1467,
+      "updatedAt": "2026-08-17T02:44:08.113Z"
+    },
+    {
+      "path": "reconciliations/r2-local-delta.json",
+      "bytes": 3840575,
+      "updatedAt": "2026-08-17T02:50:13.361Z"
+    },
+    {
+      "path": "reconciliations/r2-metadata-delta.json",
+      "bytes": 1736318,
+      "updatedAt": "2026-08-17T02:50:13.322Z"
+    },
+    {
+      "path": "reconciliations/sample-set.json",
+      "bytes": 1156,
+      "updatedAt": "2026-08-17T02:50:13.421Z"
+    },
+    {
+      "path": "reconciliations/unresolved-items.json",
+      "bytes": 7870,
+      "updatedAt": "2026-08-17T02:50:13.408Z"
+    },
+    {
+      "path": "reconciliations/worker-raw-delta.json",
+      "bytes": 1462144,
+      "updatedAt": "2026-08-17T02:50:13.370Z"
+    },
+    {
+      "path": "REPORT.md",
+      "bytes": 14098,
+      "updatedAt": "2026-08-17T02:54:08.533Z"
+    },
+    {
+      "path": "scripts/analyze-r2-evidence.mjs",
+      "bytes": 30553,
+      "updatedAt": "2026-08-13T15:48:18.196Z"
+    },
+    {
+      "path": "scripts/audit-grok-gallery-001.mjs",
+      "bytes": 88269,
+      "updatedAt": "2026-08-17T02:55:45.301Z"
+    },
+    {
+      "path": "scripts/verify-media-samples.mjs",
+      "bytes": 10637,
+      "updatedAt": "2026-08-13T16:03:58.232Z"
+    }
+  ],
+  "validation": {
+    "completedAt": "2026-08-17T02:58:56Z",
+    "artifactContract": "passed",
+    "jsonArtifactsParsed": 73,
+    "extensionLint": "passed",
+    "extensionUnitTests": {
+      "status": "passed",
+      "tests": 321
+    },
+    "extensionE2eTests": {
+      "status": "passed",
+      "tests": 15
+    },
+    "cloudTypecheck": "passed",
+    "mediaSamples": {
+      "status": "passed",
+      "samples": 23
+    },
+    "gitleaks": "passed",
+    "trufflehog": "passed",
+    "gitDiffCheck": "passed",
+    "dependencySource": "matching package.json and package-lock.json installation from the primary checkout",
+    "cloudMutations": false
+  },
+  "finalVerdicts": {
+    "bucketCorrectness": "dirty",
+    "duplicateSafety": "unsafe_to_delete_without_lineage_proof",
+    "metadataCompleteness": "incomplete",
+    "currentGrokSavedCompleteness": "inconclusive"
+  }
+}

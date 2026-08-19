@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-08-19T16:58:12.262Z",
+  "rawObjectCount": 18738,
+  "mediaObjectCount": 16496,
+  "metadataObjectCount": 10,
+  "totalBytes": 45501777314,
+  "byClass": {
+    "out-of-prefix": 1,
+    "legacy-date-media": 9894,
+    "prompt-sidecar": 2226,
+    "canonical-media": 6603,
+    "asset-metadata-v2": 2,
+    "metadata": 10,
+    "system": 2
+  },
+  "byMediaType": {
+    "non-media": 2242,
+    "image": 9886,
+    "video": 6610
+  },
+  "hashCoverage": {
+    "attempted": 16496,
+    "ok": 16496,
+    "failed": 0,
+    "byEvidenceSource": {
+      "current-run-resume": 16496
+    }
+  }
+}
