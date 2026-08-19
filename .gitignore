@@ -37,3 +37,6 @@ AGENT_HANDOFF.md
 cloud/wrangler.acceptance.generated.toml
 cloud/.tmp-test/
 acceptance/runs/
+
+# Private R2 migration evidence
+docs/audits/2026-08-19-grok-gallery-v2-migration/private/
