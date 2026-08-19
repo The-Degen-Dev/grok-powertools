@@ -42,20 +42,27 @@ function env(overrides: Record<string, unknown> = {}) {
         R2_BUCKET_NAME: 'grok-gallery-001',
         KEY_PREFIX: 'grok-powertools/v1',
         R2_BUCKET: {
-            list: async () => ({
-                objects: [
-                    {
-                        key: 'grok-powertools/v1/users/greymaker/media/by-asset/asset-video-1.mp4',
-                        size: 2048,
-                        etag: 'etag-1',
-                        uploaded: new Date('2026-06-18T00:00:00.000Z'),
-                        httpMetadata: { contentType: 'video/mp4' },
-                        customMetadata: { assetId: 'asset-video-1', contentSha256: 'sha-1' },
-                    },
-                ],
-                truncated: false,
-                cursor: undefined,
-            }),
+            list: async (options: { delimiter?: string } = {}) => options.delimiter === '/'
+                ? {
+                    objects: [],
+                    delimitedPrefixes: ['grok-powertools/v1/users/greymaker/'],
+                    truncated: false,
+                    cursor: undefined,
+                }
+                : ({
+                    objects: [
+                        {
+                            key: 'grok-powertools/v1/users/greymaker/media/by-asset/asset-video-1.mp4',
+                            size: 2048,
+                            etag: 'etag-1',
+                            uploaded: new Date('2026-06-18T00:00:00.000Z'),
+                            httpMetadata: { contentType: 'video/mp4' },
+                            customMetadata: { assetId: 'asset-video-1', contentSha256: 'sha-1' },
+                        },
+                    ],
+                    truncated: false,
+                    cursor: undefined,
+                }),
             get: async (key: string) => {
                 if (key.endsWith('saved-prompts.latest.json')) {
                     return {
@@ -108,8 +115,9 @@ test('Vault identity returns redacted target proof', async () => {
     assert.equal(JSON.stringify(body).includes(sampleKey), false);
 });
 
-test('Vault inventory prefers D1 index rows without R2 listing or D1 writes', async () => {
-    const calls: Array<{ sql: string; args: unknown[] }> = [];
+test('Vault inventory treats R2 as authoritative when D1 is only a partial index', async () => {
+    const d1Calls: Array<{ sql: string; args: unknown[] }> = [];
+    const r2ListCalls: Array<Record<string, unknown>> = [];
 
     const response = await worker.fetch(
         new Request('https://worker.example/v1/vault/inventory', {
@@ -117,15 +125,36 @@ test('Vault inventory prefers D1 index rows without R2 listing or D1 writes', as
         }),
         env({
             R2_BUCKET: {
-                list: async () => {
-                    throw new Error('D1 inventory rows should avoid R2 list fallback');
+                list: async (options: Record<string, unknown>) => {
+                    r2ListCalls.push(options);
+                    return {
+                        objects: [
+                            {
+                                key: 'grok-powertools/v1/users/Shared_Account/media/by-asset/asset-video-1.mp4',
+                                size: 2048,
+                                etag: 'etag-r2',
+                                uploaded: new Date('2026-06-19T00:00:00.000Z'),
+                                httpMetadata: { contentType: 'video/mp4' },
+                                customMetadata: { 'asset-id': 'asset-video-1', sha256: 'sha-r2' },
+                            },
+                            {
+                                key: 'grok-powertools/v1/users/Shared_Account/media/by-asset/asset-video-1.mp4.prompt.json',
+                                size: 400,
+                                etag: 'etag-sidecar',
+                                uploaded: new Date('2026-06-19T00:00:00.000Z'),
+                                httpMetadata: { contentType: 'application/json' },
+                            },
+                        ],
+                        truncated: false,
+                        cursor: undefined,
+                    };
                 },
             },
             DB: {
                 prepare: (sql: string) => ({
                     bind: (...args: unknown[]) => ({
                         all: async () => {
-                            calls.push({ sql, args });
+                            d1Calls.push({ sql, args });
                             return {
                                 results: [
                                     {
@@ -149,18 +178,20 @@ test('Vault inventory prefers D1 index rows without R2 listing or D1 writes', as
             },
         })
     );
-    const body = await response.json() as { items: Array<{ assetId: string; mediaType: string; legacyObjectKeys: string[]; canonicalObjectKey: string }> };
+    const body = await response.json() as {
+        items: Array<{ assetId: string; mediaType: string; legacyObjectKeys: string[]; canonicalObjectKey: string }>;
+    };
     assert.equal(response.status, 200);
     assert.equal(body.items.length, 1);
-    assert.equal(body.items[0].assetId, 'asset-image-1');
-    assert.equal(body.items[0].mediaType, 'image');
-    assert.equal(body.items[0].canonicalObjectKey, 'grok-powertools/v1/users/greymaker/media/by-asset/asset-image-1.png');
-    assert.deepEqual(body.items[0].legacyObjectKeys, ['grok-powertools/v1/users/greymaker/media/conflicts/asset-image-1.png']);
-    assert.equal(calls.length, 1);
-    assert.match(calls[0].sql, /^SELECT /);
-    assert.equal(calls[0].sql.includes('INSERT'), false);
-    assert.equal(calls[0].sql.includes('UPDATE'), false);
-    assert.equal(calls[0].sql.includes('DELETE'), false);
+    assert.equal(body.items[0].assetId, 'asset-video-1');
+    assert.equal(body.items[0].mediaType, 'video');
+    assert.equal(
+        body.items[0].canonicalObjectKey,
+        'grok-powertools/v1/users/Shared_Account/media/by-asset/asset-video-1.mp4'
+    );
+    assert.deepEqual(body.items[0].legacyObjectKeys, []);
+    assert.equal(r2ListCalls.length, 1);
+    assert.equal(d1Calls.length, 0);
 });
 
 test('Vault inventory falls back to R2 list when D1 has no rows', async () => {
@@ -207,6 +238,105 @@ test('Vault metadata returns saved prompt snapshots', async () => {
     assert.equal(body.ok, true);
     assert.equal(body.kind, 'savedPrompts');
     assert.equal(body.data.length, 1);
+});
+
+test('Vault metadata discovers and merges every R2 user namespace without a hardcoded account', async () => {
+    const requestedKeys: string[] = [];
+    const response = await worker.fetch(
+        new Request('https://worker.example/v1/vault/metadata/savedPrompts', {
+            headers: { [headerName]: sampleKey },
+        }),
+        env({
+            R2_BUCKET: {
+                list: async (options: { prefix: string; delimiter?: string; cursor?: string }) => {
+                    assert.equal(options.prefix, 'grok-powertools/v1/users/');
+                    assert.equal(options.delimiter, '/');
+                    return {
+                        objects: [],
+                        delimitedPrefixes: [
+                            'grok-powertools/v1/users/greymaker/',
+                            'grok-powertools/v1/users/Shared_Account/',
+                        ],
+                        truncated: false,
+                        cursor: undefined,
+                    };
+                },
+                get: async (key: string) => {
+                    requestedKeys.push(key);
+                    if (key.includes('/greymaker/')) {
+                        return { text: async () => JSON.stringify({ data: [{ id: 'prompt-1', text: 'first' }] }) };
+                    }
+                    if (key.includes('/Shared_Account/')) {
+                        return { text: async () => JSON.stringify({ data: [{ id: 'prompt-2', text: 'second' }] }) };
+                    }
+                    return null;
+                },
+            },
+        })
+    );
+    const body = await response.json() as {
+        ok: boolean;
+        kind: string;
+        data: Array<{ id: string }>;
+        sources: string[];
+    };
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(body.data.map((item) => item.id), ['prompt-2', 'prompt-1']);
+    assert.deepEqual(body.sources, ['Shared_Account', 'greymaker']);
+    assert.deepEqual(requestedKeys.sort(), [
+        'grok-powertools/v1/users/Shared_Account/metadata/saved-prompts.latest.json',
+        'grok-powertools/v1/users/greymaker/metadata/saved-prompts.latest.json',
+    ]);
+});
+
+test('Vault metadata fails closed when namespace pagination exceeds its safety bound', async () => {
+    let listCalls = 0;
+    await assert.rejects(
+        worker.fetch(
+            new Request('https://worker.example/v1/vault/metadata/savedPrompts', {
+                headers: { [headerName]: sampleKey },
+            }),
+            env({
+                R2_BUCKET: {
+                    list: async () => {
+                        listCalls += 1;
+                        return {
+                            objects: [],
+                            delimitedPrefixes: [],
+                            truncated: true,
+                            cursor: `page-${listCalls + 1}`,
+                        };
+                    },
+                    get: async () => null,
+                },
+            })
+        ),
+        /vault_metadata_namespace_limit_exceeded/
+    );
+    assert.equal(listCalls, 100);
+});
+
+test('Vault metadata fails closed when a truncated namespace page omits its cursor', async () => {
+    await assert.rejects(
+        worker.fetch(
+            new Request('https://worker.example/v1/vault/metadata/savedPrompts', {
+                headers: { [headerName]: sampleKey },
+            }),
+            env({
+                R2_BUCKET: {
+                    list: async () => ({
+                        objects: [],
+                        delimitedPrefixes: [],
+                        truncated: true,
+                        cursor: undefined,
+                    }),
+                    get: async () => null,
+                },
+            })
+        ),
+        /vault_metadata_cursor_missing/
+    );
 });
 
 test('Vault media streams object bytes for server-side proxy', async () => {

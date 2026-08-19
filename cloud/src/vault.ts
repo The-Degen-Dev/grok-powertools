@@ -195,15 +195,6 @@ async function listVaultInventoryFromD1(env: Env, keyPrefix: string, cursor: str
 
 export async function listVaultInventory(env: Env, cursor?: string | null, limit = 100) {
     const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
-    if (env.DB) {
-        try {
-            const indexed = await listVaultInventoryFromD1(env, keyPrefix, cursor, limit);
-            if (indexed.items.length > 0) return indexed;
-        } catch {
-            // Fall back to R2 when the D1 index is absent or temporarily unavailable.
-        }
-    }
-
     const listed = await env.R2_BUCKET.list({
         prefix: `${keyPrefix}/users/`,
         cursor: cursor || undefined,
@@ -211,10 +202,12 @@ export async function listVaultInventory(env: Env, cursor?: string | null, limit
     });
     const items = listed.objects
         .filter((object) => object.key.includes('/media/'))
-        .map((object) => normalizeVaultObject(object, keyPrefix));
+        .map((object) => normalizeVaultObject(object, keyPrefix))
+        .filter((item) => item.mediaType === 'image' || item.mediaType === 'video');
 
     return {
         ok: true,
+        source: 'r2',
         items,
         nextCursor: listed.truncated ? listed.cursor || null : null,
         counts: {
@@ -229,6 +222,33 @@ export async function listVaultInventory(env: Env, cursor?: string | null, limit
     };
 }
 
+async function listVaultUserNamespaces(env: Env, keyPrefix: string): Promise<string[]> {
+    const usersPrefix = `${keyPrefix}/users/`;
+    const namespaces = new Set<string>();
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+
+    for (let page = 0; page < 100; page += 1) {
+        const listed = await env.R2_BUCKET.list({
+            prefix: usersPrefix,
+            delimiter: '/',
+            cursor,
+            limit: 1000,
+        });
+        for (const prefix of listed.delimitedPrefixes || []) {
+            const namespace = prefix.slice(usersPrefix.length).replace(/\/$/, '');
+            if (namespace && !namespace.includes('/')) namespaces.add(namespace);
+        }
+        if (!listed.truncated) return [...namespaces].sort();
+        if (!listed.cursor) throw new Error('vault_metadata_cursor_missing');
+        if (seenCursors.has(listed.cursor)) throw new Error('vault_metadata_cursor_repeated');
+        seenCursors.add(listed.cursor);
+        cursor = listed.cursor;
+    }
+
+    throw new Error('vault_metadata_namespace_limit_exceeded');
+}
+
 export async function readVaultMetadata(env: Env, kind: string) {
     const keyPrefix = sanitizeKeyPrefix(env.KEY_PREFIX);
     const filenameByKind: Record<string, string> = {
@@ -240,15 +260,28 @@ export async function readVaultMetadata(env: Env, kind: string) {
     };
     const filename = filenameByKind[kind];
     if (!filename) return { ok: false, status: 400, error: 'Unsupported metadata kind.' };
-
-    const object = await env.R2_BUCKET.get(`${keyPrefix}/users/greymaker/metadata/${filename}`);
-    if (!object) return { ok: true, kind, data: [] };
-
-    const parsed = JSON.parse(await object.text()) as { data?: unknown };
+    const namespaces = await listVaultUserNamespaces(env, keyPrefix);
+    const data: unknown[] = [];
+    const sources: string[] = [];
+    const warnings: string[] = [];
+    for (const namespace of namespaces) {
+        const object = await env.R2_BUCKET.get(`${keyPrefix}/users/${namespace}/metadata/${filename}`);
+        if (!object) continue;
+        try {
+            const parsed = JSON.parse(await object.text()) as { data?: unknown };
+            if (Array.isArray(parsed.data)) data.push(...parsed.data);
+            else if (parsed.data !== undefined && parsed.data !== null) data.push(parsed.data);
+            sources.push(namespace);
+        } catch {
+            warnings.push(`${namespace}: invalid ${filename}`);
+        }
+    }
     return {
         ok: true,
         kind,
-        data: Array.isArray(parsed.data) ? parsed.data : parsed.data ? [parsed.data] : [],
+        data,
+        sources,
+        warnings,
     };
 }
 
