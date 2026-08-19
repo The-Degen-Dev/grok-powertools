@@ -85,6 +85,7 @@ workbook = upsertExtensionRecoveryLane(workbook, {
 });
 workbook.releaseGate = evaluateExtensionRecoveryReleaseGate(workbook);
 
+fs.mkdirSync(path.dirname(runDir), { recursive: true });
 fs.mkdirSync(runDir, { recursive: false });
 fs.writeFileSync(path.join(runDir, 'baseline.patch'), baselinePatch);
 writeJsonAtomically(path.join(runDir, 'extension-recovery.json'), workbook);
