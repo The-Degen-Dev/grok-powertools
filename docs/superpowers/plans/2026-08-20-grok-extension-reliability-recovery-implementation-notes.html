@@ -54,7 +54,7 @@
         <div><span class="label">Baseline:</span> <code>35f6bc7</code></div>
         <div><span class="label">Checkpoint:</span> <code>f6ece2a</code></div>
         <div><span class="label">Manifest:</span> <code>0.2.0</code></div>
-        <div><span class="label">Status:</span> Task 1 red fixtures captured</div>
+        <div><span class="label">Status:</span> Task 2 adapter ready; Task 3 in progress</div>
       </div>
     </header>
 
@@ -65,6 +65,9 @@
         <li>Provider-accepted state, not click dispatch or return navigation, is the only batch progress signal.</li>
         <li>Generation run state will be background-owned; the existing Sync lease remains separate.</li>
         <li>Sync will reuse serialized <code>processedIds</code> for durable per-asset UUIDs and keep only the active conversation inventory in the existing run mirror.</li>
+        <li>The Grok adapter treats asset ID plus post ID as gallery identity. Conversation ID is metadata scope and is never sufficient to identify a card.</li>
+        <li>Agent Mode binds the one selected <code>.react-flow__node-asset</code> by stable node/media asset identity. The persisted post ID remains context because current Agent DOM does not expose it.</li>
+        <li>Submission acceptance must be new and source-scoped. Control disappearance, return navigation, unrelated progress, and stale result media remain pending.</li>
       </ul>
     </section>
 
@@ -78,6 +81,7 @@
       <ul>
         <li>A second permanent Sync ledger was rejected because it would duplicate thousands of IDs and increase Chrome storage quota and write-race risk.</li>
         <li>The adapter/controller extraction adds three focused runtime files, but removes repeated selector and state logic from the 8,000-line content script.</li>
+        <li>Agent identity cannot re-prove the source post ID from current DOM. The adapter therefore requires exact unique asset agreement and fails closed on duplicate, disagreement, or multiple selected nodes.</li>
       </ul>
     </section>
 
@@ -102,6 +106,8 @@
         <li>Recreate regression: cancelling while the Imagine submit control is still pending does not revoke the wait; the control is clicked after cancellation and can create a late result.</li>
         <li>Sync regression: a conversation response containing two attachment assets produces no conversation inventory event, confirming the current path cannot enumerate every authoritative asset.</li>
         <li>Adapter and generation-state contract suites are syntax- and lint-clean, and fail only because their runtime modules do not exist yet. They remain assigned to Tasks 2 and 3.</li>
+        <li>Task 2: 19 adapter tests passed across gallery, Saved, Agent, legacy detail, action selection, source-scoped acceptance, rejection, ambiguity, remount, and playable-result cases.</li>
+        <li>Task 2: manifest order, direct reinjection order, and release package allowlist tests passed; the package list contains <code>grokImagineAdapter.js</code>.</li>
       </ul>
     </section>
   </main>

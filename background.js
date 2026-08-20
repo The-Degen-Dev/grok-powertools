@@ -2606,6 +2606,7 @@ function injectContentScripts(tabId) {
         'providerRegistry.js',
         'providerRunLedger.js',
         'chatgptImagesContent.js',
+        'grokImagineAdapter.js',
         'recreateWorkflowUtils.js',
         'recreateWorkflowContent.js',
         'content.js'
