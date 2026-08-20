@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grok Extension Reliability Recovery - Implementation Notes</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      line-height: 1.5;
+    }
+    body {
+      margin: 0;
+      background: Canvas;
+      color: CanvasText;
+    }
+    main {
+      width: min(960px, calc(100% - 32px));
+      margin: 32px auto 64px;
+    }
+    header, section {
+      border-bottom: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+      padding: 0 0 24px;
+      margin: 0 0 24px;
+    }
+    h1, h2 {
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    h1 { font-size: 24px; }
+    h2 { font-size: 17px; }
+    code {
+      background: color-mix(in srgb, CanvasText 10%, transparent);
+      padding: 2px 4px;
+    }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 8px 24px;
+    }
+    .label { opacity: 0.65; }
+    li + li { margin-top: 8px; }
+    .empty { opacity: 0.65; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Grok Extension Reliability Recovery</h1>
+      <div class="meta">
+        <div><span class="label">Started:</span> 2026-08-20</div>
+        <div><span class="label">Branch:</span> <code>codex/grok-extension-recovery</code></div>
+        <div><span class="label">Baseline:</span> <code>35f6bc7</code></div>
+        <div><span class="label">Status:</span> Task 1 in progress</div>
+      </div>
+    </header>
+
+    <section>
+      <h2>Design Decisions</h2>
+      <ul>
+        <li>Quick Batch uses every eligible card discovered from the starting gallery, capped by the existing Gallery Limit.</li>
+        <li>Provider-accepted state, not click dispatch or return navigation, is the only batch progress signal.</li>
+        <li>Generation run state will be background-owned; the existing Sync lease remains separate.</li>
+        <li>Sync will reuse serialized <code>processedIds</code> for durable per-asset UUIDs and keep only the active conversation inventory in the existing run mirror.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Deviations</h2>
+      <p class="empty">None.</p>
+    </section>
+
+    <section>
+      <h2>Tradeoffs</h2>
+      <ul>
+        <li>A second permanent Sync ledger was rejected because it would duplicate thousands of IDs and increase Chrome storage quota and write-race risk.</li>
+        <li>The adapter/controller extraction adds three focused runtime files, but removes repeated selector and state logic from the 8,000-line content script.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Open Questions</h2>
+      <p class="empty">None currently. Live spend and write lanes remain approval-gated.</p>
+    </section>
+
+    <section>
+      <h2>Validation Log</h2>
+      <ul>
+        <li>Planning baseline: lint passed.</li>
+        <li>Planning baseline: 902 unit tests passed, but one background initialization console error made the run an invalid clean signal.</li>
+        <li>Planning baseline: 48 mocked Playwright tests passed.</li>
+        <li>Read-only live Saved inspection confirmed current Make Video controls and stable post/asset identities without enumerating Chrome tabs.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
