@@ -279,7 +279,7 @@
         if (typeof normalized.sourcePostId !== 'string' || !normalized.sourcePostId) {
             throw stateError('INVALID_GENERATION_STATE');
         }
-        if (typeof normalized.conversationId !== 'string' || !normalized.conversationId) {
+        if (typeof normalized.conversationId !== 'string') {
             throw stateError('INVALID_GENERATION_STATE');
         }
         return normalized;

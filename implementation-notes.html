@@ -2178,6 +2178,48 @@ npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-
                     </tr>
                 </tbody>
             </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Quick Batch</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Quick Batch snapshots stable asset/post descriptors, claims one source at
+                            a time from the background authority, reacquires the native Make Video
+                            control after React remounts, and advances only after source-scoped provider
+                            acceptance. It does not wait for video generation to finish before dispatching
+                            the next eligible source.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Quick Batch no longer uses the shared legacy <code>batchQueue</code> of live DOM
+                            nodes. That queue remains temporarily for Prompted Batch until the next task
+                            migrates Prompted Batch to the same descriptor contract.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            A click with no provider acceptance evidence is retried only within the
+                            configured attempt budget, then remains eligible for explicit Retry Failed.
+                            Ambiguous source identity fails closed instead of risking generation against
+                            the wrong card.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None for deterministic Quick Batch behavior. A live credit-spending lane
+                            remains approval-gated until Prompted Batch and Video Goal share this runner.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </main>
     </body>
 </html>

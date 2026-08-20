@@ -156,9 +156,13 @@ function createSavedBatchCard(sourceUrl, onImageClick = null) {
 function mountQuickBatchGallery(sourceIds, onAction) {
     document.querySelectorAll('[data-test-quick-batch-card]').forEach((card) => card.remove());
     return sourceIds.map((sourceId) => {
-        const { card, makeVideo } = createSavedBatchCard(
+        const { card, image, makeVideo } = createSavedBatchCard(
             `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`
         );
+        const postLink = document.createElement('a');
+        postLink.href = `/imagine/post/${sourceId}?conversation=${sourceId}`;
+        card.insertBefore(postLink, image);
+        postLink.appendChild(image);
         card.setAttribute('data-test-quick-batch-card', sourceId);
         makeVideo.scrollIntoView = jest.fn();
         makeVideo.addEventListener('click', () => onAction({ sourceId, card }));
@@ -265,6 +269,7 @@ describe('VideoRetryManager', () => {
     let setIntervalSpy;
     let promptedVideoBridgeHandler;
     let nativeControlClickSpy;
+    let generationLease;
 
     beforeEach(() => {
         if (!global.PointerEvent) global.PointerEvent = MouseEvent;
@@ -299,6 +304,7 @@ describe('VideoRetryManager', () => {
         document.addEventListener('__gpt_set_prompted_video_content', promptedVideoBridgeHandler);
 
         setIntervalSpy = jest.spyOn(global, 'setInterval').mockImplementation(() => 1);
+        generationLease = null;
         retryManager = new VideoRetryManager(mockOverlay, settingsManager, historyManager);
         nativeControlClickSpy = jest.spyOn(retryManager, '_clickPromptedBatchNativeControl')
             .mockImplementation(async (target, runToken, _operation, validateTarget) => {
@@ -308,8 +314,74 @@ describe('VideoRetryManager', () => {
                 return retryManager.isPromptedBatchTokenActive(runToken);
             });
         chrome.runtime.sendMessage.mockImplementation(async (message) => {
-            if (message?.action !== 'GPT_PROMPTED_VIDEO_NATIVE_CLICK') return undefined;
-            return { ok: false, error: 'native_click_not_stubbed' };
+            if (message?.action === 'GPT_PROMPTED_VIDEO_NATIVE_CLICK') {
+                return { ok: false, error: 'native_click_not_stubbed' };
+            }
+            if (message?.action === 'GENERATION_RUN_START') {
+                const items = message.items.map((entry, index) => ({
+                    itemId: `item-${index + 1}`,
+                    descriptor: entry,
+                    status: 'queued',
+                    attemptCount: 0,
+                    failureCode: ''
+                }));
+                generationLease = {
+                    runId: 'generation-run-test',
+                    epoch: 1,
+                    kind: message.kind,
+                    status: 'running',
+                    items,
+                    counts: { accepted: 0, failed: 0, skipped: 0, pending: items.length },
+                    options: message.options
+                };
+                return { status: 'started', run: generationLease };
+            }
+            if (message?.action === 'GENERATION_RUN_CLAIM') {
+                const item = generationLease?.items.find((candidate) => candidate.status === 'queued');
+                if (!item) return { status: 'waiting', claim: null, run: generationLease };
+                item.status = 'targeting';
+                return {
+                    status: 'claimed',
+                    claim: {
+                        runId: generationLease.runId,
+                        epoch: generationLease.epoch,
+                        claimId: `claim-${item.itemId}-${item.attemptCount}`,
+                        itemId: item.itemId,
+                        descriptor: item.descriptor
+                    },
+                    run: generationLease
+                };
+            }
+            if (message?.action === 'GENERATION_RUN_REPORT') {
+                const item = generationLease.items.find((candidate) => candidate.itemId === message.itemId);
+                if (message.outcome === 'accepted') {
+                    item.status = 'accepted';
+                } else if (message.outcome === 'permanent_failed') {
+                    item.status = 'permanent_failed';
+                    item.failureCode = message.failureCode;
+                } else if (message.outcome === 'retryable_failed') {
+                    item.attemptCount += 1;
+                    item.failureCode = message.failureCode;
+                    item.status = item.attemptCount > generationLease.options.maxRetries
+                        ? 'retryable_failed'
+                        : 'queued';
+                }
+                generationLease.counts = generationLease.items.reduce((counts, candidate) => {
+                    if (candidate.status === 'accepted') counts.accepted += 1;
+                    else if (candidate.status === 'retryable_failed' || candidate.status === 'permanent_failed') counts.failed += 1;
+                    else counts.pending += 1;
+                    return counts;
+                }, { accepted: 0, failed: 0, skipped: 0, pending: 0 });
+                if (generationLease.counts.pending === 0) {
+                    generationLease.status = generationLease.counts.failed ? 'retryable_failed' : 'completed';
+                }
+                return { status: 'updated', run: generationLease };
+            }
+            if (message?.action === 'GENERATION_RUN_CANCEL') {
+                generationLease.status = 'cancelled';
+                return { status: 'cancelled', acknowledged: true, run: generationLease };
+            }
+            return undefined;
         });
     });
 
@@ -484,22 +556,28 @@ describe('VideoRetryManager', () => {
     });
 
     test('Quick Batch reacquires all three stable source identities after the gallery remounts', async () => {
+        settingsManager.settings.galleryBatchLimit = 3;
         const sourceIds = [
             '10101010-aaaa-4bbb-8ccc-111111111111',
             '20202020-aaaa-4bbb-8ccc-222222222222',
             '30303030-aaaa-4bbb-8ccc-333333333333'
         ];
         const acceptedSourceIds = [];
+        const accepted = new Set();
         let remounted = false;
         window.history.pushState({}, '', '/imagine/saved');
 
         const mountGallery = () => mountQuickBatchGallery(sourceIds, ({ sourceId, card }) => {
             acceptedSourceIds.push(sourceId);
-            markQuickBatchActionAccepted(card);
+            accepted.add(sourceId);
             if (!remounted) {
                 remounted = true;
                 mountGallery();
+            } else {
+                markQuickBatchActionAccepted(card);
             }
+        }).forEach(({ sourceId, card }) => {
+            if (accepted.has(sourceId)) markQuickBatchActionAccepted(card);
         });
         mountGallery();
         retryManager.sleep = jest.fn().mockResolvedValue();
@@ -523,28 +601,35 @@ describe('VideoRetryManager', () => {
 
         await retryManager.startBatch('quick');
 
-        expect(dispatchedSourceIds).toEqual([sourceId]);
+        expect(dispatchedSourceIds).toHaveLength(settingsManager.settings.maxRetries + 1);
+        expect(new Set(dispatchedSourceIds)).toEqual(new Set([sourceId]));
         expect(retryManager.goalCount).toBe(0);
     });
 
     test('Quick Batch never dispatches the same stable source twice after a gallery remount', async () => {
+        settingsManager.settings.galleryBatchLimit = 3;
         const sourceIds = [
             '50505050-aaaa-4bbb-8ccc-555555555555',
             '60606060-aaaa-4bbb-8ccc-666666666666',
             '70707070-aaaa-4bbb-8ccc-777777777777'
         ];
         const dispatchedSourceIds = [];
+        const accepted = new Set();
         let remounted = false;
         window.history.pushState({}, '', '/imagine/saved');
         window.scrollBy = jest.fn();
 
         const mountGallery = () => mountQuickBatchGallery(sourceIds, ({ sourceId, card }) => {
             dispatchedSourceIds.push(sourceId);
-            markQuickBatchActionAccepted(card);
+            accepted.add(sourceId);
             if (!remounted) {
                 remounted = true;
                 mountGallery();
+            } else {
+                markQuickBatchActionAccepted(card);
             }
+        }).forEach(({ sourceId, card }) => {
+            if (accepted.has(sourceId)) markQuickBatchActionAccepted(card);
         });
         mountGallery();
         retryManager.sleep = jest.fn().mockResolvedValue();
