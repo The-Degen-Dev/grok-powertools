@@ -153,6 +153,30 @@ function createSavedBatchCard(sourceUrl, onImageClick = null) {
     return { card, image, makeVideo };
 }
 
+function createCurrentSavedBatchCard(sourceId) {
+    const listItem = document.createElement('div');
+    listItem.setAttribute('role', 'listitem');
+    listItem.setAttribute('data-masonry-key', sourceId);
+    const card = document.createElement('div');
+    card.className = 'relative group/media-post-masonry-card';
+    const mediaBranch = document.createElement('div');
+    const image = document.createElement('img');
+    image.alt = '';
+    image.src = `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`;
+    mediaBranch.appendChild(image);
+    const postLink = document.createElement('a');
+    postLink.className = 'absolute inset-0';
+    postLink.href = `/imagine/post/${sourceId}?conversation=${sourceId}`;
+    const actionBranch = document.createElement('div');
+    const makeVideo = document.createElement('button');
+    makeVideo.setAttribute('aria-label', 'Make video');
+    actionBranch.appendChild(makeVideo);
+    card.append(mediaBranch, postLink, actionBranch);
+    listItem.appendChild(card);
+    document.body.appendChild(listItem);
+    return { listItem, card, image, postLink, makeVideo };
+}
+
 function mountQuickBatchGallery(sourceIds, onAction) {
     document.querySelectorAll('[data-test-quick-batch-card]').forEach((card) => card.remove());
     return sourceIds.map((sourceId) => {
@@ -279,6 +303,88 @@ function renderAgentEditor({
     return { back, makeVideo: makeVideo ? makeVideoButton : null };
 }
 
+function appendPlayableGoalVideo(root, resultAssetId) {
+    const video = document.createElement('video');
+    video.src = `https://assets.grok.com/users/example/generated/${resultAssetId}/video.mp4`;
+    Object.defineProperties(video, {
+        readyState: { configurable: true, value: 2 },
+        duration: { configurable: true, value: 6 },
+        videoWidth: { configurable: true, value: 400 },
+        videoHeight: { configurable: true, value: 736 }
+    });
+    root.appendChild(video);
+    return video;
+}
+
+function mountVideoGoalSource({ sourceAssetId, sourcePostId, onAction }) {
+    const sourceUrl = `https://assets.grok.com/users/example/generated/${sourceAssetId}/image.jpg`;
+    const sourceNodeId = 'goal-source-node';
+    window.history.pushState(
+        {},
+        '',
+        `/imagine/agent/${sourceAssetId}?conversation=${sourcePostId}`
+    );
+    document.body.innerHTML = `
+        <div class="react-flow">
+            <div class="react-flow__node-asset selected" data-id="${sourceNodeId}">
+                <img src="${sourceUrl}">
+            </div>
+            <div class="react-flow__node-toolbar" data-id="${sourceNodeId}"></div>
+        </div>
+    `;
+    const action = makeVisible(document.createElement('button'));
+    action.setAttribute('aria-label', 'Make Video');
+    action.addEventListener('click', () => onAction?.({
+        source: document.querySelector('.react-flow__node-asset.selected'),
+        action
+    }));
+    document.querySelector('.react-flow__node-toolbar').appendChild(action);
+    return {
+        source: document.querySelector('.react-flow__node-asset.selected'),
+        action,
+        sourceUrl
+    };
+}
+
+function mountVideoGoalDetailSource({ sourceAssetId, sourcePostId, onAction }) {
+    window.history.pushState(
+        {},
+        '',
+        `/imagine/post/${sourcePostId}?conversation=${sourcePostId}`
+    );
+    document.body.innerHTML = `
+        <main>
+            <article>
+                <div data-media-frame>
+                    <img src="https://assets.grok.com/users/example/generated/${sourceAssetId}/image.jpg">
+                </div>
+            </article>
+        </main>
+    `;
+    const trigger = makeVisible(document.createElement('button'));
+    trigger.id = 'detail-goal-trigger';
+    trigger.setAttribute('aria-label', 'Make Video');
+    trigger.setAttribute('aria-haspopup', 'menu');
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('data-state', 'closed');
+    trigger.addEventListener('click', () => {
+        const menu = makeVisible(document.createElement('div'));
+        const quickAnimate = createMenuItem('Quick Animate', () => onAction?.({
+            source: document.querySelector('article'),
+            trigger,
+            quickAnimate
+        }));
+        menu.append(
+            createMenuItem('Add Prompt'),
+            createMenuItem('Spicy'),
+            quickAnimate
+        );
+        openLinkedMenu(trigger, menu);
+    });
+    document.body.appendChild(trigger);
+    return { source: document.querySelector('article'), trigger };
+}
+
 describe('VideoRetryManager', () => {
     let retryManager;
     let mockOverlay;
@@ -345,6 +451,7 @@ describe('VideoRetryManager', () => {
                     descriptor: entry,
                     status: 'queued',
                     attemptCount: 0,
+                    attemptsThisRound: 0,
                     failureCode: ''
                 }));
                 generationLease = {
@@ -356,7 +463,9 @@ describe('VideoRetryManager', () => {
                     items,
                     counts: { accepted: 0, failed: 0, skipped: 0, pending: items.length },
                     options: message.options,
-                    prompt: message.prompt
+                    prompt: message.prompt,
+                    goalProgress: 0,
+                    completedResultIds: []
                 };
                 return { status: 'started', run: generationLease };
             }
@@ -392,7 +501,17 @@ describe('VideoRetryManager', () => {
                     item.status = message.outcome;
                     item.receipt = message.receipt;
                 } else if (message.outcome === 'accepted') {
-                    item.status = 'accepted';
+                    item.attemptCount += 1;
+                    item.attemptsThisRound += 1;
+                    item.status = generationLease.kind === 'video_goal' ? 'submitted' : 'accepted';
+                    item.receipt = message.receipt;
+                } else if (message.outcome === 'completed' && generationLease.kind === 'video_goal') {
+                    generationLease.goalProgress += 1;
+                    generationLease.completedResultIds.push(message.receipt.resultAssetId);
+                    item.status = generationLease.goalProgress >= generationLease.options.goalCount
+                        ? 'accepted'
+                        : 'queued';
+                    item.attemptsThisRound = item.status === 'queued' ? 0 : item.attemptsThisRound;
                     item.receipt = message.receipt;
                 } else if (message.outcome === 'capacity') {
                     item.status = 'queued';
@@ -402,12 +521,18 @@ describe('VideoRetryManager', () => {
                     item.status = 'permanent_failed';
                     item.failureCode = message.failureCode;
                 } else if (message.outcome === 'retryable_failed') {
-                    item.attemptCount += 1;
+                    if (!(generationLease.kind === 'video_goal'
+                        && item.status === 'submitted'
+                        && item.lastOutcome === 'accepted')) {
+                        item.attemptCount += 1;
+                        item.attemptsThisRound += 1;
+                    }
                     item.failureCode = message.failureCode;
-                    item.status = item.attemptCount > generationLease.options.maxRetries
+                    item.status = item.attemptsThisRound > generationLease.options.maxRetries
                         ? 'retryable_failed'
                         : 'queued';
                 }
+                item.lastOutcome = message.outcome;
                 generationLease.counts = generationLease.items.reduce((counts, candidate) => {
                     if (candidate.status === 'accepted') counts.accepted += 1;
                     else if (candidate.status === 'retryable_failed' || candidate.status === 'permanent_failed') counts.failed += 1;
@@ -415,7 +540,14 @@ describe('VideoRetryManager', () => {
                     return counts;
                 }, { accepted: 0, failed: 0, skipped: 0, pending: 0 });
                 if (generationLease.counts.pending === 0) {
-                    generationLease.status = generationLease.counts.failed ? 'retryable_failed' : 'completed';
+                    const hasRetryableFailure = generationLease.items.some((candidate) => (
+                        candidate.status === 'retryable_failed'
+                    ));
+                    if (hasRetryableFailure) generationLease.status = 'retryable_failed';
+                    else if (generationLease.kind === 'video_goal'
+                        && generationLease.goalProgress < generationLease.options.goalCount) {
+                        generationLease.status = 'failed';
+                    } else generationLease.status = 'completed';
                 } else if (generationLease.status !== 'waiting_capacity') {
                     generationLease.status = 'running';
                 }
@@ -428,6 +560,7 @@ describe('VideoRetryManager', () => {
                     if (item.status === 'retryable_failed') {
                         item.status = 'queued';
                         item.failureCode = '';
+                        item.attemptsThisRound = 0;
                     }
                 });
                 return { status: 'updated', run: generationLease };
@@ -545,7 +678,25 @@ describe('VideoRetryManager', () => {
         expect(retryManager.detectBatchContext()).toBe('gallery');
     });
 
-    test('targets the nearest qualified media card when an unrelated control is closer to viewport center', () => {
+    test('current Saved sibling media is eligible and opens through its exact overlay link', () => {
+        const sourceId = 'abababab-aaaa-4bbb-8ccc-abababababab';
+        window.history.pushState({}, '', '/imagine/saved');
+        const { card, image, postLink } = createCurrentSavedBatchCard(sourceId);
+        const descriptor = {
+            sourceAssetId: sourceId,
+            sourcePostId: sourceId
+        };
+
+        expect(retryManager._getCardGeneratedImage(card)).toBe(image);
+        expect(retryManager.isCensoredCard(card)).toBe(false);
+        expect(retryManager._getPromptedOpenTarget(descriptor)).toEqual({
+            status: 'matched',
+            control: postLink,
+            card
+        });
+    });
+
+    test('Video Goal refuses gallery-wide implicit targeting', async () => {
         const menuItem = document.createElement('div');
         menuItem.setAttribute('role', 'listitem');
         const menuImage = document.createElement('img');
@@ -569,21 +720,18 @@ describe('VideoRetryManager', () => {
         card.append(image, makeVideo, progress);
         document.body.append(menuItem, card);
 
-        retryManager.startGoal(1);
+        await expect(retryManager.startGoal(1)).resolves.toBe(false);
 
-        expect(retryManager.targetContext).toBe(card);
-        expect(retryManager._queryRoot().querySelector('img')).toBe(image);
-        expect(retryManager._queryRoot().querySelector(retryManager.PROGRESS_SELECTOR)).toBe(progress);
-        expect(makeVideo.click).toHaveBeenCalledTimes(1);
+        expect(retryManager.targetContext).toBeNull();
+        expect(makeVideo.click).not.toHaveBeenCalled();
         expect(menuMakeVideo.click).not.toHaveBeenCalled();
-
-        progress.remove();
-        expect(retryManager.buildBatchQueue()).toEqual([
-            expect.objectContaining({ button: makeVideo, container: card })
-        ]);
+        expect(mockOverlay.setStatus).toHaveBeenCalledWith(
+            'Video Goal: select one generated source in Agent or detail view',
+            'warning'
+        );
     });
 
-    test('does not start or click when no qualified media card exists', () => {
+    test('Video Goal does not start or click when no selected source exists', async () => {
         const menuItem = document.createElement('div');
         menuItem.setAttribute('role', 'listitem');
         const menuImage = document.createElement('img');
@@ -594,12 +742,16 @@ describe('VideoRetryManager', () => {
         menuItem.append(menuImage, menuMakeVideo);
         document.body.appendChild(menuItem);
 
-        retryManager.startGoal(1);
+        window.history.pushState({}, '', '/imagine/agent/agent-empty?conversation=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+        await expect(retryManager.startGoal(1)).resolves.toBe(false);
 
         expect(retryManager.goalRunning).toBe(false);
         expect(retryManager.targetContext).toBeNull();
         expect(menuMakeVideo.click).not.toHaveBeenCalled();
-        expect(mockOverlay.setStatus).toHaveBeenCalledWith('No generated-image card found', 'warning');
+        expect(mockOverlay.setStatus).toHaveBeenCalledWith(
+            'Video Goal: agent_selected_source_missing',
+            'warning'
+        );
     });
 
     test('startBatch(prompted) routes through the durable Prompted runner', async () => {
@@ -929,6 +1081,266 @@ describe('VideoRetryManager', () => {
 
         expect(window.scrollTo).toHaveBeenCalledWith({ top: 4200, behavior: 'instant' });
     });
+
+    test('Video Goal completes three new playable videos across source remounts', async () => {
+        settingsManager.settings.maxRetries = 0;
+        const sourceAssetId = 'a1a1a1a1-aaaa-4bbb-8ccc-111111111111';
+        const sourcePostId = 'a2a2a2a2-aaaa-4bbb-8ccc-222222222222';
+        const resultIds = [
+            'a3a3a3a3-aaaa-4bbb-8ccc-333333333333',
+            'a4a4a4a4-aaaa-4bbb-8ccc-444444444444',
+            'a5a5a5a5-aaaa-4bbb-8ccc-555555555555'
+        ];
+        let attempts = 0;
+
+        const render = ({ acceptedCount = 0, resultId = '' } = {}) => {
+            const mounted = mountVideoGoalSource({
+                sourceAssetId,
+                sourcePostId,
+                onAction: () => {
+                    attempts += 1;
+                    render({ acceptedCount: attempts, resultId: resultIds[attempts - 1] });
+                }
+            });
+            for (let index = 0; index < acceptedCount; index++) {
+                const accepted = document.createElement('button');
+                accepted.setAttribute('aria-label', 'Video Options');
+                mounted.source.appendChild(accepted);
+            }
+            if (resultId) appendPlayableGoalVideo(mounted.source, resultId);
+            return mounted;
+        };
+        render();
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager.startGoal(3)).resolves.toBe(true);
+
+        expect(attempts).toBe(3);
+        expect(generationLease.status).toBe('completed');
+        expect(generationLease.goalProgress).toBe(3);
+        expect(generationLease.completedResultIds).toEqual(resultIds);
+    });
+
+    test('Video Goal opens current detail Make Video and submits exact Quick Animate', async () => {
+        settingsManager.settings.maxRetries = 0;
+        const sourceAssetId = 'a6a6a6a6-aaaa-4bbb-8ccc-666666666666';
+        const sourcePostId = 'a7a7a7a7-aaaa-4bbb-8ccc-777777777777';
+        const resultAssetId = 'a8a8a8a8-aaaa-4bbb-8ccc-888888888888';
+        let attempts = 0;
+        mountVideoGoalDetailSource({
+            sourceAssetId,
+            sourcePostId,
+            onAction: ({ source }) => {
+                attempts += 1;
+                const accepted = document.createElement('div');
+                accepted.setAttribute('role', 'status');
+                accepted.textContent = 'Video generation queued';
+                source.appendChild(accepted);
+                appendPlayableGoalVideo(source, resultAssetId);
+            }
+        });
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager.startGoal(1)).resolves.toBe(true);
+
+        expect(attempts).toBe(1);
+        expect(generationLease.status).toBe('completed');
+        expect(generationLease.completedResultIds).toEqual([resultAssetId]);
+    });
+
+    test('Video Goal retries one source-scoped failure without counting it as output', async () => {
+        settingsManager.settings.maxRetries = 1;
+        const sourceAssetId = 'b1b1b1b1-aaaa-4bbb-8ccc-111111111111';
+        const sourcePostId = 'b2b2b2b2-aaaa-4bbb-8ccc-222222222222';
+        const resultId = 'b3b3b3b3-aaaa-4bbb-8ccc-333333333333';
+        let attempts = 0;
+
+        let firstFailurePending = false;
+        const mounted = mountVideoGoalSource({
+            sourceAssetId,
+            sourcePostId,
+            onAction: ({ source }) => {
+                attempts += 1;
+                const accepted = document.createElement('button');
+                accepted.setAttribute('aria-label', 'Video Options');
+                source.appendChild(accepted);
+                if (attempts === 1) firstFailurePending = true;
+                else appendPlayableGoalVideo(source, resultId);
+            }
+        });
+        retryManager.sleep = jest.fn(async () => {
+            if (!firstFailurePending) return;
+            firstFailurePending = false;
+            const failed = document.createElement('div');
+            failed.setAttribute('role', 'alert');
+            failed.textContent = 'Video generation failed';
+            mounted.source.appendChild(failed);
+        });
+
+        await retryManager.startGoal(1);
+
+        expect(attempts).toBe(2);
+        expect(generationLease.goalProgress).toBe(1);
+        expect(generationLease.completedResultIds).toEqual([resultId]);
+        expect(generationLease.status).toBe('completed');
+    });
+
+    test('Video Goal fails closed when one attempt produces two new result identities', async () => {
+        settingsManager.settings.maxRetries = 0;
+        const sourceAssetId = 'c1c1c1c1-aaaa-4bbb-8ccc-111111111111';
+        const sourcePostId = 'c2c2c2c2-aaaa-4bbb-8ccc-222222222222';
+        const resultIds = [
+            'c3c3c3c3-aaaa-4bbb-8ccc-333333333333',
+            'c4c4c4c4-aaaa-4bbb-8ccc-444444444444'
+        ];
+        mountVideoGoalSource({
+            sourceAssetId,
+            sourcePostId,
+            onAction: ({ source }) => {
+                const accepted = document.createElement('button');
+                accepted.setAttribute('aria-label', 'Video Options');
+                source.appendChild(accepted);
+                resultIds.forEach((resultId) => appendPlayableGoalVideo(source, resultId));
+            }
+        });
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await retryManager.startGoal(1);
+
+        expect(generationLease.goalProgress).toBe(0);
+        expect(generationLease.completedResultIds).toEqual([]);
+        expect(generationLease.status).toBe('failed');
+        expect(generationLease.items[0]).toEqual(expect.objectContaining({
+            status: 'permanent_failed',
+            failureCode: 'result_ambiguous'
+        }));
+    });
+
+    test('Video Goal Stop revokes the run while a provider-accepted result is pending', async () => {
+        settingsManager.settings.maxRetries = 3;
+        const sourceAssetId = 'd1d1d1d1-aaaa-4bbb-8ccc-111111111111';
+        const sourcePostId = 'd2d2d2d2-aaaa-4bbb-8ccc-222222222222';
+        let attempts = 0;
+        let stopped = false;
+        mountVideoGoalSource({
+            sourceAssetId,
+            sourcePostId,
+            onAction: ({ source }) => {
+                attempts += 1;
+                const accepted = document.createElement('button');
+                accepted.setAttribute('aria-label', 'Video Options');
+                source.appendChild(accepted);
+            }
+        });
+        retryManager.sleep = jest.fn(async () => {
+            if (!stopped) {
+                stopped = true;
+                await retryManager.stopBatch();
+            }
+        });
+
+        await retryManager.startGoal(2);
+
+        expect(attempts).toBe(1);
+        expect(generationLease.status).toBe('cancelled');
+        expect(generationLease.goalProgress).toBe(0);
+    });
+
+    test.each([
+        { lastOutcome: 'submitted', observedState: 'submit_dispatched', attemptCount: 0 },
+        { lastOutcome: 'accepted', observedState: 'provider_accepted', attemptCount: 1 }
+    ])(
+        'Video Goal resumes a $lastOutcome checkpoint without dispatching Make Video again',
+        async ({ lastOutcome, observedState, attemptCount }) => {
+        const sourceAssetId = 'e1e1e1e1-aaaa-4bbb-8ccc-111111111111';
+        const sourcePostId = 'e2e2e2e2-aaaa-4bbb-8ccc-222222222222';
+        const resultAssetId = 'e3e3e3e3-aaaa-4bbb-8ccc-333333333333';
+        let attempts = 0;
+        const mounted = mountVideoGoalSource({
+            sourceAssetId,
+            sourcePostId,
+            onAction: () => {
+                attempts += 1;
+            }
+        });
+        const accepted = document.createElement('button');
+        accepted.setAttribute('aria-label', 'Video Options');
+        mounted.source.appendChild(accepted);
+        appendPlayableGoalVideo(mounted.source, resultAssetId);
+
+        const descriptor = {
+            version: 1,
+            surface: 'agent_media',
+            sourceAssetId,
+            sourcePostId,
+            conversationId: sourcePostId,
+            mediaKind: 'image',
+            hrefPath: `/imagine/agent/${sourceAssetId}`,
+            route: `https://grok.com/imagine/agent/${sourceAssetId}?conversation=${sourcePostId}`,
+            initialOrder: 0,
+            beforeAssetId: '',
+            afterAssetId: ''
+        };
+        generationLease = {
+            runId: 'generation-run-test',
+            epoch: 1,
+            kind: 'video_goal',
+            status: 'running',
+            origin: {
+                surface: 'agent_media',
+                url: descriptor.route,
+                pathname: descriptor.hrefPath,
+                scrollY: 0,
+                sourceAssetId,
+                sourcePostId,
+                conversationId: sourcePostId
+            },
+            items: [{
+                itemId: 'item-1',
+                descriptor,
+                status: 'submitted',
+                attemptCount,
+                attemptsThisRound: attemptCount,
+                failureCode: '',
+                lastOutcome,
+                receipt: {
+                    sourceAssetId,
+                    sourcePostId,
+                    observedState,
+                    observedAt: Date.now(),
+                    checkpointVersion: 1,
+                    checkpointAction: 'goal_video',
+                    checkpointSourceKind: 'agent_media',
+                    checkpointSourceNodeId: 'goal-source-node',
+                    baselineAcceptedCount: 0,
+                    baselineRejectedCount: 0,
+                    resultBaselineVersion: 1,
+                    baselineResultAssetIds: [],
+                    baselineFailureCount: 0
+                }
+            }],
+            counts: { accepted: 0, failed: 0, skipped: 0, pending: 1 },
+            options: {
+                maxRetries: 0,
+                goalCount: 1,
+                acceptanceTimeoutMs: 15000,
+                resultTimeoutMs: 180000,
+                capacityTimeoutMs: 60000
+            },
+            prompt: '',
+            goalProgress: 0,
+            completedResultIds: []
+        };
+        retryManager.generationRun = generationLease;
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager.resumeGenerationRun()).resolves.toBe(true);
+
+        expect(attempts).toBe(0);
+        expect(generationLease.status).toBe('completed');
+        expect(generationLease.completedResultIds).toEqual([resultAssetId]);
+        }
+    );
 
     test('detectBatchContext resolves a qualified current results grid separately from Saved', () => {
         window.history.pushState({}, '', '/imagine');
@@ -1904,7 +2316,10 @@ describe('VideoRetryManager', () => {
         expect(secondResult).toBe(false);
         expect(durableSpy).toHaveBeenCalledTimes(1);
         expect(durableSpy).toHaveBeenCalledWith('first prompt', { galleryLimit: 1 });
-        expect(mockOverlay.setStatus).toHaveBeenCalledWith('Batch is already running', 'warning');
+        expect(mockOverlay.setStatus).toHaveBeenCalledWith(
+            'A generation run is already active',
+            'warning'
+        );
     });
 
     test('prompted Saved batch submits through Agent Mode and restores the Saved scroll position', async () => {

@@ -410,6 +410,44 @@ describe('generation run state contract', () => {
         expect(getNextGenerationClaim(submitted)).toEqual({ state: submitted, claim: null });
     });
 
+    test('persists a complete Video Goal result baseline and rejects partial or duplicate baselines', () => {
+        const run = createRun({
+            kind: 'video_goal',
+            items: [createDescriptor('goal-baseline')],
+            options: { maxRetries: 1, goalCount: 1 }
+        });
+        const claimed = claimNext(run);
+        const receipt = {
+            sourceAssetId: 'asset-goal-baseline',
+            sourcePostId: 'post-goal-baseline',
+            observedState: 'composer_ready',
+            observedAt: BASE_TIME + 1,
+            checkpointVersion: 1,
+            checkpointAction: 'goal_video',
+            checkpointSourceKind: 'agent_media',
+            checkpointSourceNodeId: 'asset-node-goal',
+            baselineAcceptedCount: 0,
+            baselineRejectedCount: 0,
+            resultBaselineVersion: 1,
+            baselineResultAssetIds: ['result-before-1'],
+            baselineFailureCount: 0
+        };
+
+        const checkpointed = reportClaim(claimed.state, claimed.claim, 'composer_ready', { receipt });
+        expect(getItem(checkpointed, claimed.claim.itemId).receipt).toEqual(receipt);
+
+        const { baselineFailureCount: _baselineFailureCount, ...partialBaseline } = receipt;
+        expect(() => reportClaim(claimed.state, claimed.claim, 'composer_ready', {
+            receipt: partialBaseline
+        })).toThrow('INVALID_GENERATION_EVENT');
+        expect(() => reportClaim(claimed.state, claimed.claim, 'composer_ready', {
+            receipt: {
+                ...receipt,
+                baselineResultAssetIds: ['result-before-1', 'result-before-1']
+            }
+        })).toThrow('INVALID_GENERATION_EVENT');
+    });
+
     test.each(['reclaim', 'resume_claim'])(
         '%s transfers an active checkpoint claim to a new document owner',
         (eventType) => {
@@ -845,6 +883,25 @@ describe('generation run state contract', () => {
             attemptCount: 1,
             attemptsThisRound: 1,
             failureCode: 'result_timeout'
+        }));
+    });
+
+    test('Video Goal ends failed when result identity is permanently ambiguous', () => {
+        const run = createRun({
+            kind: 'video_goal',
+            items: [createDescriptor('goal-ambiguous')],
+            options: { maxRetries: 1, goalCount: 1 }
+        });
+        const claimed = claimNext(run);
+        const failed = reportClaim(claimed.state, claimed.claim, 'permanent_failed', {
+            failureCode: 'result_ambiguous'
+        });
+
+        expect(failed.status).toBe('failed');
+        expect(failed.goalProgress).toBe(0);
+        expect(getItem(failed, claimed.claim.itemId)).toEqual(expect.objectContaining({
+            status: 'permanent_failed',
+            failureCode: 'result_ambiguous'
         }));
     });
 

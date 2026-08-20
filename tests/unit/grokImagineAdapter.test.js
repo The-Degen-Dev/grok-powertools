@@ -1,11 +1,13 @@
 const fs = require('fs');
 const vm = require('vm');
 const {
+    captureGeneratedResultBaseline,
     captureSubmissionReceipt,
     describeCurrentSource,
     detectGrokSurface,
     evaluateSubmissionReceipt,
     findGeneratedResult,
+    inspectGeneratedResult,
     listGalleryItems,
     resolveGalleryItem,
     resolveMediaAction
@@ -50,6 +52,41 @@ function galleryCard({
 
 function mountGallery(items) {
     document.body.innerHTML = `<main><section role="list">${items.map(galleryCard).join('')}</section></main>`;
+}
+
+function currentGalleryCard({
+    assetId,
+    postId,
+    conversationId,
+    mediaKind = 'image',
+    includeQuickAction = true
+}) {
+    const media = mediaKind === 'video'
+        ? `
+            <img alt="" src="${generatedMediaUrl(assetId, 'preview_image.jpg')}">
+            <video src="${generatedMediaUrl(assetId, 'generated_video.mp4')}"></video>
+        `
+        : `<img alt="" src="${generatedMediaUrl(assetId)}">`;
+    return `
+        <div role="listitem" data-masonry-key="${conversationId}">
+            <div class="relative group/media-post-masonry-card" data-media-type="${mediaKind}">
+                <div>${media}</div>
+                <a class="absolute inset-0"
+                    href="/imagine/post/${postId}?conversation=${conversationId}"></a>
+                <div>
+                    ${includeQuickAction ? '<button type="button" aria-label="Make video">Make video</button>' : ''}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function mountCurrentGallery(items) {
+    document.body.innerHTML = `
+        <main><section role="list" data-imagine-masonry-grid>
+            ${items.map(currentGalleryCard).join('')}
+        </section></main>
+    `;
 }
 
 function expectedDescriptor({
@@ -172,6 +209,28 @@ function mountLegacyDetail({ assetId = FIRST_ASSET_ID, postId = FIRST_POST_ID } 
     };
 }
 
+function mountCurrentDetailModal({ assetId = FIRST_ASSET_ID, mediaKind = 'image' } = {}) {
+    const media = mediaKind === 'video'
+        ? `<video src="${generatedMediaUrl(assetId, 'generated_video.mp4')}"></video>`
+        : `<img alt="Generated image" src="${generatedMediaUrl(assetId)}">`;
+    document.body.innerHTML = `
+        <main>
+            <article>
+                <div data-media-frame>${media}</div>
+            </article>
+            <aside aria-label="Media actions">
+                <button id="detail-make-video" aria-label="Make Video" aria-haspopup="menu">
+                    Make Video
+                </button>
+            </aside>
+        </main>
+    `;
+    return {
+        source: document.querySelector('article'),
+        sidePanelAction: document.querySelector('#detail-make-video')
+    };
+}
+
 function openLinkedAddPromptMenu(trigger, menuId) {
     trigger.setAttribute('aria-expanded', 'true');
     trigger.setAttribute('data-state', 'open');
@@ -186,6 +245,24 @@ function openLinkedAddPromptMenu(trigger, menuId) {
     `;
     document.body.appendChild(menu);
     return menu.querySelectorAll('[role="menuitem"]')[1];
+}
+
+function openLinkedQuickAnimateMenu(trigger, menuId) {
+    trigger.setAttribute('aria-controls', menuId);
+    trigger.setAttribute('aria-expanded', 'true');
+    trigger.setAttribute('data-state', 'open');
+    const menu = document.createElement('div');
+    menu.id = menuId;
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-labelledby', trigger.id);
+    menu.setAttribute('data-state', 'open');
+    menu.innerHTML = `
+        <button role="menuitem">Add Prompt</button>
+        <button role="menuitem">Spicy</button>
+        <button role="menuitem">Quick Animate</button>
+    `;
+    document.body.appendChild(menu);
+    return menu.querySelectorAll('[role="menuitem"]')[2];
 }
 
 function appendResultVideo(parent, assetId, { ready = true } = {}) {
@@ -219,10 +296,12 @@ describe('Grok Imagine adapter module contract', () => {
         expect(browserApi.listGalleryItems).toBeDefined();
         expect(browserApi.resolveGalleryItem).toBeDefined();
         expect(browserApi.resolveMediaAction).toBeDefined();
+        expect(browserApi.captureGeneratedResultBaseline).toBeDefined();
         expect(browserApi.captureSubmissionReceipt).toBeDefined();
         expect(browserApi.describeCurrentSource).toBeDefined();
         expect(browserApi.evaluateSubmissionReceipt).toBeDefined();
         expect(browserApi.findGeneratedResult).toBeDefined();
+        expect(browserApi.inspectGeneratedResult).toBeDefined();
     });
 
     test('detects Agent, legacy detail, and unsupported routes without trusting a foreign host', () => {
@@ -275,6 +354,33 @@ describe('Grok Imagine adapter module contract', () => {
         });
         expect(JSON.parse(JSON.stringify(result))).toEqual(result);
         expect(Object.values(result.descriptor).some((value) => value instanceof Element)).toBe(false);
+    });
+
+    test('describes the current Grok detail modal without requiring a nested post link', () => {
+        mountCurrentDetailModal({ mediaKind: 'video' });
+
+        expect(describeCurrentSource({
+            root: document,
+            surface: 'legacy_detail',
+            location: new URL(
+                `https://grok.com/imagine/post/${FIRST_POST_ID}?conversation=${CONVERSATION_ID}`
+            )
+        })).toEqual({
+            status: 'matched',
+            descriptor: {
+                version: 1,
+                surface: 'legacy_detail',
+                sourceAssetId: FIRST_ASSET_ID,
+                sourcePostId: FIRST_POST_ID,
+                conversationId: CONVERSATION_ID,
+                mediaKind: 'video',
+                hrefPath: `/imagine/post/${FIRST_POST_ID}`,
+                route: `https://grok.com/imagine/post/${FIRST_POST_ID}?conversation=${CONVERSATION_ID}`,
+                initialOrder: 0,
+                beforeAssetId: '',
+                afterAssetId: ''
+            }
+        });
     });
 
     test('fails closed when legacy detail identity is missing or disagrees with the route post UUID', () => {
@@ -496,6 +602,67 @@ describe('Grok Imagine adapter module contract', () => {
         expect(JSON.stringify(result)).not.toContain('must-not-persist');
     });
 
+    test('binds current Saved overlay links to sibling media inside the same card', () => {
+        mountCurrentGallery([
+            {
+                assetId: FIRST_ASSET_ID,
+                postId: FIRST_POST_ID,
+                conversationId: CONVERSATION_ID,
+                mediaKind: 'image'
+            },
+            {
+                assetId: THIRD_ASSET_ID,
+                postId: THIRD_POST_ID,
+                conversationId: SECOND_CONVERSATION_ID,
+                mediaKind: 'video',
+                includeQuickAction: false
+            }
+        ]);
+
+        const surface = detectGrokSurface({
+            root: document,
+            location: new URL('https://grok.com/imagine/saved')
+        });
+        const result = listGalleryItems({ root: document, surface });
+
+        expect(result).toEqual({
+            status: 'ok',
+            items: [
+                expectedDescriptor({
+                    surface: 'saved_gallery',
+                    assetId: FIRST_ASSET_ID,
+                    postId: FIRST_POST_ID,
+                    conversationId: CONVERSATION_ID,
+                    mediaKind: 'image',
+                    initialOrder: 0,
+                    afterAssetId: THIRD_ASSET_ID
+                }),
+                expectedDescriptor({
+                    surface: 'saved_gallery',
+                    assetId: THIRD_ASSET_ID,
+                    postId: THIRD_POST_ID,
+                    conversationId: SECOND_CONVERSATION_ID,
+                    mediaKind: 'video',
+                    initialOrder: 1,
+                    beforeAssetId: FIRST_ASSET_ID
+                })
+            ]
+        });
+
+        const resolved = resolveGalleryItem({ root: document, descriptor: result.items[0] });
+        expect(resolved.status).toBe('matched');
+        expect(resolved.card.classList.contains('group/media-post-masonry-card')).toBe(true);
+        expect(resolveMediaAction({
+            root: document,
+            descriptor: result.items[0],
+            action: 'quick_video'
+        })).toEqual({
+            status: 'matched',
+            stage: 'submit_direct',
+            control: resolved.card.querySelector('button[aria-label="Make video"]')
+        });
+    });
+
     test('reacquires one descriptor after every gallery node is remounted and reordered', () => {
         mountGallery(currentResultsItems());
         const descriptor = listCurrentResults().items[1];
@@ -538,6 +705,22 @@ describe('Grok Imagine adapter module contract', () => {
             descriptor,
             action: 'prompted_video'
         }).control).not.toBe(toolbarAction);
+        expect(resolveMediaAction({
+            root: document,
+            descriptor,
+            action: 'goal_video'
+        })).toEqual({
+            status: 'matched',
+            stage: 'submit_direct',
+            control: toolbarAction
+        });
+
+        appendResultVideo(source, THIRD_ASSET_ID);
+        expect(resolveGalleryItem({ root: document, descriptor })).toEqual({
+            status: 'matched',
+            card: source,
+            descriptor
+        });
 
         const addPrompt = openLinkedAddPromptMenu(sidePanelAction, 'agent-video-menu');
         expect(resolveMediaAction({
@@ -597,6 +780,30 @@ describe('Grok Imagine adapter module contract', () => {
             status: 'matched',
             stage: 'select_add_prompt',
             control: addPrompt
+        });
+
+        sidePanelAction.setAttribute('aria-expanded', 'false');
+        sidePanelAction.setAttribute('data-state', 'closed');
+        document.querySelector('#detail-video-menu').remove();
+        expect(resolveMediaAction({
+            root: document,
+            descriptor,
+            action: 'goal_video'
+        })).toEqual({
+            status: 'matched',
+            stage: 'open_goal_menu',
+            control: sidePanelAction
+        });
+
+        const quickAnimate = openLinkedQuickAnimateMenu(sidePanelAction, 'detail-goal-menu');
+        expect(resolveMediaAction({
+            root: document,
+            descriptor,
+            action: 'goal_video'
+        })).toEqual({
+            status: 'matched',
+            stage: 'select_quick_animate',
+            control: quickAnimate
         });
     });
 
@@ -893,6 +1100,82 @@ describe('Grok Imagine adapter module contract', () => {
         expect(evaluateSubmissionReceipt({ root: document, receipt })).toBe('rejected');
     });
 
+    test('captures a serializable Agent video baseline scoped to the exact persisted source', () => {
+        const descriptor = persistedSourceDescriptor();
+        const { source } = mountAgentSource();
+        const scopedResults = document.createElement('section');
+        scopedResults.setAttribute('data-source-asset-id', FIRST_ASSET_ID);
+        scopedResults.setAttribute('data-source-post-id', FIRST_POST_ID);
+        appendResultVideo(scopedResults, THIRD_ASSET_ID);
+        appendResultVideo(scopedResults, THIRD_ASSET_ID);
+
+        const rejection = document.createElement('div');
+        rejection.setAttribute('role', 'alert');
+        rejection.textContent = 'Video generation failed';
+        scopedResults.appendChild(rejection);
+        source.parentElement.appendChild(scopedResults);
+
+        const unrelated = document.createElement('section');
+        unrelated.setAttribute('data-source-asset-id', SECOND_ASSET_ID);
+        unrelated.setAttribute('data-source-post-id', SECOND_POST_ID);
+        appendResultVideo(unrelated, FOURTH_ASSET_ID);
+        source.parentElement.appendChild(unrelated);
+
+        const baseline = captureGeneratedResultBaseline({
+            root: document,
+            descriptor,
+            mediaKind: 'video'
+        });
+
+        expect(baseline).toEqual({
+            version: 1,
+            mediaAssetIds: [THIRD_ASSET_ID],
+            failureCount: 1
+        });
+        expect(JSON.parse(JSON.stringify(baseline))).toEqual(baseline);
+        expect(Object.keys(baseline)).toEqual(['version', 'mediaAssetIds', 'failureCount']);
+    });
+
+    test('captures existing legacy-detail videos without including unrelated media', () => {
+        const descriptor = persistedSourceDescriptor();
+        const { source } = mountLegacyDetail();
+        appendResultVideo(source, FIFTH_ASSET_ID);
+        appendResultVideo(document.body, FOURTH_ASSET_ID);
+
+        expect(captureGeneratedResultBaseline({
+            root: document,
+            descriptor,
+            mediaKind: 'video'
+        })).toEqual({
+            version: 1,
+            mediaAssetIds: [FIFTH_ASSET_ID],
+            failureCount: 0
+        });
+    });
+
+    test('returns null when the persisted source is missing or ambiguous or media kind is invalid', () => {
+        const descriptor = persistedSourceDescriptor();
+        expect(captureGeneratedResultBaseline({
+            root: document,
+            descriptor,
+            mediaKind: 'video'
+        })).toBeNull();
+
+        const { source } = mountAgentSource();
+        source.parentElement.appendChild(source.cloneNode(true));
+        expect(captureGeneratedResultBaseline({
+            root: document,
+            descriptor,
+            mediaKind: 'video'
+        })).toBeNull();
+
+        expect(captureGeneratedResultBaseline({
+            root: document,
+            descriptor,
+            mediaKind: 'audio'
+        })).toBeNull();
+    });
+
     test('finds exactly one new playable matching video and ignores stale, unrelated, or unready media', () => {
         mountGallery(currentResultsItems());
         const descriptor = persistedSourceDescriptor();
@@ -905,6 +1188,10 @@ describe('Grok Imagine adapter module contract', () => {
             mediaKind: 'video'
         };
 
+        expect(inspectGeneratedResult({ root: document, before, expected })).toEqual({
+            status: 'pending',
+            resultAssetId: ''
+        });
         expect(findGeneratedResult({ root: document, before, expected })).toBe('pending');
         appendResultVideo(cards[1], FOURTH_ASSET_ID);
         expect(findGeneratedResult({ root: document, before, expected })).toBe('pending');
@@ -917,9 +1204,17 @@ describe('Grok Imagine adapter module contract', () => {
             videoWidth: { configurable: true, value: 400 },
             videoHeight: { configurable: true, value: 736 }
         });
+        expect(inspectGeneratedResult({ root: document, before, expected })).toEqual({
+            status: 'ready',
+            resultAssetId: FIFTH_ASSET_ID
+        });
         expect(findGeneratedResult({ root: document, before, expected })).toBe('ready');
 
         appendResultVideo(cards[0], FOURTH_ASSET_ID);
+        expect(inspectGeneratedResult({ root: document, before, expected })).toEqual({
+            status: 'ambiguous',
+            resultAssetId: ''
+        });
         expect(findGeneratedResult({ root: document, before, expected })).toBe('ambiguous');
     });
 
@@ -942,6 +1237,10 @@ describe('Grok Imagine adapter module contract', () => {
 
         const matchingFailure = unrelatedFailure.cloneNode(true);
         cards[0].appendChild(matchingFailure);
+        expect(inspectGeneratedResult({ root: document, before, expected })).toEqual({
+            status: 'failed',
+            resultAssetId: ''
+        });
         expect(findGeneratedResult({ root: document, before, expected })).toBe('failed');
 
         appendResultVideo(cards[0], FIFTH_ASSET_ID);

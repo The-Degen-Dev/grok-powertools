@@ -54,7 +54,7 @@
         <div><span class="label">Baseline:</span> <code>35f6bc7</code></div>
         <div><span class="label">Checkpoint:</span> <code>f6ece2a</code></div>
         <div><span class="label">Manifest:</span> <code>0.2.0</code></div>
-        <div><span class="label">Status:</span> Tasks 2-5 complete; Task 6 in progress</div>
+        <div><span class="label">Status:</span> Tasks 2-6 deterministic work complete; Task 7 next</div>
       </div>
     </header>
 
@@ -70,12 +70,17 @@
         <li>Submission acceptance must be new and source-scoped. Control disappearance, return navigation, unrelated progress, and stale result media remain pending.</li>
         <li>Prompted Batch persists only a flat source/action checkpoint with baseline counters. Prompts, cookies, signed URLs, and composer DOM are not persisted.</li>
         <li>Direct Agent starts use the conversation UUID as contextual post identity only when no gallery post hint exists, because current Agent DOM exposes no post UUID.</li>
+        <li>Current Saved cards bind one overlay post link to one sibling generated-media branch inside the same masonry-card wrapper. Empty image alt text is supported only for trusted generated asset URLs.</li>
+        <li>Video Goal uses the source-bound Agent toolbar action or the exact detail Make Video then Quick Animate path. Add Prompt and Precise Edit are excluded from Goal.</li>
       </ul>
     </section>
 
     <section>
       <h2>Deviations</h2>
-      <p class="empty">None.</p>
+      <ul>
+        <li>Task 6 expanded into the shared gallery adapter after live inspection showed that current Saved links and media are siblings and generated images may have empty alt text.</li>
+        <li>The approved direct Video Goal action is represented by Quick Animate on current detail pages, so the runner opens the menu before checkpointing and dispatching that exact item.</li>
+      </ul>
     </section>
 
     <section>
@@ -84,12 +89,16 @@
         <li>A second permanent Sync ledger was rejected because it would duplicate thousands of IDs and increase Chrome storage quota and write-race risk.</li>
         <li>The adapter/controller extraction adds three focused runtime files, but removes repeated selector and state logic from the 8,000-line content script.</li>
         <li>Agent identity cannot re-prove the source post ID from current DOM. The adapter therefore requires exact unique asset agreement and fails closed on duplicate, disagreement, or multiple selected nodes.</li>
+        <li>Current sibling media is accepted only when one direct card branch resolves to one asset identity. Multiple branches fail closed rather than guessing which media belongs to the post link.</li>
       </ul>
     </section>
 
     <section>
       <h2>Open Questions</h2>
-      <p class="empty">None currently. Live spend and write lanes remain approval-gated.</p>
+      <ul>
+        <li>The current Chrome session had no populated <code>/imagine</code> results conversation, so live results-page proof remains pending.</li>
+        <li>The current Agent toolbar Make Video control is source-bound but its Prompted transition has not been activated live because a provider-side effect cannot yet be excluded. This remains part of the separate generation approval gate.</li>
+      </ul>
     </section>
 
     <section>
@@ -114,6 +123,9 @@
         <li>Task 4: Quick Batch now snapshots stable descriptors, reacquires controls after remount, advances only on source-scoped provider acceptance, and preserves failed sources for explicit retry.</li>
         <li>Task 5: Prompted Batch now snapshots stable descriptors, opens the exact source, selects Make Video then Add Prompt, persists a source-scoped pre-submit checkpoint, advances after provider acceptance without waiting for video completion, and retries only failed sources.</li>
         <li>Task 5: a reloaded owner document can resume an in-flight Prompted submission from its persisted checkpoint without dispatching Submit again.</li>
+        <li>Task 6 read-only live inspection: Saved uses overlay post links with sibling generated media; current images can have empty alt text; Agent toolbar controls carry the selected node's exact <code>data-id</code>; detail Make Video exposes Add Prompt, Spicy, and Quick Animate.</li>
+        <li>Task 6: Video Goal now records acceptance and one new playable result per attempt, retries source-scoped failure, fails closed on multiple results, stops without a late retry, and resumes submitted or accepted checkpoints without a second native click.</li>
+        <li>Task 6: deterministic browser runs cover current Saved overlay cards, durable Prompted return, Quick remounts, and Video Goal remount/retry/Stop/reload paths. This is not live generation proof.</li>
       </ul>
     </section>
   </main>

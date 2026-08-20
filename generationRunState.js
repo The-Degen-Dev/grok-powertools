@@ -117,6 +117,7 @@
         'concurrency',
         'capacityTimeoutMs',
         'acceptanceTimeoutMs',
+        'resultTimeoutMs',
         'claimTimeoutMs'
     ]);
     const RECEIPT_KEYS = new Set([
@@ -131,7 +132,10 @@
         'checkpointSourceKind',
         'checkpointSourceNodeId',
         'baselineAcceptedCount',
-        'baselineRejectedCount'
+        'baselineRejectedCount',
+        'resultBaselineVersion',
+        'baselineResultAssetIds',
+        'baselineFailureCount'
     ]);
     const RECEIPT_STATES_BY_OUTCOME = {
         composer_ready: new Set(['composer_ready']),
@@ -302,6 +306,7 @@
             concurrency: [1, 100],
             capacityTimeoutMs: [1, 3600000],
             acceptanceTimeoutMs: [1, 3600000],
+            resultTimeoutMs: [1000, 3600000],
             claimTimeoutMs: [1000, 3600000]
         };
 
@@ -355,6 +360,25 @@
             }
             assertInteger(normalized.baselineAcceptedCount, 0, Number.MAX_SAFE_INTEGER, 'INVALID_GENERATION_EVENT');
             assertInteger(normalized.baselineRejectedCount, 0, Number.MAX_SAFE_INTEGER, 'INVALID_GENERATION_EVENT');
+        }
+        const resultBaselineKeys = [
+            'resultBaselineVersion',
+            'baselineResultAssetIds',
+            'baselineFailureCount'
+        ];
+        const resultBaselineFieldCount = resultBaselineKeys.filter((key) => key in normalized).length;
+        if (resultBaselineFieldCount !== 0 && resultBaselineFieldCount !== resultBaselineKeys.length) {
+            throw stateError('INVALID_GENERATION_EVENT');
+        }
+        if (resultBaselineFieldCount === resultBaselineKeys.length) {
+            assertInteger(normalized.resultBaselineVersion, 1, 1, 'INVALID_GENERATION_EVENT');
+            if (!Array.isArray(normalized.baselineResultAssetIds)
+                || normalized.baselineResultAssetIds.length > MAX_ITEMS
+                || normalized.baselineResultAssetIds.some((value) => typeof value !== 'string' || !value)
+                || new Set(normalized.baselineResultAssetIds).size !== normalized.baselineResultAssetIds.length) {
+                throw stateError('INVALID_GENERATION_EVENT');
+            }
+            assertInteger(normalized.baselineFailureCount, 0, Number.MAX_SAFE_INTEGER, 'INVALID_GENERATION_EVENT');
         }
         return normalized;
     }
@@ -591,9 +615,14 @@
         let completedAt = state.completedAt;
 
         if (!requestedStatus && counts.pending === 0) {
-            status = items.some((item) => item.status === 'retryable_failed')
-                ? 'retryable_failed'
-                : 'completed';
+            if (items.some((item) => item.status === 'retryable_failed')) {
+                status = 'retryable_failed';
+            } else if (state.kind === 'video_goal'
+                && state.goalProgress < (state.options.goalCount || 1)) {
+                status = 'failed';
+            } else {
+                status = 'completed';
+            }
             completedAt = event.now;
         }
 

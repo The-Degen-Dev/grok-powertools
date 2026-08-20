@@ -511,10 +511,30 @@ function findMatchingAgentMedia(root = document, expectedIdentity = '') {
     return { status: 'missing', media: null, sourceUrl: '' };
 }
 
+function isGrokGeneratedCardImage(image) {
+    const sourceUrl = String(image?.currentSrc || image?.src || image?.getAttribute?.('src') || '');
+    if (!sourceUrl) return false;
+    const alt = String(image.getAttribute?.('alt') || '').trim();
+    if (alt === 'Generated image') return true;
+    if (alt) return false;
+    try {
+        const url = new URL(sourceUrl, 'https://grok.com');
+        return url.hostname === 'assets.grok.com' && url.pathname.includes('/generated/');
+    } catch {
+        return false;
+    }
+}
+
+function getGrokGeneratedCardImages(root = document) {
+    return Array.from(root?.querySelectorAll?.('img') || []).filter(isGrokGeneratedCardImage);
+}
+
 function findMediaCardRoot(element) {
+    const masonryCard = element?.closest?.('[class*="media-post-masonry-card"]');
+    if (getGrokGeneratedCardImages(masonryCard).length > 0) return masonryCard;
     const listItem = element?.closest?.('[role="listitem"]');
-    if (listItem?.querySelector('img[alt="Generated image"]')) return listItem;
-    return element?.closest?.('[class*="media-post-masonry-card"]') || null;
+    if (getGrokGeneratedCardImages(listItem).length > 0) return listItem;
+    return masonryCard || null;
 }
 
 function getSavedCardIdentity(card, fallbackIdentity = '') {
@@ -684,7 +704,7 @@ function evaluateGalleryReceipt({
 }
 
 function getSavedGalleryEntries(root = document) {
-    return Array.from(root.querySelectorAll('img[alt="Generated image"]'))
+    return getGrokGeneratedCardImages(root)
         .map((image) => {
             const card = findMediaCardRoot(image);
             const sourceUrl = image.currentSrc || image.src || '';
@@ -2286,9 +2306,9 @@ class GrokOverlay {
             e.target.value = limit;
             this.settingsManager.set('galleryBatchLimit', limit);
         });
-        this.el.querySelector('#gptStartGoalBtn').addEventListener('click', () => {
+        this.el.querySelector('#gptStartGoalBtn').addEventListener('click', async () => {
             const count = parseInt(this.el.querySelector('#gptVideoGoal').value, 10);
-            this.retryManager.startGoal(count);
+            await this.retryManager.startGoal(count);
         });
         this.el.querySelector('#gptQuickBatchBtn').addEventListener('click', async () => {
             await this.retryManager.startBatch('quick');
@@ -3186,6 +3206,8 @@ const PROMPTED_VIDEO_SUBMIT_ACCEPTANCE_TIMEOUT_MS = 3000;
 const PROMPTED_RESULTS_CAPACITY_WAIT_MS = 60000;
 const GENERATION_ACCEPTANCE_POLL_MS = 250;
 const GENERATION_ACCEPTANCE_TIMEOUT_MS = 15000;
+const GENERATION_RESULT_POLL_MS = 500;
+const GENERATION_RESULT_TIMEOUT_MS = 180000;
 const AGENT_ACTION_QUIESCENCE_MS = 500;
 const PROMPTED_VIDEO_INPUT_SELECTOR =
     'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]';
@@ -3306,7 +3328,7 @@ class VideoRetryManager {
     _getResultsGalleryEntries() {
         if (!/^\/imagine\/?$/.test(window.location.pathname)) return [];
         const seenCards = new Set();
-        return Array.from(document.querySelectorAll('img[alt="Generated image"]'))
+        return getGrokGeneratedCardImages(document)
             .map((image) => {
                 const container = findMediaCardRoot(image);
                 if (!container || !image || seenCards.has(container)) return null;
@@ -3354,7 +3376,7 @@ class VideoRetryManager {
 
     isBatchRunActive(runToken = this.batchRunToken) {
         return !!runToken
-            && this.batchRunning
+            && (this.batchRunning || this.goalRunning)
             && !this.batchAborted
             && this.batchRunToken === runToken;
     }
@@ -3458,8 +3480,12 @@ class VideoRetryManager {
 
     // Gets a stable identifier for a gallery card (image src survives React re-renders)
     _getCardGeneratedImage(container) {
-        const image = container?.querySelector?.('img[alt="Generated image"]') || null;
-        return image && findMediaCardRoot(image) === container ? image : null;
+        const images = getGrokGeneratedCardImages(container)
+            .filter((image) => findMediaCardRoot(image) === container);
+        const identities = new Set(images
+            .map((image) => getGrokMediaIdentity(image.currentSrc || image.src || ''))
+            .filter(Boolean));
+        return identities.size === 1 ? images[0] || null : null;
     }
 
     _getCardImageSrc(container) {
@@ -4369,8 +4395,21 @@ class VideoRetryManager {
     _rememberGenerationRun(response) {
         if (response?.run) this.generationRun = response.run;
         if (this.generationRun?.counts) {
-            this.goalCount = this.generationRun.counts.accepted;
-            this.goalTotal = this.generationRun.items.length;
+            const isVideoGoal = this.generationRun.kind === 'video_goal';
+            this.goalCount = isVideoGoal
+                ? this.generationRun.goalProgress
+                : this.generationRun.counts.accepted;
+            this.goalTotal = isVideoGoal
+                ? this.generationRun.options.goalCount
+                : this.generationRun.items.length;
+            if (isVideoGoal) {
+                const goalItem = this.generationRun.items[0];
+                this.currentRetry = Math.max(
+                    0,
+                    Number(goalItem?.attemptsThisRound || 0)
+                        - (goalItem?.lastOutcome === 'accepted' ? 1 : 0)
+                );
+            }
             this.batchIndex = this.generationRun.counts.accepted
                 + this.generationRun.counts.failed
                 + this.generationRun.counts.skipped;
@@ -4558,15 +4597,26 @@ class VideoRetryManager {
             return true;
         }
 
-        this.batchRunning = true;
         this.batchAborted = false;
-        this.batchMode = this.generationRun.kind === 'quick_batch' ? 'quick' : 'prompted';
         this.batchContext = this.generationRun.origin.surface;
         this.batchRunToken = this.createBatchRunToken();
         this.generationResumePending = true;
+        this.updateGenerationRunControls(this.generationRun);
+        if (this.generationRun.kind === 'video_goal') {
+            this.goalRunning = true;
+            this.batchRunning = false;
+            this.batchMode = null;
+            this.goalTotal = this.generationRun.options.goalCount;
+            this.goalCount = this.generationRun.goalProgress;
+            this.updateCounters();
+            await this._runVideoGoal(this.batchRunToken);
+            return true;
+        }
+        this.goalRunning = false;
+        this.batchRunning = true;
+        this.batchMode = this.generationRun.kind === 'quick_batch' ? 'quick' : 'prompted';
         this.goalTotal = this.generationRun.items.length;
         this.updateBatchButtons(true);
-        this.updateGenerationRunControls(this.generationRun);
         if (this.generationRun.kind === 'quick_batch') {
             await this._runQuickBatch(this.batchRunToken);
             return true;
@@ -4575,7 +4625,7 @@ class VideoRetryManager {
             await this._runPromptedBatch(this.batchRunToken);
             return true;
         }
-        this.safeStatus('Resume Run: Video Goal migration is still in progress', 'warning');
+        this.safeStatus('Resume Run: unsupported generation workflow', 'warning');
         this.updateGenerationRunControls(this.generationRun, { resume: true });
         return false;
     }
@@ -4652,6 +4702,29 @@ class VideoRetryManager {
         };
     }
 
+    _createVideoGoalReceipt(claim, observedState, checkpoint, resultBaseline, extra = {}) {
+        return {
+            ...this._createCheckpointedGenerationReceipt(claim, observedState, checkpoint),
+            resultBaselineVersion: resultBaseline.version,
+            baselineResultAssetIds: [...resultBaseline.mediaAssetIds],
+            baselineFailureCount: resultBaseline.failureCount,
+            ...extra
+        };
+    }
+
+    _restoreGeneratedResultBaseline(receipt) {
+        if (receipt?.resultBaselineVersion !== 1
+            || !Array.isArray(receipt.baselineResultAssetIds)
+            || !Number.isInteger(receipt.baselineFailureCount)) {
+            return null;
+        }
+        return {
+            version: 1,
+            mediaAssetIds: [...receipt.baselineResultAssetIds],
+            failureCount: receipt.baselineFailureCount
+        };
+    }
+
     async _waitForAdapterSubmission(receipt, runToken, timeoutMs = GENERATION_ACCEPTANCE_TIMEOUT_MS) {
         const attempts = Math.max(1, Math.ceil(timeoutMs / GENERATION_ACCEPTANCE_POLL_MS));
         for (let attempt = 0; attempt < attempts; attempt++) {
@@ -4661,6 +4734,32 @@ class VideoRetryManager {
             await this.sleep(GENERATION_ACCEPTANCE_POLL_MS);
         }
         return 'pending';
+    }
+
+    async _waitForGeneratedResult(
+        descriptor,
+        before,
+        runToken,
+        timeoutMs = GENERATION_RESULT_TIMEOUT_MS
+    ) {
+        const attempts = Math.max(1, Math.ceil(timeoutMs / GENERATION_RESULT_POLL_MS));
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            if (!this.isBatchRunActive(runToken)) {
+                return { status: 'cancelled', resultAssetId: '' };
+            }
+            const result = GrokImagineAdapter.inspectGeneratedResult({
+                root: document,
+                before,
+                expected: {
+                    sourceAssetId: descriptor.sourceAssetId,
+                    sourcePostId: descriptor.sourcePostId,
+                    mediaKind: 'video'
+                }
+            });
+            if (result.status !== 'pending') return result;
+            await this.sleep(GENERATION_RESULT_POLL_MS);
+        }
+        return { status: 'timeout', resultAssetId: '' };
     }
 
     _getCapacityDescriptor(run = this.generationRun) {
@@ -4819,7 +4918,7 @@ class VideoRetryManager {
         const hrefs = new Set(links.map((link) => link.href));
         if (hrefs.size > 1) return { status: 'ambiguous', reason: 'source_open_target_ambiguous' };
         const control = links[0]
-            || resolved.card.querySelector('img[alt="Generated image"]')
+            || this._getCardGeneratedImage(resolved.card)
             || resolved.card.querySelector('video');
         return control
             ? { status: 'matched', control, card: resolved.card }
@@ -5284,37 +5383,422 @@ class VideoRetryManager {
     }
 
     // --- Goal Mode ---
-    startGoal(count) {
-        this.goalRunning = true;
-        this.batchRunning = false;
-        this.batchContext = 'detail';
-        this.goalTotal = count;
-        this.goalCount = 0;
-        this.currentRetry = 0;
+    async _reportVideoGoalFailure(claim, code, permanent = false) {
+        return this._reportGenerationAction(
+            claim,
+            permanent ? 'permanent_failed' : 'retryable_failed',
+            code
+        );
+    }
 
-        // Scope to the card the user is looking at
-        this.targetContext = this.findTargetContext();
-        if (!this.targetContext) {
-            this.goalRunning = false;
-            this.isVerifying = false;
-            this.safeStatus('No generated-image card found', 'warning');
-            this.updateCounters();
-            return;
+    async _prepareVideoGoalControl(claim, runToken) {
+        let resolved = GrokImagineAdapter.resolveMediaAction({
+            root: document,
+            descriptor: claim.descriptor,
+            action: 'goal_video'
+        });
+        if (resolved.status !== 'matched') return resolved;
+
+        if (resolved.stage === 'open_goal_menu') {
+            if (resolved.control.disabled
+                || resolved.control.getAttribute('aria-disabled') === 'true') {
+                return { status: 'capacity', reason: 'provider_capacity' };
+            }
+            const trigger = resolved.control;
+            const opened = await this._clickPromptedBatchNativeControl(
+                trigger,
+                runToken,
+                'open Video Goal Make Video menu',
+                () => {
+                    const current = GrokImagineAdapter.resolveMediaAction({
+                        root: document,
+                        descriptor: claim.descriptor,
+                        action: 'goal_video'
+                    });
+                    return current.status === 'matched'
+                        && current.stage === 'open_goal_menu'
+                        && current.control === trigger;
+                }
+            );
+            if (!opened) return { status: 'missing', reason: 'goal_menu_open_failed' };
+
+            for (let attempt = 0; attempt < 20; attempt++) {
+                if (!this.isBatchRunActive(runToken)) return { status: 'cancelled' };
+                resolved = GrokImagineAdapter.resolveMediaAction({
+                    root: document,
+                    descriptor: claim.descriptor,
+                    action: 'goal_video'
+                });
+                if (resolved.status === 'ambiguous') return resolved;
+                if (resolved.status === 'matched'
+                    && resolved.stage === 'select_quick_animate') {
+                    break;
+                }
+                await this.sleep(100);
+            }
         }
 
-        const root = this._queryRoot();
-        this.baseCompletedCount = root.querySelectorAll(this.PROGRESS_SELECTOR).length;
-        console.log(`VideoRetryManager: Goal Started. Target: ${count}. Scoped: ${!!this.targetContext}`);
+        if (resolved.status !== 'matched'
+            || (resolved.stage !== 'submit_direct'
+                && resolved.stage !== 'select_quick_animate')) {
+            return {
+                status: resolved.status === 'ambiguous' ? 'ambiguous' : 'missing',
+                reason: resolved.reason || 'goal_action_missing'
+            };
+        }
+        if (resolved.control.disabled
+            || resolved.control.getAttribute('aria-disabled') === 'true') {
+            return { status: 'capacity', reason: 'provider_capacity' };
+        }
+        return { status: 'ready', action: resolved };
+    }
 
-        this.safeStatus('Goal Started', 'info');
+    async _executeVideoGoalClaim(claim, runToken) {
+        const persistedItem = this._getGenerationItem(claim.itemId);
+        let checkpoint = this._restoreAdapterSubmissionReceipt(persistedItem?.receipt);
+        let resultBaseline = this._restoreGeneratedResultBaseline(persistedItem?.receipt);
+        const acceptedAlready = persistedItem?.status === 'submitted'
+            && persistedItem?.lastOutcome === 'accepted';
+
+        if (!acceptedAlready
+            && (persistedItem?.status === 'composer_ready' || persistedItem?.status === 'submitted')) {
+            if (!checkpoint || !resultBaseline) {
+                await this._reportVideoGoalFailure(claim, 'goal_checkpoint_missing', true);
+                return 'failed';
+            }
+            const acceptance = await this._waitForAdapterSubmission(
+                checkpoint,
+                runToken,
+                claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
+            );
+            if (acceptance !== 'accepted') {
+                if (acceptance !== 'cancelled') {
+                    await this._reportVideoGoalFailure(
+                        claim,
+                        acceptance === 'rejected' ? 'provider_rejected' : 'acceptance_unproven',
+                        acceptance === 'ambiguous'
+                    );
+                }
+                return acceptance;
+            }
+            const acceptedResponse = await this._reportGenerationAction(
+                claim,
+                'accepted',
+                '',
+                this._createVideoGoalReceipt(
+                    claim,
+                    'provider_accepted',
+                    checkpoint,
+                    resultBaseline
+                )
+            );
+            if (!acceptedResponse || acceptedResponse.status === 'rejected') return 'stopped';
+        } else if (!acceptedAlready) {
+            const prepared = await this._prepareVideoGoalControl(claim, runToken);
+            if (prepared.status === 'cancelled') return 'cancelled';
+            if (prepared.status === 'capacity') {
+                await this._reportGenerationAction(claim, 'capacity', 'provider_capacity');
+                return 'capacity';
+            }
+            if (prepared.status !== 'ready') {
+                await this._reportVideoGoalFailure(
+                    claim,
+                    prepared.reason || 'goal_action_missing',
+                    prepared.status === 'ambiguous'
+                );
+                return prepared.status;
+            }
+            const resolved = prepared.action;
+
+            checkpoint = GrokImagineAdapter.captureSubmissionReceipt({
+                root: document,
+                descriptor: claim.descriptor,
+                action: 'goal_video'
+            });
+            resultBaseline = GrokImagineAdapter.captureGeneratedResultBaseline({
+                root: document,
+                descriptor: claim.descriptor,
+                mediaKind: 'video'
+            });
+            if (!checkpoint || !resultBaseline) {
+                await this._reportVideoGoalFailure(claim, 'goal_checkpoint_missing', true);
+                return 'failed';
+            }
+
+            const readyCheckpoint = await this._reportGenerationAction(
+                claim,
+                'composer_ready',
+                '',
+                this._createVideoGoalReceipt(
+                    claim,
+                    'composer_ready',
+                    checkpoint,
+                    resultBaseline
+                )
+            );
+            if (readyCheckpoint?.status === 'rejected') return 'stopped';
+
+            const clicked = await this._clickPromptedBatchNativeControl(
+                resolved.control,
+                runToken,
+                resolved.stage === 'select_quick_animate'
+                    ? 'click Video Goal Quick Animate'
+                    : 'click Video Goal Make Video',
+                () => {
+                    const current = GrokImagineAdapter.resolveMediaAction({
+                        root: document,
+                        descriptor: claim.descriptor,
+                        action: 'goal_video'
+                    });
+                    return current.status === 'matched'
+                        && current.stage === resolved.stage
+                        && current.control === resolved.control;
+                }
+            );
+            if (!clicked) {
+                await this._reportVideoGoalFailure(claim, 'native_click_failed');
+                return 'failed';
+            }
+
+            const submittedCheckpoint = await this._reportGenerationAction(
+                claim,
+                'submitted',
+                '',
+                this._createVideoGoalReceipt(
+                    claim,
+                    'submit_dispatched',
+                    checkpoint,
+                    resultBaseline
+                )
+            );
+            if (submittedCheckpoint?.status === 'rejected') return 'stopped';
+
+            const acceptance = await this._waitForAdapterSubmission(
+                checkpoint,
+                runToken,
+                claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
+            );
+            if (acceptance !== 'accepted') {
+                if (acceptance !== 'cancelled') {
+                    await this._reportVideoGoalFailure(
+                        claim,
+                        acceptance === 'rejected' ? 'provider_rejected' : 'acceptance_unproven',
+                        acceptance === 'ambiguous'
+                    );
+                }
+                return acceptance;
+            }
+            const acceptedResponse = await this._reportGenerationAction(
+                claim,
+                'accepted',
+                '',
+                this._createVideoGoalReceipt(
+                    claim,
+                    'provider_accepted',
+                    checkpoint,
+                    resultBaseline
+                )
+            );
+            if (!acceptedResponse || acceptedResponse.status === 'rejected') return 'stopped';
+        }
+
+        if (!checkpoint || !resultBaseline) {
+            await this._reportVideoGoalFailure(claim, 'goal_result_baseline_missing', true);
+            return 'failed';
+        }
+        this.safeStatus(
+            `Video Goal: waiting for playable result ${this.goalCount + 1}/${this.goalTotal}`,
+            'info'
+        );
+        const result = await this._waitForGeneratedResult(
+            claim.descriptor,
+            resultBaseline,
+            runToken,
+            claim.options.resultTimeoutMs || GENERATION_RESULT_TIMEOUT_MS
+        );
+        if (result.status === 'ready') {
+            const completedResponse = await this._reportGenerationAction(
+                claim,
+                'completed',
+                '',
+                this._createGenerationReceipt(claim, 'playable_result', {
+                    resultAssetId: result.resultAssetId
+                })
+            );
+            if (!completedResponse || completedResponse.status === 'rejected') return 'stopped';
+            return 'completed';
+        }
+        if (result.status !== 'cancelled') {
+            await this._reportVideoGoalFailure(
+                claim,
+                result.status === 'failed' ? 'provider_result_failed' : `result_${result.status}`,
+                result.status === 'ambiguous'
+            );
+        }
+        return result.status;
+    }
+
+    async _runVideoGoal(runToken) {
+        const retryBudget = Number(this.generationRun?.options?.maxRetries) || 0;
+        const maxSteps = Math.max(1, this.goalTotal * (retryBudget + 1));
+        const maxIterations = maxSteps + Math.max(
+            1,
+            Math.ceil((this.generationRun?.options?.capacityTimeoutMs || 120000) / GENERATION_ACCEPTANCE_POLL_MS)
+        );
+        let steps = 0;
+        let iterations = 0;
+        while (this.isBatchRunActive(runToken) && steps < maxSteps && iterations < maxIterations) {
+            iterations += 1;
+            const waitingDescriptor = this.generationRun?.status === 'waiting_capacity'
+                ? this._getCapacityDescriptor()
+                : null;
+            if (waitingDescriptor) await this.sleep(GENERATION_ACCEPTANCE_POLL_MS);
+            const claimResponse = await this._claimGenerationAction(waitingDescriptor ? {
+                capacityAvailable: this._isGenerationActionAvailable(waitingDescriptor, 'goal_video')
+            } : {});
+            if (!claimResponse || claimResponse.status === 'rejected') {
+                const recoverable = claimResponse?.error === 'GENERATION_RESUME_SURFACE_UNPROVEN';
+                this.safeStatus(
+                    recoverable
+                        ? 'Video Goal: reselect the original source, then Resume Run'
+                        : `Video Goal: ${claimResponse?.error || 'Run authority unavailable'}`,
+                    'warning'
+                );
+                this.updateGenerationRunControls(this.generationRun, { resume: recoverable });
+                break;
+            }
+            if (claimResponse.status === 'waiting') {
+                if (['completed', 'cancelled', 'retryable_failed', 'failed'].includes(this.generationRun?.status)) break;
+                continue;
+            }
+            if (claimResponse.status !== 'claimed' && claimResponse.status !== 'resumed') break;
+
+            const outcome = await this._executeVideoGoalClaim(claimResponse.claim, runToken);
+            if (outcome !== 'capacity') steps += 1;
+            if (outcome === 'stopped' || outcome === 'cancelled') break;
+        }
+
+        const run = this.generationRun;
+        this.goalRunning = false;
+        this.batchRunToken = null;
         this.updateCounters();
-        this.clickMakeVideo();
+        this.updateGenerationRunControls(run);
+        if (run?.status === 'completed') {
+            this.safeStatus(`Video Goal: Complete (${run.goalProgress}/${run.options.goalCount})`, 'success');
+        } else if (run?.status === 'retryable_failed') {
+            this.safeStatus(
+                `Video Goal: ${run.goalProgress}/${run.options.goalCount} complete. Retry Failed is available.`,
+                'warning'
+            );
+        } else if (run?.status === 'failed') {
+            this.safeStatus(
+                `Video Goal: stopped safely (${run.items?.[0]?.failureCode || 'result could not be verified'})`,
+                'error'
+            );
+        } else if (run?.status === 'cancelled' || this.batchAborted) {
+            this.safeStatus(`Video Goal: Stopped (${run?.goalProgress || 0}/${run?.options?.goalCount || 0})`, 'neutral');
+        }
+    }
+
+    async _startVideoGoalDurable(count) {
+        if (!GrokImagineAdapter?.describeCurrentSource
+            || !GrokImagineAdapter?.captureGeneratedResultBaseline
+            || !GrokImagineAdapter?.inspectGeneratedResult) {
+            this.safeStatus('Video Goal: Grok adapter unavailable. Reload the extension.', 'error');
+            return false;
+        }
+        const surface = this._detectGenerationSurface();
+        if (surface !== 'agent_media' && surface !== 'legacy_detail') {
+            this.safeStatus('Video Goal: select one generated source in Agent or detail view', 'warning');
+            return false;
+        }
+        const described = GrokImagineAdapter.describeCurrentSource({
+            root: document,
+            surface,
+            location: {
+                pathname: window.location.pathname,
+                search: window.location.search
+            }
+        });
+        if (described.status !== 'matched') {
+            this.safeStatus(`Video Goal: ${described.reason || 'Select one generated source'}`, 'warning');
+            return false;
+        }
+        const action = GrokImagineAdapter.resolveMediaAction({
+            root: document,
+            descriptor: described.descriptor,
+            action: 'goal_video'
+        });
+        if (action.status !== 'matched') {
+            this.safeStatus(`Video Goal: ${action.reason || 'Make Video is unavailable for this source'}`, 'warning');
+            return false;
+        }
+
+        const goalCount = Math.max(1, parseInt(count, 10) || 1);
+        const retryEnabled = this.settingsManager.settings.autoRetryEnabled === true;
+        this.goalRunning = true;
+        this.batchRunning = false;
+        this.batchAborted = false;
+        this.batchRunToken = this.createBatchRunToken();
+        this.batchMode = null;
+        this.batchContext = surface;
+        this.goalTotal = goalCount;
+        this.goalCount = 0;
+        this.currentRetry = 0;
+        this.generationRun = null;
+
+        const started = await this._startGenerationRun(
+            'video_goal',
+            surface,
+            [described.descriptor],
+            '',
+            {
+                maxRetries: retryEnabled
+                    ? Math.max(0, Number(this.settingsManager.settings.maxRetries) || 0)
+                    : 0,
+                goalCount,
+                action: 'goal_video',
+                mediaKind: 'video',
+                acceptanceTimeoutMs: GENERATION_ACCEPTANCE_TIMEOUT_MS,
+                resultTimeoutMs: GENERATION_RESULT_TIMEOUT_MS,
+                capacityTimeoutMs: PROMPTED_RESULTS_CAPACITY_WAIT_MS
+            }
+        );
+        if (started?.status !== 'started') {
+            this.goalRunning = false;
+            this.batchRunToken = null;
+            this.safeStatus(
+                started?.activeWorkflow?.kind
+                    ? `Video Goal blocked by active ${started.activeWorkflow.kind}`
+                    : `Video Goal: ${started?.error || 'Could not start'}`,
+                'warning'
+            );
+            return false;
+        }
+        this.updateCounters();
+        this.updateGenerationRunControls(this.generationRun);
+        this.safeStatus(`Video Goal: Starting ${goalCount} playable video${goalCount === 1 ? '' : 's'}`, 'info');
+        await this._runVideoGoal(this.batchRunToken);
+        return true;
+    }
+
+    async startGoal(count) {
+        if (this.batchRunning || this.goalRunning || this.batchStartPending) {
+            this.safeStatus('A generation run is already active', 'warning');
+            return false;
+        }
+        this.batchStartPending = true;
+        try {
+            return await this._startVideoGoalDurable(count);
+        } finally {
+            this.batchStartPending = false;
+        }
     }
 
     // --- Batch Mode (Quick + Prompted) ---
     async startBatch(mode = 'quick', prompt = null, options = {}) {
-        if (this.batchRunning || this.batchStartPending) {
-            this.safeStatus('Batch is already running', 'warning');
+        if (this.batchRunning || this.goalRunning || this.batchStartPending) {
+            this.safeStatus('A generation run is already active', 'warning');
             return false;
         }
 
@@ -5970,6 +6454,7 @@ class VideoRetryManager {
 
     async stopBatch() {
         const activeRun = this.generationRun;
+        const label = activeRun?.kind === 'video_goal' ? 'Video Goal' : 'Batch';
         this._clearPromptedVideoComposerRoot();
         this.batchRunning = false;
         this.batchAborted = true;
@@ -5979,7 +6464,7 @@ class VideoRetryManager {
         this.targetContext = null;
         this.batchContext = null;
         this.batchProcessedSrcs = null;
-        this.safeStatus('Batch Stopped', 'neutral');
+        this.safeStatus(`${label} Stopped`, 'neutral');
         this.updateCounters();
         this.updateBatchButtons(false);
         if (activeRun && !['completed', 'cancelled', 'failed'].includes(activeRun.status)) {
@@ -6590,12 +7075,14 @@ class VideoRetryManager {
         if (!this.overlay || !this.overlay.el) return;
         const quickBtn = this.overlay.el.querySelector('#gptQuickBatchBtn');
         const promptedBtn = this.overlay.el.querySelector('#gptPromptedBatchBtn');
+        const goalBtn = this.overlay.el.querySelector('#gptStartGoalBtn');
         const stopBtn = this.overlay.el.querySelector('#gptBatchStopBtn');
         const batchStatus = this.overlay.el.querySelector('#gptBatchStatus');
         const galleryLimitRow = this.overlay.el.querySelector('#gptGalleryLimitRow');
 
         if (quickBtn) quickBtn.style.display = running ? 'none' : '';
         if (promptedBtn) promptedBtn.style.display = running ? 'none' : '';
+        if (goalBtn) goalBtn.style.display = running ? 'none' : '';
         if (stopBtn) stopBtn.style.display = running ? '' : 'none';
         if (batchStatus) batchStatus.style.display = running ? 'block' : 'none';
         if (galleryLimitRow) galleryLimitRow.style.display = running ? 'none' : '';
@@ -6609,6 +7096,7 @@ class VideoRetryManager {
         if (!this.overlay?.el) return;
         const quickBtn = this.overlay.el.querySelector('#gptQuickBatchBtn');
         const promptedBtn = this.overlay.el.querySelector('#gptPromptedBatchBtn');
+        const goalBtn = this.overlay.el.querySelector('#gptStartGoalBtn');
         const stopBtn = this.overlay.el.querySelector('#gptBatchStopBtn');
         const recoveryRow = this.overlay.el.querySelector('#gptBatchRecoveryRow');
         const resumeBtn = this.overlay.el.querySelector('#gptBatchResumeBtn');
@@ -6621,6 +7109,7 @@ class VideoRetryManager {
 
         if (quickBtn) quickBtn.style.display = active ? 'none' : '';
         if (promptedBtn) promptedBtn.style.display = active ? 'none' : '';
+        if (goalBtn) goalBtn.style.display = active ? 'none' : '';
         if (stopBtn) stopBtn.style.display = active && !recovering ? '' : 'none';
         if (recoveryRow) recoveryRow.style.display = recovering ? 'flex' : 'none';
         if (resumeBtn) resumeBtn.style.display = resumable ? '' : 'none';
@@ -6657,6 +7146,8 @@ class VideoRetryManager {
     }
 
     checkAndAct() {
+        if (this.generationRun
+            && !['completed', 'cancelled', 'failed'].includes(this.generationRun.status)) return;
         // Batch mode uses its own async loop
         if (this.batchRunning) return;
         // Only act during active goals

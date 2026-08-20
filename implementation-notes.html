@@ -2269,6 +2269,63 @@ npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-
                     </tr>
                 </tbody>
             </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Video Goal and Current Grok Cards</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Video Goal keeps one exact selected source and increments only for one new
+                            playable video identity. Current Agent Mode binds its Make Video control by
+                            the selected node's exact <code>data-id</code>. Current detail pages open the
+                            Make Video menu and choose the exact <code>Quick Animate</code> item, never
+                            Add Prompt or Precise Edit. Current Saved cards bind the overlay post link,
+                            sibling generated media branch, and action controls as one card identity.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Live read-only inspection showed two Grok changes that were not represented
+                            in the approved fixtures: Saved media can be a sibling of the post link with
+                            an empty <code>alt</code>, and detail Video Goal now reaches Quick Animate
+                            through a menu. Task 6 therefore includes the shared card/media adapter and
+                            Sync gallery-image recognition instead of changing Video Goal alone.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Sibling media is accepted only when one direct card branch owns all generated
+                            media for one asset. Multiple branches or identities fail closed. A submitted
+                            Video Goal survives remount or extension reload from its checkpoint without a
+                            second click, but an ambiguous or unplayable result does not increment progress.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            The inspected Chrome session had no populated <code>/imagine</code> results
+                            conversation, so that live surface remains for the approval-gated browser lane.
+                            Current Agent Prompted Batch may require opening its source-bound toolbar panel
+                            before the Add Prompt menu appears; that control has not been activated live
+                            because its provider-side effect is not yet proven harmless.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            Current Saved, detail, and Agent structures were inspected through one narrow
+                            Chrome tab without tab enumeration. Deterministic browser scenarios cover card
+                            remounts, current overlay cards, Prompted return, three Video Goal outputs,
+                            retry, ambiguity, Stop, and reload resume. No live generation was started.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </main>
     </body>
 </html>
