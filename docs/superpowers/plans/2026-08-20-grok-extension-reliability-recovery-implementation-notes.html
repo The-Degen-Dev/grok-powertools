@@ -52,7 +52,9 @@
         <div><span class="label">Started:</span> 2026-08-20</div>
         <div><span class="label">Branch:</span> <code>codex/grok-extension-recovery</code></div>
         <div><span class="label">Baseline:</span> <code>35f6bc7</code></div>
-        <div><span class="label">Status:</span> Task 1 in progress</div>
+        <div><span class="label">Checkpoint:</span> <code>f6ece2a</code></div>
+        <div><span class="label">Manifest:</span> <code>0.2.0</code></div>
+        <div><span class="label">Status:</span> Task 1 red fixtures captured</div>
       </div>
     </header>
 
@@ -91,6 +93,13 @@
         <li>Planning baseline: 902 unit tests passed, but one background initialization console error made the run an invalid clean signal.</li>
         <li>Planning baseline: 48 mocked Playwright tests passed.</li>
         <li>Read-only live Saved inspection confirmed current Make Video controls and stable post/asset identities without enumerating Chrome tabs.</li>
+        <li>Source fingerprint before runtime edits: <code>manifest.json 7e4a0e02</code>, <code>content.js b0bcc265</code>, <code>background.js d8ad9106</code>, <code>bridge.js b8d3eae8</code>, and <code>popup.js 00b56c70</code> using SHA-256 prefixes.</li>
+        <li>Quick Batch unit regression: three stable source identities fail after a full gallery remount; the current implementation processes only the first source.</li>
+        <li>Quick Batch unit regression: a dispatched click without provider acceptance evidence incorrectly increments progress from zero to one.</li>
+        <li>Quick Batch unit regression: remount discovery dispatches the first stable source twice before continuing.</li>
+        <li>Quick Batch Playwright regression: a ten-card current-Grok fixture that remounts after each accepted action accepts only the first card.</li>
+        <li>Prompted Batch Playwright regression: an unsettled submit followed by successful return navigation is incorrectly reported as complete and increments progress.</li>
+        <li>Adapter and generation-state contract suites are syntax- and lint-clean, and fail only because their runtime modules do not exist yet. They remain assigned to Tasks 2 and 3.</li>
       </ul>
     </section>
   </main>

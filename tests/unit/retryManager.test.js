@@ -153,6 +153,25 @@ function createSavedBatchCard(sourceUrl, onImageClick = null) {
     return { card, image, makeVideo };
 }
 
+function mountQuickBatchGallery(sourceIds, onAction) {
+    document.querySelectorAll('[data-test-quick-batch-card]').forEach((card) => card.remove());
+    return sourceIds.map((sourceId) => {
+        const { card, makeVideo } = createSavedBatchCard(
+            `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`
+        );
+        card.setAttribute('data-test-quick-batch-card', sourceId);
+        makeVideo.scrollIntoView = jest.fn();
+        makeVideo.addEventListener('click', () => onAction({ sourceId, card }));
+        return { sourceId, card, makeVideo };
+    });
+}
+
+function markQuickBatchActionAccepted(card) {
+    const progress = document.createElement('button');
+    progress.setAttribute('aria-label', 'Video Options');
+    card.appendChild(progress);
+}
+
 function mountSavedScope(selected = 'all') {
     document.querySelectorAll('[data-test-saved-scope]').forEach((control) => control.remove());
     const all = makeVisible(document.createElement('button'));
@@ -462,6 +481,78 @@ describe('VideoRetryManager', () => {
 
         expect(gallerySpy).toHaveBeenCalledWith('test prompt', 4, expect.any(String));
         expect(detailSpy).not.toHaveBeenCalled();
+    });
+
+    test('Quick Batch reacquires all three stable source identities after the gallery remounts', async () => {
+        const sourceIds = [
+            '10101010-aaaa-4bbb-8ccc-111111111111',
+            '20202020-aaaa-4bbb-8ccc-222222222222',
+            '30303030-aaaa-4bbb-8ccc-333333333333'
+        ];
+        const acceptedSourceIds = [];
+        let remounted = false;
+        window.history.pushState({}, '', '/imagine/saved');
+
+        const mountGallery = () => mountQuickBatchGallery(sourceIds, ({ sourceId, card }) => {
+            acceptedSourceIds.push(sourceId);
+            markQuickBatchActionAccepted(card);
+            if (!remounted) {
+                remounted = true;
+                mountGallery();
+            }
+        });
+        mountGallery();
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.scrollForMore = jest.fn().mockResolvedValue(false);
+
+        await retryManager.startBatch('quick');
+
+        expect(acceptedSourceIds).toEqual(sourceIds);
+        expect(retryManager.goalCount).toBe(3);
+    });
+
+    test('Quick Batch does not count a dispatched click without provider acceptance evidence', async () => {
+        const sourceId = '40404040-aaaa-4bbb-8ccc-444444444444';
+        const dispatchedSourceIds = [];
+        window.history.pushState({}, '', '/imagine/saved');
+        mountQuickBatchGallery([sourceId], ({ sourceId: dispatchedSourceId }) => {
+            dispatchedSourceIds.push(dispatchedSourceId);
+        });
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager.scrollForMore = jest.fn().mockResolvedValue(false);
+
+        await retryManager.startBatch('quick');
+
+        expect(dispatchedSourceIds).toEqual([sourceId]);
+        expect(retryManager.goalCount).toBe(0);
+    });
+
+    test('Quick Batch never dispatches the same stable source twice after a gallery remount', async () => {
+        const sourceIds = [
+            '50505050-aaaa-4bbb-8ccc-555555555555',
+            '60606060-aaaa-4bbb-8ccc-666666666666',
+            '70707070-aaaa-4bbb-8ccc-777777777777'
+        ];
+        const dispatchedSourceIds = [];
+        let remounted = false;
+        window.history.pushState({}, '', '/imagine/saved');
+        window.scrollBy = jest.fn();
+
+        const mountGallery = () => mountQuickBatchGallery(sourceIds, ({ sourceId, card }) => {
+            dispatchedSourceIds.push(sourceId);
+            markQuickBatchActionAccepted(card);
+            if (!remounted) {
+                remounted = true;
+                mountGallery();
+            }
+        });
+        mountGallery();
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await retryManager.startBatch('quick');
+
+        expect(dispatchedSourceIds).toEqual(sourceIds);
+        expect(new Set(dispatchedSourceIds).size).toBe(dispatchedSourceIds.length);
     });
 
     test('detectBatchContext resolves a qualified current results grid separately from Saved', () => {

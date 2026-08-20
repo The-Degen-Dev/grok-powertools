@@ -22,6 +22,7 @@ const bridgeJs = fs.readFileSync(bridgeJsPath, 'utf8');
 const contentJs = fs.readFileSync(contentJsPath, 'utf8');
 const styleCss = fs.readFileSync(styleCssPath, 'utf8');
 const { MAX_REFERENCE_BYTES } = require('../../recreateWorkflowUtils.js');
+const { setupRemountingQuickBatch } = require('./fixtures/grok-imagine-2.js');
 
 async function evaluateExtensionContent(page) {
     await page.evaluate(providerRegistryJs);
@@ -3816,6 +3817,68 @@ test.describe('Grok Power Tools E2E', () => {
         expect(await page.evaluate(() => window.__chromeRuntimeMessages
             .filter((message) => message.action === 'GPT_PROMPTED_VIDEO_NATIVE_CLICK')))
             .toHaveLength(6);
+    });
+
+    test('durable generation recovery Quick Batch reacquires ten cards after a transient full remount', async ({ page }) => {
+        const accountUuid = '61616161-6161-4161-8161-616161616161';
+        const mediaUuids = Array.from({ length: 10 }, (_, index) => (
+            `62000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`
+        ));
+
+        await evaluateExtensionContent(page);
+        await setupRemountingQuickBatch(page, { accountUuid, mediaUuids });
+
+        await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
+            'quick',
+            null,
+            { galleryLimit: 10 }
+        ))).resolves.toBe(true);
+
+        const evidence = await page.evaluate(() => ({
+            ...window.__quickBatchEvents,
+            batchRunning: window.__gptE2e.retry.batchRunning,
+            goalCount: window.__gptE2e.retry.goalCount,
+            status: window.__gptE2e.overlay.el.querySelector('#gptStatusBadge')?.textContent
+        }));
+        expect(evidence.accepted).toEqual(mediaUuids);
+        expect(evidence.clicks).toEqual(mediaUuids);
+        expect(evidence.duplicateClicks).toEqual([]);
+        expect(evidence.mounts).toBeGreaterThan(mediaUuids.length);
+        expect(evidence.goalCount).toBe(mediaUuids.length);
+        expect(evidence.batchRunning).toBe(false);
+        expect(evidence.status).toContain('10');
+    });
+
+    test('durable generation recovery Prompted Batch does not count an unproven submit after returning', async ({ page }) => {
+        const accountUuid = '63636363-6363-4363-8363-636363636363';
+        const mediaUuids = ['64000000-0000-4000-8000-000000000001'];
+
+        await evaluateExtensionContent(page);
+        await page.evaluate(bridgeJs);
+        await setupMockPromptedResultsBatch(page, {
+            accountUuid,
+            mediaUuids,
+            deferGeneratedResult: true,
+            leaveSubmitUnsettled: true
+        });
+
+        await expect(page.evaluate(() => window.__gptE2e.retry.startBatch(
+            'prompted',
+            'A subtle natural camera move.',
+            { galleryLimit: 1, videoGoal: 1 }
+        ))).resolves.toBe(true);
+
+        const evidence = await page.evaluate(() => ({
+            goalCount: window.__gptE2e.retry.goalCount,
+            batchRunning: window.__gptE2e.retry.batchRunning,
+            events: window.__promptedResultsEvents,
+            status: window.__gptE2e.overlay.el.querySelector('#gptStatusBadge')?.textContent
+        }));
+        expect(evidence.events.submitted).toHaveLength(1);
+        expect(evidence.goalCount).toBe(0);
+        expect(evidence.batchRunning).toBe(false);
+        expect(evidence.status).not.toContain('Complete');
+        expect(evidence.status).toMatch(/not accepted|unproven|failed/i);
     });
 
     test('Prompted Batch completes five generated results with trusted controls and returns', async ({ page }) => {
