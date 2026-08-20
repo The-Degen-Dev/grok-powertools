@@ -726,8 +726,19 @@
             return activeRun ? { ...activeRun } : null;
         }
 
+        function getActiveRunStatus() {
+            if (!activeRun) return null;
+            return {
+                kind: 'recreate',
+                status: activeRun.aborted ? 'stopping' : 'running',
+                runId: activeRun.runId,
+                phase: activeRun.phase || 'workflow'
+            };
+        }
+
         return {
             abort,
+            getActiveRunStatus,
             getActiveRunForTest,
             start
         };

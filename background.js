@@ -1,4 +1,5 @@
 // Background Service Worker
+let generationRunHelperLoadError = null;
 if (typeof importScripts === 'function') {
     try {
         importScripts('cloudSyncUtils.js');
@@ -9,6 +10,11 @@ if (typeof importScripts === 'function') {
         importScripts('recreateWorkflowUtils.js', 'recreateWorkflowBackground.js');
     } catch (e) {
         console.warn('Grok recreate workflow helpers failed to load.', e);
+    }
+    try {
+        importScripts('generationRunState.js', 'generationRunController.js');
+    } catch (e) {
+        generationRunHelperLoadError = e || new Error('GENERATION_HELPERS_LOAD_FAILED');
     }
 }
 
@@ -234,6 +240,11 @@ const recreateWorkflowController = RecreateWorkflowBackground
         messageTimeoutMs: RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS
     })
     : null;
+const GenerationRunController = generationRunHelperLoadError
+    ? null
+    : (typeof self !== 'undefined' && self.GrokPowerToolsGenerationRunController)
+        ? self.GrokPowerToolsGenerationRunController
+        : (typeof require === 'function' ? require('./generationRunController.js') : null);
 
 const API_KEY_HEADER = ['x-gpt', 'api', 'key'].join('-');
 
@@ -258,6 +269,8 @@ let activeScrapeLease = null;
 let scrapeLeaseHydrationPromise = null;
 let scrapeLeaseMutationQueue = Promise.resolve();
 let scrapeStopPending = false;
+let generationRunController = null;
+let mutatingWorkflowStartQueue = Promise.resolve();
 const activeScrapeTransferTasks = new Map();
 const activeScrapeTransferKinds = new Map();
 const activeScrapeTransferAbortControllers = new Map();
@@ -2363,6 +2376,175 @@ function assertBackgroundInitializationCurrent(context) {
     }
 }
 
+async function getGenerationBlockingWorkflow() {
+    const scrapeActive = activeScrapeLease?.status === 'starting'
+        || activeScrapeLease?.status === 'active'
+        || scrapeStartPending
+        || scrapeStopPending
+        || isScraping
+        || isR2Backup;
+    if (scrapeActive) {
+        const kind = activeScrapeLease?.kind || (isR2Backup ? 'r2_backup' : 'sync');
+        return {
+            kind,
+            status: scrapeStopPending ? 'stopping' : 'running',
+            runId: activeScrapeLease?.token || ''
+        };
+    }
+
+    return recreateWorkflowController?.getActiveRunStatus?.() || null;
+}
+
+function enqueueMutatingWorkflowStart(operation) {
+    const execute = () => Promise.resolve().then(operation);
+    const result = mutatingWorkflowStartQueue.then(execute, execute);
+    mutatingWorkflowStartQueue = result.catch(() => {});
+    return result;
+}
+
+async function listActiveMutatingWorkflows() {
+    const workflows = [];
+    const scrapeActive = activeScrapeLease?.status === 'starting'
+        || activeScrapeLease?.status === 'active'
+        || scrapeStartPending
+        || scrapeStopPending
+        || isScraping
+        || isR2Backup;
+    if (scrapeActive) {
+        workflows.push({
+            kind: activeScrapeLease?.kind || (isR2Backup ? 'r2_backup' : 'sync'),
+            status: scrapeStopPending ? 'stopping' : 'running',
+            runId: activeScrapeLease?.token || ''
+        });
+    }
+
+    const recreateWorkflow = recreateWorkflowController?.getActiveRunStatus?.() || null;
+    if (recreateWorkflow) workflows.push(recreateWorkflow);
+
+    if (generationRunController) {
+        const generationStatus = await generationRunController.getGenerationRunStatus();
+        if (generationStatus?.status === 'active' && generationStatus.run) {
+            workflows.push({
+                kind: generationStatus.run.kind,
+                status: generationStatus.run.status,
+                runId: generationStatus.run.runId
+            });
+        }
+    }
+    return workflows;
+}
+
+function buildMutatingWorkflowConflict(workflows) {
+    if (workflows.length === 1) {
+        return { status: 'conflict', activeWorkflow: workflows[0] };
+    }
+    return {
+        status: 'conflict',
+        error: 'MUTATING_WORKFLOW_AUTHORITY_CONFLICT',
+        activeWorkflow: {
+            kind: 'authority_conflict',
+            status: 'blocked',
+            workflows
+        }
+    };
+}
+
+async function startGenerationWithGlobalAuthority(request, sender) {
+    return enqueueMutatingWorkflowStart(async () => {
+        const activeWorkflows = await listActiveMutatingWorkflows();
+        if (activeWorkflows.length > 0) return buildMutatingWorkflowConflict(activeWorkflows);
+        return generationRunController.startGenerationRun(request, sender);
+    });
+}
+
+async function reserveScrapeWithGlobalAuthority(kind) {
+    return enqueueMutatingWorkflowStart(async () => {
+        const activeWorkflows = await listActiveMutatingWorkflows();
+        if (activeWorkflows.length > 0) {
+            return { intent: null, conflict: buildMutatingWorkflowConflict(activeWorkflows) };
+        }
+        return { intent: await reserveScrapeStartIntent(kind), conflict: null };
+    });
+}
+
+async function startRecreateWithGlobalAuthority(request, context) {
+    const reservation = await enqueueMutatingWorkflowStart(async () => {
+        const activeWorkflows = await listActiveMutatingWorkflows();
+        if (activeWorkflows.length > 0) {
+            return { conflict: buildMutatingWorkflowConflict(activeWorkflows), completion: null };
+        }
+        return {
+            conflict: null,
+            completion: recreateWorkflowController.start(request, context)
+        };
+    });
+    if (reservation.conflict) {
+        return {
+            ok: false,
+            error: 'workflow_active',
+            ...reservation.conflict
+        };
+    }
+    return reservation.completion;
+}
+
+function notifyGenerationCancellation(details) {
+    if (!Number.isInteger(details?.ownerTabId) || !chrome.tabs?.sendMessage) {
+        return Promise.resolve({ acknowledged: false });
+    }
+
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (acknowledged) => {
+            if (settled) return;
+            settled = true;
+            resolve({ acknowledged });
+        };
+
+        try {
+            const pending = chrome.tabs.sendMessage(details.ownerTabId, {
+                action: 'GENERATION_RUN_CANCELLED',
+                runId: details.runId,
+                epoch: details.epoch,
+                ownerDocumentId: details.ownerDocumentId
+            }, (response) => {
+                if (chrome.runtime?.lastError) {
+                    finish(false);
+                    return;
+                }
+                finish(response?.acknowledged === true);
+            });
+            if (pending && typeof pending.then === 'function') {
+                pending.then(
+                    (response) => finish(response?.acknowledged === true),
+                    () => finish(false)
+                );
+            }
+        } catch {
+            finish(false);
+        }
+    });
+}
+
+async function initializeGenerationRunController() {
+    if (generationRunController) {
+        await generationRunController.initialize();
+        return generationRunController;
+    }
+    if (!GenerationRunController?.createGenerationRunController || !chrome.storage?.session) {
+        return null;
+    }
+
+    generationRunController = GenerationRunController.createGenerationRunController({
+        sessionStorage: chrome.storage.session,
+        localStorage: chrome.storage.local,
+        getBlockingWorkflow: getGenerationBlockingWorkflow,
+        notifyCancellation: notifyGenerationCancellation
+    });
+    await generationRunController.initialize();
+    return generationRunController;
+}
+
 async function initializeBackgroundState(context = null, storedSnapshot = null) {
     const stored = storedSnapshot || await chrome.storage.local.get(null);
     assertBackgroundInitializationCurrent(context);
@@ -2406,6 +2588,8 @@ async function initializeBackgroundState(context = null, storedSnapshot = null) 
     await hydrateScrapeCompletionJournal(stored, context?.deadlineAt);
     assertBackgroundInitializationCurrent(context);
     hydrateScrapeRunStateRecordRevision(stored);
+    await initializeGenerationRunController();
+    assertBackgroundInitializationCurrent(context);
     const startupDownloadOperations = Array.from(pendingDownloadOperations.values())
         .map((operation) => ({ ...operation }));
 
@@ -3856,7 +4040,16 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false, source
     let intent = null;
     let lease = null;
     try {
-        intent = await reserveScrapeStartIntent(backup ? 'r2_backup' : 'sync');
+        const reservation = await reserveScrapeWithGlobalAuthority(backup ? 'r2_backup' : 'sync');
+        intent = reservation.intent;
+        if (reservation.conflict) {
+            return {
+                status: 'error',
+                surface: 'unsupported',
+                error: 'Another mutating extension workflow is already active.',
+                activeWorkflow: reservation.conflict.activeWorkflow
+            };
+        }
         if (!intent) {
             return { status: 'error', surface: 'unsupported', error: 'A sync or backup run is already active.' };
         }
@@ -4173,8 +4366,43 @@ async function checkR2BackupPresence(request, sender) {
     }, 'presence');
 }
 
+function handleGenerationRuntimeMessage(request, sender, sendResponse) {
+    const handlers = {
+        GENERATION_RUN_START: 'startGenerationRun',
+        GENERATION_RUN_CLAIM: 'claimGenerationAction',
+        GENERATION_RUN_REPORT: 'reportGenerationAction',
+        GENERATION_RUN_RETRY_FAILED: 'retryFailedGenerationItems',
+        GENERATION_RUN_CANCEL: 'cancelGenerationRun',
+        GENERATION_RUN_STATUS: 'getGenerationRunStatus'
+    };
+    const methodName = handlers[request.action];
+    if (!methodName) return null;
+    if (generationRunHelperLoadError) {
+        sendResponse({ status: 'rejected', error: 'GENERATION_HELPERS_LOAD_FAILED' });
+        return false;
+    }
+    if (!generationRunController) {
+        sendResponse({ status: 'rejected', error: 'GENERATION_CONTROLLER_UNAVAILABLE' });
+        return false;
+    }
+
+    const operation = request.action === 'GENERATION_RUN_START'
+        ? startGenerationWithGlobalAuthority(request, sender)
+        : generationRunController[methodName](request, sender);
+    operation.then(sendResponse).catch((error) => {
+        sendResponse({
+            status: 'rejected',
+            error: String(error?.code || error?.message || 'GENERATION_CONTROLLER_ERROR')
+        });
+    });
+    return true;
+}
+
 // Handle messages
 function handleRuntimeMessage(request, sender, sendResponse) {
+    const generationResponse = handleGenerationRuntimeMessage(request, sender, sendResponse);
+    if (generationResponse !== null) return generationResponse;
+
     if (request.action === 'PROCESSED_IDS_ADD') {
         mutateProcessedIds({ ids: request.ids }).then((processedIds) => {
             sendResponse({ status: 'ok', processedIds });
@@ -4646,7 +4874,7 @@ function handleRuntimeMessage(request, sender, sendResponse) {
 
         (async () => {
             const sourceTab = sender && sender.tab ? sender.tab : {};
-            const response = await recreateWorkflowController.start(request, {
+            const response = await startRecreateWithGlobalAuthority(request, {
                 sourceTabId: sourceTab.id,
                 sourceTabUrl: sourceTab.url
             });
@@ -4669,6 +4897,12 @@ function handleRuntimeMessage(request, sender, sendResponse) {
 }
 
 const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
+    'GENERATION_RUN_START',
+    'GENERATION_RUN_CLAIM',
+    'GENERATION_RUN_REPORT',
+    'GENERATION_RUN_RETRY_FAILED',
+    'GENERATION_RUN_CANCEL',
+    'GENERATION_RUN_STATUS',
     'PROCESSED_IDS_ADD',
     'PROCESSED_IDS_RESET',
     'SCRAPE_RUN_STATE_WRITE',
@@ -4678,6 +4912,7 @@ const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
     'GET_SCRAPE_DURABILITY',
     'START_SCRAPE',
     'START_R2_BACKUP',
+    'START_GPT_RECREATE',
     'R2_BACKUP_CHECK_PRESENT',
     'R2_BACKUP_UPLOAD',
     'R2_BACKUP_PROGRESS',
@@ -4781,10 +5016,16 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
     return waitForBackgroundInitialization()
-        .then(() => getActiveLeaseForTabEvent(tabId))
-        .then((lease) => {
-            if (!lease || lease.tabId !== tabId) return;
-            return stopScrapeRun(lease.kind, 'owner_tab_closed');
+        .then(async () => {
+            const lease = await getActiveLeaseForTabEvent(tabId);
+            const operations = [];
+            if (lease?.tabId === tabId) {
+                operations.push(stopScrapeRun(lease.kind, 'owner_tab_closed'));
+            }
+            if (generationRunController?.cancelGenerationRunForOwnerTab) {
+                operations.push(generationRunController.cancelGenerationRunForOwnerTab(tabId));
+            }
+            await Promise.all(operations);
         })
         .catch(() => {});
 });
@@ -6479,6 +6720,8 @@ if (typeof module !== 'undefined') {
         getCloudSyncForTest: () => CloudSync,
         getCloudSyncQueueForTest: () => cloudSyncQueue.map((item) => ({ ...item })),
         getBackgroundStateForTest: () => ({ ...backgroundStateStatus }),
+        getGenerationRunControllerForTest: () => generationRunController,
+        getGenerationBlockingWorkflow,
         getPendingDownloadOperationsForTest: () => serializeDownloadOperations(pendingDownloadOperations),
         getProcessedUUIDsForTest: () => Array.from(processedUUIDs),
         getScrapeDurabilitySnapshot,
@@ -6487,6 +6730,7 @@ if (typeof module !== 'undefined') {
         handleDownloadChanged,
         handleDownloadFilename,
         initializeBackgroundState,
+        initializeGenerationRunController,
         ensureBackgroundStateReady,
         initializeScrapeInActiveTab,
         ensureScrapeLeaseHydrated,

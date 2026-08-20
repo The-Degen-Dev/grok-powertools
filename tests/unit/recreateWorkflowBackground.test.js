@@ -289,12 +289,16 @@ describe('recreate background controller', () => {
 
         const abortResult = controller.abort('user');
         expect(abortResult).toEqual(expect.objectContaining({ ok: true, aborted: true }));
+        expect(controller.getActiveRunStatus()).toEqual(expect.objectContaining({
+            status: 'stopping'
+        }));
         expect(typeof chatCallback).toBe('function');
 
         chatCallback({ ok: true, generatedPrompt: 'A red cabin in snow.' });
 
         const result = await promise;
         expect(result).toEqual(expect.objectContaining({ ok: false, error: 'workflow_aborted' }));
+        expect(controller.getActiveRunStatus()).toBeNull();
         expect(messages.some((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP')).toBe(false);
     });
 

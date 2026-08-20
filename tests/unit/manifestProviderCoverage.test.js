@@ -12,6 +12,8 @@ describe('provider manifest coverage', () => {
         expect(scripts.indexOf('grokImagineAdapter.js')).toBeGreaterThan(scripts.indexOf('chatgptImagesContent.js'));
         expect(scripts.indexOf('recreateWorkflowUtils.js')).toBeGreaterThan(scripts.indexOf('grokImagineAdapter.js'));
         expect(scripts.indexOf('content.js')).toBeGreaterThan(scripts.indexOf('recreateWorkflowContent.js'));
+        expect(scripts).not.toContain('generationRunState.js');
+        expect(scripts).not.toContain('generationRunController.js');
     });
 
     test('direct Grok reinjection preserves the manifest helper order', () => {
@@ -57,5 +59,7 @@ describe('provider manifest coverage', () => {
         expect(EXTENSION_PACKAGE_FILES).toContain('providerRunLedger.js');
         expect(EXTENSION_PACKAGE_FILES).toContain('chatgptImagesContent.js');
         expect(EXTENSION_PACKAGE_FILES).toContain('grokImagineAdapter.js');
+        expect(EXTENSION_PACKAGE_FILES).toContain('generationRunState.js');
+        expect(EXTENSION_PACKAGE_FILES).toContain('generationRunController.js');
     });
 });

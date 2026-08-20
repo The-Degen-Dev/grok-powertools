@@ -2127,6 +2127,57 @@ npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-
                     </tr>
                 </tbody>
             </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Durable Run Authority</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Quick Batch, Prompted Batch, and Video Goal now share a background-owned
+                            run contract. The authoritative lease lives in
+                            <code>chrome.storage.session</code>; a redacted local journal supports
+                            operator status without storing prompts or transient claims. Sync, R2,
+                            Recreate, and generation starts pass through one serialized authority gate.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            The plan listed <code>manifest.json</code> among likely files, but the run
+                            state and controller are service-worker-only helpers. They are packaged but
+                            intentionally not injected into web pages, so no manifest runtime entry was
+                            added.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            An unacknowledged claim expires into Retry Failed and a provider-capacity
+                            wait times out into Retry Failed. Neither case automatically replays a
+                            potentially submitted source. A hard navigation may transfer authority only
+                            with proof from the current Grok URL and the exact source identity.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None for the authority layer. Live provider behavior still requires the
+                            later workflow migrations and approval-gated Chrome runs.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            Focused state, controller, background wiring, and Recreate cancellation
+                            checks pass. This is structural proof only, not a claim that the user-facing
+                            workflows are usable yet.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </main>
     </body>
 </html>

@@ -25,6 +25,8 @@ const EXTENSION_PACKAGE_FILES = [
     'providerRunLedger.js',
     'chatgptImagesContent.js',
     'grokImagineAdapter.js',
+    'generationRunState.js',
+    'generationRunController.js',
     'recreateWorkflowBackground.js',
     'recreateWorkflowContent.js',
     'recreateWorkflowUtils.js',

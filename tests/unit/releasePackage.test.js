@@ -31,6 +31,8 @@ describe('release extension package allowlist', () => {
 
         expect(listed).toContain('cloudSyncUtils.js');
         expect(listed).toContain('grokImagineAdapter.js');
+        expect(listed).toContain('generationRunState.js');
+        expect(listed).toContain('generationRunController.js');
         expect(listed).toContain('recreateWorkflowBackground.js');
         expect(listed).toContain('offscreen.html');
         expect(listed).toContain('offscreen.js');
