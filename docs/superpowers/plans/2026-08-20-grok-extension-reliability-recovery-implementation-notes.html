@@ -99,6 +99,8 @@
         <li>Quick Batch unit regression: remount discovery dispatches the first stable source twice before continuing.</li>
         <li>Quick Batch Playwright regression: a ten-card current-Grok fixture that remounts after each accepted action accepts only the first card.</li>
         <li>Prompted Batch Playwright regression: an unsettled submit followed by successful return navigation is incorrectly reported as complete and increments progress.</li>
+        <li>Recreate regression: cancelling while the Imagine submit control is still pending does not revoke the wait; the control is clicked after cancellation and can create a late result.</li>
+        <li>Sync regression: a conversation response containing two attachment assets produces no conversation inventory event, confirming the current path cannot enumerate every authoritative asset.</li>
         <li>Adapter and generation-state contract suites are syntax- and lint-clean, and fail only because their runtime modules do not exist yet. They remain assigned to Tasks 2 and 3.</li>
       </ul>
     </section>

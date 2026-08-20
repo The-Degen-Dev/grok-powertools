@@ -294,6 +294,101 @@ describe('bridge prompted video editor targeting', () => {
         }));
     });
 
+    test('conversation asset inventory returns every distinct sanitized attachment asset', async () => {
+        const conversationId = '11111111-1111-4111-8111-111111111111';
+        const imageAssetId = '22222222-2222-4222-8222-222222222222';
+        const videoAssetId = '33333333-3333-4333-8333-333333333333';
+        const payload = {
+            responses: [{
+                responseId: 'multi-asset-response',
+                parentResponseId: 'multi-asset-parent',
+                mediaGenInput: { prompt: 'candid friends at the beach' },
+                fileAttachmentAssetMetadata: [
+                    {
+                        assetId: imageAssetId,
+                        mimeType: 'image/jpeg',
+                        url: `https://assets.grok.com/generated/${imageAssetId}/image.jpg?signature=image-secret`,
+                        accessToken: 'image-token-must-not-cross-the-bridge'
+                    },
+                    {
+                        assetId: videoAssetId,
+                        mimeType: 'video/mp4',
+                        url: `https://assets.grok.com/generated/${videoAssetId}/video.mp4?token=video-secret`,
+                        cookie: 'video-cookie-must-not-cross-the-bridge'
+                    }
+                ]
+            }]
+        };
+        const originalFetch = window.fetch;
+        const fetchMock = jest.fn(async (url, options) => {
+            expect(String(url)).toBe(`/rest/app-chat/conversations/${conversationId}/responses`);
+            expect(options).toEqual({ credentials: 'include' });
+            return {
+                ok: true,
+                json: async () => payload
+            };
+        });
+        const inventoryResults = [];
+        const resultListener = (event) => {
+            inventoryResults.push(event.detail);
+        };
+        window.fetch = fetchMock;
+        document.addEventListener('__gpt_fetch_conversation_asset_inventory_result', resultListener);
+
+        if (!window.__gptPowerToolsBridgeInstalled) eval(bridgeSource);
+
+        try {
+            expect(payload.responses[0].fileAttachmentAssetMetadata).toHaveLength(2);
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory', {
+                detail: { requestId: 'inventory-1', conversationId }
+            }));
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            expect(inventoryResults).toEqual([{
+                requestId: 'inventory-1',
+                inventory: {
+                    schemaVersion: 1,
+                    conversationId,
+                    assets: [
+                        expect.objectContaining({
+                            assetId: imageAssetId,
+                            responseId: 'multi-asset-response',
+                            parentResponseId: 'multi-asset-parent',
+                            mediaKind: 'image',
+                            sourceUrl: `https://assets.grok.com/generated/${imageAssetId}/image.jpg`,
+                            promptText: 'candid friends at the beach',
+                            assetMetadata: expect.objectContaining({
+                                assetId: imageAssetId,
+                                mimeType: 'image/jpeg',
+                                url: `https://assets.grok.com/generated/${imageAssetId}/image.jpg`
+                            }),
+                            mediaGenInput: { prompt: 'candid friends at the beach' }
+                        }),
+                        expect.objectContaining({
+                            assetId: videoAssetId,
+                            responseId: 'multi-asset-response',
+                            parentResponseId: 'multi-asset-parent',
+                            mediaKind: 'video',
+                            sourceUrl: `https://assets.grok.com/generated/${videoAssetId}/video.mp4`,
+                            promptText: 'candid friends at the beach',
+                            assetMetadata: expect.objectContaining({
+                                assetId: videoAssetId,
+                                mimeType: 'video/mp4',
+                                url: `https://assets.grok.com/generated/${videoAssetId}/video.mp4`
+                            }),
+                            mediaGenInput: { prompt: 'candid friends at the beach' }
+                        })
+                    ]
+                }
+            }]);
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(JSON.stringify(inventoryResults)).not.toMatch(/image-secret|video-secret|must-not-cross/);
+        } finally {
+            window.fetch = originalFetch;
+            document.removeEventListener('__gpt_fetch_conversation_asset_inventory_result', resultListener);
+        }
+    });
+
     test('media helper uses the page-world data URL bridge without refetching a blob URL', async () => {
         const root = document.createElement('div');
         const removeListenerSpy = jest.spyOn(root, 'removeEventListener');

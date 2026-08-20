@@ -1729,6 +1729,72 @@ describe('recreate content DOM actions', () => {
         expect(submitEvents.map((event) => event.type)).toEqual(CLICK_EVENT_SEQUENCE);
     });
 
+    test('runImagineSubmitStep Stop cancels an in-flight submit wait before any late click or result', async () => {
+        const editor = document.createElement('div');
+        editor.contentEditable = 'true';
+        editor.setAttribute('aria-label', 'Ask Grok anything');
+        makeVisibleElement(editor);
+        document.body.appendChild(editor);
+
+        const submit = document.createElement('button');
+        submit.setAttribute('aria-label', 'Submit');
+        submit.disabled = true;
+        submit.getBoundingClientRect = () => ({ width: 40, height: 40, left: 0, top: 0 });
+        submit.addEventListener('click', () => {
+            appendGeneratedImage();
+        });
+        document.body.appendChild(submit);
+
+        const uninstallBridge = installContentEditableBridge();
+        const uninstallMediaBridge = installMediaDataUrlBridge();
+        const abortController = new AbortController();
+        const nativeClick = jest.fn(async () => {
+            submit.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            return { ok: true };
+        });
+
+        let outcome;
+        try {
+            const pendingResult = runImagineSubmitStep(
+                {
+                    runId: 'recreate_stop_1',
+                    generatedPrompt: 'A red cabin in snow.',
+                    autoSubmit: true
+                },
+                {
+                    documentRef: document,
+                    timeoutMs: 100,
+                    resultTimeoutMs: 100,
+                    intervalMs: 1,
+                    nativeClick,
+                    signal: abortController.signal
+                }
+            );
+
+            await waitForCondition(() => editor.textContent.includes('A red cabin in snow.'), {
+                timeoutMs: 100,
+                intervalMs: 1
+            });
+            abortController.abort();
+            submit.disabled = false;
+
+            outcome = await pendingResult.then(
+                (value) => ({ status: 'resolved', value }),
+                (error) => ({ status: 'rejected', error })
+            );
+        } finally {
+            uninstallMediaBridge();
+            uninstallBridge();
+        }
+
+        expect(nativeClick).not.toHaveBeenCalled();
+        expect(document.querySelector('img[alt="Generated image"]')).toBeNull();
+        expect(outcome).toEqual({
+            status: 'rejected',
+            error: expect.objectContaining({ code: 'workflow_aborted' })
+        });
+    });
+
     test('runImagineSubmitStep waits through low-resolution placeholder result cards', async () => {
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
