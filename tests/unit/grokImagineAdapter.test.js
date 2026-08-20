@@ -2,6 +2,7 @@ const fs = require('fs');
 const vm = require('vm');
 const {
     captureSubmissionReceipt,
+    describeCurrentSource,
     detectGrokSurface,
     evaluateSubmissionReceipt,
     findGeneratedResult,
@@ -219,6 +220,7 @@ describe('Grok Imagine adapter module contract', () => {
         expect(browserApi.resolveGalleryItem).toBeDefined();
         expect(browserApi.resolveMediaAction).toBeDefined();
         expect(browserApi.captureSubmissionReceipt).toBeDefined();
+        expect(browserApi.describeCurrentSource).toBeDefined();
         expect(browserApi.evaluateSubmissionReceipt).toBeDefined();
         expect(browserApi.findGeneratedResult).toBeDefined();
     });
@@ -242,6 +244,169 @@ describe('Grok Imagine adapter module contract', () => {
             root: document,
             location: new URL(`https://example.com/imagine?conversation=${CONVERSATION_ID}`)
         })).toBe('unsupported');
+    });
+
+    test('describes exactly one legacy detail source from its route post and media asset UUIDs', () => {
+        mountLegacyDetail();
+
+        const result = describeCurrentSource({
+            root: document,
+            surface: 'legacy_detail',
+            location: new URL(
+                `https://grok.com/imagine/post/${FIRST_POST_ID}?conversation=${CONVERSATION_ID}`
+            )
+        });
+
+        expect(result).toEqual({
+            status: 'matched',
+            descriptor: {
+                version: 1,
+                surface: 'legacy_detail',
+                sourceAssetId: FIRST_ASSET_ID,
+                sourcePostId: FIRST_POST_ID,
+                conversationId: CONVERSATION_ID,
+                mediaKind: 'image',
+                hrefPath: `/imagine/post/${FIRST_POST_ID}`,
+                route: `https://grok.com/imagine/post/${FIRST_POST_ID}?conversation=${CONVERSATION_ID}`,
+                initialOrder: 0,
+                beforeAssetId: '',
+                afterAssetId: ''
+            }
+        });
+        expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+        expect(Object.values(result.descriptor).some((value) => value instanceof Element)).toBe(false);
+    });
+
+    test('fails closed when legacy detail identity is missing or disagrees with the route post UUID', () => {
+        mountLegacyDetail({ postId: SECOND_POST_ID });
+
+        expect(describeCurrentSource({
+            root: document,
+            surface: 'legacy_detail',
+            location: new URL(`https://grok.com/imagine/post/${FIRST_POST_ID}`)
+        })).toEqual({
+            status: 'ambiguous',
+            reason: 'legacy_detail_route_mismatch'
+        });
+
+        document.body.innerHTML = '<main></main>';
+        expect(describeCurrentSource({
+            root: document,
+            surface: 'legacy_detail',
+            location: new URL(`https://grok.com/imagine/post/${FIRST_POST_ID}`)
+        })).toEqual({
+            status: 'missing',
+            reason: 'legacy_detail_source_missing'
+        });
+    });
+
+    test('describes one selected Agent source using an explicit contextual post hint', () => {
+        mountAgentSource();
+
+        expect(describeCurrentSource({
+            root: document,
+            surface: 'agent_media',
+            location: new URL(
+                `https://grok.com/imagine/agent/agent-1?conversation=${CONVERSATION_ID}`
+            ),
+            sourcePostIdHint: FIRST_POST_ID
+        })).toEqual({
+            status: 'matched',
+            descriptor: {
+                version: 1,
+                surface: 'agent_media',
+                sourceAssetId: FIRST_ASSET_ID,
+                sourcePostId: FIRST_POST_ID,
+                conversationId: CONVERSATION_ID,
+                mediaKind: 'image',
+                hrefPath: '/imagine/agent/agent-1',
+                route: `https://grok.com/imagine/agent/agent-1?conversation=${CONVERSATION_ID}`,
+                initialOrder: 0,
+                beforeAssetId: '',
+                afterAssetId: ''
+            }
+        });
+    });
+
+    test('uses the Agent conversation UUID as post context only when no post hint is supplied', () => {
+        mountAgentSource({ assetId: THIRD_ASSET_ID });
+
+        const result = describeCurrentSource({
+            root: document,
+            surface: 'agent_media',
+            location: new URL(
+                `https://grok.com/imagine/agent/agent-2?conversation=${SECOND_CONVERSATION_ID}`
+            )
+        });
+
+        expect(result).toEqual({
+            status: 'matched',
+            descriptor: {
+                version: 1,
+                surface: 'agent_media',
+                sourceAssetId: THIRD_ASSET_ID,
+                sourcePostId: SECOND_CONVERSATION_ID,
+                conversationId: SECOND_CONVERSATION_ID,
+                mediaKind: 'image',
+                hrefPath: '/imagine/agent/agent-2',
+                route: `https://grok.com/imagine/agent/agent-2?conversation=${SECOND_CONVERSATION_ID}`,
+                initialOrder: 0,
+                beforeAssetId: '',
+                afterAssetId: ''
+            }
+        });
+    });
+
+    test('fails closed for missing or ambiguous selected Agent source identity', () => {
+        mountAgentSource({ selected: false });
+        const options = {
+            root: document,
+            surface: 'agent_media',
+            location: new URL(
+                `https://grok.com/imagine/agent/agent-1?conversation=${CONVERSATION_ID}`
+            )
+        };
+
+        expect(describeCurrentSource(options)).toEqual({
+            status: 'missing',
+            reason: 'agent_selected_source_missing'
+        });
+
+        const { source } = mountAgentSource();
+        source.parentElement.appendChild(source.cloneNode(true));
+        expect(describeCurrentSource(options)).toEqual({
+            status: 'ambiguous',
+            reason: 'agent_selected_source_ambiguous'
+        });
+
+        mountAgentSource().source.removeAttribute('data-id');
+        expect(describeCurrentSource(options)).toEqual({
+            status: 'missing',
+            reason: 'agent_source_node_id_missing'
+        });
+
+        const multiAssetSource = mountAgentSource().source;
+        multiAssetSource.insertAdjacentHTML(
+            'beforeend',
+            `<img src="${generatedMediaUrl(SECOND_ASSET_ID)}">`
+        );
+        expect(describeCurrentSource(options)).toEqual({
+            status: 'ambiguous',
+            reason: 'agent_source_asset_ambiguous'
+        });
+    });
+
+    test('returns unsupported for current-source surfaces outside detail and Agent media', () => {
+        mountGallery(currentResultsItems());
+
+        expect(describeCurrentSource({
+            root: document,
+            surface: 'results_gallery',
+            location: new URL(`https://grok.com/imagine?conversation=${CONVERSATION_ID}`)
+        })).toEqual({
+            status: 'unsupported',
+            reason: 'current_source_surface_unsupported'
+        });
     });
 
     test('returns serializable descriptors for current results with shared conversation scope', () => {

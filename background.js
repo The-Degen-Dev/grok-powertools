@@ -4389,7 +4389,17 @@ function handleGenerationRuntimeMessage(request, sender, sendResponse) {
     const operation = request.action === 'GENERATION_RUN_START'
         ? startGenerationWithGlobalAuthority(request, sender)
         : generationRunController[methodName](request, sender);
-    operation.then(sendResponse).catch((error) => {
+    operation.then((response) => {
+        if (request.action !== 'GENERATION_RUN_STATUS') {
+            sendResponse(response);
+            return;
+        }
+        sendResponse({
+            ...response,
+            isOwner: Number.isInteger(sender?.tab?.id)
+                && sender.tab.id === response?.run?.ownerTabId
+        });
+    }).catch((error) => {
         sendResponse({
             status: 'rejected',
             error: String(error?.code || error?.message || 'GENERATION_CONTROLLER_ERROR')

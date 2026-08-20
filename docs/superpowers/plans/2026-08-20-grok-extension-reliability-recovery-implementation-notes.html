@@ -54,7 +54,7 @@
         <div><span class="label">Baseline:</span> <code>35f6bc7</code></div>
         <div><span class="label">Checkpoint:</span> <code>f6ece2a</code></div>
         <div><span class="label">Manifest:</span> <code>0.2.0</code></div>
-        <div><span class="label">Status:</span> Tasks 2-4 complete; Task 5 in progress</div>
+        <div><span class="label">Status:</span> Tasks 2-5 complete; Task 6 in progress</div>
       </div>
     </header>
 
@@ -68,6 +68,8 @@
         <li>The Grok adapter treats asset ID plus post ID as gallery identity. Conversation ID is metadata scope and is never sufficient to identify a card.</li>
         <li>Agent Mode binds the one selected <code>.react-flow__node-asset</code> by stable node/media asset identity. The persisted post ID remains context because current Agent DOM does not expose it.</li>
         <li>Submission acceptance must be new and source-scoped. Control disappearance, return navigation, unrelated progress, and stale result media remain pending.</li>
+        <li>Prompted Batch persists only a flat source/action checkpoint with baseline counters. Prompts, cookies, signed URLs, and composer DOM are not persisted.</li>
+        <li>Direct Agent starts use the conversation UUID as contextual post identity only when no gallery post hint exists, because current Agent DOM exposes no post UUID.</li>
       </ul>
     </section>
 
@@ -110,6 +112,8 @@
         <li>Task 2: manifest order, direct reinjection order, and release package allowlist tests passed; the package list contains <code>grokImagineAdapter.js</code>.</li>
         <li>Task 3: one background-owned generation authority now serializes Quick Batch, Prompted Batch, Video Goal, Sync/R2, and Recreate starts; claims, capacity waits, cancellation, and reload transfer are durable and bounded.</li>
         <li>Task 4: Quick Batch now snapshots stable descriptors, reacquires controls after remount, advances only on source-scoped provider acceptance, and preserves failed sources for explicit retry.</li>
+        <li>Task 5: Prompted Batch now snapshots stable descriptors, opens the exact source, selects Make Video then Add Prompt, persists a source-scoped pre-submit checkpoint, advances after provider acceptance without waiting for video completion, and retries only failed sources.</li>
+        <li>Task 5: a reloaded owner document can resume an in-flight Prompted submission from its persisted checkpoint without dispatching Submit again.</li>
       </ul>
     </section>
   </main>

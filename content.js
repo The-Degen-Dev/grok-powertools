@@ -1895,6 +1895,11 @@ class GrokOverlay {
                             <button id="gptPromptedBatchBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; margin-left:4px; background:#7c3aed; font-size:11px;">Prompted Batch</button>
                             <button id="gptBatchStopBtn" class="gpt-btn" style="flex:1; background:#f4212e; display:none; font-size:11px;">Stop Batch</button>
                         </div>
+                        <div class="gpt-row" id="gptBatchRecoveryRow" style="margin-top:8px; gap:4px; display:none;">
+                            <button id="gptBatchResumeBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; background:#1d9bf0; font-size:11px; display:none;">Resume Run</button>
+                            <button id="gptBatchRetryFailedBtn" class="gpt-btn gpt-btn-secondary" style="flex:1; background:#d97706; font-size:11px; display:none;">Retry Failed</button>
+                            <button id="gptBatchCancelRunBtn" class="gpt-btn" style="flex:1; background:#f4212e; font-size:11px; display:none;">Cancel Run</button>
+                        </div>
                         <div class="gpt-row" style="margin-top:4px; font-size:10px; color:#71767b; display:none;" id="gptBatchStatus">
                             Batch Mode: Active
                         </div>
@@ -2299,6 +2304,15 @@ class GrokOverlay {
             await this.retryManager.startBatch('prompted', prompt, { videoGoal, galleryLimit });
         });
         this.el.querySelector('#gptBatchStopBtn').addEventListener('click', async () => {
+            await this.retryManager.stopBatch();
+        });
+        this.el.querySelector('#gptBatchResumeBtn').addEventListener('click', async () => {
+            await this.retryManager.resumeGenerationRun();
+        });
+        this.el.querySelector('#gptBatchRetryFailedBtn').addEventListener('click', async () => {
+            await this.retryManager.retryFailedGenerationRun();
+        });
+        this.el.querySelector('#gptBatchCancelRunBtn').addEventListener('click', async () => {
             await this.retryManager.stopBatch();
         });
         this.el.querySelector('#gptAddPromptBtn').addEventListener('click', () => this.saveCurrentPrompt(this.savedPromptType));
@@ -3223,6 +3237,8 @@ class VideoRetryManager {
         this.batchStartPending = false;
         this.promptedVideoComposerRoot = null;
         this.generationRun = null;
+        this.generationResumePending = false;
+        this.generationCancellationListenerInstalled = false;
 
         // Quality Repeat state
         this.qualityRepeatRunning = false;
@@ -4378,6 +4394,53 @@ class VideoRetryManager {
         };
     }
 
+    _detectGenerationSurface() {
+        if (!GrokImagineAdapter) return 'unsupported';
+        return GrokImagineAdapter.detectGrokSurface({
+            root: document,
+            location: {
+                pathname: window.location.pathname,
+                search: window.location.search
+            }
+        });
+    }
+
+    _getActiveGenerationDescriptor(run = this.generationRun) {
+        return run?.items?.find((item) => (
+            item.status === 'targeting'
+            || item.status === 'composer_ready'
+            || item.status === 'submitted'
+        ))?.descriptor
+            || run?.items?.find((item) => item.status === 'queued')?.descriptor
+            || run?.items?.[0]?.descriptor
+            || null;
+    }
+
+    _buildGenerationResumeProof(descriptor = this._getActiveGenerationDescriptor()) {
+        const surface = this._detectGenerationSurface();
+        if (surface === 'unsupported') return null;
+        const url = window.location.href;
+
+        if (surface === 'results_gallery' || surface === 'saved_gallery') {
+            if (surface !== this.generationRun?.origin?.surface) return null;
+            return { surface, url };
+        }
+
+        if (!descriptor) return null;
+        const identityReceipt = GrokImagineAdapter.captureSubmissionReceipt({
+            root: document,
+            descriptor,
+            action: 'resume_identity'
+        });
+        if (!identityReceipt) return null;
+        return {
+            surface,
+            url,
+            sourceAssetId: descriptor.sourceAssetId,
+            sourcePostId: descriptor.sourcePostId
+        };
+    }
+
     async _startGenerationRun(kind, surface, items, prompt = '', options = {}) {
         const response = await this._sendGenerationMessage({
             action: 'GENERATION_RUN_START',
@@ -4393,14 +4456,144 @@ class VideoRetryManager {
 
     async _claimGenerationAction(options = {}) {
         if (!this.generationRun) return null;
+        const resumeOptions = {};
+        if (this.generationResumePending) {
+            const resumeProof = this._buildGenerationResumeProof();
+            if (!resumeProof) {
+                return {
+                    status: 'rejected',
+                    error: 'GENERATION_RESUME_SURFACE_UNPROVEN',
+                    run: this.generationRun
+                };
+            }
+            resumeOptions.resume = true;
+            resumeOptions.resumeProof = resumeProof;
+        }
         const response = await this._sendGenerationMessage({
             action: 'GENERATION_RUN_CLAIM',
             runId: this.generationRun.runId,
             epoch: this.generationRun.epoch,
+            ...resumeOptions,
             ...options
         }, 'claim generation action');
         this._rememberGenerationRun(response);
+        if (response && response.status !== 'rejected') this.generationResumePending = false;
         return response;
+    }
+
+    setupGenerationCancellationListener() {
+        if (this.generationCancellationListenerInstalled) return;
+        const listener = (request, _sender, sendResponse) => {
+            if (request?.action !== 'GENERATION_RUN_CANCELLED') return false;
+            const matches = this.generationRun
+                && request.runId === this.generationRun.runId
+                && request.epoch >= this.generationRun.epoch;
+            if (matches) {
+                this.batchAborted = true;
+                this.batchRunning = false;
+                this.goalRunning = false;
+                this.batchRunToken = null;
+                this.generationRun = {
+                    ...this.generationRun,
+                    epoch: request.epoch,
+                    status: 'cancelled'
+                };
+                this._clearPromptedVideoComposerRoot();
+                this.updateBatchButtons(false);
+                this.updateGenerationRunControls(this.generationRun);
+                this.safeStatus('Generation run cancelled', 'neutral');
+            }
+            sendResponse({ acknowledged: Boolean(matches) });
+            return false;
+        };
+        const installed = safeChromeAddListener(
+            () => chrome.runtime.onMessage,
+            listener,
+            'listen for generation cancellation'
+        );
+        if (installed.ok) {
+            this.generationCancellationListenerInstalled = true;
+        }
+    }
+
+    async resumeGenerationRunIfNeeded() {
+        const response = await this._sendGenerationMessage({
+            action: 'GENERATION_RUN_STATUS'
+        }, 'load generation run status');
+        if (!response?.isOwner || response.status !== 'active' || !response.run) return false;
+        this._rememberGenerationRun(response);
+        this.updateGenerationRunControls(this.generationRun);
+        if (this.generationRun.status === 'retryable_failed') {
+            this.safeStatus(
+                `${this.generationRun.kind}: ${this.generationRun.counts.accepted} accepted, ${this.generationRun.counts.failed} failed. Retry Failed or Cancel Run.`,
+                'warning'
+            );
+            return true;
+        }
+        return this.resumeGenerationRun({ automatic: true });
+    }
+
+    async resumeGenerationRun(options = {}) {
+        if (!this.generationRun) {
+            const response = await this._sendGenerationMessage({
+                action: 'GENERATION_RUN_STATUS'
+            }, 'load generation run status');
+            if (!response?.isOwner || response.status !== 'active' || !response.run) return false;
+            this._rememberGenerationRun(response);
+        }
+        if (this.generationRun.status === 'retryable_failed') {
+            this.updateGenerationRunControls(this.generationRun);
+            return false;
+        }
+
+        const descriptor = this._getActiveGenerationDescriptor();
+        if (!this._buildGenerationResumeProof(descriptor)) {
+            const originUrl = this.generationRun.origin?.url;
+            if (!originUrl || options.automatic) {
+                this.safeStatus('Resume Run: return to the original Grok source', 'warning');
+                this.updateGenerationRunControls(this.generationRun, { resume: true });
+                return false;
+            }
+            window.location.assign(originUrl);
+            return true;
+        }
+
+        this.batchRunning = true;
+        this.batchAborted = false;
+        this.batchMode = this.generationRun.kind === 'quick_batch' ? 'quick' : 'prompted';
+        this.batchContext = this.generationRun.origin.surface;
+        this.batchRunToken = this.createBatchRunToken();
+        this.generationResumePending = true;
+        this.goalTotal = this.generationRun.items.length;
+        this.updateBatchButtons(true);
+        this.updateGenerationRunControls(this.generationRun);
+        if (this.generationRun.kind === 'quick_batch') {
+            await this._runQuickBatch(this.batchRunToken);
+            return true;
+        }
+        if (this.generationRun.kind === 'prompted_batch') {
+            await this._runPromptedBatch(this.batchRunToken);
+            return true;
+        }
+        this.safeStatus('Resume Run: Video Goal migration is still in progress', 'warning');
+        this.updateGenerationRunControls(this.generationRun, { resume: true });
+        return false;
+    }
+
+    async retryFailedGenerationRun() {
+        if (!this.generationRun || this.generationRun.status !== 'retryable_failed') return false;
+        const response = await this._sendGenerationMessage({
+            action: 'GENERATION_RUN_RETRY_FAILED',
+            runId: this.generationRun.runId,
+            epoch: this.generationRun.epoch
+        }, 'retry failed generation items');
+        this._rememberGenerationRun(response);
+        if (response?.status !== 'updated') {
+            this.safeStatus(`Retry Failed: ${response?.error || 'Could not resume'}`, 'warning');
+            return false;
+        }
+        this.generationResumePending = false;
+        return this.resumeGenerationRun();
     }
 
     async _reportGenerationAction(claim, outcome, failureCode = '', receipt = null) {
@@ -4425,6 +4618,37 @@ class VideoRetryManager {
             observedState,
             observedAt: Date.now(),
             ...extra
+        };
+    }
+
+    _createCheckpointedGenerationReceipt(claim, observedState, checkpoint) {
+        return this._createGenerationReceipt(claim, observedState, {
+            checkpointVersion: checkpoint.version,
+            checkpointAction: checkpoint.action,
+            checkpointSourceKind: checkpoint.sourceKind,
+            checkpointSourceNodeId: checkpoint.sourceNodeId || '',
+            baselineAcceptedCount: checkpoint.baseline.acceptedCount,
+            baselineRejectedCount: checkpoint.baseline.rejectedCount
+        });
+    }
+
+    _restoreAdapterSubmissionReceipt(receipt) {
+        if (receipt?.checkpointVersion !== 1
+            || !Number.isInteger(receipt.baselineAcceptedCount)
+            || !Number.isInteger(receipt.baselineRejectedCount)) {
+            return null;
+        }
+        return {
+            version: 1,
+            action: receipt.checkpointAction,
+            sourceKind: receipt.checkpointSourceKind,
+            sourceNodeId: receipt.checkpointSourceNodeId || '',
+            sourceAssetId: receipt.sourceAssetId,
+            sourcePostId: receipt.sourcePostId,
+            baseline: {
+                acceptedCount: receipt.baselineAcceptedCount,
+                rejectedCount: receipt.baselineRejectedCount
+            }
         };
     }
 
@@ -4577,6 +4801,488 @@ class VideoRetryManager {
         }
     }
 
+    _getGenerationItem(itemId) {
+        return this.generationRun?.items?.find((item) => item.itemId === itemId) || null;
+    }
+
+    _getPromptedOpenTarget(descriptor) {
+        const resolved = GrokImagineAdapter.resolveGalleryItem({ root: document, descriptor });
+        if (resolved.status !== 'matched') return { status: resolved.status, reason: resolved.reason };
+        const links = Array.from(resolved.card.querySelectorAll('a[href*="/imagine/post/"]'))
+            .filter((link) => {
+                try {
+                    return new URL(link.href).pathname === `/imagine/post/${descriptor.sourcePostId}`;
+                } catch {
+                    return false;
+                }
+            });
+        const hrefs = new Set(links.map((link) => link.href));
+        if (hrefs.size > 1) return { status: 'ambiguous', reason: 'source_open_target_ambiguous' };
+        const control = links[0]
+            || resolved.card.querySelector('img[alt="Generated image"]')
+            || resolved.card.querySelector('video');
+        return control
+            ? { status: 'matched', control, card: resolved.card }
+            : { status: 'missing', reason: 'source_open_target_missing' };
+    }
+
+    _isPromptedCapacityAvailable(descriptor, prompt) {
+        const checkpoint = GrokImagineAdapter.captureSubmissionReceipt({
+            root: document,
+            descriptor,
+            action: 'prompted_video'
+        });
+        if (!checkpoint) return false;
+        const composer = this._getVerifiedPromptedVideoComposer(
+            this.promptedVideoComposerRoot,
+            false
+        );
+        if (!composer) return false;
+        const value = composer.input instanceof HTMLTextAreaElement
+            ? composer.input.value
+            : composer.input.textContent;
+        return (!prompt || String(value || '').trim() === String(prompt).trim())
+            && this._isActionableAutomationTarget(composer.submitButton, 72);
+    }
+
+    async _waitForGenerationOrigin(runToken, timeoutMs = 10000) {
+        const origin = this.generationRun?.origin;
+        if (!origin?.url) return false;
+        let originUrl;
+        try {
+            originUrl = new URL(origin.url);
+        } catch {
+            return false;
+        }
+        const attempts = Math.max(1, Math.ceil(timeoutMs / 200));
+        let restoredScroll = false;
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            if (!this.isBatchRunActive(runToken)) return false;
+            const surface = this._detectGenerationSurface();
+            const routeMatches = window.location.pathname === originUrl.pathname
+                && window.location.search === originUrl.search;
+            if (surface === origin.surface && routeMatches) {
+                if (!restoredScroll && typeof window.scrollTo === 'function') {
+                    window.scrollTo({ top: origin.scrollY || 0, behavior: 'instant' });
+                    restoredScroll = true;
+                    await this.sleep(200);
+                    if (!this.isBatchRunActive(runToken)) return false;
+                }
+                const pendingDescriptor = this.generationRun?.items?.find((item) => (
+                    item.status === 'queued'
+                ))?.descriptor;
+                const sourceMatches = !pendingDescriptor
+                    || GrokImagineAdapter.resolveGalleryItem({
+                        root: document,
+                        descriptor: pendingDescriptor
+                    }).status === 'matched';
+                if (sourceMatches) return true;
+            }
+            await this.sleep(200);
+        }
+        return false;
+    }
+
+    async _returnToGenerationOrigin(runToken) {
+        const origin = this.generationRun?.origin;
+        if (!origin || (origin.surface !== 'results_gallery' && origin.surface !== 'saved_gallery')) {
+            return 'returned';
+        }
+        if (await this._waitForGenerationOrigin(runToken, 200)) return 'returned';
+
+        const backControl = this._findPromptedBatchBackControl();
+        if (backControl) {
+            await this._clickPromptedBatchNativeControl(
+                backControl,
+                runToken,
+                'return to prompted batch origin',
+                () => this._findPromptedBatchBackControl() === backControl
+            );
+            if (await this._waitForGenerationOrigin(runToken)) return 'returned';
+        } else if (typeof window.history?.back === 'function') {
+            window.history.back();
+            if (await this._waitForGenerationOrigin(runToken)) return 'returned';
+        }
+
+        if (!this.isBatchRunActive(runToken)) return 'cancelled';
+        this.safeStatus('Prompted Batch: recovering the original gallery...', 'warning');
+        window.location.assign(origin.url);
+        return 'navigating';
+    }
+
+    async _reportPromptedFailure(claim, code, permanent = false) {
+        return this._reportGenerationAction(
+            claim,
+            permanent ? 'permanent_failed' : 'retryable_failed',
+            code
+        );
+    }
+
+    async _openPromptedDescriptor(claim, runToken) {
+        const descriptor = claim.descriptor;
+        const surface = this._detectGenerationSurface();
+        if (surface === 'results_gallery' || surface === 'saved_gallery') {
+            const resolved = this._getPromptedOpenTarget(descriptor);
+            if (resolved.status !== 'matched') {
+                return { status: resolved.status, reason: resolved.reason };
+            }
+            if (this.isCensoredCard(resolved.card)) {
+                return { status: 'rejected', reason: 'source_censored' };
+            }
+            resolved.control.scrollIntoView?.({ behavior: 'instant', block: 'center' });
+            if (!this.isBatchRunActive(runToken)) return { status: 'cancelled' };
+            const clicked = await this._clickPromptedBatchNativeControl(
+                resolved.control,
+                runToken,
+                'open prompted batch source',
+                () => this._getPromptedOpenTarget(descriptor).control === resolved.control
+            );
+            if (!clicked) return { status: 'missing', reason: 'source_open_failed' };
+        }
+
+        const editor = await this.waitForPromptedBatchEditorReady(
+            descriptor.sourceAssetId,
+            runToken
+        );
+        if (!this.isBatchRunActive(runToken)) return { status: 'cancelled' };
+        if (editor.status !== 'ready') {
+            return {
+                status: editor.status === 'ambiguous' ? 'ambiguous' : 'missing',
+                reason: editor.status === 'ambiguous'
+                    ? 'source_identity_ambiguous'
+                    : 'source_editor_unavailable'
+            };
+        }
+        const identity = GrokImagineAdapter.captureSubmissionReceipt({
+            root: document,
+            descriptor,
+            action: 'prompted_video'
+        });
+        if (!identity) return { status: 'missing', reason: 'source_identity_unproven' };
+        return { status: 'ready', editor };
+    }
+
+    async _preparePromptedComposer(claim, editor, runToken) {
+        const expectedPrompt = String(claim.prompt || '');
+        let composer = this._getVerifiedPromptedVideoComposer(
+            this.promptedVideoComposerRoot,
+            false
+        );
+        const currentValue = composer
+            ? (composer.input instanceof HTMLTextAreaElement
+                ? composer.input.value
+                : composer.input.textContent)
+            : '';
+        if (!composer || String(currentValue || '').trim() !== expectedPrompt.trim()) {
+            const modeReady = await this.selectMakeVideoMode(
+                runToken,
+                editor.makeVideoTrigger,
+                editor.agentBinding || null
+            );
+            if (!modeReady || !this.isBatchRunActive(runToken)) {
+                return { status: 'missing', reason: 'add_prompt_unavailable' };
+            }
+            if (!this.injectPromptedVideoText(expectedPrompt)) {
+                return { status: 'missing', reason: 'prompt_injection_failed' };
+            }
+            composer = this._getVerifiedPromptedVideoComposer(
+                this.promptedVideoComposerRoot,
+                false
+            );
+        }
+        if (!composer) return { status: 'missing', reason: 'prompted_composer_missing' };
+
+        const submit = await this._waitForPromptedResultsSubmitButton(
+            runToken,
+            editor.agentBinding || null
+        );
+        if (!submit) {
+            const retained = this._getVerifiedPromptedVideoComposer(
+                this.promptedVideoComposerRoot,
+                false
+            );
+            return retained
+                ? { status: 'capacity', reason: 'provider_capacity' }
+                : { status: 'missing', reason: 'prompted_composer_lost' };
+        }
+        return { status: 'ready', editor, submit };
+    }
+
+    async _finishPromptedClaimOnOrigin(_claim, runToken) {
+        const originSurface = this.generationRun?.origin?.surface;
+        if (originSurface !== 'results_gallery' && originSurface !== 'saved_gallery') return 'returned';
+        const returned = await this._returnToGenerationOrigin(runToken);
+        if (returned === 'returned') {
+            this.safeStatus(
+                `Prompted Batch: ${this.generationRun.counts.accepted}/${this.generationRun.items.length} accepted`,
+                'info'
+            );
+        }
+        return returned;
+    }
+
+    async _executePromptedClaim(claim, runToken) {
+        this.batchPrompt = claim.prompt;
+        const persistedItem = this._getGenerationItem(claim.itemId);
+        if (persistedItem?.status === 'submitted' || persistedItem?.status === 'composer_ready') {
+            const checkpoint = this._restoreAdapterSubmissionReceipt(persistedItem.receipt);
+            const acceptance = checkpoint
+                ? await this._waitForAdapterSubmission(
+                    checkpoint,
+                    runToken,
+                    claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
+                )
+                : 'ambiguous';
+            if (acceptance === 'accepted') {
+                await this._reportGenerationAction(
+                    claim,
+                    'accepted',
+                    '',
+                    this._createGenerationReceipt(claim, 'provider_accepted')
+                );
+            } else if (acceptance !== 'cancelled') {
+                await this._reportPromptedFailure(
+                    claim,
+                    acceptance === 'rejected' ? 'provider_rejected' : 'acceptance_unproven',
+                    acceptance === 'ambiguous'
+                );
+            }
+            return this._finishPromptedClaimOnOrigin(claim, runToken);
+        }
+
+        const opened = await this._openPromptedDescriptor(claim, runToken);
+        if (opened.status !== 'ready') {
+            if (opened.status !== 'cancelled') {
+                await this._reportPromptedFailure(
+                    claim,
+                    opened.reason || 'source_editor_unavailable',
+                    opened.status === 'ambiguous' || opened.status === 'rejected'
+                );
+            }
+            return this._finishPromptedClaimOnOrigin(claim, runToken);
+        }
+
+        const prepared = await this._preparePromptedComposer(claim, opened.editor, runToken);
+        if (prepared.status === 'capacity') {
+            await this._reportGenerationAction(claim, 'capacity', 'provider_capacity');
+            return 'capacity';
+        }
+        if (prepared.status !== 'ready') {
+            await this._reportPromptedFailure(claim, prepared.reason || 'prompted_composer_unavailable');
+            return this._finishPromptedClaimOnOrigin(claim, runToken);
+        }
+
+        const checkpoint = GrokImagineAdapter.captureSubmissionReceipt({
+            root: document,
+            descriptor: claim.descriptor,
+            action: 'prompted_video'
+        });
+        if (!checkpoint) {
+            await this._reportPromptedFailure(claim, 'submission_checkpoint_missing');
+            return this._finishPromptedClaimOnOrigin(claim, runToken);
+        }
+        const composerCheckpoint = await this._reportGenerationAction(
+            claim,
+            'composer_ready',
+            '',
+            this._createCheckpointedGenerationReceipt(claim, 'composer_ready', checkpoint)
+        );
+        if (composerCheckpoint?.status === 'rejected') return 'stopped';
+
+        const submitted = await this._clickPromptedBatchNativeControl(
+            prepared.submit,
+            runToken,
+            'click prompted video submit',
+            () => this._findPromptedVideoSubmitButton() === prepared.submit
+                && (!opened.editor.agentBinding
+                    || !!this._resolveCurrentAgentMediaBinding(opened.editor.agentBinding))
+        );
+        if (!submitted) {
+            await this._reportPromptedFailure(claim, 'native_submit_failed');
+            return this._finishPromptedClaimOnOrigin(claim, runToken);
+        }
+        const submittedCheckpoint = await this._reportGenerationAction(
+            claim,
+            'submitted',
+            '',
+            this._createCheckpointedGenerationReceipt(claim, 'submit_dispatched', checkpoint)
+        );
+        if (submittedCheckpoint?.status === 'rejected') return 'stopped';
+
+        const acceptance = await this._waitForAdapterSubmission(
+            checkpoint,
+            runToken,
+            claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
+        );
+        if (acceptance === 'accepted') {
+            await this._reportGenerationAction(
+                claim,
+                'accepted',
+                '',
+                this._createGenerationReceipt(claim, 'provider_accepted')
+            );
+        } else if (acceptance !== 'cancelled') {
+            await this._reportPromptedFailure(
+                claim,
+                acceptance === 'rejected' ? 'provider_rejected' : 'acceptance_unproven',
+                acceptance === 'ambiguous'
+            );
+        }
+        return this._finishPromptedClaimOnOrigin(claim, runToken);
+    }
+
+    async _runPromptedBatch(runToken) {
+        const maxSteps = Math.max(
+            10,
+            this.goalTotal * ((this.generationRun?.options?.maxRetries || 0) + 3)
+        );
+        const maxIterations = maxSteps + Math.max(
+            1,
+            Math.ceil((this.generationRun?.options?.capacityTimeoutMs || 120000) / GENERATION_ACCEPTANCE_POLL_MS)
+        );
+        let steps = 0;
+        let iterations = 0;
+        while (this.isBatchRunActive(runToken) && steps < maxSteps && iterations < maxIterations) {
+            iterations += 1;
+            const waitingDescriptor = this.generationRun?.status === 'waiting_capacity'
+                ? this._getCapacityDescriptor()
+                : null;
+            if (waitingDescriptor) await this.sleep(GENERATION_ACCEPTANCE_POLL_MS);
+            const claimResponse = await this._claimGenerationAction(waitingDescriptor ? {
+                capacityAvailable: this._isPromptedCapacityAvailable(
+                    waitingDescriptor,
+                    this.batchPrompt
+                )
+            } : {});
+            if (!claimResponse || claimResponse.status === 'rejected') {
+                const recoverable = claimResponse?.error === 'GENERATION_RESUME_SURFACE_UNPROVEN';
+                this.safeStatus(
+                    recoverable
+                        ? 'Prompted Batch: return to the original source, then Resume Run'
+                        : `Prompted Batch: ${claimResponse?.error || 'Run authority unavailable'}`,
+                    'warning'
+                );
+                this.updateGenerationRunControls(this.generationRun, { resume: recoverable });
+                break;
+            }
+            if (claimResponse.status === 'waiting') {
+                if (['completed', 'cancelled', 'retryable_failed', 'failed'].includes(this.generationRun?.status)) break;
+                continue;
+            }
+            if (claimResponse.status !== 'claimed' && claimResponse.status !== 'resumed') break;
+
+            steps += 1;
+            const result = await this._executePromptedClaim(claimResponse.claim, runToken);
+            if (result === 'navigating' || result === 'stopped' || result === 'cancelled') return;
+        }
+
+        const run = this.generationRun;
+        this.batchRunning = false;
+        this.batchRunToken = null;
+        this.updateBatchButtons(false);
+        this.updateGenerationRunControls(run);
+        this.updateCounters();
+        if (run?.status === 'completed') {
+            this.safeStatus(`Prompted Batch: Complete (${run.counts.accepted}/${run.items.length})`, 'success');
+        } else if (run?.status === 'retryable_failed') {
+            this.safeStatus(
+                `Prompted Batch: ${run.counts.accepted} accepted, ${run.counts.failed} failed. Retry Failed is available.`,
+                'warning'
+            );
+        } else if (run?.status === 'cancelled' || this.batchAborted) {
+            this.safeStatus(`Prompted Batch: Stopped (${run?.counts?.accepted || 0}/${run?.items?.length || 0})`, 'neutral');
+        }
+    }
+
+    async _startPromptedBatchDurable(prompt, options = {}) {
+        if (!GrokImagineAdapter?.describeCurrentSource) {
+            this.safeStatus('Prompted Batch: Grok adapter unavailable. Reload the extension.', 'error');
+            return false;
+        }
+        const surface = this._detectGenerationSurface();
+        let items = [];
+        let galleryLimit = 0;
+        let videoGoal = 0;
+        if (surface === 'results_gallery' || surface === 'saved_gallery') {
+            const listed = GrokImagineAdapter.listGalleryItems({ root: document, surface });
+            if (listed.status !== 'ok') {
+                this.safeStatus(`Prompted Batch: ${listed.reason || 'Gallery identity is ambiguous'}`, 'warning');
+                return false;
+            }
+            galleryLimit = Math.max(1, parseInt(options.galleryLimit, 10) || listed.items.length);
+            items = listed.items.filter((descriptor) => descriptor.mediaKind === 'image').slice(0, galleryLimit);
+        } else if (surface === 'agent_media' || surface === 'legacy_detail') {
+            const described = GrokImagineAdapter.describeCurrentSource({
+                root: document,
+                surface,
+                location: {
+                    pathname: window.location.pathname,
+                    search: window.location.search
+                }
+            });
+            if (described.status !== 'matched') {
+                this.safeStatus(`Prompted Batch: ${described.reason || 'Select one generated source'}`, 'warning');
+                return false;
+            }
+            videoGoal = Math.max(1, parseInt(options.videoGoal, 10) || 1);
+            items = Array.from({ length: videoGoal }, () => ({ ...described.descriptor }));
+        } else {
+            this.safeStatus('Prompted Batch: Open generated results, Saved, or one generated source', 'warning');
+            return false;
+        }
+        if (!items.length) {
+            this.safeStatus('Prompted Batch: No eligible generated images found', 'warning');
+            return false;
+        }
+
+        this._clearPromptedVideoComposerRoot();
+        this.batchRunning = true;
+        this.goalRunning = false;
+        this.batchAborted = false;
+        this.batchRunToken = this.createBatchRunToken();
+        this.batchMode = 'prompted';
+        this.batchContext = surface;
+        this.batchPrompt = prompt;
+        this.goalCount = 0;
+        this.goalTotal = items.length;
+        this.currentRetry = 0;
+        this.generationRun = null;
+        if (prompt && this.historyManager?.add) this.historyManager.add(prompt, 'video');
+
+        const runOptions = {
+            maxRetries: Math.max(0, Number(this.settingsManager.settings.maxRetries) || 0),
+            action: 'prompted_video',
+            acceptanceTimeoutMs: GENERATION_ACCEPTANCE_TIMEOUT_MS,
+            capacityTimeoutMs: PROMPTED_RESULTS_CAPACITY_WAIT_MS
+        };
+        if (galleryLimit) runOptions.galleryLimit = galleryLimit;
+        if (videoGoal) runOptions.videoGoal = videoGoal;
+        const started = await this._startGenerationRun(
+            'prompted_batch',
+            surface,
+            items,
+            prompt,
+            runOptions
+        );
+        if (started?.status !== 'started') {
+            this.batchRunning = false;
+            this.batchRunToken = null;
+            this.safeStatus(
+                started?.activeWorkflow?.kind
+                    ? `Prompted Batch blocked by active ${started.activeWorkflow.kind}`
+                    : `Prompted Batch: ${started?.error || 'Could not start'}`,
+                'warning'
+            );
+            return false;
+        }
+        this.updateCounters();
+        this.updateBatchButtons(true);
+        this.updateGenerationRunControls(this.generationRun);
+        this.safeStatus(`Prompted Batch: Starting ${items.length} source${items.length === 1 ? '' : 's'}`, 'info');
+        await this._runPromptedBatch(this.batchRunToken);
+        return true;
+    }
+
     // --- Goal Mode ---
     startGoal(count) {
         this.goalRunning = true;
@@ -4625,22 +5331,7 @@ class VideoRetryManager {
         const normalizedMode = mode === 'prompted' ? 'prompted' : 'quick';
 
         if (normalizedMode === 'prompted') {
-            const runToken = this.createBatchRunToken();
-            this.batchRunToken = runToken;
-            const detectedContext = this.detectBatchContext();
-            if (detectedContext === 'detail') {
-                const videoGoal = Math.max(1, parseInt(options.videoGoal, 10) || this.settingsManager.get('videoGoal') || 1);
-                await this.startPromptedBatchFromDetail(prompt, videoGoal, runToken);
-            } else if (detectedContext === 'gallery') {
-                const galleryLimit = Math.max(1, parseInt(options.galleryLimit, 10) || this.settingsManager.get('galleryBatchLimit') || 1);
-                await this.startPromptedBatchFromGallery(prompt, galleryLimit, runToken);
-            } else if (detectedContext === 'results_gallery') {
-                const galleryLimit = Math.max(1, parseInt(options.galleryLimit, 10) || this.settingsManager.get('galleryBatchLimit') || 1);
-                await this.startPromptedBatchFromResultsGallery(prompt, galleryLimit, runToken);
-            } else {
-                this.batchRunToken = null;
-                this.safeStatus('Prompted Batch: Open a generated results gallery, Saved, or a supported image detail first', 'warning');
-            }
+            await this._startPromptedBatchDurable(prompt, options);
             return;
         }
 
@@ -5299,6 +5990,7 @@ class VideoRetryManager {
             }, 'cancel generation run');
             this._rememberGenerationRun(response);
         }
+        this.updateGenerationRunControls(this.generationRun);
     }
 
     buildBatchQueue() {
@@ -5913,6 +6605,29 @@ class VideoRetryManager {
         }
     }
 
+    updateGenerationRunControls(run = this.generationRun, options = {}) {
+        if (!this.overlay?.el) return;
+        const quickBtn = this.overlay.el.querySelector('#gptQuickBatchBtn');
+        const promptedBtn = this.overlay.el.querySelector('#gptPromptedBatchBtn');
+        const stopBtn = this.overlay.el.querySelector('#gptBatchStopBtn');
+        const recoveryRow = this.overlay.el.querySelector('#gptBatchRecoveryRow');
+        const resumeBtn = this.overlay.el.querySelector('#gptBatchResumeBtn');
+        const retryBtn = this.overlay.el.querySelector('#gptBatchRetryFailedBtn');
+        const cancelBtn = this.overlay.el.querySelector('#gptBatchCancelRunBtn');
+        const active = run && !['completed', 'cancelled', 'failed'].includes(run.status);
+        const retryable = active && run.status === 'retryable_failed';
+        const resumable = active && options.resume === true;
+        const recovering = retryable || resumable;
+
+        if (quickBtn) quickBtn.style.display = active ? 'none' : '';
+        if (promptedBtn) promptedBtn.style.display = active ? 'none' : '';
+        if (stopBtn) stopBtn.style.display = active && !recovering ? '' : 'none';
+        if (recoveryRow) recoveryRow.style.display = recovering ? 'flex' : 'none';
+        if (resumeBtn) resumeBtn.style.display = resumable ? '' : 'none';
+        if (retryBtn) retryBtn.style.display = retryable ? '' : 'none';
+        if (cancelBtn) cancelBtn.style.display = recovering ? '' : 'none';
+    }
+
     // --- Observer (1s polling for Goal mode only) ---
     startObserver() {
         if (this.intervalId) clearInterval(this.intervalId);
@@ -5931,7 +6646,9 @@ class VideoRetryManager {
         const s = this.settingsManager.settings;
         const isGalleryPrompted = this.batchRunning
             && this.batchMode === 'prompted'
-            && (this.batchContext === 'gallery' || this.batchContext === 'results_gallery');
+            && (this.batchContext === 'gallery'
+                || this.batchContext === 'results_gallery'
+                || this.batchContext === 'saved_gallery');
         if (progressLabel) {
             progressLabel.textContent = isGalleryPrompted ? 'Images Processed' : 'Videos Generated';
         }
@@ -8596,8 +9313,14 @@ if (typeof module === 'undefined') {
             const recreateBridge = new RecreateWorkflowContentBridge(overlay, history);
             recreateBridge.setupListeners();
             retry.overlay = overlay;
+            retry.setupGenerationCancellationListener();
             scraper.setOverlay(overlay);
             globalThis[runtimeKey] = { provider, settings, history, scraper, retry, overlay, recreateBridge };
+            setTimeout(() => {
+                retry.resumeGenerationRunIfNeeded().catch(() => {
+                    retry.safeStatus('Generation run status unavailable. Reload the page.', 'warning');
+                });
+            }, 0);
         }
     }
 } else {

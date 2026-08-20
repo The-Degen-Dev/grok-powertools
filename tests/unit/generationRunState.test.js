@@ -198,6 +198,40 @@ describe('generation run state contract', () => {
             expect(() => createRun({ items: [duplicate, { ...duplicate }] }))
                 .toThrow('INVALID_GENERATION_STATE');
         });
+
+        test('allows repeated Prompted detail work only when the video goal matches the item count', () => {
+            const duplicate = {
+                ...createDescriptor('detail-repeat'),
+                surface: 'agent_media'
+            };
+            const detailOrigin = {
+                ...createOrigin(),
+                surface: 'agent_media',
+                sourceAssetId: duplicate.sourceAssetId,
+                sourcePostId: duplicate.sourcePostId
+            };
+
+            expect(() => createRun({
+                kind: 'prompted_batch',
+                origin: detailOrigin,
+                items: [duplicate, { ...duplicate }, { ...duplicate }],
+                prompt: 'Slow handheld push-in',
+                options: { maxRetries: 1, videoGoal: 3 }
+            })).not.toThrow();
+            expect(() => createRun({
+                kind: 'prompted_batch',
+                origin: detailOrigin,
+                items: [duplicate, { ...duplicate }, { ...duplicate }],
+                prompt: 'Slow handheld push-in',
+                options: { maxRetries: 1, videoGoal: 2 }
+            })).toThrow('INVALID_GENERATION_STATE');
+            expect(() => createRun({
+                kind: 'quick_batch',
+                origin: detailOrigin,
+                items: [duplicate, { ...duplicate }],
+                options: { maxRetries: 1, videoGoal: 2 }
+            })).toThrow('INVALID_GENERATION_STATE');
+        });
     });
 
     test('allows only one outstanding claim and advances after acceptance', () => {
@@ -325,7 +359,13 @@ describe('generation run state contract', () => {
             sourceAssetId: 'asset-a',
             sourcePostId: 'post-a',
             observedState: 'composer_ready',
-            observedAt: BASE_TIME + 1
+            observedAt: BASE_TIME + 1,
+            checkpointVersion: 1,
+            checkpointAction: 'prompted_video',
+            checkpointSourceKind: 'agent_media',
+            checkpointSourceNodeId: 'asset-node-a',
+            baselineAcceptedCount: 0,
+            baselineRejectedCount: 0
         };
         const composerReady = reportClaim(claimed.state, claimed.claim, 'composer_ready', {
             receipt: composerReceipt
@@ -348,7 +388,13 @@ describe('generation run state contract', () => {
             sourceAssetId: 'asset-a',
             sourcePostId: 'post-a',
             observedState: 'submitted',
-            observedAt: BASE_TIME + 2
+            observedAt: BASE_TIME + 2,
+            checkpointVersion: 1,
+            checkpointAction: 'prompted_video',
+            checkpointSourceKind: 'agent_media',
+            checkpointSourceNodeId: 'asset-node-a',
+            baselineAcceptedCount: 0,
+            baselineRejectedCount: 0
         };
         const submitted = reportClaim(composerReady, claimed.claim, 'submitted', {
             receipt: submittedReceipt

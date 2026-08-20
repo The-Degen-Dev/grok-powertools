@@ -2198,8 +2198,8 @@ npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-
                         <td>Deviations</td>
                         <td>
                             Quick Batch no longer uses the shared legacy <code>batchQueue</code> of live DOM
-                            nodes. That queue remains temporarily for Prompted Batch until the next task
-                            migrates Prompted Batch to the same descriptor contract.
+                            nodes. That queue remains temporarily only for legacy helper compatibility;
+                            user-facing Prompted Batch now uses the same descriptor contract.
                         </td>
                     </tr>
                     <tr>
@@ -2216,6 +2216,55 @@ npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-
                         <td>
                             None for deterministic Quick Batch behavior. A live credit-spending lane
                             remains approval-gated until Prompted Batch and Video Goal share this runner.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Prompted Batch</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Prompted Batch now uses the same background-owned descriptor and claim
+                            contract as Quick Batch. It opens the exact source, selects Make Video then
+                            Add Prompt, writes only into the verified video composer, persists a
+                            source-scoped checkpoint before Submit, and advances only after fresh
+                            provider acceptance. Gallery runs return to their captured URL and scroll
+                            position; direct-detail runs can submit the requested count from one source
+                            without waiting for generated videos to finish.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            The legacy Saved, results, and detail Prompted loops remain in the file only
+                            for temporary compatibility with direct helper coverage, but no user-facing
+                            Prompted entry point routes to them. They will be removed after Video Goal
+                            and workflow-isolation migration confirm no shared callers remain.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            A reload after Submit evaluates the persisted pre-submit checkpoint and
+                            never automatically clicks Submit again. If acceptance cannot be proved,
+                            that item becomes Retry Failed rather than risking a duplicate generation.
+                            The checkpoint stores only source identity, action, source kind, stable node
+                            identity, and accepted/rejected baseline counts. It stores no prompt, cookie,
+                            signed URL, or composer content.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None for deterministic Prompted behavior. Agent direct starts use the
+                            conversation UUID as contextual post identity only when no gallery post hint
+                            exists because current Agent DOM does not expose a post UUID. Live generation
+                            remains separately approval-gated.
                         </td>
                     </tr>
                 </tbody>

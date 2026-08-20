@@ -176,6 +176,24 @@ function markQuickBatchActionAccepted(card) {
     card.appendChild(progress);
 }
 
+function mountDurablePromptedGallery(sourceIds, onOpen) {
+    document.body.innerHTML = '';
+    mountSavedScope('all');
+    return sourceIds.map((sourceId) => {
+        const sourceUrl = `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`;
+        const { card, image } = createSavedBatchCard(sourceUrl);
+        const postLink = document.createElement('a');
+        postLink.href = `/imagine/post/${sourceId}?conversation=${sourceId}`;
+        postLink.addEventListener('click', (event) => {
+            event.preventDefault();
+            onOpen({ sourceId, sourceUrl });
+        });
+        card.insertBefore(postLink, image);
+        postLink.appendChild(image);
+        return { sourceId, sourceUrl, card, postLink };
+    });
+}
+
 function mountSavedScope(selected = 'all') {
     document.querySelectorAll('[data-test-saved-scope]').forEach((control) => control.remove());
     const all = makeVisible(document.createElement('button'));
@@ -286,6 +304,10 @@ describe('VideoRetryManager', () => {
             <div id="gptBatchStopBtn"></div>
             <div id="gptBatchStatus"></div>
             <div id="gptGalleryLimitRow"></div>
+            <div id="gptBatchRecoveryRow"></div>
+            <div id="gptBatchResumeBtn"></div>
+            <div id="gptBatchRetryFailedBtn"></div>
+            <div id="gptBatchCancelRunBtn"></div>
         `;
 
         settingsManager = createSettingsManager();
@@ -330,32 +352,52 @@ describe('VideoRetryManager', () => {
                     epoch: 1,
                     kind: message.kind,
                     status: 'running',
+                    origin: message.origin,
                     items,
                     counts: { accepted: 0, failed: 0, skipped: 0, pending: items.length },
-                    options: message.options
+                    options: message.options,
+                    prompt: message.prompt
                 };
                 return { status: 'started', run: generationLease };
             }
             if (message?.action === 'GENERATION_RUN_CLAIM') {
-                const item = generationLease?.items.find((candidate) => candidate.status === 'queued');
+                const resumedItem = message.resume
+                    ? generationLease?.items.find((candidate) => (
+                        candidate.status === 'targeting'
+                        || candidate.status === 'composer_ready'
+                        || candidate.status === 'submitted'
+                    ))
+                    : null;
+                const item = resumedItem
+                    || generationLease?.items.find((candidate) => candidate.status === 'queued');
                 if (!item) return { status: 'waiting', claim: null, run: generationLease };
-                item.status = 'targeting';
+                if (!resumedItem) item.status = 'targeting';
                 return {
-                    status: 'claimed',
+                    status: resumedItem ? 'resumed' : 'claimed',
                     claim: {
                         runId: generationLease.runId,
                         epoch: generationLease.epoch,
                         claimId: `claim-${item.itemId}-${item.attemptCount}`,
                         itemId: item.itemId,
-                        descriptor: item.descriptor
+                        descriptor: item.descriptor,
+                        prompt: generationLease.prompt,
+                        options: generationLease.options
                     },
                     run: generationLease
                 };
             }
             if (message?.action === 'GENERATION_RUN_REPORT') {
                 const item = generationLease.items.find((candidate) => candidate.itemId === message.itemId);
-                if (message.outcome === 'accepted') {
+                if (message.outcome === 'composer_ready' || message.outcome === 'submitted') {
+                    item.status = message.outcome;
+                    item.receipt = message.receipt;
+                } else if (message.outcome === 'accepted') {
                     item.status = 'accepted';
+                    item.receipt = message.receipt;
+                } else if (message.outcome === 'capacity') {
+                    item.status = 'queued';
+                    item.failureCode = 'provider_capacity';
+                    generationLease.status = 'waiting_capacity';
                 } else if (message.outcome === 'permanent_failed') {
                     item.status = 'permanent_failed';
                     item.failureCode = message.failureCode;
@@ -374,8 +416,26 @@ describe('VideoRetryManager', () => {
                 }, { accepted: 0, failed: 0, skipped: 0, pending: 0 });
                 if (generationLease.counts.pending === 0) {
                     generationLease.status = generationLease.counts.failed ? 'retryable_failed' : 'completed';
+                } else if (generationLease.status !== 'waiting_capacity') {
+                    generationLease.status = 'running';
                 }
                 return { status: 'updated', run: generationLease };
+            }
+            if (message?.action === 'GENERATION_RUN_RETRY_FAILED') {
+                generationLease.epoch += 1;
+                generationLease.status = 'running';
+                generationLease.items.forEach((item) => {
+                    if (item.status === 'retryable_failed') {
+                        item.status = 'queued';
+                        item.failureCode = '';
+                    }
+                });
+                return { status: 'updated', run: generationLease };
+            }
+            if (message?.action === 'GENERATION_RUN_STATUS') {
+                return generationLease
+                    ? { status: 'active', isOwner: true, run: generationLease }
+                    : { status: 'idle', isOwner: false, run: null };
             }
             if (message?.action === 'GENERATION_RUN_CANCEL') {
                 generationLease.status = 'cancelled';
@@ -542,17 +602,12 @@ describe('VideoRetryManager', () => {
         expect(mockOverlay.setStatus).toHaveBeenCalledWith('No generated-image card found', 'warning');
     });
 
-    test('startBatch(prompted) routes to gallery flow on gallery context', async () => {
-        window.history.pushState({}, '', '/imagine/saved');
-        createSavedBatchCard('https://assets.grok.com/users/example/generated/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg');
-
-        const gallerySpy = jest.spyOn(retryManager, 'startPromptedBatchFromGallery').mockResolvedValue();
-        const detailSpy = jest.spyOn(retryManager, 'startPromptedBatchFromDetail').mockResolvedValue();
+    test('startBatch(prompted) routes through the durable Prompted runner', async () => {
+        const durableSpy = jest.spyOn(retryManager, '_startPromptedBatchDurable').mockResolvedValue(true);
 
         await retryManager.startBatch('prompted', 'test prompt', { galleryLimit: 4, videoGoal: 7 });
 
-        expect(gallerySpy).toHaveBeenCalledWith('test prompt', 4, expect.any(String));
-        expect(detailSpy).not.toHaveBeenCalled();
+        expect(durableSpy).toHaveBeenCalledWith('test prompt', { galleryLimit: 4, videoGoal: 7 });
     });
 
     test('Quick Batch reacquires all three stable source identities after the gallery remounts', async () => {
@@ -640,6 +695,241 @@ describe('VideoRetryManager', () => {
         expect(new Set(dispatchedSourceIds).size).toBe(dispatchedSourceIds.length);
     });
 
+    test('durable Prompted Batch advances on accepted submissions across gallery remounts', async () => {
+        settingsManager.settings.maxRetries = 0;
+        settingsManager.settings.galleryBatchLimit = 3;
+        const sourceIds = [
+            '81818181-aaaa-4bbb-8ccc-111111111111',
+            '82828282-aaaa-4bbb-8ccc-222222222222',
+            '83838383-aaaa-4bbb-8ccc-333333333333'
+        ];
+        const submitted = [];
+        window.history.pushState({}, '', '/imagine/saved');
+
+        const mountGallery = () => mountDurablePromptedGallery(sourceIds, ({ sourceId, sourceUrl }) => {
+            window.history.pushState({}, '', `/imagine/agent/${sourceId}?conversation=${sourceId}`);
+            renderAgentEditor({
+                sourceUrl,
+                produceResult: false,
+                onSubmit: () => {
+                    submitted.push(sourceId);
+                    const progress = document.createElement('button');
+                    progress.setAttribute('aria-label', 'Video Options');
+                    document.querySelector('.react-flow__node-asset.selected').appendChild(progress);
+                }
+            });
+        });
+        mountGallery();
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager._returnToGenerationOrigin = jest.fn(async () => {
+            window.history.pushState({}, '', '/imagine/saved');
+            mountGallery();
+            return 'returned';
+        });
+
+        await retryManager.startBatch('prompted', 'slow camera push in', { galleryLimit: 3 });
+
+        expect(submitted).toEqual(sourceIds);
+        expect(generationLease.status).toBe('completed');
+        expect(generationLease.counts.accepted).toBe(3);
+    });
+
+    test('durable Prompted Batch continues after an unproven source and Retry Failed preserves accepted work', async () => {
+        settingsManager.settings.maxRetries = 0;
+        settingsManager.settings.galleryBatchLimit = 2;
+        const sourceIds = [
+            '91919191-aaaa-4bbb-8ccc-111111111111',
+            '92929292-aaaa-4bbb-8ccc-222222222222'
+        ];
+        const submissions = [];
+        let firstSourceAccepts = false;
+        window.history.pushState({}, '', '/imagine/saved');
+
+        const mountGallery = () => mountDurablePromptedGallery(sourceIds, ({ sourceId, sourceUrl }) => {
+            window.history.pushState({}, '', `/imagine/agent/${sourceId}?conversation=${sourceId}`);
+            renderAgentEditor({
+                sourceUrl,
+                produceResult: false,
+                onSubmit: () => {
+                    submissions.push(sourceId);
+                    if (sourceId !== sourceIds[0] || firstSourceAccepts) {
+                        const progress = document.createElement('button');
+                        progress.setAttribute('aria-label', 'Video Options');
+                        document.querySelector('.react-flow__node-asset.selected').appendChild(progress);
+                    }
+                }
+            });
+        });
+        mountGallery();
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        retryManager._returnToGenerationOrigin = jest.fn(async () => {
+            window.history.pushState({}, '', '/imagine/saved');
+            mountGallery();
+            return 'returned';
+        });
+
+        await retryManager.startBatch('prompted', 'slow camera push in', { galleryLimit: 2 });
+
+        expect(generationLease.status).toBe('retryable_failed');
+        expect(generationLease.counts).toEqual({ accepted: 1, failed: 1, skipped: 0, pending: 0 });
+        firstSourceAccepts = true;
+        await retryManager.retryFailedGenerationRun();
+
+        expect(generationLease.status).toBe('completed');
+        expect(generationLease.counts.accepted).toBe(2);
+        expect(submissions.filter((sourceId) => sourceId === sourceIds[0])).toHaveLength(2);
+        expect(submissions.filter((sourceId) => sourceId === sourceIds[1])).toHaveLength(1);
+    });
+
+    test('durable Prompted detail submits its goal without waiting for completed videos', async () => {
+        settingsManager.settings.maxRetries = 0;
+        const sourceId = '93939393-aaaa-4bbb-8ccc-333333333333';
+        const sourceUrl = `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`;
+        let submitted = 0;
+        window.history.pushState({}, '', `/imagine/agent/${sourceId}?conversation=${sourceId}`);
+        renderAgentEditor({
+            sourceUrl,
+            produceResult: false,
+            settleSubmit: false,
+            onSubmit: () => {
+                submitted += 1;
+                const progress = document.createElement('button');
+                progress.setAttribute('aria-label', 'Video Options');
+                document.querySelector('.react-flow__node-asset.selected').appendChild(progress);
+                document.querySelectorAll('.query-bar, [role="menu"]').forEach((element) => element.remove());
+                const trigger = document.querySelector('button[aria-label="Make Video"]');
+                trigger?.setAttribute('aria-expanded', 'false');
+                trigger?.setAttribute('data-state', 'closed');
+                trigger?.removeAttribute('aria-controls');
+            }
+        });
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await retryManager.startBatch('prompted', 'slow camera push in', { videoGoal: 3 });
+
+        expect(submitted).toBe(3);
+        expect(document.querySelectorAll('video')).toHaveLength(0);
+        expect(generationLease.status).toBe('completed');
+        expect(generationLease.counts.accepted).toBe(3);
+    });
+
+    test('durable Prompted resume accepts a persisted submitted checkpoint without clicking again', async () => {
+        const sourceAssetId = '94949494-aaaa-4bbb-8ccc-444444444444';
+        const sourcePostId = '95959595-aaaa-4bbb-8ccc-555555555555';
+        const sourceUrl = `https://assets.grok.com/users/example/generated/${sourceAssetId}/image.jpg`;
+        window.history.pushState({}, '', `/imagine/agent/${sourceAssetId}?conversation=${sourcePostId}`);
+        renderAgentEditor({ sourceUrl, produceResult: false });
+        const sourceNode = document.querySelector('.react-flow__node-asset.selected');
+        const acceptedSignal = document.createElement('button');
+        acceptedSignal.setAttribute('aria-label', 'Video Options');
+        sourceNode.appendChild(acceptedSignal);
+
+        const descriptor = {
+            version: 1,
+            surface: 'agent_media',
+            sourceAssetId,
+            sourcePostId,
+            conversationId: sourcePostId,
+            mediaKind: 'image',
+            hrefPath: `/imagine/agent/${sourceAssetId}`,
+            route: window.location.href,
+            initialOrder: 0,
+            beforeAssetId: '',
+            afterAssetId: ''
+        };
+        generationLease = {
+            runId: 'generation-run-resume',
+            epoch: 2,
+            kind: 'prompted_batch',
+            status: 'running',
+            origin: {
+                surface: 'agent_media',
+                url: window.location.href,
+                pathname: window.location.pathname,
+                scrollY: 0,
+                hrefPath: descriptor.hrefPath,
+                sourceAssetId,
+                sourcePostId,
+                conversationId: sourcePostId
+            },
+            items: [{
+                itemId: 'item-resume',
+                descriptor,
+                status: 'submitted',
+                attemptCount: 0,
+                failureCode: '',
+                receipt: {
+                    sourceAssetId,
+                    sourcePostId,
+                    observedState: 'submit_dispatched',
+                    observedAt: Date.now(),
+                    checkpointVersion: 1,
+                    checkpointAction: 'prompted_video',
+                    checkpointSourceKind: 'agent_media',
+                    checkpointSourceNodeId: 'asset-source',
+                    baselineAcceptedCount: 0,
+                    baselineRejectedCount: 0
+                }
+            }],
+            counts: { accepted: 0, failed: 0, skipped: 0, pending: 1 },
+            options: {
+                maxRetries: 0,
+                action: 'prompted_video',
+                videoGoal: 1,
+                acceptanceTimeoutMs: 1000,
+                capacityTimeoutMs: 1000
+            },
+            prompt: 'slow camera push in'
+        };
+        retryManager.generationRun = null;
+        retryManager.sleep = jest.fn().mockResolvedValue();
+        nativeControlClickSpy.mockClear();
+
+        await retryManager.resumeGenerationRunIfNeeded();
+
+        expect(nativeControlClickSpy).not.toHaveBeenCalled();
+        expect(generationLease.status).toBe('completed');
+        expect(generationLease.counts.accepted).toBe(1);
+    });
+
+    test('durable Prompted return restores the deep gallery viewport before reacquiring the next source', async () => {
+        const sourceId = '96969696-aaaa-4bbb-8ccc-666666666666';
+        window.history.pushState({}, '', '/imagine/saved');
+        document.body.innerHTML = '';
+        const descriptor = {
+            version: 1,
+            surface: 'saved_gallery',
+            sourceAssetId: sourceId,
+            sourcePostId: sourceId,
+            conversationId: sourceId,
+            mediaKind: 'image',
+            hrefPath: `/imagine/post/${sourceId}`,
+            initialOrder: 0,
+            beforeAssetId: '',
+            afterAssetId: ''
+        };
+        const token = retryManager.createBatchRunToken();
+        retryManager.batchRunning = true;
+        retryManager.batchAborted = false;
+        retryManager.batchRunToken = token;
+        retryManager.generationRun = {
+            origin: {
+                surface: 'saved_gallery',
+                url: window.location.href,
+                scrollY: 4200
+            },
+            items: [{ itemId: 'item-deep', status: 'queued', descriptor }]
+        };
+        window.scrollTo = jest.fn(() => {
+            mountDurablePromptedGallery([sourceId], () => {});
+        });
+        retryManager.sleep = jest.fn().mockResolvedValue();
+
+        await expect(retryManager._waitForGenerationOrigin(token, 1000)).resolves.toBe(true);
+
+        expect(window.scrollTo).toHaveBeenCalledWith({ top: 4200, behavior: 'instant' });
+    });
+
     test('detectBatchContext resolves a qualified current results grid separately from Saved', () => {
         window.history.pushState({}, '', '/imagine');
         createSavedBatchCard(
@@ -708,21 +998,12 @@ describe('VideoRetryManager', () => {
         expect(retryManager._getResultsGalleryOpenTarget(item)).toBeNull();
     });
 
-    test('startBatch(prompted) routes a current results grid to its gallery runner', async () => {
-        window.history.pushState({}, '', '/imagine');
-        createSavedBatchCard(
-            'https://assets.grok.com/users/example/generated/acacacac-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
-        );
-
-        const savedSpy = jest.spyOn(retryManager, 'startPromptedBatchFromGallery').mockResolvedValue();
-        const resultsSpy = jest.spyOn(retryManager, 'startPromptedBatchFromResultsGallery').mockResolvedValue();
-        const detailSpy = jest.spyOn(retryManager, 'startPromptedBatchFromDetail').mockResolvedValue();
+    test('startBatch(prompted) keeps results settings on the durable Prompted runner', async () => {
+        const durableSpy = jest.spyOn(retryManager, '_startPromptedBatchDurable').mockResolvedValue(true);
 
         await retryManager.startBatch('prompted', 'results prompt', { galleryLimit: 5, videoGoal: 7 });
 
-        expect(resultsSpy).toHaveBeenCalledWith('results prompt', 5, expect.any(String));
-        expect(savedSpy).not.toHaveBeenCalled();
-        expect(detailSpy).not.toHaveBeenCalled();
+        expect(durableSpy).toHaveBeenCalledWith('results prompt', { galleryLimit: 5, videoGoal: 7 });
     });
 
     test('results card opening fails closed when the trusted native click is unavailable', async () => {
@@ -1601,48 +1882,28 @@ describe('VideoRetryManager', () => {
         expect(retryManager.detectBatchContext()).toBe('unsupported');
     });
 
-    test('startBatch(prompted) routes to detail flow on detail context', async () => {
-        window.history.pushState({}, '', '/imagine/post/xyz');
-        const gallerySpy = jest.spyOn(retryManager, 'startPromptedBatchFromGallery').mockResolvedValue();
-        const detailSpy = jest.spyOn(retryManager, 'startPromptedBatchFromDetail').mockResolvedValue();
+    test('startBatch(prompted) keeps detail settings on the durable Prompted runner', async () => {
+        const durableSpy = jest.spyOn(retryManager, '_startPromptedBatchDurable').mockResolvedValue(true);
 
         await retryManager.startBatch('prompted', 'detail prompt', { galleryLimit: 4, videoGoal: 6 });
 
-        expect(detailSpy).toHaveBeenCalledWith('detail prompt', 6, expect.any(String));
-        expect(gallerySpy).not.toHaveBeenCalled();
+        expect(durableSpy).toHaveBeenCalledWith('detail prompt', { galleryLimit: 4, videoGoal: 6 });
     });
 
     test('rejects an overlapping batch start without replacing the active run state', async () => {
-        const sourceUrl = 'https://assets.grok.com/users/example/generated/01010101-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
-        window.history.pushState({}, '', '/imagine/saved');
-        const { image } = createSavedBatchCard(sourceUrl);
-        const imageClick = jest.fn();
-        image.addEventListener('click', imageClick);
-        const sleepResolvers = [];
-        retryManager.sleep = jest.fn(() => new Promise((resolve) => sleepResolvers.push(resolve)));
+        let releaseFirst;
+        const durableSpy = jest.spyOn(retryManager, '_startPromptedBatchDurable')
+            .mockImplementation(() => new Promise((resolve) => { releaseFirst = resolve; }));
 
         const firstRun = retryManager.startBatch('prompted', 'first prompt', { galleryLimit: 1 });
-        const firstToken = retryManager.batchRunToken;
-        const secondRun = retryManager.startBatch('prompted', 'second prompt', { galleryLimit: 9 });
         await Promise.resolve();
-
-        const activeState = {
-            token: retryManager.batchRunToken,
-            prompt: retryManager.batchPrompt,
-            goalTotal: retryManager.goalTotal,
-            clicks: imageClick.mock.calls.length
-        };
-        retryManager.stopBatch();
-        sleepResolvers.forEach((resolve) => resolve());
+        const secondRun = retryManager.startBatch('prompted', 'second prompt', { galleryLimit: 9 });
+        releaseFirst(true);
         const [, secondResult] = await Promise.all([firstRun, secondRun]);
 
         expect(secondResult).toBe(false);
-        expect(activeState).toEqual({
-            token: firstToken,
-            prompt: 'first prompt',
-            goalTotal: 1,
-            clicks: 1
-        });
+        expect(durableSpy).toHaveBeenCalledTimes(1);
+        expect(durableSpy).toHaveBeenCalledWith('first prompt', { galleryLimit: 1 });
         expect(mockOverlay.setStatus).toHaveBeenCalledWith('Batch is already running', 'warning');
     });
 

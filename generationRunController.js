@@ -91,8 +91,18 @@
         }
 
         const activeItem = getActiveClaimItem(run);
-        const descriptor = activeItem?.descriptor;
-        if (!activeItem
+        const capacityItem = run.status === 'waiting_capacity'
+            ? run.items.find((item) => (
+                item.status === 'queued' && item.failureCode === 'provider_capacity'
+            ))
+            : null;
+        const directDetailItem = DETAIL_SURFACES.has(run.origin?.surface)
+            ? run.items.find((item) => item.status === 'queued') || run.items[0]
+            : null;
+        const descriptor = activeItem?.descriptor
+            || capacityItem?.descriptor
+            || directDetailItem?.descriptor;
+        if (!descriptor
             || !DETAIL_SURFACES.has(proof.surface)
             || proof.sourceAssetId !== descriptor.sourceAssetId
             || proof.sourcePostId !== descriptor.sourcePostId) {

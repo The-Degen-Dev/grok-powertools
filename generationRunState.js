@@ -125,7 +125,13 @@
         'resultAssetId',
         'resultPostId',
         'observedState',
-        'observedAt'
+        'observedAt',
+        'checkpointVersion',
+        'checkpointAction',
+        'checkpointSourceKind',
+        'checkpointSourceNodeId',
+        'baselineAcceptedCount',
+        'baselineRejectedCount'
     ]);
     const RECEIPT_STATES_BY_OUTCOME = {
         composer_ready: new Set(['composer_ready']),
@@ -328,6 +334,28 @@
             throw stateError('INVALID_GENERATION_EVENT');
         }
         assertFiniteNumber(normalized.observedAt, 'INVALID_GENERATION_EVENT');
+        const checkpointKeys = [
+            'checkpointVersion',
+            'checkpointAction',
+            'checkpointSourceKind',
+            'checkpointSourceNodeId',
+            'baselineAcceptedCount',
+            'baselineRejectedCount'
+        ];
+        const checkpointFieldCount = checkpointKeys.filter((key) => key in normalized).length;
+        if (checkpointFieldCount !== 0 && checkpointFieldCount !== checkpointKeys.length) {
+            throw stateError('INVALID_GENERATION_EVENT');
+        }
+        if (checkpointFieldCount === checkpointKeys.length) {
+            assertInteger(normalized.checkpointVersion, 1, 1, 'INVALID_GENERATION_EVENT');
+            if (typeof normalized.checkpointAction !== 'string'
+                || typeof normalized.checkpointSourceKind !== 'string'
+                || typeof normalized.checkpointSourceNodeId !== 'string') {
+                throw stateError('INVALID_GENERATION_EVENT');
+            }
+            assertInteger(normalized.baselineAcceptedCount, 0, Number.MAX_SAFE_INTEGER, 'INVALID_GENERATION_EVENT');
+            assertInteger(normalized.baselineRejectedCount, 0, Number.MAX_SAFE_INTEGER, 'INVALID_GENERATION_EVENT');
+        }
         return normalized;
     }
 
@@ -390,7 +418,12 @@
         const descriptorIds = descriptors.map((descriptor) => (
             `${descriptor.sourceAssetId}\u0000${descriptor.sourcePostId}`
         ));
-        if (new Set(descriptorIds).size !== descriptorIds.length) {
+        const repeatedDetailSource = input.kind === 'prompted_batch'
+            && (origin.surface === 'agent_media' || origin.surface === 'legacy_detail')
+            && new Set(descriptorIds).size === 1
+            && Number.isInteger(options.videoGoal)
+            && options.videoGoal === descriptors.length;
+        if (new Set(descriptorIds).size !== descriptorIds.length && !repeatedDetailSource) {
             throw stateError('INVALID_GENERATION_STATE');
         }
         const runId = makeOpaqueId('generation_run', now);
@@ -1108,6 +1141,10 @@
         }
         const itemIds = new Set();
         const descriptorIds = new Set();
+        const repeatedDetailSource = state.kind === 'prompted_batch'
+            && (state.origin.surface === 'agent_media' || state.origin.surface === 'legacy_detail')
+            && Number.isInteger(state.options.videoGoal)
+            && state.options.videoGoal === state.items.length;
         state.items.forEach((item) => {
             copyAllowlistedObject(item, ITEM_KEYS);
             if (typeof item.itemId !== 'string' || !item.itemId || itemIds.has(item.itemId)) {
@@ -1117,7 +1154,9 @@
             if (!isPlainObject(item.descriptor)) throw stateError('INVALID_GENERATION_STATE');
             const descriptor = normalizeDescriptor(item.descriptor);
             const descriptorId = `${descriptor.sourceAssetId}\u0000${descriptor.sourcePostId}`;
-            if (descriptorIds.has(descriptorId)) throw stateError('INVALID_GENERATION_STATE');
+            if (descriptorIds.has(descriptorId) && !repeatedDetailSource) {
+                throw stateError('INVALID_GENERATION_STATE');
+            }
             descriptorIds.add(descriptorId);
             assertInteger(item.attemptCount, 0, Number.MAX_SAFE_INTEGER);
             assertInteger(item.attemptsThisRound, 0, Number.MAX_SAFE_INTEGER);

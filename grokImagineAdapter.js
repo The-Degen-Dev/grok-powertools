@@ -292,6 +292,207 @@
         };
     }
 
+    function getDescriptorMediaKind(container, mediaElements) {
+        const explicitMediaKind = String(
+            container.getAttribute?.('data-media-type')
+            || container.querySelector?.('[data-media-type]')?.getAttribute('data-media-type')
+            || ''
+        ).trim().toLowerCase();
+        if (explicitMediaKind === 'image' || explicitMediaKind === 'video') {
+            return explicitMediaKind;
+        }
+        return mediaElements.some((media) => media.tagName?.toLowerCase() === 'video')
+            ? 'video'
+            : 'image';
+    }
+
+    function getSafeCurrentRoute(url, conversationId) {
+        const route = new URL(url.pathname, url.origin);
+        if (conversationId) route.searchParams.set('conversation', conversationId);
+        return route.href;
+    }
+
+    function createCurrentSourceDescriptor({
+        surface,
+        sourceAssetId,
+        sourcePostId,
+        conversationId,
+        mediaKind,
+        hrefPath,
+        route
+    }) {
+        return {
+            version: 1,
+            surface,
+            sourceAssetId,
+            sourcePostId,
+            conversationId,
+            mediaKind,
+            hrefPath,
+            route,
+            initialOrder: 0,
+            beforeAssetId: '',
+            afterAssetId: ''
+        };
+    }
+
+    function describeLegacyDetailSource(root, url) {
+        const routePostId = getPostId(url);
+        if (!routePostId) {
+            return { status: 'missing', reason: 'legacy_detail_route_post_missing' };
+        }
+
+        const candidates = [];
+        let sourceAmbiguous = false;
+        let routeMismatch = false;
+        for (const container of getLegacyDetailContainers(root)) {
+            const postLinks = Array.from(container.querySelectorAll('a[href*="/imagine/post/"]'))
+                .filter((link) => !closestGalleryCard(link));
+            const mediaElements = getPostSourceMedia(postLinks);
+            const postIds = new Set(postLinks.map((link) => getPostId(link.href)).filter(Boolean));
+            const assetIds = new Set(
+                mediaElements.map((media) => getAssetId(getMediaSource(media))).filter(Boolean)
+            );
+            const conversationIds = new Set(
+                postLinks.map((link) => getConversationId(link.href)).filter(Boolean)
+            );
+
+            if (postIds.size === 0 && assetIds.size === 0) continue;
+            if (postIds.size !== 1 || assetIds.size !== 1 || conversationIds.size > 1) {
+                sourceAmbiguous = true;
+                continue;
+            }
+
+            const sourcePostId = Array.from(postIds)[0];
+            if (sourcePostId !== routePostId) {
+                routeMismatch = true;
+                continue;
+            }
+            candidates.push({
+                sourceAssetId: Array.from(assetIds)[0],
+                sourcePostId,
+                conversationId: Array.from(conversationIds)[0] || '',
+                mediaKind: getDescriptorMediaKind(container, mediaElements)
+            });
+        }
+
+        if (sourceAmbiguous || candidates.length > 1) {
+            return { status: 'ambiguous', reason: 'legacy_detail_source_ambiguous' };
+        }
+        if (routeMismatch) {
+            return { status: 'ambiguous', reason: 'legacy_detail_route_mismatch' };
+        }
+        if (candidates.length === 0) {
+            return { status: 'missing', reason: 'legacy_detail_source_missing' };
+        }
+
+        const candidate = candidates[0];
+        const routeConversationId = getConversationId(url);
+        if (routeConversationId
+            && candidate.conversationId
+            && routeConversationId !== candidate.conversationId) {
+            return { status: 'ambiguous', reason: 'legacy_detail_source_ambiguous' };
+        }
+        const conversationId = candidate.conversationId || routeConversationId;
+        return {
+            status: 'matched',
+            descriptor: createCurrentSourceDescriptor({
+                surface: 'legacy_detail',
+                ...candidate,
+                conversationId,
+                hrefPath: `/imagine/post/${routePostId}`,
+                route: getSafeCurrentRoute(url, conversationId)
+            })
+        };
+    }
+
+    function describeAgentSource(root, url, sourcePostIdHint) {
+        const selectedNodes = getAgentNodes(root).filter(isSelectedAgentNode);
+        if (selectedNodes.length === 0) {
+            return { status: 'missing', reason: 'agent_selected_source_missing' };
+        }
+        if (selectedNodes.length > 1) {
+            return { status: 'ambiguous', reason: 'agent_selected_source_ambiguous' };
+        }
+
+        const selectedNode = selectedNodes[0];
+        const sourceNodeId = String(selectedNode.getAttribute('data-id') || '').trim();
+        if (!sourceNodeId) {
+            return { status: 'missing', reason: 'agent_source_node_id_missing' };
+        }
+        const nodesWithSourceId = getAgentNodes(root).filter((node) => (
+            String(node.getAttribute('data-id') || '').trim() === sourceNodeId
+        ));
+        if (nodesWithSourceId.length !== 1) {
+            return { status: 'ambiguous', reason: 'agent_source_node_id_ambiguous' };
+        }
+
+        const mediaElements = Array.from(selectedNode.querySelectorAll('img, video'))
+            .filter((media) => media.closest('.react-flow__node-asset') === selectedNode);
+        const assetIds = new Set(
+            mediaElements.map((media) => getAssetId(getMediaSource(media))).filter(Boolean)
+        );
+        if (assetIds.size === 0) {
+            return { status: 'missing', reason: 'agent_source_asset_missing' };
+        }
+        if (assetIds.size > 1) {
+            return { status: 'ambiguous', reason: 'agent_source_asset_ambiguous' };
+        }
+
+        const sourceAssetId = Array.from(assetIds)[0];
+        const nodeIdentityIds = new Set(
+            (sourceNodeId.match(new RegExp(UUID_PATTERN, 'ig')) || []).map(normalizeUuid)
+        );
+        if (nodeIdentityIds.size > 1
+            || (nodeIdentityIds.size === 1 && !nodeIdentityIds.has(sourceAssetId))) {
+            return { status: 'ambiguous', reason: 'agent_source_identity_ambiguous' };
+        }
+
+        const conversationId = getConversationId(url);
+        const hintSupplied = String(sourcePostIdHint || '').trim().length > 0;
+        const normalizedSourcePostIdHint = normalizeUuid(sourcePostIdHint);
+        if (hintSupplied && !normalizedSourcePostIdHint) {
+            return { status: 'missing', reason: 'agent_source_post_hint_invalid' };
+        }
+        const agentDomHasNoPostIdContext = normalizedSourcePostIdHint || conversationId;
+        if (!agentDomHasNoPostIdContext) {
+            return { status: 'missing', reason: 'agent_source_post_context_missing' };
+        }
+
+        const sourceMedia = mediaElements.filter((media) => (
+            getAssetId(getMediaSource(media)) === sourceAssetId
+        ));
+        return {
+            status: 'matched',
+            descriptor: createCurrentSourceDescriptor({
+                surface: 'agent_media',
+                sourceAssetId,
+                sourcePostId: agentDomHasNoPostIdContext,
+                conversationId,
+                mediaKind: getDescriptorMediaKind(selectedNode, sourceMedia),
+                hrefPath: url.pathname,
+                route: getSafeCurrentRoute(url, conversationId)
+            })
+        };
+    }
+
+    function describeCurrentSource({ root, surface, location, sourcePostIdHint } = {}) {
+        if (surface !== 'legacy_detail' && surface !== 'agent_media') {
+            return { status: 'unsupported', reason: 'current_source_surface_unsupported' };
+        }
+
+        const url = toUrl(location);
+        if (!url
+            || !isGrokHost(url.hostname)
+            || detectGrokSurface({ root, location: url }) !== surface) {
+            return { status: 'unsupported', reason: 'current_source_location_unsupported' };
+        }
+
+        return surface === 'legacy_detail'
+            ? describeLegacyDetailSource(root, url)
+            : describeAgentSource(root, url, sourcePostIdHint);
+    }
+
     function findLegacyDetailSource(root, descriptor) {
         const sourceAssetId = normalizeUuid(descriptor?.sourceAssetId);
         const sourcePostId = normalizeUuid(descriptor?.sourcePostId);
@@ -642,6 +843,7 @@
 
     return {
         captureSubmissionReceipt,
+        describeCurrentSource,
         detectGrokSurface,
         evaluateSubmissionReceipt,
         findGeneratedResult,

@@ -368,6 +368,101 @@ describe('generation run controller', () => {
         }));
     });
 
+    test('transfers a claimless direct-detail Prompted run only from the exact source', async () => {
+        const harness = createHarness();
+        const detailDescriptor = {
+            ...descriptor('detail'),
+            surface: 'agent_media',
+            hrefPath: '/imagine/agent/agent-detail'
+        };
+        const detailUrl = 'https://grok.com/imagine/agent/agent-detail?conversation=conversation-detail';
+        const detailOrigin = {
+            surface: 'agent_media',
+            url: detailUrl,
+            sourceAssetId: detailDescriptor.sourceAssetId,
+            sourcePostId: detailDescriptor.sourcePostId,
+            scrollY: 0
+        };
+        const run = await startRun(harness, startRequest({
+            kind: 'prompted_batch',
+            origin: detailOrigin,
+            items: [detailDescriptor],
+            prompt: 'Slow handheld push-in',
+            options: { maxRetries: 1, videoGoal: 1 }
+        }), sender(42, 'document-before-reload', detailUrl));
+
+        const resumed = await harness.controller.claimGenerationAction({
+            runId: run.runId,
+            epoch: run.epoch,
+            resume: true,
+            resumeProof: {
+                surface: 'agent_media',
+                url: detailUrl,
+                sourceAssetId: detailDescriptor.sourceAssetId,
+                sourcePostId: detailDescriptor.sourcePostId
+            }
+        }, sender(42, 'document-after-reload', detailUrl));
+
+        expect(resumed).toEqual(expect.objectContaining({
+            status: 'claimed',
+            claim: expect.objectContaining({
+                descriptor: detailDescriptor,
+                ownerDocumentId: 'document-after-reload'
+            })
+        }));
+    });
+
+    test('resumes direct-detail provider capacity after reload without changing source', async () => {
+        const harness = createHarness();
+        const detailDescriptor = {
+            ...descriptor('detail-capacity'),
+            surface: 'agent_media',
+            hrefPath: '/imagine/agent/agent-capacity'
+        };
+        const detailUrl = 'https://grok.com/imagine/agent/agent-capacity?conversation=conversation-detail-capacity';
+        let run = await startRun(harness, startRequest({
+            kind: 'prompted_batch',
+            origin: {
+                surface: 'agent_media',
+                url: detailUrl,
+                sourceAssetId: detailDescriptor.sourceAssetId,
+                sourcePostId: detailDescriptor.sourcePostId,
+                scrollY: 0
+            },
+            items: [detailDescriptor],
+            prompt: 'Slow handheld push-in',
+            options: { maxRetries: 1, videoGoal: 1, capacityTimeoutMs: 5000 }
+        }), sender(42, 'document-before-reload', detailUrl));
+        const first = await harness.controller.claimGenerationAction({
+            runId: run.runId,
+            epoch: run.epoch
+        }, sender(42, 'document-before-reload', detailUrl));
+        ({ run } = await harness.controller.reportGenerationAction({
+            ...first.claim,
+            outcome: 'capacity',
+            failureCode: 'provider_capacity'
+        }, sender(42, 'document-before-reload', detailUrl)));
+
+        const resumed = await harness.controller.claimGenerationAction({
+            runId: run.runId,
+            epoch: run.epoch,
+            resume: true,
+            resumeProof: {
+                surface: 'agent_media',
+                url: detailUrl,
+                sourceAssetId: detailDescriptor.sourceAssetId,
+                sourcePostId: detailDescriptor.sourcePostId
+            },
+            capacityAvailable: true
+        }, sender(42, 'document-after-reload', detailUrl));
+
+        expect(resumed).toEqual(expect.objectContaining({
+            status: 'claimed',
+            claim: expect.objectContaining({ descriptor: detailDescriptor })
+        }));
+        expect(resumed.claim.itemId).toBe(first.claim.itemId);
+    });
+
     test('rejects document transfer without proof from the current Grok surface', async () => {
         const harness = createHarness();
         const run = await startRun(harness, startRequest(), sender(42, 'document-before-reload'));

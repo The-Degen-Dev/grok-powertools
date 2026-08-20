@@ -392,7 +392,9 @@ describe('background recreate workflow wiring', () => {
             const response = await new Promise((resolve) => {
                 expect(listener(request, sender, resolve)).toBe(true);
             });
-            expect(response).toEqual({ status: expectedStatus });
+            expect(response).toEqual(action === 'GENERATION_RUN_STATUS'
+                ? { status: expectedStatus, isOwner: false }
+                : { status: expectedStatus });
             expect(methods[methodName]).toHaveBeenCalledWith(request, sender);
         }
     });
