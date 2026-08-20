@@ -340,6 +340,138 @@ function buildAssetCaptureMetadata(payload, conversationId, assetId) {
     return metadata;
 }
 
+var conversationInventoryUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var conversationInventoryMaxAssets = 2048;
+var conversationInventoryMaxBytes = 2097152;
+
+function getSerializedByteLength(value) {
+    return new Blob([value]).size;
+}
+
+function getConversationAssetSourceUrl(assetMetadata) {
+    var candidates = [];
+    ['url', 'sourceUrl', 'downloadUrl', 'imageUrl', 'videoUrl'].forEach(function(key) {
+        var value = assetMetadata && assetMetadata[key];
+        if (typeof value === 'string' && value.trim()) candidates.push(value.trim());
+    });
+    var objectKey = assetMetadata && assetMetadata.key;
+    if (typeof objectKey === 'string' && objectKey.trim()) {
+        var normalizedKey = objectKey.trim().replace(/^\/+/, '');
+        if (!normalizedKey || normalizedKey.split('/').some(function(part) { return part === '..'; })) {
+            throw new Error('conversation_asset_source_invalid');
+        }
+        candidates.push('https://assets.grok.com/' + normalizedKey);
+    }
+
+    var normalizedCandidates = [];
+    candidates.forEach(function(value) {
+        var parsed;
+        try {
+            parsed = new URL(value);
+        } catch {
+            throw new Error('conversation_asset_source_invalid');
+        }
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password || (parsed.port && parsed.port !== '443')) {
+            throw new Error('conversation_asset_source_invalid');
+        }
+        var trustedHost = parsed.hostname === 'assets.grok.com' || parsed.hostname === 'imagine-public.x.ai';
+        if (!trustedHost) throw new Error('conversation_asset_source_untrusted');
+        parsed.search = '';
+        parsed.hash = '';
+        var normalized = parsed.toString();
+        if (normalizedCandidates.indexOf(normalized) === -1) normalizedCandidates.push(normalized);
+    });
+    if (normalizedCandidates.length === 0) throw new Error('conversation_asset_source_missing');
+    if (normalizedCandidates.length !== 1) throw new Error('conversation_asset_source_conflict');
+    return normalizedCandidates[0];
+}
+
+function getConversationAssetMediaKind(assetMetadata, sourceUrl) {
+    var mimeType = String(
+        assetMetadata && (assetMetadata.mimeType || assetMetadata.contentType || assetMetadata.mediaType) || ''
+    ).trim().toLowerCase();
+    var mimeKind = mimeType.indexOf('image/') === 0
+        ? 'image'
+        : (mimeType.indexOf('video/') === 0 ? 'video' : '');
+    var pathname = new URL(sourceUrl).pathname.toLowerCase();
+    var extensionKind = /\.(?:mp4|webm|mov|m4v)$/.test(pathname)
+        ? 'video'
+        : (/\.(?:png|jpe?g|webp|gif|bmp|avif)$/.test(pathname) ? 'image' : '');
+    if (mimeKind && extensionKind && mimeKind !== extensionKind) {
+        throw new Error('conversation_asset_media_type_conflict');
+    }
+    var mediaKind = mimeKind || extensionKind;
+    if (!mediaKind) throw new Error('conversation_asset_media_type_missing');
+    return mediaKind;
+}
+
+function buildConversationAssetDescriptor(response, assetMetadata) {
+    var assetId = String(assetMetadata && assetMetadata.assetId || '').toLowerCase();
+    if (!conversationInventoryUuidPattern.test(assetId)) throw new Error('conversation_asset_id_invalid');
+    var sourceUrl = getConversationAssetSourceUrl(assetMetadata);
+    if (sourceUrl.toLowerCase().indexOf(assetId) === -1) {
+        throw new Error('conversation_asset_source_mismatch');
+    }
+    var mediaGenInput = response && response.mediaGenInput !== undefined
+        ? response.mediaGenInput
+        : assetMetadata.mediaGenInput;
+    return {
+        assetId: assetId,
+        responseId: String(response && (response.responseId || response.id) || ''),
+        parentResponseId: String(response && response.parentResponseId || ''),
+        mediaKind: getConversationAssetMediaKind(assetMetadata, sourceUrl),
+        sourceUrl: sourceUrl,
+        promptText: readPromptText(mediaGenInput),
+        assetMetadata: sanitizeAssetMetadataValue(assetMetadata, 0),
+        mediaGenInput: sanitizeAssetMetadataValue(mediaGenInput === undefined ? null : mediaGenInput, 0)
+    };
+}
+
+function buildConversationAssetInventory(payload, conversationId) {
+    if (!conversationInventoryUuidPattern.test(String(conversationId || ''))) {
+        throw new Error('conversation_inventory_identity_invalid');
+    }
+    var responses = Array.isArray(payload && payload.responses)
+        ? payload.responses
+        : (Array.isArray(payload && payload.data && payload.data.responses) ? payload.data.responses : []);
+    var descriptorsByAssetId = new Map();
+    var assets = [];
+
+    responses.forEach(function(response) {
+        var attachmentAssets = Array.isArray(response && response.fileAttachmentAssetMetadata)
+            ? response.fileAttachmentAssetMetadata
+            : [];
+        attachmentAssets.forEach(function(assetMetadata) {
+            var descriptor = buildConversationAssetDescriptor(response, assetMetadata);
+            var canonical = JSON.stringify({
+                assetId: descriptor.assetId,
+                mediaKind: descriptor.mediaKind,
+                sourceUrl: descriptor.sourceUrl,
+                assetMetadata: descriptor.assetMetadata
+            });
+            var existing = descriptorsByAssetId.get(descriptor.assetId);
+            if (existing && existing !== canonical) throw new Error('conversation_asset_duplicate_conflict');
+            if (existing) return;
+            if (assets.length >= conversationInventoryMaxAssets) {
+                throw new Error('conversation_inventory_asset_limit');
+            }
+            descriptorsByAssetId.set(descriptor.assetId, canonical);
+            assets.push(descriptor);
+        });
+    });
+
+    if (assets.length === 0) throw new Error('conversation_inventory_empty');
+    var inventory = {
+        schemaVersion: 1,
+        conversationId: String(conversationId).toLowerCase(),
+        assets: assets
+    };
+    if (getSerializedByteLength(JSON.stringify(inventory)) > conversationInventoryMaxBytes) {
+        throw new Error('conversation_inventory_too_large');
+    }
+    return inventory;
+}
+
 document.addEventListener('__gpt_fetch_asset_metadata', function(e) {
     var detail = e.detail || {};
     var requestId = detail.requestId;
@@ -366,6 +498,43 @@ document.addEventListener('__gpt_fetch_asset_metadata', function(e) {
         .catch(function(error) {
             document.dispatchEvent(new CustomEvent('__gpt_fetch_asset_metadata_result', {
                 detail: { requestId: requestId, error: String(error && error.message || 'asset_metadata_failed') }
+            }));
+        });
+});
+
+document.addEventListener('__gpt_fetch_conversation_asset_inventory', function(e) {
+    var detail = e.detail || {};
+    var requestId = detail.requestId;
+    var conversationId = String(detail.conversationId || '').toLowerCase();
+    if (!requestId) return;
+    if (!conversationInventoryUuidPattern.test(conversationId)) {
+        document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory_result', {
+            detail: { requestId: requestId, error: 'conversation_inventory_identity_invalid' }
+        }));
+        return;
+    }
+
+    fetch('/rest/app-chat/conversations/' + encodeURIComponent(conversationId) + '/responses', {
+        credentials: 'include'
+    })
+        .then(function(response) {
+            if (!response.ok) throw new Error('conversation_inventory_http_' + response.status);
+            return response.json();
+        })
+        .then(function(payload) {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory_result', {
+                detail: {
+                    requestId: requestId,
+                    inventory: buildConversationAssetInventory(payload, conversationId)
+                }
+            }));
+        })
+        .catch(function(error) {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory_result', {
+                detail: {
+                    requestId: requestId,
+                    error: String(error && error.message || 'conversation_inventory_failed')
+                }
             }));
         });
 });

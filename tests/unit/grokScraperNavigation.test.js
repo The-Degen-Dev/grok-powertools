@@ -10,7 +10,9 @@ const {
     detectGrokScrapeSurface,
     evaluateGalleryReceipt,
     findMatchingAgentMedia,
+    hashGrokConversationAssetInventory,
     getSavedGalleryContext,
+    getSavedCardConversationId,
     getGrokMediaIdentity,
     hasOrderedSavedNeighborhood,
     isSavedGalleryLoading,
@@ -102,6 +104,47 @@ function captureMetadata(assetId, promptText = 'authoritative prompt') {
         assetMetadata: { assetId },
         mediaGenInput: { prompt: promptText }
     };
+}
+
+function makeConversationInventory(conversationId, assetIds) {
+    return {
+        schemaVersion: 1,
+        conversationId,
+        assets: assetIds.map((assetId, index) => ({
+            assetId,
+            responseId: `response-${index + 1}`,
+            parentResponseId: '',
+            mediaKind: index % 2 === 0 ? 'image' : 'video',
+            sourceUrl: `https://assets.grok.com/users/example/generated/${assetId}/${index % 2 === 0 ? 'image.jpg' : 'generated_video.mp4'}`,
+            promptText: 'candid friends at the beach',
+            assetMetadata: {
+                assetId,
+                mimeType: index % 2 === 0 ? 'image/jpeg' : 'video/mp4'
+            },
+            mediaGenInput: { prompt: 'candid friends at the beach' }
+        }))
+    };
+}
+
+async function withConversationInventoryBridge(inventory, callback) {
+    const readyListener = (event) => {
+        document.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+            detail: { requestId: event.detail.requestId }
+        }));
+    };
+    const inventoryListener = (event) => {
+        document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory_result', {
+            detail: { requestId: event.detail.requestId, inventory }
+        }));
+    };
+    document.addEventListener('__gpt_media_fetch_bridge_probe', readyListener);
+    document.addEventListener('__gpt_fetch_conversation_asset_inventory', inventoryListener);
+    try {
+        return await callback();
+    } finally {
+        document.removeEventListener('__gpt_media_fetch_bridge_probe', readyListener);
+        document.removeEventListener('__gpt_fetch_conversation_asset_inventory', inventoryListener);
+    }
 }
 
 function makeVisible(element, width = 120, height = 32) {
@@ -911,6 +954,26 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
         });
     });
 
+    test('reads the conversation ID when the Saved card root is itself the post link', () => {
+        const conversationId = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+        const postId = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
+        const assetId = 'cccccccc-3333-4333-8333-cccccccccccc';
+        const card = document.createElement('a');
+        card.className = 'group/media-post-masonry-card';
+        card.href = `/imagine/post/${postId}?conversation=${conversationId}`;
+        const image = document.createElement('img');
+        image.alt = 'Generated image';
+        image.src = `https://assets.grok.com/users/u/generated/${assetId}/image.jpg`;
+        card.appendChild(image);
+        document.body.appendChild(card);
+
+        expect(getSavedCardConversationId(card)).toBe(conversationId);
+        expect(getSavedGalleryContext(document)?.entries[0]).toMatchObject({
+            cardIdentity: postId,
+            sourceIdentity: assetId
+        });
+    });
+
     test.each(['liked', 'unknown'])(
         'rejects Saved receipt capture when the native scope is %s',
         (scope) => {
@@ -930,8 +993,13 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
 
 describe('Grok scrape surface transitions', () => {
     let bridgeProbeListener;
+    let originalCrypto;
 
     beforeEach(() => {
+        originalCrypto = global.crypto;
+        if (!global.crypto?.subtle) {
+            Object.defineProperty(global, 'crypto', { configurable: true, value: webcrypto });
+        }
         mountSavedScope('all');
         bridgeProbeListener = (event) => {
             document.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
@@ -942,6 +1010,7 @@ describe('Grok scrape surface transitions', () => {
     });
 
     afterEach(() => {
+        Object.defineProperty(global, 'crypto', { configurable: true, value: originalCrypto });
         document.removeEventListener('__gpt_media_fetch_bridge_probe', bridgeProbeListener);
         delete global.chrome;
         document.body.textContent = '';
@@ -998,9 +1067,9 @@ describe('Grok scrape surface transitions', () => {
     });
 
     test.each([
-        ['normal Sync', false, 1],
-        ['R2 backup', true, 0]
-    ])('%s uses its exact historical processed IDs eligibility rule', async (_label, backupMode, expectedIndex) => {
+        ['normal Sync', false],
+        ['R2 backup', true]
+    ])('%s inventories a Saved entry even when its visible preview was processed historically', async (_label, backupMode) => {
         mockContentChrome();
         const scraper = createScraper();
         const firstUrl = 'https://assets.grok.com/users/u/generated/31000000-0000-4000-8000-000000000001/image.jpg';
@@ -1023,11 +1092,11 @@ describe('Grok scrape surface transitions', () => {
         await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
 
         expect(scraper.processItem).toHaveBeenCalledWith(
-            expectedIndex === 0 ? expect.anything() : secondImage,
-            expectedIndex === 0 ? firstUrl : secondUrl,
+            expect.anything(),
+            firstUrl,
             'run-1',
             1,
-            expectedIndex === 0 ? '31000000-0000-4000-8000-000000000002' : null
+            '31000000-0000-4000-8000-000000000002'
         );
     });
 
@@ -1720,7 +1789,7 @@ describe('Grok scrape surface transitions', () => {
         document.body.appendChild(outsideLoader);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
-        scraper.processedIds = new Set([sourceUrl]);
+        scraper._runVisited.add('card:32000000-0000-4000-8000-000000000001');
         scraper.processItem = jest.fn().mockResolvedValue();
         scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
         scraper.waitForRunDurability = jest.fn().mockResolvedValue({ status: 'durable' });
@@ -1754,7 +1823,7 @@ describe('Grok scrape surface transitions', () => {
         scroller.remove();
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
-        scraper.processedIds = new Set([sourceUrl]);
+        scraper._runVisited.add('card:32000000-0000-4000-8000-000000000002');
         scraper.processItem = jest.fn().mockResolvedValue();
         scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
         scraper.waitForRunDurability = jest.fn().mockResolvedValue({ status: 'durable' });
@@ -2127,7 +2196,7 @@ describe('Grok scrape surface transitions', () => {
         await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
 
         expect(scraper.failRun).toHaveBeenCalledWith(
-            'The selected Saved card did not open a supported media surface.',
+            'The selected Saved card did not expose a conversation inventory surface.',
             'surface_transition_timeout'
         );
         expect(activationEvents).toEqual(FULL_POINTER_ACTIVATION_EVENTS);
@@ -2218,9 +2287,8 @@ describe('Grok scrape surface transitions', () => {
         expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ status: 'stopped' }));
     });
 
-    test('transfers the exact Agent media, persists after success, and returns to Saved', async () => {
+    test('fails closed without transferring when Agent never exposes a conversation ID', async () => {
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
-        const media = document.createElement('img');
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
         scraper.pendingNavigation = {
@@ -2229,287 +2297,380 @@ describe('Grok scrape surface transitions', () => {
             expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
             currentItemId: 'gallery-clean-id'
         };
-        scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'matched', media }));
-        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
-        scraper.persistProcessedId = jest.fn(() => Promise.resolve());
+        scraper.waitForConversationId = jest.fn(() => Promise.resolve(''));
+        scraper.performDownload = jest.fn();
         scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
-        scraper.failRun = jest.fn();
+        scraper.failRun = jest.fn(() => Promise.resolve());
 
         await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
 
-        expect(scraper.performDownload).toHaveBeenCalledWith(media, 'gallery-clean-id', 'run-1');
-        expect(scraper.persistProcessedId).toHaveBeenCalledWith('gallery-clean-id', 'run-1');
-        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
-        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'Agent Mode did not expose the Saved conversation identity needed to inventory every asset.',
+            'conversation_identity_missing'
+        );
+        expect(scraper.performDownload).not.toHaveBeenCalled();
+        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
     });
 
-    test.each(['queued', 'cloud_queued'])(
-        'advances after %s without persisting the Saved current item',
-        async (status) => {
-            const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
-            const media = document.createElement('img');
-            scraper.state.isRunning = true;
-            scraper.runToken = 'run-1';
-            scraper.pendingNavigation = {
-                runToken: 'run-1',
-                runEpoch: 1,
-                expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
-                currentItemId: 'gallery-clean-id'
-            };
-            scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'matched', media }));
-            scraper.performDownload = jest.fn(() => Promise.resolve({ status }));
-            scraper.persistProcessedId = jest.fn(() => Promise.resolve());
-            scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
+    test('processes every authoritative conversation asset before advancing the Saved entry', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.savedGallery);
+        const conversationId = '41414141-4141-4141-8141-414141414141';
+        const firstAssetId = '42424242-4242-4242-8242-424242424242';
+        const secondAssetId = '43434343-4343-4343-8343-434343434343';
+        const inventory = {
+            schemaVersion: 1,
+            conversationId,
+            assets: [
+                {
+                    assetId: firstAssetId,
+                    responseId: 'response-1',
+                    parentResponseId: '',
+                    mediaKind: 'image',
+                    sourceUrl: `https://assets.grok.com/users/example/generated/${firstAssetId}/image.jpg`,
+                    promptText: 'candid friends at the beach',
+                    assetMetadata: { assetId: firstAssetId, mimeType: 'image/jpeg' },
+                    mediaGenInput: { prompt: 'candid friends at the beach' }
+                },
+                {
+                    assetId: secondAssetId,
+                    responseId: 'response-1',
+                    parentResponseId: '',
+                    mediaKind: 'video',
+                    sourceUrl: `https://assets.grok.com/users/example/generated/${secondAssetId}/generated_video.mp4`,
+                    promptText: 'candid friends at the beach',
+                    assetMetadata: { assetId: secondAssetId, mimeType: 'video/mp4' },
+                    mediaGenInput: { prompt: 'candid friends at the beach' }
+                }
+            ]
+        };
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: firstAssetId,
+            currentItemId: 'saved-preview',
+            conversationId,
+            entryRunKey: `conversation:${conversationId}`
+        };
+        scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
+        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
+        scraper.persistProcessedId = jest.fn(async (assetId) => {
+            scraper.processedIds.add(assetId);
+            return true;
+        });
+        scraper.waitForRunDurability = jest.fn(() => Promise.resolve({ status: 'durable' }));
+        scraper.refreshProcessedIds = jest.fn(() => Promise.resolve(true));
+        scraper.executeListView = jest.fn(() => Promise.resolve());
+        scraper.failRun = jest.fn(() => Promise.resolve());
+        const readyListener = (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+                detail: { requestId: event.detail.requestId }
+            }));
+        };
+        const inventoryListener = (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory_result', {
+                detail: { requestId: event.detail.requestId, inventory }
+            }));
+        };
+        document.addEventListener('__gpt_media_fetch_bridge_probe', readyListener);
+        document.addEventListener('__gpt_fetch_conversation_asset_inventory', inventoryListener);
 
-            await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
-
-            expect(scraper.persistProcessedId).not.toHaveBeenCalled();
-            expect(scraper._runVisited).toContain('gallery-clean-id');
-            expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
+        try {
+            await GrokScraper.prototype.processPendingConversationInventory.call(scraper, 'run-1');
+        } finally {
+            document.removeEventListener('__gpt_media_fetch_bridge_probe', readyListener);
+            document.removeEventListener('__gpt_fetch_conversation_asset_inventory', inventoryListener);
         }
-    );
 
-    test('runs the Saved-to-Agent transfer path in R2 Backup mode', async () => {
-        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
-        const media = document.createElement('video');
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.backupMode = true;
-        scraper.backupOptions = { mode: 'full', limit: null, options: {} };
-        scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
-            currentItemId: 'gallery-clean-id'
-        };
-        scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'matched', media }));
-        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
-        scraper.performDownload = jest.fn(async () => {
-            scraper.backupStats.uploaded++;
-            return { status: 'uploaded' };
-        });
-        scraper.persistProcessedId = jest.fn();
-        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
-
-        await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
-
-        expect(scraper._backupVisited).toContain('gallery-clean-id');
-        expect(scraper.backupStats).toMatchObject({ totalSeen: 1, uploaded: 1 });
-        expect(scraper.persistBackupProgress).toHaveBeenCalledWith('run-1');
-        expect(scraper.performDownload).toHaveBeenCalledWith(media, 'gallery-clean-id', 'run-1');
-        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
-        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
+        expect(scraper.performDownload.mock.calls.map(([, assetId]) => assetId)).toEqual([
+            firstAssetId,
+            secondAssetId
+        ]);
+        expect(scraper.performDownload).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({ tagName: 'VIDEO', src: inventory.assets[1].sourceUrl }),
+            secondAssetId,
+            'run-1',
+            expect.objectContaining({
+                schemaVersion: 2,
+                conversationId,
+                assetId: secondAssetId,
+                promptText: 'candid friends at the beach'
+            })
+        );
+        expect(scraper.persistProcessedId).toHaveBeenCalledTimes(2);
+        expect(scraper.waitForRunDurability).toHaveBeenCalledWith('run-1', { timeoutMs: 180000 });
+        expect(scraper._runVisited).toContain(`conversation:${conversationId}`);
+        expect(scraper.pendingNavigation).toBeNull();
+        expect(scraper.executeListView).toHaveBeenCalledWith('run-1');
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        await expect(hashGrokConversationAssetInventory(inventory)).resolves.toMatch(/^sha256:2:[a-f0-9]{64}$/);
+        await expect(hashGrokConversationAssetInventory({
+            ...inventory,
+            assets: inventory.assets.map((asset, index) => (
+                index === 0 ? { ...asset, promptText: 'changed prompt metadata' } : asset
+            ))
+        })).resolves.not.toBe(await hashGrokConversationAssetInventory(inventory));
     });
 
-    test('an Agent R2 presence error stops backup once without persisting processed IDs', async () => {
+    test('fails before transfer when the selected Saved preview is absent from the conversation inventory', async () => {
         mockContentChrome();
-        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
-        const mediaId = '73737373-7373-4373-8373-737373737373';
-        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-        const media = document.createElement('img');
-        media.src = currentItemId;
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.backupMode = true;
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: mediaId,
-            currentItemId
-        };
-        scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'matched', media }));
-        scraper.loadAuthoritativeCaptureMetadata = jest.fn(async () => captureMetadata(mediaId));
-        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
-        scraper.stopBackupMode = jest.fn(() => Promise.resolve({ status: 'stopped' }));
-        scraper.returnToSavedGallery = jest.fn();
-        chrome.runtime.sendMessage.mockImplementation(async (message) => {
-            if (message.action === 'R2_BACKUP_CHECK_PRESENT') {
-                return { status: 'error', error: 'r2_head_500' };
-            }
-            return { status: 'error', error: 'unexpected_action' };
-        });
-
-        await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
-
-        expect(scraper.stopBackupMode).toHaveBeenCalledTimes(1);
-        expect(scraper.stopBackupMode).toHaveBeenCalledWith('media_transfer_failed');
-        expect(scraper.backupStats.errors).toBe(1);
-        expect(scraper.persistBackupProgress).toHaveBeenCalledTimes(2);
-        expect(scraper.processedIds).toEqual(new Set());
-        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
-            action: 'SCRAPE_PROCESSED_IDS_ADD'
-        }));
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
-    });
-
-    test('returns a successful Agent canary to Saved before completing the run', async () => {
-        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
-        const media = document.createElement('video');
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.backupMode = true;
-        scraper.backupOptions = { mode: 'canary', limit: 1, options: { stopAfterMediaAttempt: true } };
-        scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
-            currentItemId: 'gallery-clean-id'
-        };
-        scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'matched', media }));
-        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
-        scraper.performDownload = jest.fn(async () => {
-            scraper.backupStats.uploaded++;
-            return { status: 'uploaded' };
-        });
-        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
-        scraper.stopBackupMode = jest.fn();
-
-        await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
-
-        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1', {
-            stopBackupReason: 'canary_complete'
-        });
-        expect(scraper.stopBackupMode).not.toHaveBeenCalled();
-    });
-
-    test('never persists a failed Agent transfer', async () => {
-        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
+        const scraper = createScraper(SCRAPE_SURFACES.savedGallery);
+        const conversationId = '51515151-5151-4151-8151-515151515151';
+        const selectedAssetId = '52525252-5252-4252-8252-525252525252';
+        const inventory = makeConversationInventory(conversationId, [
+            '53535353-5353-4353-8353-535353535353'
+        ]);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
         scraper.pendingNavigation = {
             runToken: 'run-1',
             runEpoch: 1,
-            expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
-            currentItemId: 'gallery-clean-id'
+            expectedIdentity: selectedAssetId,
+            currentItemId: selectedAssetId,
+            conversationId
         };
-        scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({
-            status: 'matched',
-            media: document.createElement('img')
-        }));
-        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'error', error: 'Transfer failed' }));
-        scraper.persistProcessedId = jest.fn();
-        scraper.returnToSavedGallery = jest.fn();
+        scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
+        scraper.performDownload = jest.fn();
         scraper.failRun = jest.fn(() => Promise.resolve());
 
-        await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
+        await withConversationInventoryBridge(inventory, () => (
+            GrokScraper.prototype.processPendingConversationInventory.call(scraper, 'run-1')
+        ));
 
-        expect(scraper.failRun).toHaveBeenCalledWith('Transfer failed', 'media_transfer_failed', false);
-        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
-    });
-
-    test('stops without transferring or scrolling when Agent media cannot be matched', async () => {
-        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
-            currentItemId: 'gallery-clean-id'
-        };
-        scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({ status: 'missing' }));
-        scraper.performDownload = jest.fn();
-        scraper.returnToSavedGallery = jest.fn();
-        scraper.failRun = jest.fn(() => Promise.resolve());
-        const scrollSpy = jest.spyOn(window, 'scrollBy').mockImplementation(() => {});
-
-        await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
-
-        expect(scraper.failRun).toHaveBeenCalledWith('Agent Mode did not expose the selected Saved media.', 'agent_media_missing');
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'The selected Saved preview was not present in its authoritative conversation inventory.',
+            'conversation_inventory_selected_asset_missing'
+        );
         expect(scraper.performDownload).not.toHaveBeenCalled();
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
-        expect(scrollSpy).not.toHaveBeenCalled();
-        scrollSpy.mockRestore();
+        expect(scraper.pendingNavigation).toMatchObject({ expectedIdentity: selectedAssetId });
     });
 
-    test('does nothing after cancellation wins a transition race', async () => {
-        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
-            currentItemId: 'gallery-clean-id'
-        };
-        scraper.waitForMatchingAgentMedia = jest.fn(async () => {
-            scraper.runToken = 'run-2';
-            return { status: 'matched', media: document.createElement('img') };
-        });
-        scraper.performDownload = jest.fn();
-        scraper.persistProcessedId = jest.fn();
-        scraper.returnToSavedGallery = jest.fn();
-
-        await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
-
-        expect(scraper.performDownload).not.toHaveBeenCalled();
-        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
-    });
-
-    test('does not persist or navigate after Stop wins during transfer', async () => {
-        const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: '73e5e137-1334-49ea-b06b-a9d9ba891003',
-            currentItemId: 'gallery-clean-id'
-        };
-        scraper.waitForMatchingAgentMedia = jest.fn(() => Promise.resolve({
-            status: 'matched',
-            media: document.createElement('img')
-        }));
-        scraper.performDownload = jest.fn(async () => {
-            scraper.runToken = 'run-2';
-            return { status: 'uploaded' };
-        });
-        scraper.persistProcessedId = jest.fn();
-        scraper.returnToSavedGallery = jest.fn();
-
-        await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
-
-        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
-    });
-
-    test('uses the pending Saved identity when legacy storage lacks the current item', async () => {
+    test('resumes an interrupted conversation at the first unconfirmed asset', async () => {
         mockContentChrome();
-        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
-        const mediaId = '47474747-4747-4747-8747-474747474747';
-        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-        const media = document.createElement('video');
-        media.src = `https://assets.grok.com/users/u/generated/${mediaId}/generated_video.mp4`;
+        const scraper = createScraper(SCRAPE_SURFACES.savedGallery);
+        const conversationId = '61616161-6161-4161-8161-616161616161';
+        const assetIds = [
+            '62626262-6262-4262-8262-626262626262',
+            '63636363-6363-4363-8363-636363636363',
+            '64646464-6464-4464-8464-646464646464'
+        ];
+        const inventory = makeConversationInventory(conversationId, assetIds);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.processedIds = new Set([assetIds[0]]);
         scraper.pendingNavigation = {
             runToken: 'run-1',
             runEpoch: 1,
-            expectedIdentity: mediaId,
-            currentItemId
+            expectedIdentity: assetIds[0],
+            currentItemId: assetIds[0],
+            conversationId,
+            entryRunKey: `conversation:${conversationId}`,
+            inventoryHash: await hashGrokConversationAssetInventory(inventory),
+            assetIds,
+            inventoryProgressVersion: 2,
+            nextAssetIndex: 1
         };
-        chrome.storage.local.get.mockResolvedValue({ currentItemId: null });
-        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(media));
+        scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
         scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
-        scraper.persistProcessedId = jest.fn(() => Promise.resolve(true));
+        scraper.persistProcessedId = jest.fn(async (assetId) => {
+            scraper.processedIds.add(assetId);
+            return true;
+        });
+        scraper.waitForRunDurability = jest.fn(() => Promise.resolve({ status: 'durable' }));
+        scraper.refreshProcessedIds = jest.fn(() => Promise.resolve(true));
+        scraper.executeListView = jest.fn(() => Promise.resolve());
+        scraper.failRun = jest.fn(() => Promise.resolve());
+
+        await withConversationInventoryBridge(inventory, () => (
+            GrokScraper.prototype.processPendingConversationInventory.call(scraper, 'run-1')
+        ));
+
+        expect(scraper.performDownload.mock.calls.map(([, assetId]) => assetId)).toEqual(assetIds.slice(1));
+        expect(scraper.processedIds).toEqual(new Set(assetIds));
+        expect(scraper.pendingNavigation).toBeNull();
+        expect(scraper.failRun).not.toHaveBeenCalled();
+    });
+
+    test('Stop after one transfer prevents the next asset and later progress writes', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.savedGallery);
+        const conversationId = '71717171-7171-4171-8171-717171717171';
+        const assetIds = [
+            '72727272-7272-4272-8272-727272727272',
+            '73737373-7373-4373-8373-737373737373'
+        ];
+        const inventory = makeConversationInventory(conversationId, assetIds);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: assetIds[0],
+            currentItemId: assetIds[0],
+            conversationId
+        };
+        scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
+        scraper.queueRunStateWrite = jest.fn(() => Promise.resolve({ ok: true, invalidated: false }));
+        scraper.performDownload = jest.fn(async () => {
+            scraper.state.isRunning = false;
+            return { status: 'uploaded' };
+        });
+        scraper.persistProcessedId = jest.fn();
+        scraper.waitForRunDurability = jest.fn();
+
+        await withConversationInventoryBridge(inventory, () => (
+            GrokScraper.prototype.processPendingConversationInventory.call(scraper, 'run-1')
+        ));
+
+        expect(scraper.performDownload).toHaveBeenCalledTimes(1);
+        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
+        expect(scraper.waitForRunDurability).not.toHaveBeenCalled();
+        expect(scraper.queueRunStateWrite).toHaveBeenCalledTimes(1);
+        expect(scraper.queueRunStateWrite).toHaveBeenCalledWith(
+            expect.objectContaining({
+                scrapeNavigation: expect.objectContaining({ nextAssetIndex: 0 })
+            }),
+            'save conversation inventory progress',
+            expect.any(Object)
+        );
+    });
+
+    test('keeps partial progress retryable when a later asset transfer fails', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.savedGallery);
+        const conversationId = '81818181-8181-4181-8181-818181818181';
+        const assetIds = [
+            '82828282-8282-4282-8282-828282828282',
+            '83838383-8383-4383-8383-838383838383'
+        ];
+        const inventory = makeConversationInventory(conversationId, assetIds);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: assetIds[0],
+            currentItemId: assetIds[0],
+            conversationId
+        };
+        scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
+        scraper.performDownload = jest.fn((_media, assetId) => Promise.resolve(
+            assetId === assetIds[0]
+                ? { status: 'uploaded' }
+                : { status: 'error', error: 'second asset failed' }
+        ));
+        scraper.persistProcessedId = jest.fn(async (assetId) => {
+            scraper.processedIds.add(assetId);
+            return true;
+        });
+        scraper.failRun = jest.fn(() => Promise.resolve());
+
+        await withConversationInventoryBridge(inventory, () => (
+            GrokScraper.prototype.processPendingConversationInventory.call(scraper, 'run-1')
+        ));
+
+        expect(scraper.performDownload).toHaveBeenCalledTimes(2);
+        expect(scraper.processedIds).toEqual(new Set([assetIds[0]]));
+        expect(scraper.pendingNavigation).toMatchObject({
+            assetIds,
+            nextAssetIndex: 1
+        });
+        expect(scraper.failRun).toHaveBeenCalledWith(
+            'second asset failed',
+            'media_transfer_failed',
+            false
+        );
+    });
+
+    test('a targeted R2 canary transfers only the exact selected conversation asset', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.savedGallery);
+        const conversationId = '91919191-9191-4191-8191-919191919191';
+        const assetIds = [
+            '92929292-9292-4292-8292-929292929292',
+            '93939393-9393-4393-8393-939393939393',
+            '94949494-9494-4494-8494-949494949494'
+        ];
+        const inventory = makeConversationInventory(conversationId, assetIds);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.backupMode = true;
+        scraper.backupOptions = {
+            mode: 'canary',
+            limit: 1,
+            options: { targetIdentity: assetIds[1], stopAfterMediaAttempt: true }
+        };
+        scraper.pendingNavigation = {
+            runToken: 'run-1',
+            runEpoch: 1,
+            expectedIdentity: assetIds[1],
+            currentItemId: assetIds[1],
+            conversationId
+        };
+        scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
+        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
+        scraper.performDownload = jest.fn(async () => {
+            scraper.backupStats.uploaded++;
+            scraper.processedIds.add(assetIds[1]);
+            return { status: 'uploaded' };
+        });
+        scraper.stopBackupMode = jest.fn(() => Promise.resolve());
+
+        await withConversationInventoryBridge(inventory, () => (
+            GrokScraper.prototype.processPendingConversationInventory.call(scraper, 'run-1')
+        ));
+
+        expect(scraper.performDownload).toHaveBeenCalledTimes(1);
+        expect(scraper.performDownload.mock.calls[0][1]).toBe(assetIds[1]);
+        expect(scraper.stopBackupMode).toHaveBeenCalledWith('canary_complete');
+    });
+
+    test('uses Agent only to acquire a missing conversation ID, then inventories every asset', async () => {
+        mockContentChrome();
+        const scraper = createScraper(SCRAPE_SURFACES.savedGallery);
+        const conversationId = 'a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1';
+        const assetIds = [
+            'a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a2',
+            'a3a3a3a3-a3a3-43a3-83a3-a3a3a3a3a3a3'
+        ];
+        const inventory = makeConversationInventory(conversationId, assetIds);
+        const { image } = mountSemanticSavedImage(inventory.assets[0].sourceUrl);
+        let surface = SCRAPE_SURFACES.savedGallery;
+        scraper.getCurrentSurface.mockImplementation(() => surface);
+        scraper.state.isRunning = true;
+        scraper.runToken = 'run-1';
+        scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
+        scraper.sleep = jest.fn(() => Promise.resolve());
+        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
+        scraper.persistProcessedId = jest.fn(async (assetId) => {
+            scraper.processedIds.add(assetId);
+            return true;
+        });
+        scraper.waitForRunDurability = jest.fn(() => Promise.resolve({ status: 'durable' }));
+        scraper.refreshProcessedIds = jest.fn(() => Promise.resolve(true));
         scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
-        scraper.failRun = jest.fn();
+        scraper.failRun = jest.fn(() => Promise.resolve());
+        scraper.determineModeAndExecute.mockImplementation(() => (
+            GrokScraper.prototype.executeAgentView.call(scraper, 'run-1')
+        ));
+        image.addEventListener('click', () => {
+            surface = SCRAPE_SURFACES.agentMedia;
+            window.history.pushState({}, '', `/imagine/agent/current?conversation=${conversationId}`);
+        });
 
-        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
+        await withConversationInventoryBridge(inventory, () => (
+            GrokScraper.prototype.processItem.call(scraper, image, assetIds[0], 'run-1', 1)
+        ));
 
-        expect(scraper.waitForMatchingLegacyDetailMedia).toHaveBeenCalledWith(mediaId, 'run-1');
-        expect(scraper.performDownload).toHaveBeenCalledWith(media, currentItemId, 'run-1');
-        expect(scraper.persistProcessedId).toHaveBeenCalledWith(currentItemId, 'run-1');
-        expect(scraper._runVisited).toContain(currentItemId);
+        expect(scraper.performDownload.mock.calls.map(([, assetId]) => assetId)).toEqual(assetIds);
         expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
         expect(scraper.failRun).not.toHaveBeenCalled();
     });
 
-    test('fails closed when legacy detail does not expose the selected Saved media', async () => {
+    test('fails a Saved-origin legacy detail when no conversation ID becomes available', async () => {
         mockContentChrome();
         const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
         const mediaId = '58585858-5858-4858-8858-585858585858';
@@ -2522,174 +2683,25 @@ describe('Grok scrape surface transitions', () => {
             expectedIdentity: mediaId,
             currentItemId,
             expectedMediaType: 'video',
-            sourceUrl: currentItemId
+            sourceUrl: currentItemId,
+            galleryUrl: 'https://grok.com/imagine/saved'
         };
-        chrome.storage.local.get.mockResolvedValue({ currentItemId });
-        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
+        scraper.waitForConversationId = jest.fn(() => Promise.resolve(''));
         scraper.performDownload = jest.fn();
-        scraper.persistProcessedId = jest.fn();
         scraper.returnToSavedGallery = jest.fn();
         scraper.failRun = jest.fn(() => Promise.resolve());
 
         await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
 
         expect(scraper.failRun).toHaveBeenCalledWith(
-            'Legacy detail view did not expose the selected Saved media.',
-            'legacy_media_missing'
+            'Detail view did not expose the Saved conversation identity needed to inventory every asset.',
+            'conversation_identity_missing'
         );
         expect(scraper.performDownload).not.toHaveBeenCalled();
-        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
         expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
     });
 
-    test('transfers the exact trusted Saved image when its legacy detail omits that media', async () => {
-        mockContentChrome();
-        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
-        const mediaId = '58585858-5858-4858-8858-585858585859';
-        const sourceUrl = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: mediaId,
-            currentItemId: sourceUrl,
-            expectedMediaType: 'image',
-            sourceUrl
-        };
-        chrome.storage.local.get.mockResolvedValue({ currentItemId: sourceUrl });
-        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
-        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
-        scraper.persistProcessedId = jest.fn(() => Promise.resolve(true));
-        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
-        scraper.failRun = jest.fn(() => Promise.resolve());
-
-        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
-
-        expect(scraper.performDownload).toHaveBeenCalledWith(
-            expect.objectContaining({ tagName: 'IMG', src: sourceUrl, currentSrc: sourceUrl }),
-            sourceUrl,
-            'run-1'
-        );
-        expect(scraper.persistProcessedId).toHaveBeenCalledWith(sourceUrl, 'run-1');
-        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
-        expect(scraper.failRun).not.toHaveBeenCalled();
-    });
-
-    test('transfers the exact trusted Saved video when its legacy detail omits that media', async () => {
-        mockContentChrome();
-        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
-        const mediaId = '59595959-5959-4959-8959-595959595958';
-        const sourceUrl = `https://assets.grok.com/users/u/generated/${mediaId}/preview_image.jpg`;
-        const sourceTransferUrl = `https://assets.grok.com/users/u/generated/${mediaId}/generated_video.mp4`;
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: mediaId,
-            currentItemId: sourceUrl,
-            expectedMediaType: 'video',
-            sourceUrl,
-            sourceTransferUrl
-        };
-        chrome.storage.local.get.mockResolvedValue({ currentItemId: sourceUrl });
-        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
-        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
-        scraper.persistProcessedId = jest.fn(() => Promise.resolve(true));
-        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
-        scraper.failRun = jest.fn(() => Promise.resolve());
-
-        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
-
-        expect(scraper.performDownload).toHaveBeenCalledWith(
-            expect.objectContaining({
-                tagName: 'VIDEO',
-                src: sourceTransferUrl,
-                currentSrc: sourceTransferUrl
-            }),
-            sourceUrl,
-            'run-1'
-        );
-        expect(scraper.persistProcessedId).toHaveBeenCalledWith(sourceUrl, 'run-1');
-        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
-        expect(scraper.failRun).not.toHaveBeenCalled();
-    });
-
-    test.each([
-        ['identity mismatch', 'https://assets.grok.com/users/u/generated/60606060-6060-4060-8060-606060606060/generated_video.mp4'],
-        ['untrusted host', 'https://example.com/users/u/generated/61616161-6161-4161-8161-616161616161/generated_video.mp4']
-    ])('rejects a Saved video fallback with %s', async (_label, sourceTransferUrl) => {
-        mockContentChrome();
-        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
-        const mediaId = '61616161-6161-4161-8161-616161616161';
-        const sourceUrl = `https://assets.grok.com/users/u/generated/${mediaId}/preview_image.jpg`;
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: mediaId,
-            currentItemId: sourceUrl,
-            expectedMediaType: 'video',
-            sourceUrl,
-            sourceTransferUrl
-        };
-        chrome.storage.local.get.mockResolvedValue({ currentItemId: sourceUrl });
-        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
-        scraper.performDownload = jest.fn();
-        scraper.persistProcessedId = jest.fn();
-        scraper.returnToSavedGallery = jest.fn();
-        scraper.failRun = jest.fn(() => Promise.resolve());
-
-        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
-
-        expect(scraper.failRun).toHaveBeenCalledWith(
-            'Legacy detail view did not expose the selected Saved media.',
-            'legacy_media_missing'
-        );
-        expect(scraper.performDownload).not.toHaveBeenCalled();
-        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
-    });
-
-    test.each([
-        ['identity mismatch', 'https://assets.grok.com/users/u/generated/68686868-6868-4868-8868-686868686868/image.jpg'],
-        ['untrusted host', 'https://example.com/users/u/generated/67676767-6767-4767-8767-676767676767/image.jpg']
-    ])('rejects a Saved image fallback with %s', async (_label, sourceUrl) => {
-        mockContentChrome();
-        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
-        const mediaId = '67676767-6767-4767-8767-676767676767';
-        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: mediaId,
-            currentItemId,
-            expectedMediaType: 'image',
-            sourceUrl
-        };
-        chrome.storage.local.get.mockResolvedValue({ currentItemId });
-        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(null));
-        scraper.performDownload = jest.fn();
-        scraper.persistProcessedId = jest.fn();
-        scraper.returnToSavedGallery = jest.fn();
-        scraper.failRun = jest.fn(() => Promise.resolve());
-
-        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
-
-        expect(scraper.failRun).toHaveBeenCalledWith(
-            'Legacy detail view did not expose the selected Saved media.',
-            'legacy_media_missing'
-        );
-        expect(scraper.performDownload).not.toHaveBeenCalled();
-        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
-    });
-
-    test('a legacy-detail R2 presence error stops backup once without persisting processed IDs', async () => {
+    test('retains the explicit non-Saved legacy detail transfer path', async () => {
         mockContentChrome();
         const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
         const mediaId = '59595959-5959-4959-8959-595959595959';
@@ -2698,66 +2710,19 @@ describe('Grok scrape surface transitions', () => {
         media.src = currentItemId;
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
-        scraper.backupMode = true;
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: mediaId,
-            currentItemId
-        };
         chrome.storage.local.get.mockResolvedValue({ currentItemId });
         scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(media));
-        scraper.loadAuthoritativeCaptureMetadata = jest.fn(async () => captureMetadata(mediaId));
-        scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
-        scraper.stopBackupMode = jest.fn(() => Promise.resolve({ status: 'stopped' }));
-        scraper.returnToSavedGallery = jest.fn();
-        chrome.runtime.sendMessage.mockImplementation(async (message) => {
-            if (message.action === 'R2_BACKUP_CHECK_PRESENT') {
-                return { status: 'error', error: 'r2_head_500' };
-            }
-            return { status: 'error', error: 'unexpected_action' };
-        });
+        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
+        scraper.persistProcessedId = jest.fn(() => Promise.resolve(true));
+        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
+        scraper.failRun = jest.fn(() => Promise.resolve());
 
         await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
 
-        expect(scraper.stopBackupMode).toHaveBeenCalledTimes(1);
-        expect(scraper.stopBackupMode).toHaveBeenCalledWith('media_transfer_failed');
-        expect(scraper.backupStats.errors).toBe(1);
-        expect(scraper.persistBackupProgress).toHaveBeenCalledTimes(2);
-        expect(scraper.processedIds).toEqual(new Set());
-        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
-            action: 'SCRAPE_PROCESSED_IDS_ADD'
-        }));
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
-    });
-
-    test('does not persist or return when Stop wins a legacy detail transfer', async () => {
-        mockContentChrome();
-        const scraper = createScraper(SCRAPE_SURFACES.legacyDetail);
-        const mediaId = '69696969-6969-4969-8969-696969696969';
-        const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-        const media = document.createElement('img');
-        scraper.state.isRunning = true;
-        scraper.runToken = 'run-1';
-        scraper.pendingNavigation = {
-            runToken: 'run-1',
-            runEpoch: 1,
-            expectedIdentity: mediaId,
-            currentItemId
-        };
-        chrome.storage.local.get.mockResolvedValue({ currentItemId });
-        scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(media));
-        scraper.performDownload = jest.fn(async () => {
-            scraper.runToken = 'run-2';
-            return { status: 'uploaded' };
-        });
-        scraper.persistProcessedId = jest.fn();
-        scraper.returnToSavedGallery = jest.fn();
-
-        await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
-
-        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
+        expect(scraper.performDownload).toHaveBeenCalledWith(media, currentItemId, 'run-1');
+        expect(scraper.persistProcessedId).toHaveBeenCalledWith(currentItemId, 'run-1');
+        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
+        expect(scraper.failRun).not.toHaveBeenCalled();
     });
 
     test('restores the Saved scroll position and clears only navigation state', async () => {
@@ -5245,7 +5210,7 @@ describe('background scrape lease authority', () => {
         await background.ensureScrapeLeaseHydrated();
         await expect(background.initializeScrapeInActiveTab({ action: 'INIT_SCRAPE' })).resolves.toMatchObject({
             status: 'error',
-            error: 'A sync or backup run is already active.'
+            error: 'Another mutating extension workflow is already active.'
         });
         expect(harness.chromeApi.tabs.sendMessage).not.toHaveBeenCalled();
     });
@@ -5308,7 +5273,7 @@ describe('background scrape lease authority', () => {
                 { backup: kind === 'r2_backup' }
             )).resolves.toMatchObject({
                 status: 'error',
-                error: 'A sync or backup run is already active.'
+                error: 'Another mutating extension workflow is already active.'
             });
             expect(harness.sessionState.activeScrapeRunToken).toEqual(lease);
         }
@@ -5425,7 +5390,7 @@ describe('background scrape lease authority', () => {
                 { backup: kind === 'r2_backup' }
             )).resolves.toMatchObject({
                 status: 'error',
-                error: 'A sync or backup run is already active.'
+                error: 'Another mutating extension workflow is already active.'
             });
         }
     );
@@ -5494,7 +5459,7 @@ describe('background scrape lease authority', () => {
             action: 'START_R2_BACKUP',
             mode: 'full'
         }, {});
-        await flushAsyncTurns();
+        await waitForCondition(() => harness.sessionState.activeScrapeRunToken?.status === 'starting');
         expect(harness.sessionState.activeScrapeRunToken).toMatchObject({
             status: 'starting',
             kind: 'r2_backup'

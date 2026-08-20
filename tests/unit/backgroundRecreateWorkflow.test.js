@@ -263,7 +263,7 @@ describe('background recreate workflow wiring', () => {
         expect(global.chrome.debugger.detach).toHaveBeenCalledWith({ tabId: 123 }, expect.any(Function));
     });
 
-    test('handles native click runtime messages from the sender tab', async () => {
+    test('rejects Recreate native clicks without active run authority', async () => {
         global.chrome = mockChromeForBackground();
 
         loadBackground();
@@ -278,8 +278,8 @@ describe('background recreate workflow wiring', () => {
         expect(keepAlive).toBe(true);
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(sendResponse).toHaveBeenCalledWith({ ok: true });
-        expect(global.chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 321 }, '1.3', expect.any(Function));
+        expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: 'workflow_aborted' });
+        expect(global.chrome.debugger.attach).not.toHaveBeenCalled();
     });
 
     test('handles prompted-video native clicks from the sender tab', async () => {

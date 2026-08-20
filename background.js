@@ -237,7 +237,8 @@ const recreateWorkflowController = RecreateWorkflowBackground
     ? RecreateWorkflowBackground.createRecreateWorkflowController({
         chromeApi: chrome,
         utils: RecreateWorkflowUtils,
-        messageTimeoutMs: RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS
+        messageTimeoutMs: RECREATE_WORKFLOW_MESSAGE_TIMEOUT_MS,
+        sessionStorage: chrome.storage?.session
     })
     : null;
 const GenerationRunController = generationRunHelperLoadError
@@ -1270,7 +1271,7 @@ function getNativeClickCoordinate(value) {
     return number;
 }
 
-async function dispatchNativeClick(tabId, click = {}) {
+async function dispatchNativeClick(tabId, click = {}, assertAuthorized = null) {
     if (!chrome.debugger) throw new Error('native_click_unavailable');
     if (!Number.isFinite(Number(tabId))) throw new Error('native_click_unavailable');
 
@@ -1280,8 +1281,10 @@ async function dispatchNativeClick(tabId, click = {}) {
     let attached = false;
 
     try {
+        if (assertAuthorized) await assertAuthorized();
         await debuggerAttach(target);
         attached = true;
+        if (assertAuthorized) await assertAuthorized();
         await debuggerSendCommand(target, 'Input.dispatchMouseEvent', {
             type: 'mouseMoved',
             x,
@@ -1289,6 +1292,7 @@ async function dispatchNativeClick(tabId, click = {}) {
             button: 'none',
             buttons: 0
         });
+        if (assertAuthorized) await assertAuthorized();
         await debuggerSendCommand(target, 'Input.dispatchMouseEvent', {
             type: 'mousePressed',
             x,
@@ -1297,6 +1301,7 @@ async function dispatchNativeClick(tabId, click = {}) {
             buttons: 1,
             clickCount: 1
         });
+        if (assertAuthorized) await assertAuthorized();
         await debuggerSendCommand(target, 'Input.dispatchMouseEvent', {
             type: 'mouseReleased',
             x,
@@ -1337,7 +1342,7 @@ function getRecreateReferenceExtension(mimeType) {
     return 'png';
 }
 
-async function fetchRecreateReferenceDataUrl(url) {
+async function fetchRecreateReferenceDataUrl(url, options = {}) {
     if (!RecreateWorkflowUtils) throw new Error('workflow_unavailable');
     if (!RecreateWorkflowUtils.isTrustedGrokMediaUrl(url)) throw new Error('reference_capture_failed');
 
@@ -1349,9 +1354,14 @@ async function fetchRecreateReferenceDataUrl(url) {
         throw new Error('reference_capture_failed');
     }
 
-    const response = await fetch(parsed.href, { credentials: 'omit' });
+    if (options.assertAuthorized) await options.assertAuthorized();
+    const response = await fetch(parsed.href, {
+        credentials: 'omit',
+        ...(options.signal ? { signal: options.signal } : {})
+    });
     if (!response || !response.ok) throw new Error('reference_capture_failed');
 
+    if (options.assertAuthorized) await options.assertAuthorized();
     const blob = await response.blob();
     const mimeType = getRecreateReferenceMimeType(parsed.href, blob);
     const kind = RecreateWorkflowUtils.getReferenceKindFromMimeType
@@ -1364,7 +1374,9 @@ async function fetchRecreateReferenceDataUrl(url) {
         throw new Error('reference_invalid');
     }
 
+    if (options.assertAuthorized) await options.assertAuthorized();
     const dataUrl = `data:${mimeType};base64,${arrayBufferToBase64(await blob.arrayBuffer())}`;
+    if (options.assertAuthorized) await options.assertAuthorized();
     const normalized = RecreateWorkflowUtils.normalizeRecreateReference({
         name: `current-grok-${kind}.${getRecreateReferenceExtension(mimeType)}`,
         kind,
@@ -2588,6 +2600,10 @@ async function initializeBackgroundState(context = null, storedSnapshot = null) 
     await hydrateScrapeCompletionJournal(stored, context?.deadlineAt);
     assertBackgroundInitializationCurrent(context);
     hydrateScrapeRunStateRecordRevision(stored);
+    if (recreateWorkflowController?.initialize) {
+        await recreateWorkflowController.initialize();
+        assertBackgroundInitializationCurrent(context);
+    }
     await initializeGenerationRunController();
     assertBackgroundInitializationCurrent(context);
     const startupDownloadOperations = Array.from(pendingDownloadOperations.values())
@@ -4853,10 +4869,27 @@ function handleRuntimeMessage(request, sender, sendResponse) {
     if (request.action === 'FETCH_GPT_RECREATE_REFERENCE_DATA_URL') {
         (async () => {
             try {
-                const result = await fetchRecreateReferenceDataUrl(request.url);
+                const operation = request.authority
+                    ? await recreateWorkflowController?.authorizeContentOperation?.(request, sender)
+                    : null;
+                const result = await fetchRecreateReferenceDataUrl(request.url, operation || {});
                 sendResponse({ ok: true, ...result });
             } catch (e) {
                 sendResponse({ ok: false, error: e.message || 'reference_capture_failed' });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'GPT_RECREATE_RESULT_BASELINE') {
+        (async () => {
+            try {
+                if (!recreateWorkflowController?.recordResultBaseline) {
+                    throw new Error('workflow_unavailable');
+                }
+                sendResponse(await recreateWorkflowController.recordResultBaseline(request, sender));
+            } catch (e) {
+                sendResponse({ ok: false, error: e.message || 'workflow_aborted' });
             }
         })();
         return true;
@@ -4867,7 +4900,17 @@ function handleRuntimeMessage(request, sender, sendResponse) {
         (async () => {
             try {
                 const tabId = sender && sender.tab ? sender.tab.id : null;
-                const result = await dispatchNativeClick(tabId, request.click || {});
+                const operation = request.action === 'GPT_RECREATE_NATIVE_CLICK'
+                    ? await recreateWorkflowController?.authorizeContentOperation?.(request, sender)
+                    : null;
+                if (request.action === 'GPT_RECREATE_NATIVE_CLICK' && !operation) {
+                    throw new Error('workflow_aborted');
+                }
+                const result = await dispatchNativeClick(
+                    tabId,
+                    request.click || {},
+                    operation?.assertAuthorized || null
+                );
                 sendResponse(result);
             } catch (e) {
                 sendResponse({ ok: false, error: e.message || 'native_click_unavailable' });
@@ -4886,7 +4929,8 @@ function handleRuntimeMessage(request, sender, sendResponse) {
             const sourceTab = sender && sender.tab ? sender.tab : {};
             const response = await startRecreateWithGlobalAuthority(request, {
                 sourceTabId: sourceTab.id,
-                sourceTabUrl: sourceTab.url
+                sourceTabUrl: sourceTab.url,
+                sourceDocumentId: sender?.documentId || ''
             });
             sendResponse(response);
         })();
@@ -4899,8 +4943,26 @@ function handleRuntimeMessage(request, sender, sendResponse) {
             return false;
         }
 
-        sendResponse(recreateWorkflowController.abort('user'));
-        return false;
+        (async () => {
+            const result = await recreateWorkflowController.abort('user');
+            sendResponse(result);
+        })();
+        return true;
+    }
+
+    if (request.action === 'GET_GPT_RECREATE_STATUS') {
+        if (!recreateWorkflowController) {
+            sendResponse({ ok: false, error: 'workflow_unavailable' });
+            return false;
+        }
+
+        (async () => {
+            const activeRun = await recreateWorkflowController.getRunStatus();
+            sendResponse({ ok: true, activeRun });
+        })().catch((error) => {
+            sendResponse({ ok: false, error: error.message || 'workflow_unavailable' });
+        });
+        return true;
     }
 
     return false;
@@ -4923,6 +4985,11 @@ const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
     'START_SCRAPE',
     'START_R2_BACKUP',
     'START_GPT_RECREATE',
+    'ABORT_GPT_RECREATE',
+    'GET_GPT_RECREATE_STATUS',
+    'FETCH_GPT_RECREATE_REFERENCE_DATA_URL',
+    'GPT_RECREATE_NATIVE_CLICK',
+    'GPT_RECREATE_RESULT_BASELINE',
     'R2_BACKUP_CHECK_PRESENT',
     'R2_BACKUP_UPLOAD',
     'R2_BACKUP_PROGRESS',

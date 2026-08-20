@@ -1,6 +1,33 @@
 const utils = require('../../recreateWorkflowUtils.js');
 const { createRecreateWorkflowController } = require('../../recreateWorkflowBackground.js');
 
+function createStorageArea(initial = {}) {
+    const values = JSON.parse(JSON.stringify(initial));
+    return {
+        get: jest.fn((keys, callback) => {
+            const requested = Array.isArray(keys) ? keys : [keys];
+            const result = Object.fromEntries(requested
+                .filter((key) => Object.prototype.hasOwnProperty.call(values, key))
+                .map((key) => [key, JSON.parse(JSON.stringify(values[key]))]));
+            if (callback) callback(result);
+            return Promise.resolve(result);
+        }),
+        set: jest.fn((items, callback) => {
+            Object.assign(values, JSON.parse(JSON.stringify(items)));
+            if (callback) callback();
+            return Promise.resolve();
+        }),
+        remove: jest.fn((keys, callback) => {
+            for (const key of Array.isArray(keys) ? keys : [keys]) delete values[key];
+            if (callback) callback();
+            return Promise.resolve();
+        }),
+        snapshot() {
+            return JSON.parse(JSON.stringify(values));
+        }
+    };
+}
+
 function createChromeHarness() {
     const messages = [];
     const createdTabs = [];
@@ -34,6 +61,14 @@ function createChromeHarness() {
                     });
                     return;
                 }
+                if (message.action === 'GPT_RECREATE_CANCEL') {
+                    callback({
+                        ok: true,
+                        acknowledged: true,
+                        runId: message.runId
+                    });
+                    return;
+                }
                 callback({ ok: true });
             }),
             update: jest.fn((tabId, options, callback) => {
@@ -63,10 +98,11 @@ function createStartRequest(overrides = {}) {
 }
 
 async function waitForPendingChatStep(getCallback) {
-    for (let attempt = 0; attempt < 10; attempt++) {
+    for (let attempt = 0; attempt < 100; attempt++) {
         if (typeof getCallback() === 'function') return;
         await Promise.resolve();
     }
+    await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function callbackWithLastError(chromeApi, message, callback) {
@@ -276,6 +312,10 @@ describe('recreate background controller', () => {
                 chatCallback = callback;
                 return;
             }
+            if (message.action === 'GPT_RECREATE_CANCEL') {
+                callback({ ok: true, acknowledged: true, runId: message.runId });
+                return;
+            }
             callback({ ok: true });
         });
         const controller = createRecreateWorkflowController({ chromeApi, utils });
@@ -287,11 +327,12 @@ describe('recreate background controller', () => {
 
         await waitForPendingChatStep(() => chatCallback);
 
-        const abortResult = controller.abort('user');
-        expect(abortResult).toEqual(expect.objectContaining({ ok: true, aborted: true }));
+        const abortPromise = controller.abort('user');
         expect(controller.getActiveRunStatus()).toEqual(expect.objectContaining({
             status: 'stopping'
         }));
+        const abortResult = await abortPromise;
+        expect(abortResult).toEqual(expect.objectContaining({ ok: true, aborted: true }));
         expect(typeof chatCallback).toBe('function');
 
         chatCallback({ ok: true, generatedPrompt: 'A red cabin in snow.' });
@@ -300,6 +341,109 @@ describe('recreate background controller', () => {
         expect(result).toEqual(expect.objectContaining({ ok: false, error: 'workflow_aborted' }));
         expect(controller.getActiveRunStatus()).toBeNull();
         expect(messages.some((entry) => entry.message.action === 'GPT_RECREATE_IMAGINE_STEP')).toBe(false);
+    });
+
+    test('keeps a restarted run blocked until the exact document acknowledges cancellation', async () => {
+        const sessionStorage = createStorageArea({
+            gptRecreateRunLease: {
+                schemaVersion: 1,
+                runId: 'recreate-restarted',
+                epoch: 2,
+                status: 'running',
+                phase: 'imagine',
+                operationId: 'recreate-restarted:2:imagine:3',
+                operationTabId: 7,
+                operationDocumentId: 'document-old',
+                sourceTabId: 7,
+                sourceDocumentId: 'document-old',
+                chatTabId: null,
+                imagineTabId: 7,
+                startedAt: 1000
+            }
+        });
+        const { chromeApi } = createChromeHarness();
+        let acknowledge = false;
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, optionsOrCallback, maybeCallback) => {
+            const options = typeof optionsOrCallback === 'function' ? {} : optionsOrCallback;
+            const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+            expect(tabId).toBe(7);
+            expect(options).toEqual({ documentId: 'document-old' });
+            callback({
+                ok: true,
+                acknowledged: acknowledge,
+                runId: message.runId
+            });
+        });
+        const controller = createRecreateWorkflowController({ chromeApi, utils, sessionStorage });
+
+        await controller.initialize();
+        expect(controller.getActiveRunStatus()).toEqual(expect.objectContaining({ status: 'stopping' }));
+        expect(sessionStorage.snapshot().gptRecreateRunLease).toEqual(expect.objectContaining({
+            runId: 'recreate-restarted',
+            status: 'cancelling'
+        }));
+
+        acknowledge = true;
+        await expect(controller.getRunStatus()).resolves.toBeNull();
+        expect(sessionStorage.snapshot().gptRecreateRunLease).toBeUndefined();
+    });
+
+    test('binds helper authority and result baselines to one sender document', async () => {
+        const { chromeApi, messages } = createChromeHarness();
+        let chatCallback = null;
+        chromeApi.tabs.sendMessage = jest.fn((tabId, message, optionsOrCallback, maybeCallback) => {
+            const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+            messages.push({ tabId, message });
+            if (message.action === 'GPT_RECREATE_CHAT_STEP') {
+                chatCallback = callback;
+                return;
+            }
+            if (message.action === 'GPT_RECREATE_CANCEL') {
+                callback({ ok: true, acknowledged: true, runId: message.runId });
+                return;
+            }
+            callback({ ok: true });
+        });
+        const controller = createRecreateWorkflowController({ chromeApi, utils });
+        const startPromise = controller.start(createStartRequest(), {
+            sourceTabId: 1,
+            sourceTabUrl: 'https://grok.com/imagine',
+            sourceDocumentId: 'source-document'
+        });
+        await waitForPendingChatStep(() => chatCallback);
+        const authority = messages.find((entry) => entry.message.action === 'GPT_RECREATE_CHAT_STEP').message;
+        const signature = JSON.stringify({
+            version: 1,
+            mediaKind: 'image',
+            sourceKind: 'trusted-grok-media',
+            url: 'https://images-public.x.ai/generated/result.jpg',
+            poster: '',
+            width: 1024,
+            height: 1024
+        });
+
+        await expect(controller.recordResultBaseline({
+            ...authority,
+            assetIds: [],
+            signatures: [signature],
+            mediaKind: 'image'
+        }, { tab: { id: 10 }, documentId: 'chat-document' })).resolves.toEqual(expect.objectContaining({
+            ok: true,
+            recordedSignatures: 1
+        }));
+        await expect(controller.authorizeContentOperation(
+            authority,
+            { tab: { id: 10 }, documentId: 'stale-document' }
+        )).rejects.toThrow('workflow_aborted');
+        await expect(controller.recordResultBaseline({
+            ...authority,
+            assetIds: [],
+            signatures: [signature.replace('result.jpg', 'result.jpg?token=secret')],
+            mediaKind: 'image'
+        }, { tab: { id: 10 }, documentId: 'chat-document' })).rejects.toThrow('recreate_baseline_invalid');
+
+        await controller.abort('test_cleanup');
+        await startPromise;
     });
 
     test('requires chat response to include a non-empty generated prompt before Imagine step', async () => {

@@ -12,6 +12,7 @@ const {
     fetchViaBackgroundAsDataUrl,
     fetchViaBridgeAsDataUrl,
     fetchViaBridgeAsBlobUrl,
+    getPersistedGeneratedResultCandidateSignature,
     hasUploadPreview,
     injectEditorText,
     readBlobAsDataUrl,
@@ -389,16 +390,26 @@ describe('recreate content helpers', () => {
         );
     });
 
-    test('selects the current generated image using shared scoring', async () => {
-        const img = document.createElement('img');
-        img.alt = 'Generated image';
-        img.src = 'data:image/png;base64,aGVsbG8=';
-        Object.defineProperty(img, 'naturalWidth', { value: 720 });
-        Object.defineProperty(img, 'naturalHeight', { value: 720 });
-        img.getBoundingClientRect = () => ({ left: 400, top: 300, width: 200, height: 200 });
-        document.body.appendChild(img);
-
-        const selected = await selectCurrentGeneratedImage({ documentRef: document, utils });
+    test('selects the exact current image resolved by the Grok adapter', async () => {
+        const selected = await selectCurrentGeneratedImage({
+            documentRef: document,
+            locationRef: { href: 'https://grok.com/imagine/agent/agent-a?conversation=conversation-a' },
+            utils,
+            grokAdapter: {
+                detectGrokSurface: () => 'agent_media',
+                resolveCurrentSourceMedia: () => ({
+                    status: 'matched',
+                    sourceUrl: 'data:image/png;base64,aGVsbG8=',
+                    descriptor: {
+                        surface: 'agent_media',
+                        mediaKind: 'image',
+                        sourceAssetId: '73e5e137-1334-49ea-b06b-a9d9ba891003',
+                        sourcePostId: 'f37b4494-f17a-409a-a1de-afbca701d55f',
+                        conversationId: 'd66a30c2-8995-45f3-8b51-6831355ebc28'
+                    }
+                })
+            }
+        });
         expect(selected).toEqual(
             expect.objectContaining({
                 mimeType: 'image/png',
@@ -416,15 +427,25 @@ describe('recreate content helpers', () => {
             })
         );
 
-        const img = document.createElement('img');
-        img.alt = 'A striking minimalist abstract geometric artwork presented as a square with thick black frame.';
-        img.src = 'https://imagine-public.x.ai/imagine-public/images/post-detail.jpg';
-        Object.defineProperty(img, 'naturalWidth', { value: 720 });
-        Object.defineProperty(img, 'naturalHeight', { value: 1280 });
-        img.getBoundingClientRect = () => ({ left: 480, top: 120, width: 320, height: 568 });
-        document.body.appendChild(img);
-
-        const selected = await selectCurrentGeneratedImage({ documentRef: document, utils });
+        const selected = await selectCurrentGeneratedImage({
+            documentRef: document,
+            locationRef: { href: 'https://grok.com/imagine/post/f37b4494-f17a-409a-a1de-afbca701d55f' },
+            utils,
+            grokAdapter: {
+                detectGrokSurface: () => 'legacy_detail',
+                resolveCurrentSourceMedia: () => ({
+                    status: 'matched',
+                    sourceUrl: 'https://imagine-public.x.ai/imagine-public/images/post-detail.jpg',
+                    descriptor: {
+                        surface: 'legacy_detail',
+                        mediaKind: 'image',
+                        sourceAssetId: '73e5e137-1334-49ea-b06b-a9d9ba891003',
+                        sourcePostId: 'f37b4494-f17a-409a-a1de-afbca701d55f',
+                        conversationId: ''
+                    }
+                })
+            }
+        });
 
         expect(selected).toEqual(
             expect.objectContaining({
@@ -437,6 +458,42 @@ describe('recreate content helpers', () => {
             'https://imagine-public.x.ai/imagine-public/images/post-detail.jpg',
             expect.objectContaining({ credentials: 'omit' })
         );
+    });
+
+    test('selects one uniquely visible generated image on an unsupported Grok surface', async () => {
+        appendGeneratedImage({ src: LARGE_IMAGE_DATA_URL });
+
+        await expect(selectCurrentGeneratedImage({
+            documentRef: document,
+            locationRef: { href: 'https://grok.com/imagine' },
+            utils,
+            grokAdapter: {
+                detectGrokSurface: () => 'unsupported',
+                resolveCurrentSourceMedia: () => ({ status: 'unsupported' })
+            }
+        })).resolves.toEqual(expect.objectContaining({
+            source: 'current-grok-image',
+            byteLength: 12288,
+            metadata: expect.objectContaining({ sourceSurface: 'visible_fallback' })
+        }));
+    });
+
+    test('refuses to guess among multiple visible fallback media items', async () => {
+        appendGeneratedImage({ src: LARGE_IMAGE_DATA_URL });
+        appendGeneratedImage({
+            src: `data:image/png;base64,${Buffer.alloc(12 * 1024, 2).toString('base64')}`,
+            getBoundingClientRect: () => ({ left: 680, top: 120, width: 320, height: 320 })
+        });
+
+        await expect(selectCurrentGeneratedImage({
+            documentRef: document,
+            locationRef: { href: 'https://grok.com/imagine' },
+            utils,
+            grokAdapter: {
+                detectGrokSurface: () => 'unsupported',
+                resolveCurrentSourceMedia: () => ({ status: 'unsupported' })
+            }
+        })).rejects.toThrow('reference_ambiguous');
     });
 
     test('resolves a Grok post URL to its shared video reference', async () => {
@@ -2080,31 +2137,59 @@ describe('recreate content DOM actions', () => {
             duration: 10
         });
 
-        await expect(
-            runImaginePostValidationStep(
-                {
-                    runId: 'recreate_video_post_1',
-                    targetMode: 'video',
-                    referenceKind: 'video'
-                },
-                { documentRef: document, resultTimeoutMs: 100, intervalMs: 1 }
-            )
-        ).resolves.toEqual(
-            expect.objectContaining({
-                ok: true,
-                mediaKind: 'video',
-                resultReady: true,
-                result: expect.objectContaining({
+        const videoDataUrl = `data:video/mp4;base64,${Buffer.alloc(12 * 1024, 1).toString('base64')}`;
+        const uninstallMediaBridge = installMediaDataUrlBridge(videoDataUrl);
+
+        try {
+            await expect(
+                runImaginePostValidationStep(
+                    {
+                        runId: 'recreate_video_post_1',
+                        targetMode: 'video',
+                        referenceKind: 'video'
+                    },
+                    { documentRef: document, resultTimeoutMs: 100, intervalMs: 1 }
+                )
+            ).resolves.toEqual(
+                expect.objectContaining({
+                    ok: true,
                     mediaKind: 'video',
-                    sourceKind: 'trusted-grok-video',
-                    url: trustedVideoUrl,
-                    byteLength: 0,
-                    outputMediaHash: null,
-                    openable: true,
-                    openableSurface: 'opened-post-playable-video'
+                    resultReady: true,
+                    result: expect.objectContaining({
+                        mediaKind: 'video',
+                        sourceKind: 'trusted-grok-video',
+                        url: trustedVideoUrl,
+                        byteLength: 12288,
+                        outputMediaHash: expect.any(String),
+                        openable: true
+                    })
                 })
-            })
-        );
+            );
+        } finally {
+            uninstallMediaBridge();
+        }
+    });
+
+    test('opened-post validation rejects a stale public URL when only its signed query changed', async () => {
+        window.history.pushState({}, '', '/imagine/post/stale-public-proof');
+        const candidate = appendGeneratedImage({
+            src: 'https://images-public.x.ai/generated/stale-public-proof.jpg?cache=2'
+        });
+        const baselineSignature = getPersistedGeneratedResultCandidateSignature({
+            ...collectGeneratedImageCandidates(document).find((entry) => entry.element === candidate),
+            src: 'https://images-public.x.ai/generated/stale-public-proof.jpg?cache=1'
+        }, 'image');
+
+        await expect(runImaginePostValidationStep({
+            runId: 'recreate_stale_public_1',
+            targetMode: 'image',
+            referenceKind: 'image',
+            baselineSignatures: [baselineSignature]
+        }, {
+            documentRef: document,
+            resultTimeoutMs: 10,
+            intervalMs: 1
+        })).rejects.toThrow('imagine_result_timeout');
     });
 
     test('runImagineSubmitStep opens full-size data result cards before accepting them', async () => {
@@ -2435,7 +2520,13 @@ describe('recreate content bridge', () => {
             expect(keepAlive).toBe(true);
         });
 
-        expect(actions.runChatPromptStep).toHaveBeenCalledWith(request);
+        expect(actions.runChatPromptStep).toHaveBeenCalledWith(
+            request,
+            expect.objectContaining({
+                signal: expect.any(AbortSignal),
+                authority: expect.objectContaining({ runId: 'recreate_1' })
+            })
+        );
         expect(response).toEqual({
             ok: false,
             runId: 'recreate_1',

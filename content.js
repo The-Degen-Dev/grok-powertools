@@ -481,7 +481,11 @@ function getGrokConversationId(value) {
 
 function getSavedCardConversationId(card) {
     if (!card) return '';
-    const conversationIds = new Set(Array.from(card.querySelectorAll('a[href]'))
+    const ownedLinks = [
+        ...(card.matches?.('a[href]') ? [card] : []),
+        ...Array.from(card.querySelectorAll('a[href]'))
+    ];
+    const conversationIds = new Set(ownedLinks
         .filter((link) => findMediaCardRoot(link) === card)
         .map((link) => getGrokConversationId(link.href))
         .filter(Boolean));
@@ -539,7 +543,11 @@ function findMediaCardRoot(element) {
 
 function getSavedCardIdentity(card, fallbackIdentity = '') {
     if (!card) return getGrokMediaIdentity(fallbackIdentity);
-    const postIdentities = new Set(Array.from(card.querySelectorAll('a[href*="/imagine/post/"]'))
+    const ownedPostLinks = [
+        ...(card.matches?.('a[href*="/imagine/post/"]') ? [card] : []),
+        ...Array.from(card.querySelectorAll('a[href*="/imagine/post/"]'))
+    ];
+    const postIdentities = new Set(ownedPostLinks
         .filter((link) => findMediaCardRoot(link) === card)
         .map((link) => getGrokMediaIdentity(link.href))
         .filter(Boolean));
@@ -1060,6 +1068,204 @@ async function fetchGrokAssetMetadataViaBridge(
         throw new Error('asset_metadata_asset_mismatch');
     }
     return metadata;
+}
+
+const GROK_CONVERSATION_INVENTORY_MAX_ASSETS = 2048;
+const GROK_CONVERSATION_INVENTORY_MAX_BYTES = 2097152;
+const GROK_INVENTORY_SENSITIVE_KEY_PATTERN = /(?:authorization|bearer|cookie|credential|password|secret|signature|token)/i;
+
+function normalizeGrokInventoryMetadataValue(value, depth = 0) {
+    if (depth > 8) throw new Error('conversation_asset_metadata_too_deep');
+    if (value === null || typeof value === 'boolean') return value;
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) throw new Error('conversation_asset_metadata_invalid');
+        return value;
+    }
+    if (typeof value === 'string') {
+        if (/^https?:\/\//i.test(value)) {
+            let parsed;
+            try {
+                parsed = new URL(value);
+            } catch {
+                throw new Error('conversation_asset_metadata_invalid');
+            }
+            if (parsed.search || parsed.hash) throw new Error('conversation_asset_metadata_not_sanitized');
+        }
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value.map((item) => normalizeGrokInventoryMetadataValue(item, depth + 1));
+    }
+    if (!value || typeof value !== 'object') {
+        throw new Error('conversation_asset_metadata_invalid');
+    }
+    return Object.keys(value).sort().reduce((result, key) => {
+        if (GROK_INVENTORY_SENSITIVE_KEY_PATTERN.test(key)) {
+            throw new Error('conversation_asset_metadata_sensitive');
+        }
+        result[key] = normalizeGrokInventoryMetadataValue(value[key], depth + 1);
+        return result;
+    }, {});
+}
+
+function getGrokSerializedByteLength(value) {
+    return new Blob([value]).size;
+}
+
+function encodeGrokInventoryHashInput(value) {
+    if (typeof TextEncoder === 'function') return new TextEncoder().encode(value);
+    const encoded = unescape(encodeURIComponent(value));
+    return Uint8Array.from(encoded, (character) => character.charCodeAt(0));
+}
+
+function normalizeGrokConversationAssetInventory(value, conversationId) {
+    const normalizedConversationId = getGrokConversationId(`https://grok.com/?conversation=${conversationId}`);
+    if (!normalizedConversationId || !value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('conversation_inventory_invalid');
+    }
+    if (value.schemaVersion !== 1) throw new Error('conversation_inventory_schema_invalid');
+    if (getGrokConversationId(`https://grok.com/?conversation=${value.conversationId}`) !== normalizedConversationId) {
+        throw new Error('conversation_inventory_conversation_mismatch');
+    }
+    if (!Array.isArray(value.assets) || value.assets.length === 0) {
+        throw new Error('conversation_inventory_empty');
+    }
+    if (value.assets.length > GROK_CONVERSATION_INVENTORY_MAX_ASSETS) {
+        throw new Error('conversation_inventory_asset_limit');
+    }
+    if (getGrokSerializedByteLength(JSON.stringify(value)) > GROK_CONVERSATION_INVENTORY_MAX_BYTES) {
+        throw new Error('conversation_inventory_too_large');
+    }
+
+    const assetIds = new Set();
+    const assets = value.assets.map((candidate) => {
+        if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+            throw new Error('conversation_asset_invalid');
+        }
+        const assetId = getGrokMediaIdentity(candidate.assetId);
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(assetId)) {
+            throw new Error('conversation_asset_id_invalid');
+        }
+        if (assetIds.has(assetId)) throw new Error('conversation_asset_duplicate');
+        assetIds.add(assetId);
+        const mediaKind = candidate.mediaKind === 'image' || candidate.mediaKind === 'video'
+            ? candidate.mediaKind
+            : '';
+        if (!mediaKind) throw new Error('conversation_asset_media_type_missing');
+
+        let parsed;
+        try {
+            parsed = new URL(String(candidate.sourceUrl || ''));
+        } catch {
+            throw new Error('conversation_asset_source_invalid');
+        }
+        if (
+            parsed.protocol !== 'https:'
+            || parsed.username
+            || parsed.password
+            || (parsed.port && parsed.port !== '443')
+            || parsed.search
+            || parsed.hash
+            || (parsed.hostname !== 'assets.grok.com' && parsed.hostname !== 'imagine-public.x.ai')
+            || getGrokMediaIdentity(parsed.toString()) !== assetId
+        ) throw new Error('conversation_asset_source_invalid');
+
+        return {
+            assetId,
+            responseId: String(candidate.responseId || ''),
+            parentResponseId: String(candidate.parentResponseId || ''),
+            mediaKind,
+            sourceUrl: parsed.toString(),
+            promptText: String(candidate.promptText || ''),
+            assetMetadata: candidate.assetMetadata && typeof candidate.assetMetadata === 'object'
+                ? normalizeGrokInventoryMetadataValue(candidate.assetMetadata)
+                : null,
+            mediaGenInput: candidate.mediaGenInput === undefined
+                ? null
+                : normalizeGrokInventoryMetadataValue(candidate.mediaGenInput)
+        };
+    });
+
+    return { schemaVersion: 1, conversationId: normalizedConversationId, assets };
+}
+
+async function fetchGrokConversationAssetInventoryViaBridge(
+    conversationId,
+    root = document,
+    timeoutMs = 30000
+) {
+    await waitForMediaFetchBridgeReady(root, Math.min(5000, timeoutMs));
+    const normalizedConversationId = getGrokConversationId(`https://grok.com/?conversation=${conversationId}`);
+    if (!normalizedConversationId) throw new Error('conversation_inventory_identity_invalid');
+    const requestId = `inventory_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const inventory = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            root.removeEventListener('__gpt_fetch_conversation_asset_inventory_result', handleResult);
+            reject(new Error('Conversation inventory bridge timeout'));
+        }, timeoutMs);
+        function handleResult(event) {
+            if (event.detail?.requestId !== requestId) return;
+            root.removeEventListener('__gpt_fetch_conversation_asset_inventory_result', handleResult);
+            clearTimeout(timeout);
+            if (event.detail.error) reject(new Error(event.detail.error));
+            else resolve(event.detail.inventory);
+        }
+        root.addEventListener('__gpt_fetch_conversation_asset_inventory_result', handleResult);
+        root.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory', {
+            detail: { requestId, conversationId: normalizedConversationId }
+        }));
+    });
+    return normalizeGrokConversationAssetInventory(inventory, normalizedConversationId);
+}
+
+function stableSerializeGrokInventoryValue(value) {
+    if (Array.isArray(value)) return `[${value.map(stableSerializeGrokInventoryValue).join(',')}]`;
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map((key) => (
+            `${JSON.stringify(key)}:${stableSerializeGrokInventoryValue(value[key])}`
+        )).join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+async function hashGrokConversationAssetInventory(inventory) {
+    if (!globalThis.crypto?.subtle) throw new Error('conversation_inventory_hash_unavailable');
+    const canonical = stableSerializeGrokInventoryValue({
+        schemaVersion: inventory.schemaVersion,
+        conversationId: inventory.conversationId,
+        assets: inventory.assets
+    });
+    const digest = await globalThis.crypto.subtle.digest(
+        'SHA-256',
+        encodeGrokInventoryHashInput(canonical)
+    );
+    const hex = Array.from(new Uint8Array(digest))
+        .map((value) => value.toString(16).padStart(2, '0'))
+        .join('');
+    return `sha256:${inventory.assets.length}:${hex}`;
+}
+
+function buildCaptureMetadataFromConversationAsset(inventory, asset) {
+    return {
+        schemaVersion: 2,
+        evidenceSource: 'grok_conversation_response',
+        conversationId: inventory.conversationId,
+        assetId: asset.assetId,
+        responseId: asset.responseId,
+        parentResponseId: asset.parentResponseId,
+        promptText: asset.promptText,
+        assetMetadata: asset.assetMetadata,
+        mediaGenInput: asset.mediaGenInput
+    };
+}
+
+function createConversationAssetMediaDescriptor(asset) {
+    return {
+        tagName: asset.mediaKind === 'video' ? 'VIDEO' : 'IMG',
+        src: asset.sourceUrl,
+        currentSrc: asset.sourceUrl,
+        querySelector: () => null
+    };
 }
 
 function getBackupElementBox(el) {
@@ -1775,6 +1981,8 @@ class GrokOverlay {
         this.recreateReference = null;
         this.recreateRunning = false;
         this.recreateAbortRequested = false;
+        this.recreateUiRunSequence = 0;
+        this.recreateRetryAvailable = false;
         this.recreatePasteHandler = null;
         this.chatGptImageRunning = false;
 
@@ -2291,6 +2499,30 @@ class GrokOverlay {
                     this.recreateAbortRequested = false;
                     this.setRecreateStopping(false);
                     this.setRecreateStatus(EXTENSION_CONTEXT_REFRESHED_MESSAGE, 'error');
+                    return;
+                }
+                if (result.value?.aborted) {
+                    const stopped = result.value.status === 'stopped'
+                        || await this.waitForRecreateAuthorityClear();
+                    if (!stopped) {
+                        this.setRecreateStatus(
+                            'Still stopping. Refresh this page before starting another Recreate.',
+                            'error'
+                        );
+                        return;
+                    }
+                    const retrySafe = result.value.retrySafe === true
+                        || result.value.retrySafeWhenStopped === true;
+                    this.recreateUiRunSequence++;
+                    this.recreateAbortRequested = false;
+                    this.recreateRetryAvailable = !!this.recreateReference && retrySafe;
+                    this.setRecreateRunning(false);
+                    this.setRecreateStatus(
+                        retrySafe
+                            ? 'Cancelled. Reference retained for retry.'
+                            : 'Cancelled after submission. Verify the result before starting again.',
+                        'neutral'
+                    );
                 }
             } catch (error) {
                 this.recreateAbortRequested = false;
@@ -2957,7 +3189,10 @@ class GrokOverlay {
         this.recreateRunning = !!running;
         const startBtn = this.el.querySelector('#gptRecreateStartBtn');
         const stopBtn = this.el.querySelector('#gptRecreateStopBtn');
-        if (startBtn) startBtn.style.display = running ? 'none' : '';
+        if (startBtn) {
+            startBtn.style.display = running ? 'none' : '';
+            startBtn.textContent = this.recreateRetryAvailable ? 'Retry Recreate' : 'Start Recreate';
+        }
         if (stopBtn) {
             stopBtn.style.display = running ? '' : 'none';
             stopBtn.disabled = false;
@@ -2972,6 +3207,21 @@ class GrokOverlay {
         stopBtn.textContent = stopping ? 'Stopping...' : 'Stop';
     }
 
+    async waitForRecreateAuthorityClear(timeoutMs = 15000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const result = await safeChromeRuntimeSendMessage(
+                { action: 'GET_GPT_RECREATE_STATUS' },
+                'check recreate workflow status'
+            );
+            if (result.invalidated) return false;
+            if (result.value?.ok !== true) return false;
+            if (!result.value.activeRun) return true;
+            await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        return false;
+    }
+
     async setRecreateReferenceFromFile(file, source) {
         this.recreateReference = null;
         this.validateRecreateFile(file);
@@ -2980,6 +3230,7 @@ class GrokOverlay {
         if (typeof actions.readFileAsRecreateReference !== 'function') throw new Error('workflow_unavailable');
 
         this.recreateReference = await actions.readFileAsRecreateReference(file, source);
+        this.recreateRetryAvailable = false;
         const byteLength = Number(this.recreateReference && this.recreateReference.byteLength) || 0;
         const sizeText = byteLength > 0 ? ` (${Math.round(byteLength / 1024)} KB)` : '';
         this.setRecreateStatus(`Selected ${this.getRecreateReferenceKind()}: ${this.recreateReference.name}${sizeText}`, 'success');
@@ -2988,10 +3239,12 @@ class GrokOverlay {
     async setRecreateReferenceFromCurrentImage() {
         this.recreateReference = null;
         const actions = this.getRecreateActions();
-        if (typeof actions.selectCurrentGeneratedImage !== 'function') throw new Error('workflow_unavailable');
+        const selectCurrent = actions.selectCurrentGeneratedMedia || actions.selectCurrentGeneratedImage;
+        if (typeof selectCurrent !== 'function') throw new Error('workflow_unavailable');
 
-        this.recreateReference = await actions.selectCurrentGeneratedImage();
-        this.setRecreateStatus('Selected current Grok image.', 'success');
+        this.recreateReference = await selectCurrent();
+        this.recreateRetryAvailable = false;
+        this.setRecreateStatus(`Selected current Grok ${this.getRecreateReferenceKind()}.`, 'success');
     }
 
     setRecreateReferenceFromUrl(url) {
@@ -3017,6 +3270,7 @@ class GrokOverlay {
             url: value,
             source
         });
+        this.recreateRetryAvailable = false;
         this.setRecreateStatus(source === 'grok-post-url' ? 'Selected Grok post video URL.' : 'Selected Grok video URL.', 'success');
     }
 
@@ -3035,6 +3289,7 @@ class GrokOverlay {
         }
 
         this.recreateAbortRequested = false;
+        const uiRunSequence = ++this.recreateUiRunSequence;
         this.setRecreateRunning(true);
         this.setRecreateStatus('Starting recreate workflow...', 'info');
 
@@ -3051,27 +3306,27 @@ class GrokOverlay {
             }
             const response = responseResult.value;
 
-            if (this.recreateAbortRequested) {
+            if (this.recreateAbortRequested || uiRunSequence !== this.recreateUiRunSequence) {
                 return;
             }
 
             if (response && response.ok) {
+                this.recreateRetryAvailable = false;
                 const label = response.referenceKind === 'video' || this.getRecreateReferenceKind() === 'video' ? 'video' : 'image';
                 this.setRecreateStatus(`Generated ${label} ready.`, 'success');
             } else {
+                this.recreateRetryAvailable = !!this.recreateReference && response?.retrySafe === true;
                 this.setRecreateStatus(this.formatRecreateStatus(response), 'error');
             }
         } catch (error) {
-            if (!this.recreateAbortRequested) {
+            if (!this.recreateAbortRequested && uiRunSequence === this.recreateUiRunSequence) {
+                this.recreateRetryAvailable = false;
                 this.setRecreateStatus(error.message || 'Recreate workflow failed.', 'error');
             }
         } finally {
-            const wasAbortRequested = this.recreateAbortRequested;
-            this.recreateAbortRequested = false;
+            if (uiRunSequence !== this.recreateUiRunSequence) return;
+            if (this.recreateAbortRequested) return;
             this.setRecreateRunning(false);
-            if (wasAbortRequested) {
-                this.setRecreateStatus('Stopped.', 'neutral');
-            }
         }
     }
 
@@ -7545,10 +7800,12 @@ class RecreateWorkflowContentBridge {
         this.chromeRuntime = options.chromeRuntime || getChromeRuntime();
         this.documentRef = options.documentRef || (typeof document !== 'undefined' ? document : null);
         this.locationRef = options.locationRef || (typeof window !== 'undefined' ? window.location : null);
+        this.activeOperations = new Map();
+        this.messageListener = null;
     }
 
     setupListeners() {
-        if (!this.chromeRuntime || !this.chromeRuntime.onMessage) return;
+        if (!this.chromeRuntime || !this.chromeRuntime.onMessage || this.messageListener) return;
 
         const listener = (request, _sender, sendResponse) => {
             if (request.action === 'GPT_RECREATE_STATUS') {
@@ -7557,33 +7814,49 @@ class RecreateWorkflowContentBridge {
                 return false;
             }
 
+            if (request.action === 'GPT_RECREATE_CANCEL') {
+                const cancelled = this.cancelRunOperations(request);
+                sendResponse({
+                    ok: true,
+                    acknowledged: true,
+                    runId: request.runId,
+                    cancelled
+                });
+                return false;
+            }
+
             if (request.action === 'GPT_RECREATE_CHAT_STEP') {
-                this.runAsyncStep(() => this.getAction('runChatPromptStep')(request), sendResponse, request.runId);
+                this.runAsyncStep(
+                    (operationOptions) => this.getAction('runChatPromptStep')(request, operationOptions),
+                    sendResponse,
+                    request
+                );
                 return true;
             }
 
             if (request.action === 'GPT_RECREATE_IMAGINE_STEP') {
-                this.runAsyncStep(async () => {
-                    const response = await this.getAction('runImagineSubmitStep')(request);
+                this.runAsyncStep(async (operationOptions) => {
+                    const response = await this.getAction('runImagineSubmitStep')(request, operationOptions);
                     if (response && response.ok && request.generatedPrompt) {
                         this.recordGeneratedPrompt(request.generatedPrompt, request.targetMode || request.referenceKind || response.mediaKind);
                     }
                     return response;
-                }, sendResponse, request.runId);
+                }, sendResponse, request);
                 return true;
             }
 
             if (request.action === 'GPT_RECREATE_IMAGINE_POST_VALIDATION_STEP') {
                 this.runAsyncStep(
-                    () => this.getAction('runImaginePostValidationStep')(request),
+                    (operationOptions) => this.getAction('runImaginePostValidationStep')(request, operationOptions),
                     sendResponse,
-                    request.runId
+                    request
                 );
                 return true;
             }
 
             return false;
         };
+        this.messageListener = listener;
 
         if (this.chromeRuntime === getChromeRuntime()) {
             safeChromeAddListener(() => chrome.runtime.onMessage, listener, 'listen for recreate workflow messages');
@@ -7591,6 +7864,36 @@ class RecreateWorkflowContentBridge {
         }
 
         this.chromeRuntime.onMessage.addListener(listener);
+    }
+
+    getOperationKey(request) {
+        return [
+            String(request?.runId || ''),
+            Number.isInteger(request?.epoch) ? request.epoch : 0,
+            String(request?.operationId || request?.action || '')
+        ].join(':');
+    }
+
+    getOperationAuthority(request) {
+        return {
+            runId: String(request?.runId || ''),
+            epoch: Number.isInteger(request?.epoch) ? request.epoch : 0,
+            operationId: String(request?.operationId || request?.action || ''),
+            phase: String(request?.phase || '')
+        };
+    }
+
+    cancelRunOperations(request) {
+        let cancelled = 0;
+        for (const operation of this.activeOperations.values()) {
+            if (operation.runId !== String(request?.runId || '')) continue;
+            if (Number.isInteger(request?.epoch) && operation.epoch !== request.epoch) continue;
+            if (!operation.controller.signal.aborted) {
+                operation.controller.abort();
+                cancelled++;
+            }
+        }
+        return cancelled;
     }
 
     handleStatus(request) {
@@ -7620,10 +7923,27 @@ class RecreateWorkflowContentBridge {
         }
     }
 
-    runAsyncStep(fn, sendResponse, runId) {
+    runAsyncStep(fn, sendResponse, request) {
+        const runId = String(request?.runId || '');
+        const epoch = Number.isInteger(request?.epoch) ? request.epoch : 0;
+        const operationKey = this.getOperationKey(request);
+        const prior = this.activeOperations.get(operationKey);
+        if (prior && !prior.controller.signal.aborted) prior.controller.abort();
+
+        const controller = new AbortController();
+        const operation = { runId, epoch, controller };
+        this.activeOperations.set(operationKey, operation);
         (async () => {
             try {
-                const response = await fn();
+                const response = await fn({
+                    signal: controller.signal,
+                    authority: this.getOperationAuthority(request)
+                });
+                if (controller.signal.aborted) {
+                    const error = new Error('workflow_aborted');
+                    error.code = 'workflow_aborted';
+                    throw error;
+                }
                 sendResponse(response && typeof response === 'object' ? response : { ok: true, runId });
             } catch (error) {
                 sendResponse({
@@ -7637,6 +7957,10 @@ class RecreateWorkflowContentBridge {
                         title: this.documentRef ? this.documentRef.title : ''
                     }
                 });
+            } finally {
+                if (this.activeOperations.get(operationKey) === operation) {
+                    this.activeOperations.delete(operationKey);
+                }
             }
         })();
     }
@@ -8852,6 +9176,10 @@ class GrokScraper {
         ) activeReturn.viewportRestored = true;
         if (!this.isRunActive(runToken)) return false;
         if (!await this.ensureSavedGalleryAllScope(runToken)) return false;
+        if (pending.conversationId && pending.inventoryComplete !== true) {
+            await this.processPendingConversationInventory(runToken);
+            return false;
+        }
         const result = await this.queueRunStateWrite({
             scrapeNavigation: null,
             currentItemId: null
@@ -8944,9 +9272,11 @@ class GrokScraper {
                 for (let i = 0; i < semanticItems.length; i++) {
                     const entry = semanticItems[i];
                     const cleanId = this.getCleanId(entry.sourceUrl);
-                    const alreadyDone = this.backupMode
-                        ? this._backupVisited.has(cleanId)
-                        : this.isMediaProcessed(entry.sourceUrl) || this._runVisited.has(cleanId);
+                    const conversationId = getSavedCardConversationId(entry.card);
+                    const entryRunKey = conversationId
+                        ? `conversation:${conversationId}`
+                        : `card:${entry.cardIdentity}`;
+                    const alreadyDone = this._runVisited.has(entryRunKey);
                     if (cleanId && !alreadyDone) {
                         targetCleanId = cleanId;
                         targetItem = entry.image;
@@ -9142,6 +9472,9 @@ class GrokScraper {
             expectedMediaType,
             sourceCardIdentity,
             conversationId,
+            entryRunKey: conversationId
+                ? `conversation:${conversationId}`
+                : `card:${sourceCardIdentity}`,
             sourceUrl,
             sourceTransferUrl,
             galleryUrl: window.location.href,
@@ -9162,17 +9495,308 @@ class GrokScraper {
         if (!this.isRunActive(runToken, runEpoch)) return;
         if (!await this.ensureSavedGalleryAllScope(runToken)) return;
         this.pendingNavigation = pendingNavigation;
+        if (conversationId) {
+            await this.processPendingConversationInventory(runToken);
+            return;
+        }
+
         dispatchFullPointerClick(targetItem);
         const nextSurface = await this.waitForSurface(
             (surface) => surface !== SCRAPE_SURFACES.savedGallery,
             runToken
         );
-        if (!this.isRunActive(runToken)) return;
+        if (!this.isRunActive(runToken, runEpoch)) return;
         if (!nextSurface) {
-            await this.failRun('The selected Saved card did not open a supported media surface.', 'surface_transition_timeout');
+            await this.failRun(
+                'The selected Saved card did not expose a conversation inventory surface.',
+                'surface_transition_timeout'
+            );
             return;
         }
         await this.determineModeAndExecute(runToken);
+    }
+
+    async persistPendingConversationProgress(pending, operation, runToken = this.runToken) {
+        if (!pending || !this.isRunActive(runToken, pending.runEpoch)) return false;
+        const result = await this.queueRunStateWrite({
+            currentItemId: pending.currentItemId,
+            scrapeNavigation: pending
+        }, operation, { runToken, runEpoch: pending.runEpoch });
+        if (result.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return false;
+        }
+        if (!result.ok || !this.isRunActive(runToken, pending.runEpoch)) return false;
+        this.pendingNavigation = pending;
+        return true;
+    }
+
+    async refreshProcessedIds(runToken = this.runToken) {
+        const storedResult = await safeChromeStorageGet('local', ['processedIds'], {}, 'refresh processed IDs');
+        if (storedResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return false;
+        }
+        if (!this.isRunActive(runToken)) return false;
+        this.processedIds = new Set(Array.isArray(storedResult.value.processedIds)
+            ? storedResult.value.processedIds
+            : []);
+        return true;
+    }
+
+    async processPendingConversationInventory(runToken = this.runToken) {
+        const pending = this.pendingNavigation;
+        if (
+            !pending
+            || pending.runToken !== runToken
+            || pending.runEpoch !== this.runEpoch
+            || !pending.expectedIdentity
+        ) {
+            await this.failRun(
+                'Saved media inventory resumed without its conversation identity.',
+                'conversation_inventory_context_missing'
+            );
+            return;
+        }
+        if (!this.isRunActive(runToken, pending.runEpoch)) return;
+        const startingSurface = this.getCurrentSurface();
+        const supportedSurface = startingSurface === SCRAPE_SURFACES.savedGallery
+            || startingSurface === SCRAPE_SURFACES.agentMedia
+            || startingSurface === SCRAPE_SURFACES.legacyDetail;
+        if (!supportedSurface) {
+            await this.failRun(
+                'Conversation inventory processing reached an unsupported Grok surface.',
+                'conversation_inventory_surface_changed'
+            );
+            return;
+        }
+        if (startingSurface === SCRAPE_SURFACES.savedGallery
+            && !await this.ensureSavedGalleryAllScope(runToken)) return;
+
+        const conversationId = pending.conversationId || getGrokConversationId(window.location.href);
+        if (!conversationId) {
+            await this.failRun(
+                'Could not identify the Saved conversation needed to inventory all media.',
+                'conversation_identity_missing'
+            );
+            return;
+        }
+
+        let inventory;
+        try {
+            inventory = await fetchGrokConversationAssetInventoryViaBridge(conversationId);
+        } catch (error) {
+            if (!this.isRunActive(runToken, pending.runEpoch)) return;
+            await this.failRun(
+                `Could not inventory every asset in the selected Saved entry (${error?.message || 'inventory_failed'}).`,
+                'conversation_inventory_failed'
+            );
+            return;
+        }
+        if (!this.isRunActive(runToken, pending.runEpoch)) return;
+        if (startingSurface === SCRAPE_SURFACES.savedGallery
+            && !await this.ensureSavedGalleryAllScope(runToken)) return;
+
+        const selectedAssetIndex = inventory.assets.findIndex((asset) => asset.assetId === pending.expectedIdentity);
+        if (selectedAssetIndex < 0) {
+            await this.failRun(
+                'The selected Saved preview was not present in its authoritative conversation inventory.',
+                'conversation_inventory_selected_asset_missing'
+            );
+            return;
+        }
+        let inventoryHash;
+        try {
+            inventoryHash = await hashGrokConversationAssetInventory(inventory);
+        } catch (error) {
+            if (!this.isRunActive(runToken, pending.runEpoch)) return;
+            await this.failRun(
+                `Could not verify the Saved conversation inventory (${error?.message || 'inventory_hash_failed'}).`,
+                'conversation_inventory_failed'
+            );
+            return;
+        }
+        const assetIds = inventory.assets.map((asset) => asset.assetId);
+        if (Array.isArray(pending.assetIds) && pending.assetIds.length) {
+            const sameAssetIds = pending.assetIds.length === assetIds.length
+                && pending.assetIds.every((assetId, index) => assetId === assetIds[index]);
+            if (!sameAssetIds || pending.inventoryHash !== inventoryHash) {
+                await this.failRun(
+                    'The selected Saved conversation changed while Sync was active. Restart Sync to re-inventory it.',
+                    'conversation_inventory_changed'
+                );
+                return;
+            }
+        }
+
+        if (!await this.refreshProcessedIds(runToken)) return;
+        const firstMissingProcessedIndex = assetIds.findIndex((assetId) => !this.isMediaProcessed(assetId));
+        const firstUnconfirmedIndex = firstMissingProcessedIndex < 0
+            ? assetIds.length
+            : firstMissingProcessedIndex;
+        const trustedBackupCursor = pending.inventoryProgressVersion === 2
+            && Number.isInteger(pending.nextAssetIndex)
+            ? Math.max(0, Math.min(pending.nextAssetIndex, assetIds.length))
+            : 0;
+        let activePending = {
+            ...pending,
+            conversationId: inventory.conversationId,
+            entryRunKey: `conversation:${inventory.conversationId}`,
+            inventoryHash,
+            assetIds,
+            inventoryProgressVersion: 2,
+            nextAssetIndex: this.backupMode ? trustedBackupCursor : firstUnconfirmedIndex
+        };
+        if (!await this.persistPendingConversationProgress(
+            activePending,
+            'save conversation inventory progress',
+            runToken
+        )) return;
+
+        const isTargetedCanary = this.backupMode
+            && this.backupOptions?.mode === 'canary'
+            && getGrokMediaIdentity(this.backupOptions?.options?.targetIdentity);
+        const indexes = isTargetedCanary
+            ? [selectedAssetIndex]
+            : inventory.assets.map((_asset, index) => index)
+                .filter((index) => index >= activePending.nextAssetIndex);
+        const confirmedBackupIndexes = new Set();
+
+        for (const index of indexes) {
+            if (!this.isRunActive(runToken, activePending.runEpoch)) return;
+            if (this.getCurrentSurface() !== startingSurface) {
+                await this.failRun(
+                    'Grok changed surfaces while a conversation inventory was being transferred.',
+                    'conversation_inventory_surface_changed'
+                );
+                return;
+            }
+            if (startingSurface === SCRAPE_SURFACES.savedGallery
+                && !await this.ensureSavedGalleryAllScope(runToken)) return;
+            const asset = inventory.assets[index];
+            const alreadyTerminal = !this.backupMode && this.isMediaProcessed(asset.assetId);
+            if (!alreadyTerminal && !this._runVisited.has(`asset:${asset.assetId}`)) {
+                if (this.backupMode && !this._backupVisited.has(asset.assetId)) {
+                    this._backupVisited.add(asset.assetId);
+                    this.backupStats.totalSeen++;
+                    if (!await this.persistBackupProgress(runToken)) return;
+                }
+                const captureMetadata = buildCaptureMetadataFromConversationAsset(inventory, asset);
+                const response = await this.performDownload(
+                    createConversationAssetMediaDescriptor(asset),
+                    asset.assetId,
+                    runToken,
+                    captureMetadata
+                );
+                if (!this.isRunActive(runToken, activePending.runEpoch)) return;
+                if (!isSuccessfulMediaTransferStatus(response?.status)) {
+                    await this.failRun(
+                        response?.error || 'A conversation asset could not be transferred.',
+                        'media_transfer_failed',
+                        false
+                    );
+                    return;
+                }
+                this._runVisited.add(`asset:${asset.assetId}`);
+                if (!this.backupMode && shouldPersistBackupProcessedId(response.status)) {
+                    if (!await this.persistProcessedId(asset.assetId, runToken)) {
+                        if (this.isRunActive(runToken, activePending.runEpoch)) {
+                            await this.failRun(
+                                'Could not persist the completed conversation asset receipt.',
+                                'processed_ids_mutation_failed'
+                            );
+                        }
+                        return;
+                    }
+                }
+                if (this.backupMode && shouldPersistBackupProcessedId(response.status)) {
+                    confirmedBackupIndexes.add(index);
+                }
+            }
+
+            if (!isTargetedCanary) {
+                let nextConfirmedIndex = activePending.nextAssetIndex;
+                if (this.backupMode) {
+                    while (confirmedBackupIndexes.has(nextConfirmedIndex)) nextConfirmedIndex++;
+                } else {
+                    const nextMissingIndex = assetIds.findIndex((assetId) => !this.isMediaProcessed(assetId));
+                    nextConfirmedIndex = nextMissingIndex < 0 ? assetIds.length : nextMissingIndex;
+                }
+                if (nextConfirmedIndex !== activePending.nextAssetIndex) {
+                    activePending = { ...activePending, nextAssetIndex: nextConfirmedIndex };
+                    if (!await this.persistPendingConversationProgress(
+                        activePending,
+                        'advance durable conversation inventory progress',
+                        runToken
+                    )) return;
+                }
+            }
+
+            const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
+            if (this.backupMode && canaryStopReason) {
+                await this.stopBackupMode(canaryStopReason);
+                return;
+            }
+        }
+
+        const durability = await this.waitForRunDurability(runToken, {
+            timeoutMs: this.backupMode ? 300000 : 180000
+        });
+        if (!this.isRunActive(runToken, activePending.runEpoch)) return;
+        if (durability.status !== 'durable') {
+            const reason = durability.status === 'timeout'
+                ? 'durability_timeout'
+                : (durability.status === 'ignored' ? 'stale_authority' : 'durability_failed');
+            await this.failRun('Conversation asset transfers did not become durable.', reason, false);
+            return;
+        }
+        if (!await this.refreshProcessedIds(runToken)) return;
+        const requiredAssetIds = isTargetedCanary
+            ? [inventory.assets[selectedAssetIndex].assetId]
+            : assetIds;
+        const missingReceipt = requiredAssetIds.find((assetId) => !this.isMediaProcessed(assetId));
+        if (missingReceipt) {
+            const missingIndex = assetIds.indexOf(missingReceipt);
+            activePending = {
+                ...activePending,
+                nextAssetIndex: Math.max(0, missingIndex)
+            };
+            if (!await this.persistPendingConversationProgress(
+                activePending,
+                'rewind conversation inventory to missing receipt',
+                runToken
+            )) return;
+            await this.failRun(
+                'A conversation asset completed without a durable processed-ID receipt.',
+                'conversation_asset_receipt_missing',
+                false
+            );
+            return;
+        }
+
+        this._runVisited.add(activePending.entryRunKey || `conversation:${inventory.conversationId}`);
+        activePending = { ...activePending, nextAssetIndex: assetIds.length };
+        if (startingSurface !== SCRAPE_SURFACES.savedGallery) {
+            activePending = { ...activePending, inventoryComplete: true };
+            if (!await this.persistPendingConversationProgress(
+                activePending,
+                'complete conversation inventory before Saved return',
+                runToken
+            )) return;
+            await this.returnToSavedGallery(runToken);
+            return;
+        }
+        const clearResult = await this.queueRunStateWrite({
+            scrapeNavigation: null,
+            currentItemId: null
+        }, 'complete conversation inventory', { runToken, runEpoch: activePending.runEpoch });
+        if (clearResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return;
+        }
+        if (!clearResult.ok || !this.isRunActive(runToken, activePending.runEpoch)) return;
+        this.pendingNavigation = null;
+        await this.executeListView(runToken);
     }
 
     async waitForMatchingAgentMedia(expectedIdentity, runToken = this.runToken) {
@@ -9184,6 +9808,16 @@ class GrokScraper {
             await this.sleep(200);
         }
         return lastResult;
+    }
+
+    async waitForConversationId(runToken = this.runToken, timeout = this.Config.surfaceWait) {
+        const startedAt = Date.now();
+        while (this.isRunActive(runToken) && Date.now() - startedAt < timeout) {
+            const conversationId = getGrokConversationId(window.location.href);
+            if (conversationId) return conversationId;
+            await this.sleep(200);
+        }
+        return getGrokConversationId(window.location.href);
     }
 
     async waitForMatchingLegacyDetailMedia(expectedIdentity, runToken = this.runToken) {
@@ -9230,47 +9864,28 @@ class GrokScraper {
             return;
         }
 
-        const match = await this.waitForMatchingAgentMedia(pending.expectedIdentity, runToken);
-        if (!this.isRunActive(runToken)) return;
-        if (match.status !== 'matched' || !match.media) {
-            const reason = match.status === 'ambiguous' ? 'agent_media_ambiguous' : 'agent_media_missing';
-            const message = match.status === 'ambiguous'
-                ? 'Agent Mode exposed more than one match for the selected Saved media.'
-                : 'Agent Mode did not expose the selected Saved media.';
-            await this.failRun(message, reason);
+        const conversationId = pending.conversationId || await this.waitForConversationId(runToken);
+        if (conversationId) {
+            if (pending.conversationId !== conversationId) {
+                const updatedPending = {
+                    ...pending,
+                    conversationId,
+                    entryRunKey: `conversation:${conversationId}`
+                };
+                if (!await this.persistPendingConversationProgress(
+                    updatedPending,
+                    'save Agent conversation identity',
+                    runToken
+                )) return;
+            }
+            await this.processPendingConversationInventory(runToken);
             return;
         }
-
-        if (this.backupMode && !this._backupVisited.has(pending.currentItemId)) {
-            this._backupVisited.add(pending.currentItemId);
-            this.backupStats.totalSeen++;
-            await this.persistBackupProgress(runToken);
-            if (!this.isRunActive(runToken)) return;
-        }
-
-        const response = await this.performDownload(match.media, pending.currentItemId, runToken);
         if (!this.isRunActive(runToken)) return;
-        if (!isSuccessfulMediaTransferStatus(response?.status)) {
-            await this.failRun(
-                response?.error || 'The selected Agent media could not be transferred.',
-                'media_transfer_failed',
-                false
-            );
-            return;
-        }
-
-        this._runVisited.add(pending.currentItemId);
-        if (!this.backupMode && shouldPersistBackupProcessedId(response.status)) {
-            await this.persistProcessedId(pending.currentItemId, runToken);
-        }
-        if (!this.isRunActive(runToken)) return;
-
-        const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
-        if (this.backupMode && canaryStopReason) {
-            await this.returnToSavedGallery(runToken, { stopBackupReason: canaryStopReason });
-            return;
-        }
-        await this.returnToSavedGallery(runToken);
+        await this.failRun(
+            'Agent Mode did not expose the Saved conversation identity needed to inventory every asset.',
+            'conversation_identity_missing'
+        );
     }
 
     async returnToSavedGallery(runToken = this.runToken, options = {}) {
@@ -9423,6 +10038,35 @@ class GrokScraper {
     async executeDetailView(runToken = this.runToken) {
         if (!this.isRunActive(runToken)) return;
 
+        let pendingConversationId = this.pendingNavigation?.conversationId || '';
+        if (this.pendingNavigation?.expectedIdentity && !pendingConversationId) {
+            pendingConversationId = await this.waitForConversationId(runToken);
+        }
+        if (this.pendingNavigation?.expectedIdentity && pendingConversationId) {
+            if (this.pendingNavigation.conversationId !== pendingConversationId) {
+                const updatedPending = {
+                    ...this.pendingNavigation,
+                    conversationId: pendingConversationId,
+                    entryRunKey: `conversation:${pendingConversationId}`
+                };
+                if (!await this.persistPendingConversationProgress(
+                    updatedPending,
+                    'save detail conversation identity',
+                    runToken
+                )) return;
+            }
+            await this.processPendingConversationInventory(runToken);
+            return;
+        }
+        if (this.pendingNavigation?.expectedIdentity) {
+            if (!this.isRunActive(runToken)) return;
+            await this.failRun(
+                'Detail view did not expose the Saved conversation identity needed to inventory every asset.',
+                'conversation_identity_missing'
+            );
+            return;
+        }
+
         // Deduplication
         const storedStateResult = await safeChromeStorageGet('local', ['currentItemId'], {}, 'load current item ID');
         if (storedStateResult.invalidated) {
@@ -9509,7 +10153,12 @@ class GrokScraper {
         return metadata;
     }
 
-    async performBackupUpload(mediaEl = null, currentItemId = null, runToken = this.runToken) {
+    async performBackupUpload(
+        mediaEl = null,
+        currentItemId = null,
+        runToken = this.runToken,
+        captureMetadataOverride = null
+    ) {
         if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
 
         const mediaStart = Date.now();
@@ -9533,7 +10182,8 @@ class GrokScraper {
         try {
             let captureMetadata;
             try {
-                captureMetadata = await this.loadAuthoritativeCaptureMetadata(src, runToken);
+                captureMetadata = captureMetadataOverride
+                    || await this.loadAuthoritativeCaptureMetadata(src, runToken);
             } catch (error) {
                 if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
                 this.backupStats.errors++;
@@ -9657,9 +10307,21 @@ class GrokScraper {
         return response || { status: 'error', error: 'R2 backup returned no response.' };
     }
 
-    async performDownload(mediaEl = null, currentItemId = null, runToken = this.runToken) {
+    async performDownload(
+        mediaEl = null,
+        currentItemId = null,
+        runToken = this.runToken,
+        captureMetadataOverride = null
+    ) {
         if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
-        if (this.backupMode) return this.performBackupUpload(mediaEl, currentItemId, runToken);
+        if (this.backupMode) {
+            return this.performBackupUpload(
+                mediaEl,
+                currentItemId,
+                runToken,
+                captureMetadataOverride
+            );
+        }
 
         if (mediaEl) {
             const src = getBackupMediaElementSrc(mediaEl);
@@ -9678,7 +10340,8 @@ class GrokScraper {
             let promptText = '';
             if (cloudEnabled) {
                 try {
-                    captureMetadata = await this.loadAuthoritativeCaptureMetadata(src, runToken);
+                    captureMetadata = captureMetadataOverride
+                        || await this.loadAuthoritativeCaptureMetadata(src, runToken);
                     promptText = captureMetadata.promptText || '';
                 } catch (error) {
                     if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
@@ -9843,6 +10506,10 @@ if (typeof module === 'undefined') {
         evaluateGalleryReceipt,
         findMatchingAgentMedia,
         fetchGrokAssetMetadataViaBridge,
+        fetchGrokConversationAssetInventoryViaBridge,
+        normalizeGrokConversationAssetInventory,
+        hashGrokConversationAssetInventory,
+        buildCaptureMetadataFromConversationAsset,
         dispatchFullPointerClick,
         getSavedGalleryContext,
         getGrokConversationId,

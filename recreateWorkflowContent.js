@@ -5,7 +5,13 @@
             : typeof require === 'function'
               ? require('./recreateWorkflowUtils.js')
               : null;
-    const actions = factory(utils, root);
+    const grokAdapter =
+        root && root.GrokPowerToolsGrokImagineAdapter
+            ? root.GrokPowerToolsGrokImagineAdapter
+            : typeof require === 'function'
+              ? require('./grokImagineAdapter.js')
+              : null;
+    const actions = factory(utils, grokAdapter, root);
 
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = actions;
@@ -14,7 +20,7 @@
     if (root) {
         root.GrokRecreateContentActions = actions;
     }
-})(typeof self !== 'undefined' ? self : typeof globalThis !== 'undefined' ? globalThis : this, function (utils, root) {
+})(typeof self !== 'undefined' ? self : typeof globalThis !== 'undefined' ? globalThis : this, function (utils, grokAdapter, root) {
     function fail(error) {
         const wrapped = new Error(error);
         wrapped.code = error;
@@ -24,19 +30,68 @@
     const DEFAULT_IMAGINE_RESULT_TIMEOUT_MS = 7 * 60 * 1000;
     const DEFAULT_IMAGINE_PLACEHOLDER_TIMEOUT_MS = 90 * 1000;
 
+    function abortError() {
+        return fail('workflow_aborted');
+    }
+
+    function throwIfAborted(signal) {
+        if (signal && signal.aborted) throw abortError();
+    }
+
+    function isAbortFailure(error, signal = null) {
+        return !!(
+            signal?.aborted
+            || error?.code === 'workflow_aborted'
+            || error?.name === 'AbortError'
+        );
+    }
+
+    function withAbort(promise, signal) {
+        if (!signal) return Promise.resolve(promise);
+        throwIfAborted(signal);
+
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const onAbort = () => finish(null, abortError());
+
+            function finish(value, error) {
+                if (settled) return;
+                settled = true;
+                signal.removeEventListener('abort', onAbort);
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve(value);
+            }
+
+            signal.addEventListener('abort', onAbort, { once: true });
+            Promise.resolve(promise).then(
+                (value) => finish(value),
+                (error) => finish(null, error)
+            );
+        });
+    }
+
     function getUtils(options = {}) {
         const workflowUtils = options.utils || utils;
         if (!workflowUtils) throw fail('reference_capture_failed');
         return workflowUtils;
     }
 
+    function getGrokAdapter(options = {}) {
+        return options.grokAdapter || grokAdapter || null;
+    }
+
     function waitForCondition(predicate, options = {}) {
         const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 10000;
         const intervalMs = Number.isFinite(options.intervalMs) ? options.intervalMs : 250;
+        const signal = options.signal || null;
 
         return new Promise((resolve, reject) => {
             let settled = false;
             let pollTimer = null;
+            const onAbort = () => finish(null, abortError());
             const deadlineTimer = setTimeout(() => {
                 finish(null, fail(options.timeoutError || 'timeout'));
             }, timeoutMs);
@@ -46,6 +101,7 @@
                 settled = true;
                 clearTimeout(deadlineTimer);
                 if (pollTimer) clearTimeout(pollTimer);
+                if (signal) signal.removeEventListener('abort', onAbort);
 
                 if (error) {
                     reject(error);
@@ -57,9 +113,11 @@
 
             function poll() {
                 Promise.resolve()
+                    .then(() => throwIfAborted(signal))
                     .then(() => predicate())
                     .then((value) => {
                         if (settled) return;
+                        throwIfAborted(signal);
 
                         if (value) {
                             finish(value);
@@ -71,31 +129,67 @@
                     .catch((error) => finish(null, error));
             }
 
+            if (signal) {
+                if (signal.aborted) {
+                    finish(null, abortError());
+                    return;
+                }
+                signal.addEventListener('abort', onAbort, { once: true });
+            }
             poll();
         });
     }
 
-    function delay(ms) {
-        return new Promise((resolve) => {
+    function delay(ms, signal = null) {
+        return withAbort(new Promise((resolve) => {
             setTimeout(resolve, ms);
-        });
+        }), signal);
     }
 
-    function readBlobAsDataUrl(blob) {
+    function readBlobAsDataUrl(blob, options = {}) {
         if (!blob) return Promise.reject(fail('reference_missing'));
+        const signal = options.signal || null;
 
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
+            let settled = false;
+            const onAbort = () => {
+                try {
+                    reader.abort();
+                } catch {
+                    // Reader may already be settled.
+                }
+                finish(null, abortError());
+            };
+
+            function finish(value, error) {
+                if (settled) return;
+                settled = true;
+                if (signal) signal.removeEventListener('abort', onAbort);
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve(value);
+            }
+
             reader.onload = () => {
                 const dataUrl = String(reader.result || '');
                 if (!dataUrl) {
-                    reject(fail('reference_capture_failed'));
+                    finish(null, fail('reference_capture_failed'));
                     return;
                 }
-                resolve(dataUrl);
+                finish(dataUrl);
             };
-            reader.onerror = () => reject(fail('reference_capture_failed'));
-            reader.onabort = () => reject(fail('reference_capture_failed'));
+            reader.onerror = () => finish(null, fail('reference_capture_failed'));
+            reader.onabort = () => finish(null, signal?.aborted ? abortError() : fail('reference_capture_failed'));
+            if (signal) {
+                if (signal.aborted) {
+                    finish(null, abortError());
+                    return;
+                }
+                signal.addEventListener('abort', onAbort, { once: true });
+            }
             reader.readAsDataURL(blob);
         });
     }
@@ -330,6 +424,46 @@
         ].join('|');
     }
 
+    function normalizePersistedResultUrl(value) {
+        try {
+            const parsed = new URL(String(value || ''));
+            if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
+            parsed.search = '';
+            parsed.hash = '';
+            return parsed.toString().slice(0, 2048);
+        } catch {
+            return '';
+        }
+    }
+
+    function getPersistedGeneratedResultCandidateSignature(candidate, mediaKind = candidate?.mediaKind || 'image') {
+        const kind = mediaKind === 'video' ? 'video' : 'image';
+        const dimensions = kind === 'video'
+            ? {
+                width: Number(candidate?.videoWidth || 0),
+                height: Number(candidate?.videoHeight || 0)
+            }
+            : {
+                width: Number(candidate?.naturalWidth || 0),
+                height: Number(candidate?.naturalHeight || 0)
+            };
+
+        return JSON.stringify({
+            version: 1,
+            mediaKind: kind,
+            sourceKind: getGeneratedResultSourceKind(candidate?.src, kind),
+            url: normalizePersistedResultUrl(candidate?.src),
+            poster: normalizePersistedResultUrl(candidate?.poster),
+            ...dimensions
+        });
+    }
+
+    function getGeneratedAssetId(value) {
+        return String(value || '').match(
+            /\/generated\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i
+        )?.[1]?.toLowerCase() || '';
+    }
+
     function createGeneratedResultSnapshot(documentRef = document, mediaKind = 'image') {
         const candidates = collectGeneratedResultCandidates(documentRef, mediaKind);
         const elementSignatures = new WeakMap();
@@ -340,7 +474,11 @@
         return {
             elements: new WeakSet(candidates.map((candidate) => candidate.element)),
             elementSignatures,
-            signatures: new Set(candidates.map(getGeneratedResultCandidateSignature))
+            signatures: new Set(candidates.map(getGeneratedResultCandidateSignature)),
+            persistedSignatures: new Set(
+                candidates.map((candidate) => getPersistedGeneratedResultCandidateSignature(candidate, mediaKind))
+            ),
+            assetIds: new Set(candidates.map((candidate) => getGeneratedAssetId(candidate.src)).filter(Boolean))
         };
     }
 
@@ -348,6 +486,13 @@
         if (!previousSnapshot) return true;
 
         const signature = getGeneratedResultCandidateSignature(candidate);
+        const persistedSignature = getPersistedGeneratedResultCandidateSignature(
+            candidate,
+            candidate?.mediaKind || 'image'
+        );
+        const assetId = getGeneratedAssetId(candidate.src);
+        if (assetId && previousSnapshot.assetIds?.has(assetId)) return false;
+        if (previousSnapshot.persistedSignatures?.has(persistedSignature)) return false;
         if (previousSnapshot.elementSignatures && previousSnapshot.elementSignatures.has(candidate.element)) {
             return previousSnapshot.elementSignatures.get(candidate.element) !== signature;
         }
@@ -355,6 +500,22 @@
         if (previousSnapshot.elements && previousSnapshot.elements.has(candidate.element)) return false;
         if (previousSnapshot.signatures && previousSnapshot.signatures.has(signature)) return false;
         return true;
+    }
+
+    async function recordResultBaseline(previousSnapshot, mediaKind, options = {}) {
+        if (!options.authority) return;
+        const runtime = getChromeRuntime(options);
+        if (!runtime || typeof runtime.sendMessage !== 'function') throw fail('workflow_unavailable');
+        const response = await withAbort(runtime.sendMessage({
+            action: 'GPT_RECREATE_RESULT_BASELINE',
+            authority: options.authority,
+            mediaKind,
+            assetIds: Array.from(previousSnapshot?.assetIds || []),
+            signatures: Array.from(previousSnapshot?.persistedSignatures || [])
+        }), options.signal);
+        if (!response || response.ok !== true) {
+            throw fail((response && response.error) || 'recreate_authority_persist_failed');
+        }
     }
 
     function getGeneratedResultSourceKind(src, mediaKind = 'image') {
@@ -532,22 +693,6 @@
         };
     }
 
-    function isPlayableOpenedPostVideoCandidate(candidate) {
-        const rect = candidate.rect || {};
-        const renderedMin = Math.min(Number(rect.width || 0), Number(rect.height || 0));
-        const videoMax = Math.max(Number(candidate.videoWidth || 0), Number(candidate.videoHeight || 0));
-        const duration = Number(candidate.duration || 0);
-        return (
-            renderedMin >= 120 &&
-            videoMax >= 256 &&
-            duration > 0 &&
-            (
-                Number(candidate.readyState || 0) >= 3 ||
-                Number(candidate.bufferedSeconds || 0) > 0
-            )
-        );
-    }
-
     async function verifyInlineMediaCandidate(candidate, options = {}) {
         const workflowUtils = getUtils(options);
         const mediaKind = options.mediaKind === 'video' ? 'video' : 'image';
@@ -585,7 +730,8 @@
             {
                 timeoutMs,
                 intervalMs,
-                timeoutError: 'result_post_open_failed'
+                timeoutError: 'result_post_open_failed',
+                signal: options.signal
             }
         );
         const mediaVerification = await verifyTrustedMediaCandidate(openedCandidate, options);
@@ -648,28 +794,11 @@
                     await waitForCondition(() => pageLooksLikeImaginePost(getDocumentRef(options)), {
                         timeoutMs: Number.isFinite(options.openedPostTimeoutMs) ? options.openedPostTimeoutMs : 20000,
                         intervalMs: Number.isFinite(options.intervalMs) ? options.intervalMs : 500,
-                        timeoutError: 'result_post_open_failed'
+                        timeoutError: 'result_post_open_failed',
+                        signal: options.signal
                     });
                 }
                 return await verifyOpenedPostMedia(candidate, options);
-            }
-
-            if (
-                mediaKind === 'video' &&
-                sourceKind === 'trusted-grok-video' &&
-                pageLooksLikeImaginePost(getDocumentRef(options)) &&
-                isPlayableOpenedPostVideoCandidate(candidate)
-            ) {
-                return {
-                    ok: true,
-                    summary: {
-                        ...summarizeGeneratedResultCandidate(candidate, mediaKind),
-                        byteLength: 0,
-                        outputMediaHash: null,
-                        openable: true,
-                        openableSurface: 'opened-post-playable-video'
-                    }
-                };
             }
 
             const mediaVerification = await verifyTrustedMediaCandidate(candidate, options);
@@ -686,6 +815,7 @@
                 }
             };
         } catch (error) {
+            if (isAbortFailure(error, options.signal)) throw abortError();
             return {
                 ok: false,
                 error: normalizeResultOpenabilityError(error)
@@ -806,6 +936,7 @@
         const verificationCache = new Map();
 
         while (now() - startedAt <= resultTimeoutMs) {
+            throwIfAborted(options.signal);
             lastState = inspectImagineResultState(documentRef, previousSnapshot, { mediaKind });
             if (lastState.ready && lastState.candidate) {
                 const signature = getGeneratedResultCandidateSignature(lastState.candidate);
@@ -817,6 +948,7 @@
                     });
                     verificationCache.set(signature, verification);
                 }
+                throwIfAborted(options.signal);
 
                 if (verification.ok) return verification.summary;
                 lastOpenabilityError = verification.error;
@@ -837,7 +969,7 @@
                 firstPlaceholderAt = null;
             }
 
-            await delay(intervalMs);
+            await delay(intervalMs, options.signal);
         }
 
         throw createImagineResultError(
@@ -868,9 +1000,11 @@
         const documentRef = getDocumentRef(options);
         const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
         const requestId = `recreate_fetch_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        const signal = options.signal || null;
 
         return new Promise((resolve, reject) => {
             let settled = false;
+            const onAbort = () => finish(null, abortError());
             const timer = setTimeout(() => {
                 finish(null, fail('reference_capture_failed'));
             }, timeoutMs);
@@ -880,6 +1014,7 @@
                 settled = true;
                 clearTimeout(timer);
                 documentRef.removeEventListener('__gpt_fetch_media_result', onResult);
+                if (signal) signal.removeEventListener('abort', onAbort);
 
                 if (error) {
                     reject(error);
@@ -902,6 +1037,13 @@
             }
 
             documentRef.addEventListener('__gpt_fetch_media_result', onResult);
+            if (signal) {
+                if (signal.aborted) {
+                    finish(null, abortError());
+                    return;
+                }
+                signal.addEventListener('abort', onAbort, { once: true });
+            }
 
             try {
                 documentRef.dispatchEvent(
@@ -921,9 +1063,11 @@
         const documentRef = getDocumentRef(options);
         const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
         const requestId = `recreate_fetch_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        const signal = options.signal || null;
 
         return new Promise((resolve, reject) => {
             let settled = false;
+            const onAbort = () => finish(null, abortError());
             const timer = setTimeout(() => {
                 finish(null, fail('reference_capture_failed'));
             }, timeoutMs);
@@ -933,6 +1077,7 @@
                 settled = true;
                 clearTimeout(timer);
                 documentRef.removeEventListener('__gpt_fetch_media_data_url_result', onResult);
+                if (signal) signal.removeEventListener('abort', onAbort);
 
                 if (error) {
                     reject(error);
@@ -955,6 +1100,13 @@
             }
 
             documentRef.addEventListener('__gpt_fetch_media_data_url_result', onResult);
+            if (signal) {
+                if (signal.aborted) {
+                    finish(null, abortError());
+                    return;
+                }
+                signal.addEventListener('abort', onAbort, { once: true });
+            }
 
             try {
                 documentRef.dispatchEvent(
@@ -992,23 +1144,49 @@
         }
     }
 
-    function fetchWithTimeout(url, fetchOptions, timeoutMs) {
-        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return fetch(url, fetchOptions);
+    function fetchWithTimeout(url, fetchOptions = {}, timeoutMs) {
+        const externalSignal = fetchOptions.signal || null;
+        throwIfAborted(externalSignal);
+        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+            return withAbort(fetch(url, fetchOptions), externalSignal);
+        }
 
         return new Promise((resolve, reject) => {
             const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            let settled = false;
+            const onExternalAbort = () => {
+                if (abortController) abortController.abort();
+                finish(null, abortError());
+            };
             const timer = setTimeout(() => {
                 if (abortController) abortController.abort();
-                reject(fail('reference_capture_failed'));
+                finish(null, fail('reference_capture_failed'));
             }, timeoutMs);
 
             const options = abortController
                 ? { ...fetchOptions, signal: abortController.signal }
                 : fetchOptions;
 
+            function finish(value, error) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve(value);
+            }
+
+            if (externalSignal) {
+                externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+            }
+
             fetch(url, options)
-                .then(resolve, reject)
-                .finally(() => clearTimeout(timer));
+                .then((response) => finish(response), (error) => {
+                    finish(null, externalSignal?.aborted ? abortError() : error);
+                });
         });
     }
 
@@ -1019,16 +1197,17 @@
         try {
             const response = await fetchWithTimeout(
                 String(url),
-                { credentials: 'omit' },
+                { credentials: 'omit', signal: options.signal },
                 Number.isFinite(options.timeoutMs) ? options.timeoutMs : undefined
             );
             if (!response || !response.ok) throw fail('reference_capture_failed');
 
-            const dataUrl = await readBlobAsDataUrl(await response.blob());
+            const dataUrl = await readBlobAsDataUrl(await response.blob(), options);
             if (!dataUrlMatchesMediaKind(dataUrl, mediaKind)) throw fail('reference_capture_failed');
 
             return dataUrl;
-        } catch {
+        } catch (error) {
+            if (isAbortFailure(error, options.signal)) throw abortError();
             throw fail('reference_capture_failed');
         }
     }
@@ -1041,17 +1220,20 @@
         if (!runtime || typeof runtime.sendMessage !== 'function') throw fail('reference_capture_failed');
 
         try {
-            const response = await runtime.sendMessage({
+            const message = {
                 action: 'FETCH_GPT_RECREATE_REFERENCE_DATA_URL',
                 url: String(url)
-            });
+            };
+            if (options.authority) message.authority = options.authority;
+            const response = await withAbort(runtime.sendMessage(message), options.signal);
 
             if (!response || !response.ok || !dataUrlMatchesMediaKind(response.dataUrl, mediaKind)) {
                 throw fail('reference_capture_failed');
             }
 
             return response.dataUrl;
-        } catch {
+        } catch (error) {
+            if (isAbortFailure(error, options.signal)) throw abortError();
             throw fail('reference_capture_failed');
         }
     }
@@ -1073,39 +1255,44 @@
 
                 try {
                     return await fetchPublicImageAsDataUrl(value, { ...options, expectedKind: mediaKind, timeoutMs: options.timeoutMs });
-                } catch {
+                } catch (error) {
+                    if (isAbortFailure(error, options.signal)) throw abortError();
                     publicFetchFailed = true;
                     // Fall through to the extension service worker.
                 }
 
                 try {
                     return await fetchViaBackgroundAsDataUrl(value, options);
-                } catch {
+                } catch (error) {
+                    if (isAbortFailure(error, options.signal)) throw abortError();
                     // Fall through to the page bridge. Some Grok media is only reachable with page cookies.
                 }
 
                 try {
                     return await fetchViaBridgeAsDataUrl(value, options);
-                } catch {
+                } catch (error) {
+                    if (isAbortFailure(error, options.signal)) throw abortError();
                     throw fail(publicFetchFailed ? 'reference_public_fetch_failed' : 'reference_capture_failed');
                 }
             }
 
             try {
                 return await fetchViaBridgeAsDataUrl(value, options);
-            } catch {
+            } catch (error) {
+                if (isAbortFailure(error, options.signal)) throw abortError();
                 throw fail('reference_capture_failed');
             }
         }
 
         try {
-            const response = await fetch(value);
+            const response = await fetch(value, options.signal ? { signal: options.signal } : undefined);
             if (!response || !response.ok) throw fail('reference_capture_failed');
 
-            const dataUrl = await readBlobAsDataUrl(await response.blob());
+            const dataUrl = await readBlobAsDataUrl(await response.blob(), options);
             if (!dataUrlMatchesMediaKind(dataUrl, mediaKind)) throw fail('reference_capture_failed');
             return dataUrl;
-        } catch {
+        } catch (error) {
+            if (isAbortFailure(error, options.signal)) throw abortError();
             throw fail('reference_capture_failed');
         }
     }
@@ -1145,7 +1332,7 @@
         try {
             const response = await fetchWithTimeout(
                 String(postUrl),
-                { credentials: 'include' },
+                { credentials: 'include', signal: options.signal },
                 Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000
             );
             if (!response || !response.ok) throw fail('reference_capture_failed');
@@ -1163,6 +1350,7 @@
                 }
             };
         } catch (error) {
+            if (isAbortFailure(error, options.signal)) throw abortError();
             if (error && error.code) throw error;
             throw fail('reference_capture_failed');
         }
@@ -1442,24 +1630,115 @@
     }
 
     async function selectCurrentGeneratedImage(options = {}) {
+        return await selectCurrentGeneratedMedia(options);
+    }
+
+    function findUniqueFallbackCurrentMedia(documentRef, workflowUtils) {
+        const view = documentRef.defaultView || root || {};
+        const documentElement = documentRef.documentElement || {};
+        const viewport = {
+            width: Number(view.innerWidth || documentElement.clientWidth || 0),
+            height: Number(view.innerHeight || documentElement.clientHeight || 0)
+        };
+        const intersectsViewport = (candidate) => {
+            const rect = candidate.rect || {};
+            const left = Number(rect.left || 0);
+            const top = Number(rect.top || 0);
+            const right = left + Number(rect.width || 0);
+            const bottom = top + Number(rect.height || 0);
+            if (viewport.width <= 0 || viewport.height <= 0) return right > left && bottom > top;
+            return right > 0 && bottom > 0 && left < viewport.width && top < viewport.height;
+        };
+        const imageCandidates = collectGeneratedImageCandidates(documentRef).filter((candidate) => (
+            !isInsidePowerToolsOverlay(candidate.element) &&
+            intersectsViewport(candidate) &&
+            Math.max(Number(candidate.naturalWidth || 0), Number(candidate.naturalHeight || 0)) >= 256 &&
+            workflowUtils.isLikelyGeneratedImageCandidate?.(candidate) === true &&
+            (
+                workflowUtils.isSupportedCurrentImageSrc?.(candidate.src) === true ||
+                getGeneratedResultSourceKind(candidate.src, 'image') === 'data-url' ||
+                getGeneratedResultSourceKind(candidate.src, 'image') === 'blob-url'
+            )
+        ));
+        const videoCandidates = collectGeneratedVideoCandidates(documentRef).filter((candidate) => (
+            !isInsidePowerToolsOverlay(candidate.element) &&
+            intersectsViewport(candidate) &&
+            Math.max(Number(candidate.videoWidth || 0), Number(candidate.videoHeight || 0)) >= 256 &&
+            (
+                workflowUtils.isSupportedCurrentVideoSrc?.(candidate.src) === true ||
+                getGeneratedResultSourceKind(candidate.src, 'video') === 'data-url' ||
+                getGeneratedResultSourceKind(candidate.src, 'video') === 'blob-url'
+            )
+        ));
+        const candidates = [
+            ...imageCandidates.map((candidate) => ({ ...candidate, mediaKind: 'image' })),
+            ...videoCandidates.map((candidate) => ({ ...candidate, mediaKind: 'video' }))
+        ];
+
+        if (candidates.length > 1) throw fail('reference_ambiguous');
+        return candidates[0] || null;
+    }
+
+    async function selectCurrentGeneratedMedia(options = {}) {
         const workflowUtils = getUtils(options);
         const documentRef = getDocumentRef(options);
-        const documentElement = documentRef.documentElement || {};
-        const view = documentRef.defaultView || root || {};
-        const viewport = options.viewport || {
-            width: view.innerWidth || documentElement.clientWidth || 0,
-            height: view.innerHeight || documentElement.clientHeight || 0
-        };
-        const candidates = collectGeneratedImageCandidates(documentRef);
-        const selected = workflowUtils.chooseBestGeneratedImageCandidate(candidates, viewport);
-        if (!selected) throw fail('reference_missing');
+        const adapter = getGrokAdapter(options);
+        const location = options.locationRef || documentRef.defaultView?.location || root?.location;
+        throwIfAborted(options.signal);
+        const surface = adapter?.detectGrokSurface
+            ? adapter.detectGrokSurface({ root: documentRef, location })
+            : 'unsupported';
+        const resolved = adapter?.resolveCurrentSourceMedia
+            ? adapter.resolveCurrentSourceMedia({
+                root: documentRef,
+                surface,
+                location,
+                sourcePostIdHint: options.sourcePostIdHint
+            })
+            : { status: 'unsupported' };
+        if (resolved.status === 'ambiguous') throw fail('reference_ambiguous');
+        if (resolved.status !== 'matched' && (surface === 'agent_media' || surface === 'legacy_detail')) {
+            throw fail('reference_missing');
+        }
 
-        const dataUrl = await sourceToDataUrl(selected.src, { ...options, utils: workflowUtils, documentRef });
+        const fallback = resolved.status === 'matched'
+            ? null
+            : findUniqueFallbackCurrentMedia(documentRef, workflowUtils);
+        if (resolved.status !== 'matched' && !fallback) throw fail('reference_missing');
+        const mediaKind = resolved.status === 'matched'
+            ? (resolved.descriptor.mediaKind === 'video' ? 'video' : 'image')
+            : fallback.mediaKind;
+        const sourceUrl = resolved.status === 'matched' ? resolved.sourceUrl : fallback.src;
+        const descriptor = resolved.status === 'matched'
+            ? resolved.descriptor
+            : {
+                sourceAssetId: getGeneratedAssetId(sourceUrl),
+                sourcePostId: '',
+                conversationId: '',
+                surface: 'visible_fallback'
+            };
+        const dataUrl = await sourceToDataUrl(sourceUrl, {
+            ...options,
+            utils: workflowUtils,
+            documentRef,
+            expectedKind: mediaKind
+        });
+        throwIfAborted(options.signal);
+        const parsed = workflowUtils.parseRecreateMediaDataUrl
+            ? workflowUtils.parseRecreateMediaDataUrl(dataUrl)
+            : workflowUtils.parseRecreateDataUrl(dataUrl);
         return workflowUtils.normalizeRecreateReference({
-            name: 'current-grok-image.png',
-            mimeType: workflowUtils.parseRecreateDataUrl(dataUrl).mimeType,
+            name: mediaKind === 'video' ? 'current-grok-video.mp4' : 'current-grok-image.png',
+            kind: mediaKind,
+            mimeType: parsed.mimeType,
             dataUrl,
-            source: 'current-grok-image'
+            source: mediaKind === 'video' ? 'grok-video-url' : 'current-grok-image',
+            metadata: {
+                sourceAssetId: descriptor.sourceAssetId,
+                sourcePostId: descriptor.sourcePostId,
+                conversationId: descriptor.conversationId || '',
+                sourceSurface: descriptor.surface
+            }
         });
     }
 
@@ -1702,7 +1981,8 @@
             {
                 timeoutMs,
                 intervalMs,
-                timeoutError: 'chat_submit_not_sent'
+                timeoutError: 'chat_submit_not_sent',
+                signal: options.signal
             }
         );
     }
@@ -1818,17 +2098,23 @@
     }
 
     async function sendNativeClick(click, options = {}) {
+        throwIfAborted(options.signal);
         if (typeof options.nativeClick === 'function') {
-            return await options.nativeClick(click);
+            const pending = options.authority
+                ? options.nativeClick(click, options.authority)
+                : options.nativeClick(click);
+            return await withAbort(pending, options.signal);
         }
 
         const runtime = getChromeRuntime(options);
         if (!runtime || typeof runtime.sendMessage !== 'function') throw fail('native_click_unavailable');
 
-        const response = await runtime.sendMessage({
+        const message = {
             action: 'GPT_RECREATE_NATIVE_CLICK',
             click
-        });
+        };
+        if (options.authority) message.authority = options.authority;
+        const response = await withAbort(runtime.sendMessage(message), options.signal);
 
         if (!response || response.ok !== true) {
             throw fail((response && response.error) || 'native_click_unavailable');
@@ -1866,11 +2152,14 @@
 
     async function clickElementNatively(element, options = {}) {
         if (!element) throw fail('native_click_unavailable');
+        throwIfAborted(options.signal);
         const click = getElementClickPoint(element, options);
 
         return await withOverlayPointerPassThrough(element, options, async () => {
+            throwIfAborted(options.signal);
             if (shouldUseNativeClick(options)) {
                 await sendNativeClick(click, options);
+                throwIfAborted(options.signal);
                 return true;
             }
 
@@ -1881,9 +2170,11 @@
     }
 
     async function clickChatSubmitButton(submitButton, documentRef, workflowUtils, options = {}) {
+        throwIfAborted(options.signal);
         try {
             await clickElementNatively(submitButton, { ...options, documentRef });
         } catch (error) {
+            if (isAbortFailure(error, options.signal)) throw abortError();
             const code = String((error && error.code) || '');
             throw fail(code.startsWith('native_click_') ? code : 'chat_submit_failed');
         }
@@ -1896,6 +2187,7 @@
         }
 
         const click = getElementClickPoint(submitButton, { ...options, documentRef });
+        throwIfAborted(options.signal);
         if (!safelyClickElement(submitButton, click)) {
             if (typeof submitButton.click !== 'function') throw fail('chat_submit_failed');
             submitButton.click();
@@ -2238,6 +2530,7 @@
             : Math.min(submitTimeoutMs, 10000);
         let reference = workflowUtils.normalizeRecreateReference(request.reference);
         const mediaKind = getReferenceKind(reference);
+        throwIfAborted(options.signal);
         reference = await resolveReferenceForUpload(reference, {
             ...options,
             documentRef,
@@ -2257,6 +2550,7 @@
             : ['You are creating a Grok Imagine prompt from the attached reference image.', workflowUtils.FINAL_PROMPT_MARKER];
 
         if (request.bestPracticesEnabled) {
+            throwIfAborted(options.signal);
             ensureGrokSearchEnabled(documentRef);
         }
 
@@ -2264,20 +2558,25 @@
         await waitForCondition(() => findUploadInput(documentRef, reference), {
             timeoutMs: uploadInputTimeoutMs,
             intervalMs,
-            timeoutError: 'chat_upload_input_missing'
+            timeoutError: 'chat_upload_input_missing',
+            signal: options.signal
         });
+        throwIfAborted(options.signal);
         uploadReferenceFile(reference, documentRef);
         await waitForCondition(() => hasUploadPreview(documentRef, previewSnapshot, reference), {
             timeoutMs: uploadPreviewTimeoutMs,
             intervalMs,
-            timeoutError: 'chat_upload_preview_missing'
+            timeoutError: 'chat_upload_preview_missing',
+            signal: options.signal
         });
         await waitForCondition(() => findEditor(documentRef), {
             timeoutMs: editorTimeoutMs,
             intervalMs,
-            timeoutError: 'chat_editor_missing'
+            timeoutError: 'chat_editor_missing',
+            signal: options.signal
         });
 
+        throwIfAborted(options.signal);
         if (!injectEditorText(instruction, documentRef)) {
             throw fail('chat_editor_missing');
         }
@@ -2293,15 +2592,18 @@
             {
                 timeoutMs: editorInjectionTimeoutMs,
                 intervalMs,
-                timeoutError: 'chat_editor_injection_failed'
+                timeoutError: 'chat_editor_injection_failed',
+                signal: options.signal
             }
         );
 
         const submitButton = await waitForCondition(() => findVisibleButtonByLabels(['Submit', 'Send'], documentRef), {
             timeoutMs: submitTimeoutMs,
             intervalMs,
-            timeoutError: 'chat_submit_missing'
+            timeoutError: 'chat_submit_missing',
+            signal: options.signal
         });
+        throwIfAborted(options.signal);
         await clickChatSubmitButton(submitButton, documentRef, workflowUtils, options);
 
         const generatedPrompt = await waitForCondition(
@@ -2316,7 +2618,8 @@
             {
                 timeoutMs,
                 intervalMs,
-                timeoutError: 'chat_answer_timeout'
+                timeoutError: 'chat_answer_timeout',
+                signal: options.signal
             }
         );
 
@@ -2442,7 +2745,9 @@
             : 'image';
         const promptVerificationText = getGeneratedPromptVerificationText(request.generatedPrompt);
 
+        throwIfAborted(options.signal);
         selectImagineMode(mediaKind, documentRef);
+        throwIfAborted(options.signal);
         if (!injectEditorText(request.generatedPrompt, documentRef)) throw fail('imagine_editor_missing');
 
         await waitForCondition(
@@ -2453,22 +2758,28 @@
             {
                 timeoutMs,
                 intervalMs,
-                timeoutError: 'imagine_editor_injection_failed'
+                timeoutError: 'imagine_editor_injection_failed',
+                signal: options.signal
             }
         );
 
         await waitForCondition(() => findVisibleButtonByLabels(['Submit'], documentRef), {
             timeoutMs,
             intervalMs,
-            timeoutError: 'imagine_submit_disabled'
+            timeoutError: 'imagine_submit_disabled',
+            signal: options.signal
         });
 
+        throwIfAborted(options.signal);
         const previousResultSnapshot = createGeneratedResultSnapshot(documentRef, mediaKind);
+        await recordResultBaseline(previousResultSnapshot, mediaKind, options);
+        throwIfAborted(options.signal);
         const submitButton = findVisibleButtonByLabels(['Submit'], documentRef);
         setPromptCaptureHint(documentRef, mediaKind);
         try {
             await clickElementNatively(submitButton, { ...options, documentRef });
         } catch (error) {
+            if (isAbortFailure(error, options.signal)) throw abortError();
             const code = String((error && error.code) || '');
             throw fail(code.startsWith('native_click_') ? code : 'imagine_submit_failed');
         } finally {
@@ -2483,7 +2794,9 @@
             mediaKind,
             chromeRuntime: options.chromeRuntime,
             nativeClick: options.nativeClick,
-            now: options.now
+            now: options.now,
+            signal: options.signal,
+            authority: options.authority
         });
 
         return {
@@ -2518,9 +2831,17 @@
             ? 'video'
             : 'image';
 
+        throwIfAborted(options.signal);
         if (!pageLooksLikeImaginePost(documentRef)) throw fail('imagine_post_missing');
 
-        const result = await waitForImagineResult(documentRef, null, {
+        const previousSnapshot = {
+            elements: new WeakSet(),
+            elementSignatures: new WeakMap(),
+            signatures: new Set(),
+            persistedSignatures: new Set(Array.isArray(request.baselineSignatures) ? request.baselineSignatures : []),
+            assetIds: new Set(Array.isArray(request.baselineAssetIds) ? request.baselineAssetIds : [])
+        };
+        const result = await waitForImagineResult(documentRef, previousSnapshot, {
             ...options,
             resultTimeoutMs,
             placeholderTimeoutMs,
@@ -2529,7 +2850,9 @@
             mediaKind,
             chromeRuntime: options.chromeRuntime,
             nativeClick: options.nativeClick,
-            now: options.now
+            now: options.now,
+            signal: options.signal,
+            authority: options.authority
         });
 
         return {
@@ -2548,6 +2871,7 @@
         collectGeneratedResultCandidates,
         clickElementNatively,
         createGeneratedResultSnapshot,
+        getPersistedGeneratedResultCandidateSignature,
         dataUrlToFile,
         collectUploadPreviewCandidates,
         createUploadPreviewSnapshot,
@@ -2568,6 +2892,7 @@
         runImagineSubmitStep,
         runImaginePostValidationStep,
         selectCurrentGeneratedImage,
+        selectCurrentGeneratedMedia,
         setFileInputFiles,
         sourceToDataUrl,
         submitVisibleButton,

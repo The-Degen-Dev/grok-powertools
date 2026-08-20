@@ -2326,6 +2326,91 @@ npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-
                     </tr>
                 </tbody>
             </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Recreate Authority</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Recreate binds every helper message to the exact owner document and keeps
+                            Stop in <code>cancelling</code> until that document acknowledges cancellation
+                            or the bounded authority clear fails closed. Result proof compares a persisted
+                            pre-submit signature baseline with one new playable result. Video proof requires
+                            fetched non-empty bytes and a stable digest, not a poster or URL alone.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Current may fall back outside Agent/detail only when exactly one visible
+                            supported source exists. Multiple candidates or unsupported surfaces fail
+                            closed instead of selecting the first media element.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Retry remains unavailable while cancellation authority is unresolved. This
+                            delays recovery by the bounded acknowledgement window, but prevents the prior
+                            document and a replacement run from submitting concurrently.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            Live Current, local-file, retry, result, and pending-phase Stop behavior remain
+                            approval-gated. Deterministic proof is not live provider proof.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Multi-Asset Sync</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            The authenticated conversation response is the Saved-entry inventory. Sync
+                            verifies that the selected card asset belongs to it, hashes the full sanitized
+                            inventory with SHA-256, transfers every image/video in stable order, and advances
+                            its version-2 cursor only from durable per-asset receipts. Agent/detail navigation
+                            is used only to acquire a missing conversation ID.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Inventory parser checks live beside the existing bridge contract checks instead
+                            of a new dedicated file because the page-world parser is intentionally private.
+                            The former Saved-origin one-preview fallback was removed because it could silently
+                            omit sibling assets.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            No second permanent conversation ledger was added. After a reload, Sync may
+                            re-fetch a completed conversation and derive completion from existing processed
+                            asset IDs. That extra read prevents a historical preview ID from hiding newly
+                            discovered siblings.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            The current live <code>/responses</code> shape and Saved-card linkage still need
+                            narrow read-only inspection. No live Sync, download, upload, R2 write, or
+                            processed-ID mutation has run during this implementation phase.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </main>
     </body>
 </html>

@@ -3,6 +3,7 @@ const path = require('path');
 const {
     VideoRetryManager,
     fetchGrokAssetMetadataViaBridge,
+    fetchGrokConversationAssetInventoryViaBridge,
     fetchMediaDataUrlViaBridge
 } = require('../../content.js');
 
@@ -387,6 +388,209 @@ describe('bridge prompted video editor targeting', () => {
             window.fetch = originalFetch;
             document.removeEventListener('__gpt_fetch_conversation_asset_inventory_result', resultListener);
         }
+    });
+
+    test('conversation asset inventory derives the current Grok media URL from its object key', async () => {
+        const conversationId = '44444444-4444-4444-8444-444444444444';
+        const assetId = '55555555-5555-4555-8555-555555555555';
+        const payload = {
+            responses: [{
+                responseId: 'key-only-response',
+                mediaGenInput: { prompt: 'candid friends walking along the beach' },
+                fileAttachmentAssetMetadata: [{
+                    assetId,
+                    key: `users/example/generated/${assetId}/image.jpg`,
+                    mimeType: 'image/jpeg'
+                }]
+            }]
+        };
+        const originalFetch = window.fetch;
+        window.fetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => payload
+        }));
+        const resultPromise = new Promise((resolve) => {
+            document.addEventListener('__gpt_fetch_conversation_asset_inventory_result', (event) => {
+                if (event.detail?.requestId === 'inventory-key-only') resolve(event.detail);
+            }, { once: true });
+        });
+
+        if (!window.__gptPowerToolsBridgeInstalled) eval(bridgeSource);
+
+        try {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory', {
+                detail: { requestId: 'inventory-key-only', conversationId }
+            }));
+
+            await expect(resultPromise).resolves.toEqual({
+                requestId: 'inventory-key-only',
+                inventory: {
+                    schemaVersion: 1,
+                    conversationId,
+                    assets: [expect.objectContaining({
+                        assetId,
+                        mediaKind: 'image',
+                        sourceUrl: `https://assets.grok.com/users/example/generated/${assetId}/image.jpg`,
+                        promptText: 'candid friends walking along the beach'
+                    })]
+                }
+            });
+        } finally {
+            window.fetch = originalFetch;
+        }
+    });
+
+    test('conversation asset inventory deduplicates repeated immutable media evidence across responses', async () => {
+        const conversationId = '66666666-6666-4666-8666-666666666666';
+        const assetId = '77777777-7777-4777-8777-777777777777';
+        const assetMetadata = {
+            assetId,
+            key: `users/example/generated/${assetId}/image.jpg`,
+            mimeType: 'image/jpeg'
+        };
+        const originalFetch = window.fetch;
+        window.fetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => ({
+                data: {
+                    responses: [
+                        {
+                            responseId: 'first-response',
+                            mediaGenInput: { prompt: 'first prompt' },
+                            fileAttachmentAssetMetadata: [{ ...assetMetadata }]
+                        },
+                        {
+                            responseId: 'later-response',
+                            parentResponseId: 'later-parent',
+                            mediaGenInput: { prompt: 'later prompt' },
+                            fileAttachmentAssetMetadata: [{ ...assetMetadata }]
+                        }
+                    ]
+                }
+            })
+        }));
+        const resultPromise = new Promise((resolve) => {
+            document.addEventListener('__gpt_fetch_conversation_asset_inventory_result', (event) => {
+                if (event.detail?.requestId === 'inventory-duplicate-agreement') resolve(event.detail);
+            }, { once: true });
+        });
+
+        if (!window.__gptPowerToolsBridgeInstalled) eval(bridgeSource);
+
+        try {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory', {
+                detail: { requestId: 'inventory-duplicate-agreement', conversationId }
+            }));
+
+            await expect(resultPromise).resolves.toEqual({
+                requestId: 'inventory-duplicate-agreement',
+                inventory: {
+                    schemaVersion: 1,
+                    conversationId,
+                    assets: [expect.objectContaining({
+                        assetId,
+                        responseId: 'first-response',
+                        promptText: 'first prompt'
+                    })]
+                }
+            });
+        } finally {
+            window.fetch = originalFetch;
+        }
+    });
+
+    test('conversation asset inventory rejects conflicting evidence for one asset identity', async () => {
+        const conversationId = '88888888-8888-4888-8888-888888888888';
+        const assetId = '99999999-9999-4999-8999-999999999999';
+        const originalFetch = window.fetch;
+        window.fetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => ({
+                responses: [
+                    {
+                        responseId: 'first-response',
+                        fileAttachmentAssetMetadata: [{
+                            assetId,
+                            key: `users/example/generated/${assetId}/image.jpg`,
+                            mimeType: 'image/jpeg'
+                        }]
+                    },
+                    {
+                        responseId: 'conflicting-response',
+                        fileAttachmentAssetMetadata: [{
+                            assetId,
+                            key: `users/example/generated/${assetId}/image.png`,
+                            mimeType: 'image/png'
+                        }]
+                    }
+                ]
+            })
+        }));
+        const resultPromise = new Promise((resolve) => {
+            document.addEventListener('__gpt_fetch_conversation_asset_inventory_result', (event) => {
+                if (event.detail?.requestId === 'inventory-duplicate-conflict') resolve(event.detail);
+            }, { once: true });
+        });
+
+        if (!window.__gptPowerToolsBridgeInstalled) eval(bridgeSource);
+
+        try {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory', {
+                detail: { requestId: 'inventory-duplicate-conflict', conversationId }
+            }));
+
+            await expect(resultPromise).resolves.toEqual({
+                requestId: 'inventory-duplicate-conflict',
+                error: 'conversation_asset_duplicate_conflict'
+            });
+        } finally {
+            window.fetch = originalFetch;
+        }
+    });
+
+    test('conversation asset inventory helper validates a key-derived current Grok asset', async () => {
+        const root = document.createElement('div');
+        const conversationId = '44444444-4444-4444-8444-444444444444';
+        const assetId = '55555555-5555-4555-8555-555555555555';
+        root.addEventListener('__gpt_media_fetch_bridge_probe', (event) => {
+            root.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+                detail: { requestId: event.detail.requestId }
+            }));
+        });
+        root.addEventListener('__gpt_fetch_conversation_asset_inventory', (event) => {
+            root.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory_result', {
+                detail: {
+                    requestId: event.detail.requestId,
+                    inventory: {
+                        schemaVersion: 1,
+                        conversationId,
+                        assets: [{
+                            assetId,
+                            responseId: 'response-1',
+                            parentResponseId: 'parent-1',
+                            mediaKind: 'image',
+                            sourceUrl: `https://assets.grok.com/users/example/generated/${assetId}/image.jpg`,
+                            promptText: 'candid friends at the beach',
+                            assetMetadata: {
+                                assetId,
+                                key: `users/example/generated/${assetId}/image.jpg`,
+                                mimeType: 'image/jpeg'
+                            },
+                            mediaGenInput: { prompt: 'candid friends at the beach' }
+                        }]
+                    }
+                }
+            }));
+        });
+
+        await expect(fetchGrokConversationAssetInventoryViaBridge(
+            conversationId,
+            root,
+            100
+        )).resolves.toEqual(expect.objectContaining({
+            conversationId,
+            assets: [expect.objectContaining({ assetId, mediaKind: 'image' })]
+        }));
     });
 
     test('media helper uses the page-world data URL bridge without refetching a blob URL', async () => {

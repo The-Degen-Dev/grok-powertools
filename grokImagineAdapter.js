@@ -538,6 +538,37 @@
             : describeAgentSource(root, url, sourcePostIdHint);
     }
 
+    function resolveCurrentSourceMedia({ root, surface, location, sourcePostIdHint } = {}) {
+        const described = describeCurrentSource({ root, surface, location, sourcePostIdHint });
+        if (described.status !== 'matched') return described;
+
+        const descriptor = described.descriptor;
+        const resolved = resolvePersistedSource(root, descriptor);
+        if (resolved.status !== 'matched') return resolved;
+
+        const matchingMedia = Array.from(resolved.element.querySelectorAll('img, video'))
+            .filter((media) => getAssetId(getMediaSource(media)) === descriptor.sourceAssetId);
+        const preferredTag = descriptor.mediaKind === 'video' ? 'video' : 'img';
+        const preferredMedia = matchingMedia.filter(
+            (media) => media.tagName?.toLowerCase() === preferredTag
+        );
+        if (preferredMedia.length !== 1) {
+            return {
+                status: preferredMedia.length > 1 ? 'ambiguous' : 'missing',
+                reason: preferredMedia.length > 1
+                    ? 'current_source_media_ambiguous'
+                    : 'current_source_media_missing'
+            };
+        }
+
+        return {
+            status: 'matched',
+            descriptor,
+            media: preferredMedia[0],
+            sourceUrl: getMediaSource(preferredMedia[0])
+        };
+    }
+
     function findLegacyDetailSource(root, descriptor) {
         const sourceAssetId = normalizeUuid(descriptor?.sourceAssetId);
         const sourcePostId = normalizeUuid(descriptor?.sourcePostId);
@@ -977,6 +1008,7 @@
         findGeneratedResult,
         inspectGeneratedResult,
         listGalleryItems,
+        resolveCurrentSourceMedia,
         resolveGalleryItem,
         resolveMediaAction
     };
