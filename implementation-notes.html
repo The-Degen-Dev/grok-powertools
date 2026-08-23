@@ -3016,6 +3016,12 @@ npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-
                             no tab-enumeration path; and no new TODO, FIXME, debugger, dynamic-eval, or unredacted
                             media log. The three inherited untracked files remain byte-identical to their starting
                             SHA-256 fingerprints and are excluded from staging.
+                            The first clean-checkout CI run then found one portability defect in the existing
+                            acceptance evidence starter: ignored local state had created
+                            <code>acceptance/runs/</code> on this Mac, but a fresh runner had no parent directory.
+                            The starter now creates that ignored parent when absent, then retains the existing
+                            non-recursive per-run directory creation and overwrite refusal. This changes no
+                            extension runtime or production acceptance data.
                         </td>
                     </tr>
                 </tbody>
