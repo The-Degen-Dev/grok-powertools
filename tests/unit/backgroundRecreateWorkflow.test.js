@@ -308,6 +308,51 @@ describe('background recreate workflow wiring', () => {
         expect(global.chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 654 }, '1.3', expect.any(Function));
     });
 
+    test('returns an atomically accepted prompted-video generation dispatch', async () => {
+        const accepted = {
+            status: 'accepted',
+            run: { runId: 'quick-run', status: 'completed' }
+        };
+        const dispatchGenerationAction = jest.fn(async (request, sender, dispatch) => {
+            const dispatchResult = await dispatch();
+            expect(request).toEqual(expect.objectContaining({ acceptOnClick: true }));
+            expect(sender).toEqual(expect.objectContaining({ tab: { id: 655 } }));
+            expect(dispatchResult).toEqual({ ok: true, clickState: 'click_sent' });
+            return accepted;
+        });
+        global.GrokPowerToolsGenerationRunController = {
+            createGenerationRunController: jest.fn(() => ({
+                initialize: jest.fn(async () => null),
+                dispatchGenerationAction,
+                cancelGenerationRunForOwnerTab: jest.fn(async () => ({ status: 'ignored' }))
+            }))
+        };
+        global.chrome = mockChromeForBackground();
+
+        const background = loadBackground();
+        await background.ensureBackgroundStateReady();
+        const listener = global.chrome.runtime.onMessage.addListener.mock.calls[0][0];
+        const request = {
+            action: 'GPT_PROMPTED_VIDEO_NATIVE_CLICK',
+            click: { x: 24, y: 48 },
+            generationDispatch: {
+                runId: 'quick-run',
+                epoch: 1,
+                itemId: 'item-1',
+                claimId: 'claim-1',
+                acceptOnClick: true,
+                receipt: { sourceAssetId: 'asset-1', sourcePostId: 'post-1' }
+            }
+        };
+        const response = await new Promise((resolve) => {
+            expect(listener(request, { tab: { id: 655 }, documentId: 'document-a' }, resolve))
+                .toBe(true);
+        });
+
+        expect(response).toEqual({ ok: true, generation: accepted });
+        expect(dispatchGenerationAction).toHaveBeenCalledTimes(1);
+    });
+
     test('hydrates generation authority during background readiness without console errors', async () => {
         global.chrome = mockChromeForBackground();
         const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});

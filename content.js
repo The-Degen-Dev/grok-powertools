@@ -818,14 +818,24 @@ function isGrokGeneratedCardImage(image) {
     const sourceUrl = String(image?.currentSrc || image?.src || image?.getAttribute?.('src') || '');
     if (!sourceUrl) return false;
     const alt = String(image.getAttribute?.('alt') || '').trim();
-    if (alt === 'Generated image') return true;
-    if (alt) return false;
+    if (!alt && /^data:image\/(?:jpeg|jpg|png|webp);base64,/i.test(sourceUrl)) return true;
     try {
         const url = new URL(sourceUrl, 'https://grok.com');
-        return url.hostname === 'assets.grok.com' && url.pathname.includes('/generated/');
+        const hasMediaIdentity = !!getGrokMediaIdentity(url.pathname);
+        if (url.hostname === 'assets.grok.com'
+            && url.pathname.includes('/generated/')
+            && hasMediaIdentity) {
+            return true;
+        }
+        if (url.hostname === 'imagine-public.x.ai'
+            && /\/(?:images|share-images)\//i.test(url.pathname)
+            && hasMediaIdentity) {
+            return true;
+        }
     } catch {
-        return false;
+        // The provider can briefly expose data URLs before the public result URL is ready.
     }
+    return alt === 'Generated image';
 }
 
 function getGrokGeneratedCardImages(root = document) {
@@ -3119,7 +3129,11 @@ class GrokOverlay {
             await this.retryManager.startGoal(count);
         });
         this.el.querySelector('#gptQuickBatchBtn').addEventListener('click', async () => {
-            await this.retryManager.startBatch('quick');
+            const galleryLimit = Math.max(
+                1,
+                parseInt(this.el.querySelector('#gptGalleryLimit').value, 10) || 1
+            );
+            await this.retryManager.startBatch('quick', null, { galleryLimit });
         });
         this.el.querySelector('#gptPromptedBatchBtn').addEventListener('click', async () => {
             const prompt = this.readCurrentPromptInput();
@@ -4663,7 +4677,22 @@ class VideoRetryManager {
         const identities = new Set(images
             .map((image) => getGrokMediaIdentity(image.currentSrc || image.src || ''))
             .filter(Boolean));
-        return identities.size === 1 ? images[0] || null : null;
+        if (identities.size === 1) return images[0] || null;
+        if (identities.size !== 0 || images.length !== 1) return null;
+        const assetScopedPostIds = new Set(
+            Array.from(container?.querySelectorAll?.('a[href*="/imagine/post/"]') || [])
+                .filter((link) => findMediaCardRoot(link) === container)
+                .filter((link) => {
+                    try {
+                        return new URL(link.href).searchParams.get('scope') === 'asset';
+                    } catch {
+                        return false;
+                    }
+                })
+                .map((link) => getGrokMediaIdentity(link.href))
+                .filter(Boolean)
+        );
+        return assetScopedPostIds.size === 1 ? images[0] : null;
     }
 
     _getCardImageSrc(container) {
@@ -5431,7 +5460,9 @@ class VideoRetryManager {
                 return false;
             }
             if (generationDispatch) {
-                if (response.value?.generation?.status !== 'submitted') return false;
+                if (!['submitted', 'accepted'].includes(response.value?.generation?.status)) {
+                    return false;
+                }
                 this._rememberGenerationRun(response.value.generation);
             }
             return this.isPromptedBatchTokenActive(runToken);
@@ -6061,6 +6092,7 @@ class VideoRetryManager {
             epoch: claim.epoch,
             itemId: claim.itemId,
             claimId: claim.claimId,
+            acceptOnClick: true,
             receipt: this._createCheckpointedGenerationReceipt(
                 claim,
                 'submit_dispatched',
@@ -6514,14 +6546,18 @@ class VideoRetryManager {
             && control.getAttribute('aria-disabled') !== 'true';
     }
 
-    async _settleQuickBatchSubmission(claim, baseline, checkpoint, runToken) {
-        const acceptance = await this._waitForPromptedProviderAcceptance(
-            claim.descriptor,
-            baseline,
-            checkpoint,
-            runToken,
-            claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
-        );
+    async _settleQuickBatchSubmission(claim, checkpoint, runToken) {
+        // Quick Batch promises a bounded native dispatch, not completed provider output.
+        // Give Grok time to apply immediate rejection or navigation state before returning.
+        await this.sleep(1200);
+        if (!this.isBatchRunActive(runToken)) return 'cancelled';
+        if (this._getGenerationItem(claim.itemId)?.status === 'accepted') {
+            return this._returnToGenerationOrigin(runToken);
+        }
+        const acceptance = GrokImagineAdapter.evaluateSubmissionReceipt({
+            root: document,
+            receipt: checkpoint
+        });
         if (acceptance === 'accepted') {
             await this._reportGenerationAction(
                 claim,
@@ -6537,14 +6573,20 @@ class VideoRetryManager {
             );
         } else if (acceptance === 'rejected') {
             await this._reportGenerationAction(claim, 'retryable_failed', 'provider_rejected');
-        } else if (acceptance !== 'cancelled') {
+        } else if (acceptance === 'ambiguous') {
             await this._reportGenerationAction(
                 claim,
-                'retryable_failed',
-                'submission_outcome_unconfirmed'
+                'permanent_failed',
+                'acceptance_ambiguous'
+            );
+        } else {
+            await this._reportGenerationAction(
+                claim,
+                'accepted',
+                '',
+                this._createGenerationReceipt(claim, 'native_click_dispatched')
             );
         }
-        if (acceptance === 'cancelled') return 'cancelled';
         return this._returnToGenerationOrigin(runToken);
     }
 
@@ -6582,7 +6624,6 @@ class VideoRetryManager {
             if (persistedItem?.status === 'submitted') {
                 steps += 1;
                 const checkpoint = this._restoreAdapterSubmissionReceipt(persistedItem.receipt);
-                const baseline = this._restoreGeneratedResultBaseline(persistedItem.receipt);
                 if (!checkpoint) {
                     await this._reportGenerationAction(
                         claim,
@@ -6595,7 +6636,6 @@ class VideoRetryManager {
                 }
                 const settled = await this._settleQuickBatchSubmission(
                     claim,
-                    baseline,
                     checkpoint,
                     runToken
                 );
@@ -6655,12 +6695,6 @@ class VideoRetryManager {
                 await this._reportGenerationAction(claim, 'retryable_failed', 'submission_receipt_missing');
                 continue;
             }
-            let resultBaseline;
-            try {
-                resultBaseline = await this._captureVideoGoalInventoryBaseline(descriptor);
-            } catch {
-                resultBaseline = null;
-            }
             const clicked = await this._clickPromptedBatchNativeControl(
                 reacquired.control,
                 runToken,
@@ -6670,7 +6704,7 @@ class VideoRetryManager {
                     descriptor,
                     action: 'quick_video'
                 }).control === reacquired.control,
-                this._createVideoGoalDispatch(claim, receipt, resultBaseline)
+                this._createGenerationDispatch(claim, receipt)
             );
             if (!clicked) {
                 steps += 1;
@@ -6680,7 +6714,6 @@ class VideoRetryManager {
             steps += 1;
             const settled = await this._settleQuickBatchSubmission(
                 claim,
-                resultBaseline,
                 receipt,
                 runToken
             );
@@ -6696,13 +6729,16 @@ class VideoRetryManager {
         this.updateCounters();
         if (stopped) {
             this.safeStatus(`Quick Batch: Stopped (${this.goalCount}/${this.goalTotal})`, 'neutral');
-        } else if (run?.status === 'completed') {
-            this.safeStatus(`Quick Batch: Complete (${run.counts.accepted}/${run.items.length})`, 'success');
+        } else if (run?.status === 'completed' && run.counts.failed === 0) {
+            this.safeStatus(`Quick Batch: Dispatched (${run.counts.accepted}/${run.items.length})`, 'success');
         } else {
             const failed = run?.counts?.failed || 0;
             const pending = run?.counts?.pending || 0;
+            const retrySuffix = run?.status === 'retryable_failed'
+                ? ' Retry Failed is available.'
+                : '';
             this.safeStatus(
-                `Quick Batch: ${run?.counts?.accepted || 0} accepted, ${failed} failed, ${pending} pending.${this._getGenerationFailureSummary(run)} Retry Failed is available.`,
+                `Quick Batch: ${run?.counts?.accepted || 0} dispatched, ${failed} failed, ${pending} pending.${this._getGenerationFailureSummary(run)}${retrySuffix}`,
                 'warning'
             );
         }
@@ -6874,6 +6910,13 @@ class VideoRetryManager {
             const currentConversationId = getGrokConversationId(window.location.href);
             const routeMatches = window.location.pathname === originUrl.pathname
                 && (!originConversationId || originConversationId === currentConversationId);
+            if (routeMatches && origin.viewportReceipt && origin.surface === 'results_gallery') {
+                return this._waitForPromptedBatchResultsSurface(
+                    origin.viewportReceipt,
+                    runToken,
+                    Math.max(200, timeoutMs - (attempt * 200))
+                );
+            }
             if (surface === origin.surface && routeMatches) {
                 if (origin.viewportReceipt && surface === 'saved_gallery') {
                     const restored = await restoreSavedViewportReceipt(origin.viewportReceipt, {
@@ -6887,13 +6930,6 @@ class VideoRetryManager {
                         pollInterval: 200
                     });
                     return restored.status === 'restored';
-                }
-                if (origin.viewportReceipt && surface === 'results_gallery') {
-                    return this._waitForPromptedBatchResultsSurface(
-                        origin.viewportReceipt,
-                        runToken,
-                        Math.max(200, timeoutMs - (attempt * 200))
-                    );
                 }
                 if (!restoredScroll && typeof window.scrollTo === 'function') {
                     window.scrollTo({ top: origin.scrollY || 0, behavior: 'instant' });
@@ -7247,11 +7283,14 @@ class VideoRetryManager {
         this.updateBatchButtons(false);
         this.updateGenerationRunControls(run);
         this.updateCounters();
-        if (run?.status === 'completed') {
+        if (run?.status === 'completed' && run.counts.failed === 0) {
             this.safeStatus(`Prompted Batch: Complete (${run.counts.accepted}/${run.items.length})`, 'success');
-        } else if (run?.status === 'retryable_failed') {
+        } else if (run?.status === 'retryable_failed' || (run?.counts?.failed || 0) > 0) {
+            const retrySuffix = run.status === 'retryable_failed'
+                ? ' Retry Failed is available.'
+                : '';
             this.safeStatus(
-                `Prompted Batch: ${run.counts.accepted} accepted, ${run.counts.failed} failed.${this._getGenerationFailureSummary(run)} Retry Failed is available.`,
+                `Prompted Batch: ${run.counts.accepted} accepted, ${run.counts.failed} failed.${this._getGenerationFailureSummary(run)}${retrySuffix}`,
                 'warning'
             );
         } else if (run?.status === 'cancelled' || this.batchAborted) {
@@ -8886,7 +8925,40 @@ class VideoRetryManager {
                 return { status: 'unsupported', surface: lastSurface };
             }
             if (lastSurface === SCRAPE_SURFACES.legacyDetail) {
-                return { status: 'ready', surface: lastSurface, makeVideoTrigger: null };
+                const described = GrokImagineAdapter.describeCurrentSource({
+                    root: document,
+                    surface: 'legacy_detail',
+                    location: window.location
+                });
+                lastMatchStatus = described.status;
+                if (described.status === 'ambiguous') {
+                    return { status: 'ambiguous', surface: lastSurface };
+                }
+                if (described.status === 'matched') {
+                    const expectedSourceId = getGrokMediaIdentity(expectedIdentity);
+                    const descriptor = described.descriptor;
+                    if (expectedSourceId
+                        && descriptor.sourceAssetId !== expectedSourceId
+                        && descriptor.sourcePostId !== expectedSourceId) {
+                        return { status: 'ambiguous', surface: lastSurface };
+                    }
+                    const makeVideoTrigger = this._findCurrentMakeVideoTrigger();
+                    if (makeVideoTrigger === stableAction) {
+                        stableActionPolls++;
+                    } else {
+                        stableAction = makeVideoTrigger;
+                        stableActionPolls = makeVideoTrigger ? 1 : 0;
+                    }
+                    if (stableAction && stableActionPolls >= requiredStableActionPolls) {
+                        return {
+                            status: 'ready',
+                            surface: lastSurface,
+                            makeVideoTrigger
+                        };
+                    }
+                }
+                await this.sleep(pollInterval);
+                continue;
             }
             if (lastSurface === SCRAPE_SURFACES.agentMedia) {
                 const match = findMatchingAgentMedia(document, expectedIdentity);

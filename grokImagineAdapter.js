@@ -13,6 +13,10 @@
     const UUID_EXACT_RE = new RegExp(`^${UUID_PATTERN}$`, 'i');
     const UUID_ANY_RE = new RegExp(UUID_PATTERN, 'i');
     const GENERATED_ASSET_RE = new RegExp(`/generated/(${UUID_PATTERN})(?:/|$)`, 'i');
+    const PUBLIC_ASSET_RE = new RegExp(
+        `/(?:images|share-images|videos|share-videos)/(${UUID_PATTERN})(?:[._/-]|$)`,
+        'i'
+    );
     const POST_RE = new RegExp(`/imagine/post/(${UUID_PATTERN})(?:/|$)`, 'i');
     const CARD_SELECTOR = '[role="listitem"], [class*="media-post-masonry-card"]';
     const SOURCE_MEDIA_SELECTOR = 'img, video';
@@ -52,7 +56,24 @@
 
     function getAssetId(value) {
         const url = toUrl(value);
-        return normalizeUuid(url?.pathname.match(GENERATED_ASSET_RE)?.[1]);
+        const generatedAssetId = normalizeUuid(url?.pathname.match(GENERATED_ASSET_RE)?.[1]);
+        if (generatedAssetId) return generatedAssetId;
+        if (url?.hostname.toLowerCase() !== 'imagine-public.x.ai') return '';
+        return normalizeUuid(url.pathname.match(PUBLIC_ASSET_RE)?.[1]);
+    }
+
+    function isTemporaryGeneratedImage(media) {
+        return media?.tagName?.toLowerCase() === 'img'
+            && /^data:image\/(?:jpeg|jpg|png|webp);base64,/i.test(getMediaSource(media));
+    }
+
+    function isGallerySourceMedia(media, allowTemporaryImage = false) {
+        return !!getAssetId(getMediaSource(media))
+            || (allowTemporaryImage && isTemporaryGeneratedImage(media));
+    }
+
+    function isAssetScopedPostLink(link) {
+        return toUrl(link?.href)?.searchParams.get('scope') === 'asset';
     }
 
     function getPostId(value) {
@@ -90,11 +111,23 @@
         ));
     }
 
+    function getSurfaceGalleryCards(root, surface) {
+        const cards = getGalleryCards(root);
+        if (surface !== 'results_gallery') return cards;
+        return cards.filter((card) => (
+            Array.from(card.querySelectorAll('button[aria-label]'))
+                .filter((button) => closestGalleryCard(button) === card
+                    && String(button.getAttribute('aria-label') || '').trim().toLowerCase()
+                        === 'make video')
+                .length === 1
+        ));
+    }
+
     function resolveGallerySurface({ root, surface } = {}) {
         if (surface !== 'results_gallery' && surface !== 'saved_gallery') {
             return { status: 'unsupported', reason: 'gallery_surface_unsupported' };
         }
-        const cards = getGalleryCards(root);
+        const cards = getSurfaceGalleryCards(root, surface);
         if (cards.length === 0) {
             return { status: 'missing', reason: 'gallery_items_missing' };
         }
@@ -122,7 +155,7 @@
         for (const link of postLinks) {
             media.push(...Array.from(link.querySelectorAll(SOURCE_MEDIA_SELECTOR))
                 .filter((candidate) => candidate.closest('a[href*="/imagine/post/"]') === link
-                    && !!getAssetId(getMediaSource(candidate))));
+                    && isGallerySourceMedia(candidate, isAssetScopedPostLink(link))));
         }
         return media;
     }
@@ -131,9 +164,13 @@
         const linkedMedia = getPostSourceMedia(postLinks);
         if (linkedMedia.length > 0) return linkedMedia;
 
+        const allowTemporaryImage = postLinks.some(isAssetScopedPostLink);
         const mediaByBranch = new Map();
         for (const media of card.querySelectorAll(SOURCE_MEDIA_SELECTOR)) {
-            if (closestGalleryCard(media) !== card || !getAssetId(getMediaSource(media))) continue;
+            if (closestGalleryCard(media) !== card
+                || !isGallerySourceMedia(media, allowTemporaryImage)) {
+                continue;
+            }
             let branch = media;
             while (branch.parentElement && branch.parentElement !== card) {
                 branch = branch.parentElement;
@@ -155,12 +192,21 @@
         const assetIds = new Set(
             mediaElements.map((media) => getAssetId(getMediaSource(media))).filter(Boolean)
         );
+        const sourcePostId = postIds.size === 1 ? Array.from(postIds)[0] : '';
+        const hasAssetScopedSourceLink = !!sourcePostId && postLinks.some((link) => (
+            getPostId(link.href) === sourcePostId && isAssetScopedPostLink(link)
+        ));
+        const usesAssetScopedTemporaryImage = assetIds.size === 0
+            && mediaElements.length === 1
+            && isTemporaryGeneratedImage(mediaElements[0])
+            && hasAssetScopedSourceLink;
 
-        if (postIds.size !== 1 || assetIds.size !== 1 || conversationIds.size > 1) {
+        if (!sourcePostId
+            || (assetIds.size !== 1 && !usesAssetScopedTemporaryImage)
+            || conversationIds.size > 1) {
             return { status: 'ambiguous', reason: 'card_identity_ambiguous' };
         }
 
-        const sourcePostId = Array.from(postIds)[0];
         const postLink = postLinks.find((link) => getPostId(link.href) === sourcePostId);
         const explicitMediaKind = String(
             card.getAttribute('data-media-type')
@@ -185,7 +231,7 @@
         return {
             status: 'ok',
             identity: {
-                sourceAssetId: Array.from(assetIds)[0],
+                sourceAssetId: Array.from(assetIds)[0] || sourcePostId,
                 sourcePostId,
                 conversationId: Array.from(conversationIds)[0] || '',
                 mediaKind,
@@ -200,7 +246,10 @@
         const pathname = String(url?.pathname || '').replace(/\/+$/, '') || '/';
 
         if (pathname === '/imagine/saved') return 'saved_gallery';
-        if (pathname === '/imagine' && getGalleryCards(root).length > 0) return 'results_gallery';
+        if (pathname === '/imagine'
+            && getSurfaceGalleryCards(root, 'results_gallery').length > 0) {
+            return 'results_gallery';
+        }
         if (pathname.startsWith('/imagine/agent/')) return 'agent_media';
         if (pathname.startsWith('/imagine/post/')) return 'legacy_detail';
         return 'unsupported';
@@ -326,32 +375,51 @@
     function getLegacyDetailContainers(root) {
         if (!root?.querySelectorAll) return [];
         const containers = new Set();
+        const modernContainers = new Set();
+        for (const aside of root.querySelectorAll('aside[aria-label="Post details"]')) {
+            if (closestGalleryCard(aside)) continue;
+            if (aside.parentElement) {
+                modernContainers.add(aside.parentElement);
+                containers.add(aside.parentElement);
+            }
+        }
+        const isInsideModernDetail = (element) => Array.from(modernContainers)
+            .some((container) => container.contains(element));
         for (const link of root.querySelectorAll('a[href*="/imagine/post/"]')) {
-            if (closestGalleryCard(link)) continue;
+            if (closestGalleryCard(link) || isInsideModernDetail(link)) continue;
             const container = link.closest('[data-testid="media-detail"], [data-grok-media-detail], article')
                 || link.parentElement
                 || link;
             containers.add(container);
         }
         for (const frame of root.querySelectorAll('[data-media-frame]')) {
-            if (closestGalleryCard(frame)) continue;
+            if (closestGalleryCard(frame) || isInsideModernDetail(frame)) continue;
             containers.add(frame.closest('article') || frame.parentElement || frame);
         }
         for (const article of root.querySelectorAll('article')) {
-            if (closestGalleryCard(article)) continue;
+            if (closestGalleryCard(article) || isInsideModernDetail(article)) continue;
             if (getDirectDetailSourceMedia(article).length > 0) containers.add(article);
         }
         return Array.from(containers);
     }
 
+    function isModernDetailContainer(container) {
+        return Array.from(container?.children || [])
+            .filter((child) => child.matches?.('aside[aria-label="Post details"]')).length === 1;
+    }
+
     function getDirectDetailSourceMedia(container) {
+        const isModernDetail = isModernDetailContainer(container);
         return Array.from(container?.querySelectorAll?.(SOURCE_MEDIA_SELECTOR) || [])
-            .filter((media) => media.closest('article') === container
+            .filter((media) => (isModernDetail
+                ? !media.closest('aside[aria-label="Post details"]')
+                : media.closest('article') === container)
                 && !media.closest(
                     '.query-bar, aside[aria-label="Post details"], [role="dialog"], '
                     + '[data-radix-popper-content-wrapper], nav'
                 )
-                && !!getAssetId(getMediaSource(media)));
+                && (!!getAssetId(getMediaSource(media))
+                    || (isModernDetail && /^data:image\//i.test(getMediaSource(media)))));
     }
 
     function getLegacyDetailSourceMedia(container, postLinks) {
@@ -362,9 +430,14 @@
         if (container.matches?.('[data-media-frame]')) frames.unshift(container);
         const uniqueFrames = Array.from(new Set(frames));
         if (uniqueFrames.length === 1) {
-            return Array.from(uniqueFrames[0].querySelectorAll('img, video'))
-                .filter((media) => media.closest('[data-media-frame]') === uniqueFrames[0]
-                    && !!getAssetId(getMediaSource(media)));
+            const frameMedia = Array.from(uniqueFrames[0].querySelectorAll('img, video'))
+                .filter((media) => media.closest('[data-media-frame]') === uniqueFrames[0]);
+            if (isModernDetailContainer(container)
+                && frameMedia.length === 1
+                && /^data:image\//i.test(getMediaSource(frameMedia[0]))) {
+                return frameMedia;
+            }
+            return frameMedia.filter((media) => !!getAssetId(getMediaSource(media)));
         }
         if (uniqueFrames.length > 1) return [];
 
@@ -372,6 +445,12 @@
         const directAssetIds = new Set(
             directMedia.map((media) => getAssetId(getMediaSource(media))).filter(Boolean)
         );
+        if (isModernDetailContainer(container)
+            && directMedia.length === 1
+            && directAssetIds.size === 0
+            && /^data:image\//i.test(getMediaSource(directMedia[0]))) {
+            return directMedia;
+        }
         if (directAssetIds.size !== 1) return [];
         const sourceAssetId = Array.from(directAssetIds)[0];
         return directMedia.filter((media) => getAssetId(getMediaSource(media)) === sourceAssetId);
@@ -388,12 +467,16 @@
         const assetIds = new Set(
             mediaElements.map((media) => getAssetId(getMediaSource(media))).filter(Boolean)
         );
-        if (postIds.size > 1 || !sourcePostId || assetIds.size !== 1) {
+        const routeBoundDataImage = isModernDetailContainer(container)
+            && mediaElements.length === 1
+            && assetIds.size === 0
+            && /^data:image\//i.test(getMediaSource(mediaElements[0]));
+        if (postIds.size > 1 || !sourcePostId || (!routeBoundDataImage && assetIds.size !== 1)) {
             return { status: 'ambiguous' };
         }
         return {
             status: 'ok',
-            sourceAssetId: Array.from(assetIds)[0],
+            sourceAssetId: routeBoundDataImage ? sourcePostId : Array.from(assetIds)[0],
             sourcePostId,
             mediaKind: getDescriptorMediaKind(container, mediaElements)
         };
@@ -784,9 +867,10 @@
         if (resolved.kind !== 'legacy_detail') return false;
         const routeId = getPostId(pageUrl);
         if (routeId !== sourceAssetId && routeId !== sourcePostId) return false;
-        const sourceMedia = Array.from(resolved.element?.querySelectorAll?.('img, video') || [])
-            .filter((media) => getAssetId(getMediaSource(media)) === sourceAssetId);
-        return sourceMedia.length > 0;
+        const parsed = parseLegacyDetailSource(resolved.element, sourcePostId);
+        return parsed.status === 'ok'
+            && parsed.sourceAssetId === sourceAssetId
+            && parsed.sourcePostId === sourcePostId;
     }
 
     function getPromptedTriggers(root, resolved, descriptor) {

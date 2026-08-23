@@ -327,6 +327,37 @@ describe('generation run controller', () => {
         });
     });
 
+    test('atomically accepts a Quick dispatch after the native click is sent', async () => {
+        const harness = createHarness();
+        const run = await startRun(harness);
+        const claimed = await harness.controller.claimGenerationAction({
+            runId: run.runId,
+            epoch: run.epoch
+        }, sender());
+        const receipt = {
+            sourceAssetId: 'asset-a',
+            sourcePostId: 'post-a',
+            observedState: 'submit_dispatched',
+            observedAt: BASE_TIME + 1
+        };
+
+        const dispatched = await harness.controller.dispatchGenerationAction({
+            ...claimed.claim,
+            acceptOnClick: true,
+            receipt
+        }, sender(), async () => ({ ok: true, clickState: 'click_sent' }));
+
+        expect(dispatched).toEqual(expect.objectContaining({ status: 'accepted' }));
+        expect(dispatched.run).toEqual(expect.objectContaining({
+            status: 'running',
+            counts: expect.objectContaining({ accepted: 1, pending: 1 })
+        }));
+        expect(dispatched.run.items[0]).toEqual(expect.objectContaining({
+            status: 'accepted',
+            receipt
+        }));
+    });
+
     test('transfers a claimless run after a proven same-gallery reload', async () => {
         const harness = createHarness();
         let run = await startRun(harness, startRequest(), sender(42, 'document-before-reload'));

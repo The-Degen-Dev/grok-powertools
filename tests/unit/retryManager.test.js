@@ -1,3 +1,5 @@
+/** @jest-environment-options {"url":"https://grok.com/"} */
+
 const { VideoRetryManager } = require('../../content.js');
 
 const originalPointerEvent = global.PointerEvent;
@@ -245,6 +247,28 @@ function createCurrentSavedBatchCard(sourceId) {
     return { listItem, card, image, postLink, makeVideo };
 }
 
+function renderModernDetailSource(sourceUrl) {
+    document.body.innerHTML = `
+        <div class="relative w-full h-dvh flex flex-col">
+            <article>
+                <div data-media-frame>
+                    <img alt="" src="data:image/jpeg;base64,Y2FuYXJ5">
+                </div>
+            </article>
+            <aside aria-label="Post details"></aside>
+        </div>
+    `;
+    const makeVideo = makeVisible(document.createElement('button'));
+    makeVideo.setAttribute('aria-label', 'Make Video');
+    makeVideo.setAttribute('aria-haspopup', 'menu');
+    document.querySelector('aside[aria-label="Post details"]').appendChild(makeVideo);
+    return {
+        shell: document.querySelector('.relative.w-full.h-dvh'),
+        makeVideo,
+        sourceId: getFixtureMediaId(sourceUrl)
+    };
+}
+
 function mountQuickBatchGallery(sourceIds, onAction) {
     document.querySelectorAll('[data-test-quick-batch-card]').forEach((card) => card.remove());
     return sourceIds.map((sourceId) => {
@@ -341,7 +365,13 @@ function renderAgentEditor({
     document.body.innerHTML = `${includeAgentAsset ? `
         <div class="react-flow__node-asset selected" data-id="asset-source">
             <img src="${sourceUrl}">
-        </div>` : ''}
+        </div>` : `
+        <div class="relative w-full h-dvh flex flex-col">
+            <article>
+                <div data-media-frame><img src="${sourceUrl}"></div>
+            </article>
+            <aside aria-label="Post details"></aside>
+        </div>`}
         <div class="query-bar"></div>`;
     const back = makeVisible(document.createElement('button'));
     back.setAttribute('aria-label', 'Back');
@@ -380,7 +410,12 @@ function renderAgentEditor({
         });
     }
     document.body.appendChild(back);
-    if (makeVideo) document.body.appendChild(makeVideoButton);
+    if (makeVideo) {
+        const actionHost = includeAgentAsset
+            ? document.body
+            : document.querySelector('aside[aria-label="Post details"]');
+        actionHost.appendChild(makeVideoButton);
+    }
     return { back, makeVideo: makeVideo ? makeVideoButton : null };
 }
 
@@ -911,7 +946,7 @@ describe('VideoRetryManager', () => {
         expect(retryManager.goalCount).toBe(3);
     });
 
-    test('Quick Batch does not count a dispatched click without provider acceptance evidence', async () => {
+    test('Quick Batch counts one atomically journaled native dispatch without waiting for output', async () => {
         const sourceId = '40404040-aaaa-4bbb-8ccc-444444444444';
         const dispatchedSourceIds = [];
         window.history.pushState({}, '', '/imagine/saved');
@@ -920,13 +955,16 @@ describe('VideoRetryManager', () => {
         });
         retryManager.sleep = jest.fn().mockResolvedValue();
         retryManager.scrollForMore = jest.fn().mockResolvedValue(false);
-        jest.spyOn(retryManager, '_waitForPromptedProviderAcceptance').mockResolvedValue('pending');
 
         await retryManager.startBatch('quick');
 
-        expect(dispatchedSourceIds).toHaveLength(settingsManager.settings.maxRetries + 1);
+        expect(dispatchedSourceIds).toHaveLength(1);
         expect(new Set(dispatchedSourceIds)).toEqual(new Set([sourceId]));
-        expect(retryManager.goalCount).toBe(0);
+        expect(retryManager.goalCount).toBe(1);
+        expect(mockOverlay.setStatus).toHaveBeenCalledWith(
+            'Quick Batch: Dispatched (1/1)',
+            'success'
+        );
     });
 
     test('Quick Batch never dispatches the same stable source twice after a gallery remount', async () => {
@@ -1466,9 +1504,10 @@ describe('VideoRetryManager', () => {
 
     test('detectBatchContext resolves a qualified current results grid separately from Saved', () => {
         window.history.pushState({}, '', '/imagine');
-        createSavedBatchCard(
-            'https://assets.grok.com/users/example/generated/abababab-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
-        );
+        const { card, image, postLink } = createSavedBatchCard('data:image/jpeg;base64,Y2FuYXJ5');
+        image.alt = '';
+        postLink.href = '/imagine/post/abababab-bbbb-4ccc-8ddd-eeeeeeeeeeee?scope=asset';
+        card.appendChild(postLink);
 
         expect(retryManager.detectBatchContext()).toBe('results_gallery');
     });
@@ -1603,12 +1642,13 @@ describe('VideoRetryManager', () => {
             document.body.innerHTML = '';
             const { postLink } = createSavedBatchCard(sourceUrl);
             postLink.addEventListener('click', () => {
+                const sourceId = getFixtureMediaId(sourceUrl);
                 window.history.pushState(
                     {},
                     '',
-                    '/imagine/post/adadadad-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+                    `/imagine/post/${sourceId}`
                 );
-                document.body.innerHTML = '';
+                const { makeVideo } = renderModernDetailSource(sourceUrl);
 
                 const back = makeVisible(document.createElement('button'));
                 back.setAttribute('aria-label', 'Back');
@@ -1617,9 +1657,6 @@ describe('VideoRetryManager', () => {
                     renderResults();
                 });
 
-                const makeVideo = makeVisible(document.createElement('button'));
-                makeVideo.setAttribute('aria-label', 'Make Video');
-                makeVideo.setAttribute('aria-haspopup', 'menu');
                 makeVideo.addEventListener('click', () => {
                     const menu = makeVisible(document.createElement('div'));
                     const addPrompt = createMenuItem('Add Prompt', () => {
@@ -1635,7 +1672,7 @@ describe('VideoRetryManager', () => {
                     openLinkedMenu(makeVideo, menu);
                 });
 
-                document.body.append(back, makeVideo);
+                document.body.appendChild(back);
             });
             return postLink;
         };
@@ -1666,8 +1703,9 @@ describe('VideoRetryManager', () => {
         retryManager.sleep = jest.fn(async () => {
             sleepCount++;
             if (sleepCount === 1) {
-                window.history.pushState({}, '', '/imagine/post/delayed-result');
-                document.body.innerHTML = '';
+                const sourceId = getFixtureMediaId(sourceUrl);
+                window.history.pushState({}, '', `/imagine/post/${sourceId}`);
+                renderModernDetailSource(sourceUrl);
             }
         });
 
@@ -1696,8 +1734,9 @@ describe('VideoRetryManager', () => {
         retryManager.sleep = jest.fn(async () => {
             sleepCount++;
             if (sleepCount === 1) {
-                window.history.pushState({}, '', '/imagine/post/delayed-progress-result');
-                document.body.innerHTML = '';
+                const sourceId = getFixtureMediaId(sourceUrl);
+                window.history.pushState({}, '', `/imagine/post/${sourceId}`);
+                renderModernDetailSource(sourceUrl);
             }
         });
 
@@ -2203,7 +2242,7 @@ describe('VideoRetryManager', () => {
 
         await expect(retryManager._processPromptedResultsItem(item, token)).resolves.toBe(true);
 
-        expect(sourceLink.href).toBe(`http://localhost/imagine/post/${sourcePostId}`);
+        expect(sourceLink.href).toBe(`https://grok.com/imagine/post/${sourcePostId}`);
         expect(retryManager.batchProcessedSrcs).toContain(sourcePostId);
         expect(retryManager.goalCount).toBe(1);
         expect(videoPolls).toBe(0);
@@ -3195,7 +3234,7 @@ describe('VideoRetryManager', () => {
 
         await retryManager.processBatchItemPrompted({ button: first.makeVideo, container: first.card }, retryManager.batchRunToken);
 
-        expect(recoverSpy).toHaveBeenCalledWith('http://localhost/imagine/saved');
+        expect(recoverSpy).toHaveBeenCalledWith('https://grok.com/imagine/saved');
         expect(retryManager.batchRunning).toBe(false);
         expect(retryManager.goalCount).toBe(0);
         expect(mockOverlay.setStatus).toHaveBeenCalledWith(expect.stringContaining('could not return to Saved'), 'warning');

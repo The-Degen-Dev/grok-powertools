@@ -534,7 +534,7 @@
                             clickState: error?.clickState || 'unknown'
                         };
                     }
-                    const run = State.reduceGenerationRun(currentRun, {
+                    let run = State.reduceGenerationRun(currentRun, {
                         type: 'report',
                         runId: request?.runId,
                         epoch: request?.epoch,
@@ -545,9 +545,26 @@
                         receipt: request?.receipt ?? null,
                         now: now()
                     });
+                    let dispatchStatus = 'submitted';
+                    if (request?.acceptOnClick === true
+                        && dispatchUncertain === false
+                        && dispatchResult?.clickState === 'click_sent') {
+                        run = State.reduceGenerationRun(run, {
+                            type: 'report',
+                            runId: request?.runId,
+                            epoch: request?.epoch,
+                            itemId: request?.itemId,
+                            claimId: request?.claimId,
+                            outcome: 'accepted',
+                            failureCode: '',
+                            receipt: request?.receipt ?? null,
+                            now: now()
+                        });
+                        dispatchStatus = 'accepted';
+                    }
                     await persist(run);
                     return {
-                        status: 'submitted',
+                        status: dispatchStatus,
                         dispatchResult,
                         dispatchUncertain,
                         run: publicRun(run)

@@ -3022,6 +3022,110 @@ npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-
                             The starter now creates that ignored parent when absent, then retains the existing
                             non-recursive per-run directory creation and overwrite refusal. This changes no
                             extension runtime or production acceptance data.
+                            On 2026-08-23, live inspection of a current Grok 2.0 results page found that both
+                            Quick Batch and Prompted Batch were rejected by their shared gallery adapter before
+                            either workflow started. Result cards still exposed stable post links and UUIDs, but
+                            their images had moved from <code>assets.grok.com/.../generated/&lt;uuid&gt;</code> to
+                            <code>imagine-public.x.ai/imagine-public/images/&lt;uuid&gt;</code> and used prompt text
+                            as <code>alt</code> content. The adapter and legacy card helper now recognize that exact
+                            trusted host/path identity. Results detection still requires exactly one card-owned
+                            Make Video action, so public-media recommendation cards on the empty Imagine home do
+                            not become batch-eligible. Saved behavior, Sync state, processed IDs, cloud settings,
+                            and generation run contracts were intentionally left unchanged. Fresh result cards
+                            can initially expose only a base64 image while retaining their stable UUID in one
+                            asset-scoped post link; that exact combination is now accepted without treating an
+                            arbitrary data image as generated media. Live inspection also found that the Quick
+                            Batch button ignored the visible Gallery Limit and fell back to stale stored settings.
+                            Quick now passes the visible value into the durable run, matching Prompted Batch.
+                            Three deliberately stopped diagnostic Quick runs dispatched one source each before
+                            terminal acceptance, so they are evidence of dispatch only, not completion proof.
+                            The first uninterrupted canary then proved the latest durable runner had changed the
+                            product contract: it persisted one native click, waited for provider-result evidence
+                            that Grok does not expose reliably for the direct card action, and mislabeled the
+                            dispatch as failed. Quick Batch now treats an atomically journaled, sender-tab native
+                            click as its success boundary, waits briefly for an immediate rejection or ambiguous
+                            remount, returns to the origin, and advances without waiting for video completion.
+                            This intentionally restores the earlier rapid-dispatch behavior while retaining stable
+                            identities, one background-owned lease, cancellation fencing, and no-duplicate resume.
+                            A second canary exposed a navigation race: the background persisted
+                            <code>submitted</code>, Grok remounted the page, and the content script lost its later
+                            terminal report. Quick's background-owned native-click transaction now advances the
+                            item to accepted-dispatch before returning from a confirmed
+                            <code>click_sent</code>. An uncertain or unsent native click remains submitted and is
+                            never silently treated as dispatched.
+                            Prompted Batch retains provider launch verification because it owns a composer submit.
+                            A fresh one-source Quick canary from a two-image results page reached
+                            <code>Quick Batch: Dispatched (1/1)</code> in about one second with no pending journal,
+                            proving the restored rapid-dispatch boundary in the live extension.
+                            The first bounded Prompted canary failed before opening a video composer or submitting
+                            a video, so it spent no video credit. Its live route trace repeatedly transitioned
+                            between the results origin and the selected <code>/imagine/post/&lt;uuid&gt;</code> page,
+                            then reported <code>source identity unproven</code>. Inspection of that exact page
+                            showed the current Grok 2.0 source image and Make Video menu inside a full-height
+                            detail shell with a sibling <code>aside[aria-label="Post details"]</code>; there is no
+                            legacy <code>article</code> or <code>data-media-frame</code>. The adapter now scopes
+                            this modern shell, excludes segment thumbnails inside the details aside, and binds the
+                            route UUID to the one source image outside it. The transition wait no longer treats a
+                            detail URL alone as readiness: it requires a matching source identity and the same
+                            actionable Make Video control across the existing quiescence window. A fresh
+                            uninterrupted one-source Prompted canary remains required after reloading this patch.
+                            A no-submit live settings inspection established that Grok currently defaults video
+                            generation to <code>480p</code> and <code>15s</code>. The duration was changed to
+                            <code>6s</code> for the bounded canary. Returning to Imagine preserved Video mode, and
+                            the next intended image-fixture prompt therefore created one unintended but bounded
+                            <code>480p/6s</code> text-to-video result. This was an operator validation error, not an
+                            extension dispatch, and it is recorded rather than hidden. Image mode was explicitly
+                            restored and verified before creating the next fixture set.
+                            The next Prompted attempt exposed a second modern-detail identity case. SPA-opened
+                            source images can remain a <code>data:image/...</code> URL indefinitely, with their
+                            stable UUID present only in the <code>/imagine/post/&lt;uuid&gt;</code> route. The adapter
+                            now accepts that route-bound identity only when the modern detail shell has exactly
+                            one source image outside the Post details aside. Arbitrary data images and segment
+                            thumbnails remain ineligible. The same attempt also exposed a false success label:
+                            a permanent identity failure produced terminal counts of zero accepted and one failed,
+                            but the overlay rendered <code>Complete (0/1)</code>. Quick and Prompted success labels
+                            now require zero failed items; permanent failures render as warnings and only
+                            retryable failures advertise Retry Failed. A read-only reproduction of that same
+                            SPA detail revealed the remaining ambiguity: Grok nests an
+                            <code>article[data-media-frame]</code> around the source image inside the canonical
+                            modern Post-details shell. The adapter had registered both the shell and its nested
+                            legacy article. Modern shells are now authoritative, and only their descendant legacy
+                            link/frame/article candidates are excluded; standalone legacy details remain supported.
+                            Before another live attempt, an exact JSDOM contract probe reproduced the modern shell,
+                            nested frame, route UUID, one data image, and Make Video menu. It initially caught that
+                            the unique-frame branch still discarded the data image before route binding. After that
+                            branch was corrected, the probe returned one matched legacy-detail descriptor and one
+                            matching Prompted submission receipt for the route UUID. The final live Prompted canary
+                            began from a fresh two-image candid beach results page with Gallery Limit and Video Goal
+                            both set to one. It opened exactly one source in the current SPA detail, selected Add
+                            Prompt, filled the supplied motion prompt, submitted once at 480p, reached one distinct
+                            child result route, returned to the original Imagine results route, and terminated as
+                            <code>Prompted Batch: Complete (1/1)</code>. The second source remained eligible and
+                            untouched, and the durable journal had no pending item. Grok reset the composer duration
+                            to 15s despite the earlier 6s setting, so this proves one bounded Prompted dispatch and
+                            return at 480p/15s rather than the intended 480p/6s. No repeat was submitted because it
+                            would spend another credit without increasing workflow coverage. The exact current DOM
+                            shape is now a regression fixture: one modern Post-details shell, one nested
+                            <code>article[data-media-frame]</code>, one route-bound data image, and one Make Video
+                            menu. Its source description, Add Prompt resolution, and submission receipt all pass
+                            together without requiring the temporary image URL to contain a UUID. The full mocked
+                            browser gate then caught a separate Quick completion fault after all ten cards were
+                            dispatched. Once every card had changed from Make Video to progress, the eligible-results
+                            detector correctly returned unsupported, but origin recovery incorrectly interpreted
+                            that as leaving the captured results grid and invoked browser Back. Results-origin
+                            recovery now verifies the exact captured route and neighborhood receipt before relying
+                            on action eligibility. A different grid on the same route still fails the receipt check,
+                            while an exhausted original grid returns without navigation. The final release review
+                            also found that the production background native-click handler still accepted only the
+                            old <code>submitted</code> controller response. Quick's atomic click path now returns
+                            <code>accepted</code> after a real <code>click_sent</code>, so the background incorrectly
+                            converted a successful persisted dispatch into an error response. The handler and mocked
+                            browser contract now accept both legitimate statuses, and the mock emits the production
+                            <code>click_sent</code> state so the atomic path is exercised rather than bypassed. Final
+                            deterministic validation on the resulting tree passed ESLint, all 1,026 unit tests, all
+                            56 mocked Playwright extension tests, <code>git diff --check</code>, and extension
+                            packaging. The final package contained only the runtime allowlist and was written to the
+                            system temporary directory, not the repository.
                         </td>
                     </tr>
                 </tbody>

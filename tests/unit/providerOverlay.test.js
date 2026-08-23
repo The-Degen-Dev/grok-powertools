@@ -92,6 +92,19 @@ describe('provider-aware overlay', () => {
         expect(overlay.el.querySelector('#gptAutoRetrySection').style.display).not.toBe('none');
     });
 
+    test('starts Quick Batch with the currently visible gallery limit', async () => {
+        const { overlay, retryManager } = createOverlay('https://grok.com/imagine');
+        const galleryLimit = overlay.el.querySelector('#gptGalleryLimit');
+        galleryLimit.value = '1';
+
+        overlay.el.querySelector('#gptQuickBatchBtn').click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(retryManager.startBatch).toHaveBeenCalledWith('quick', null, {
+            galleryLimit: 1
+        });
+    });
+
     test('tracks native ChatGPT image send and writes provider run ledger entry', async () => {
         const fallback = document.createElement('textarea');
         fallback.name = 'prompt-textarea';

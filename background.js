@@ -6080,7 +6080,7 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                             assertAuthorized
                         )
                     );
-                    if (generation?.status !== 'submitted') {
+                    if (!['submitted', 'accepted'].includes(generation?.status)) {
                         throw new Error(generation?.error || 'generation_dispatch_rejected');
                     }
                     sendResponse({ ok: true, generation });

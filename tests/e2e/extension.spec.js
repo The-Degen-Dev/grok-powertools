@@ -2627,7 +2627,7 @@ test.describe('Grok Power Tools E2E', () => {
                             }));
                         });
                         await assertAuthorized?.();
-                        return { ok: true, clickState: 'dispatched' };
+                        return { ok: true, clickState: 'click_sent' };
                     };
                     if (!message.generationDispatch) return dispatchClick();
                     if (!window.__generationRunController) {
@@ -2641,7 +2641,7 @@ test.describe('Grok Power Tools E2E', () => {
                         message.generationDispatch,
                         sender,
                         dispatchClick
-                    ).then((generation) => generation?.status === 'submitted'
+                    ).then((generation) => ['submitted', 'accepted'].includes(generation?.status)
                         ? { ok: true, generation }
                         : { ok: false, error: generation?.error || 'generation_dispatch_rejected' });
                 }

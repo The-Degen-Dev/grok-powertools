@@ -30,6 +30,10 @@ function generatedMediaUrl(assetId, fileName = 'image.jpg') {
     return `https://assets.grok.com/users/example/generated/${assetId}/${fileName}?token=must-not-persist&expires=9999999999`;
 }
 
+function publicGeneratedImageUrl(assetId) {
+    return `https://imagine-public.x.ai/imagine-public/images/${assetId}.jpg?token=must-not-persist`;
+}
+
 function galleryCard({
     assetId,
     postId,
@@ -235,6 +239,30 @@ function mountCurrentDetailModal({ assetId = FIRST_ASSET_ID, mediaKind = 'image'
     };
 }
 
+function mountModernPostDetail({ postId = FIRST_POST_ID } = {}) {
+    document.body.innerHTML = `
+        <div class="relative w-full h-dvh flex flex-col">
+            <article>
+                <div data-media-frame>
+                    <img alt="" src="data:image/jpeg;base64,Y2FuYXJ5">
+                </div>
+            </article>
+            <aside aria-label="Post details">
+                <button id="modern-detail-make-video" aria-label="Make Video"
+                    aria-haspopup="menu" aria-controls="modern-detail-video-menu"
+                    aria-expanded="false" data-state="closed">
+                    Make Video
+                </button>
+            </aside>
+        </div>
+    `;
+    setActiveGrokRoute(`/imagine/post/${postId}?scope=asset`);
+    return {
+        source: document.querySelector('.relative.w-full.h-dvh'),
+        sidePanelAction: document.querySelector('#modern-detail-make-video')
+    };
+}
+
 function openLinkedAddPromptMenu(trigger, menuId) {
     trigger.setAttribute('aria-expanded', 'true');
     trigger.setAttribute('data-state', 'open');
@@ -385,6 +413,67 @@ describe('Grok Imagine adapter module contract', () => {
                 beforeAssetId: '',
                 afterAssetId: ''
             }
+        });
+    });
+
+    test('binds the current nested Grok detail data image to its route and Prompted action', () => {
+        const { source, sidePanelAction } = mountModernPostDetail();
+        const result = describeCurrentSource({
+            root: document,
+            surface: 'legacy_detail',
+            location: new URL(`https://grok.com/imagine/post/${FIRST_POST_ID}?scope=asset`)
+        });
+
+        expect(result).toEqual({
+            status: 'matched',
+            descriptor: {
+                version: 1,
+                surface: 'legacy_detail',
+                sourceAssetId: FIRST_POST_ID,
+                sourcePostId: FIRST_POST_ID,
+                conversationId: '',
+                mediaKind: 'image',
+                hrefPath: `/imagine/post/${FIRST_POST_ID}`,
+                route: `https://grok.com/imagine/post/${FIRST_POST_ID}`,
+                initialOrder: 0,
+                beforeAssetId: '',
+                afterAssetId: ''
+            }
+        });
+        expect(resolveGalleryItem({ root: document, descriptor: result.descriptor })).toEqual({
+            status: 'matched',
+            card: source,
+            descriptor: result.descriptor
+        });
+        expect(resolveMediaAction({
+            root: document,
+            descriptor: result.descriptor,
+            action: 'prompted_video'
+        })).toEqual({
+            status: 'matched',
+            stage: 'open_prompt_menu',
+            control: sidePanelAction
+        });
+
+        const addPrompt = openLinkedAddPromptMenu(sidePanelAction, 'modern-detail-video-menu');
+        expect(resolveMediaAction({
+            root: document,
+            descriptor: result.descriptor,
+            action: 'prompted_video'
+        })).toEqual({
+            status: 'matched',
+            stage: 'select_add_prompt',
+            control: addPrompt
+        });
+        expect(captureSubmissionReceipt({
+            root: document,
+            descriptor: result.descriptor,
+            action: 'prompted_video'
+        })).toMatchObject({
+            version: 1,
+            sourceKind: 'legacy_detail',
+            sourceAssetId: FIRST_POST_ID,
+            sourcePostId: FIRST_POST_ID
         });
     });
 
@@ -543,6 +632,99 @@ describe('Grok Imagine adapter module contract', () => {
         expect(JSON.stringify(result)).not.toContain('token=');
         expect(JSON.stringify(result)).not.toContain('https://');
         expect(result.items.every((item) => !Object.values(item).some((value) => value instanceof Element))).toBe(true);
+    });
+
+    test('recognizes current public result media with prompt alt text', () => {
+        mountCurrentGallery(currentResultsItems());
+        const firstImage = document.querySelector('img');
+        firstImage.alt = 'A candid beach portrait';
+        firstImage.src = publicGeneratedImageUrl(FIRST_ASSET_ID);
+
+        const result = listCurrentResults();
+
+        expect(result.status).toBe('ok');
+        expect(result.items[0]).toEqual(expect.objectContaining({
+            surface: 'results_gallery',
+            sourceAssetId: FIRST_ASSET_ID,
+            sourcePostId: FIRST_POST_ID
+        }));
+        expect(JSON.stringify(result)).not.toContain('token=');
+    });
+
+    test('uses an asset-scoped post UUID while a current result image is still a data URL', () => {
+        document.body.innerHTML = `
+            <main><section role="list">
+                <div role="listitem">
+                    <div class="relative group/media-post-masonry-card">
+                        <img alt="" src="data:image/jpeg;base64,Y2FuYXJ5">
+                        <a class="absolute inset-0"
+                            href="/imagine/post/${FIRST_POST_ID}?scope=asset"></a>
+                        <button type="button" aria-label="Make video">Make video</button>
+                    </div>
+                </div>
+            </section></main>
+        `;
+
+        const result = listGalleryItems({
+            root: document,
+            surface: detectGrokSurface({
+                root: document,
+                location: new URL('https://grok.com/imagine')
+            })
+        });
+
+        expect(result).toEqual({
+            status: 'ok',
+            items: [expectedDescriptor({
+                surface: 'results_gallery',
+                assetId: FIRST_POST_ID,
+                postId: FIRST_POST_ID,
+                conversationId: '',
+                mediaKind: 'image',
+                initialOrder: 0
+            })]
+        });
+    });
+
+    test('rejects a data image fallback when its post is not explicitly asset-scoped', () => {
+        document.body.innerHTML = `
+            <main><section role="list">
+                <div role="listitem">
+                    <div class="relative group/media-post-masonry-card">
+                        <img alt="" src="data:image/jpeg;base64,Y2FuYXJ5">
+                        <a href="/imagine/post/${FIRST_POST_ID}"></a>
+                        <button type="button" aria-label="Make video">Make video</button>
+                    </div>
+                </div>
+            </section></main>
+        `;
+
+        expect(detectGrokSurface({
+            root: document,
+            location: new URL('https://grok.com/imagine')
+        })).toBe('unsupported');
+    });
+
+    test('keeps public-media post cards without one Make video action unsupported on Imagine home', () => {
+        mountCurrentGallery([{
+            assetId: FIRST_ASSET_ID,
+            postId: FIRST_POST_ID,
+            conversationId: CONVERSATION_ID,
+            includeQuickAction: false
+        }]);
+        const image = document.querySelector('img');
+        image.alt = 'Recommended image';
+        image.src = publicGeneratedImageUrl(FIRST_ASSET_ID);
+
+        expect(detectGrokSurface({
+            root: document,
+            location: new URL('https://grok.com/imagine')
+        })).toBe('unsupported');
+        expect(listGalleryItems({ root: document, surface: 'results_gallery' })).toEqual({
+            status: 'missing',
+            reason: 'gallery_items_missing',
+            items: []
+        });
     });
 
     test('returns ordered Saved image and video descriptors without signed media URLs', () => {
