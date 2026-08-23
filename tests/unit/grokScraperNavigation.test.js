@@ -2,6 +2,7 @@ const {
     SCRAPE_SURFACES,
     SAVED_GALLERY_SCOPES,
     GrokScraper,
+    initializeGrokScraperState,
     GALLERY_RECEIPT_VERSION,
     captureGalleryReceipt,
     captureSavedViewportReceipt,
@@ -26,45 +27,108 @@ const CloudSyncUtils = require('../../cloudSyncUtils.js');
 const { Blob: NodeBlob } = require('buffer');
 const { webcrypto } = require('crypto');
 
+function preventFixtureAnchorNavigation(event) {
+    if (event.target?.closest?.('a[href]')) event.preventDefault();
+}
+
+beforeEach(() => {
+    document.addEventListener('click', preventFixtureAnchorNavigation, true);
+});
+
+afterEach(() => {
+    document.removeEventListener('click', preventFixtureAnchorNavigation, true);
+});
+
+function addMockDestinationReceipts(localState, message) {
+    const localIds = Array.from(new Set([
+        ...(localState.processedLocalIds || []),
+        ...(message.localIds || [])
+    ]));
+    const r2Ids = Array.from(new Set([
+        ...(localState.processedR2Ids || []),
+        ...(message.r2Ids || [])
+    ]));
+    const processedIds = Array.from(new Set([
+        ...(localState.processedIds || []),
+        ...localIds,
+        ...r2Ids
+    ]));
+    Object.assign(localState, {
+        processedIds,
+        processedLocalIds: localIds,
+        processedR2Ids: r2Ids
+    });
+    return { status: 'ok', processedIds, processedLocalIds: localIds, processedR2Ids: r2Ids };
+}
+
 function mockContentChrome() {
+    const localState = {};
+    const readLocalState = (keys) => {
+        if (keys == null) return { ...localState };
+        if (typeof keys === 'string') return { [keys]: localState[keys] };
+        if (Array.isArray(keys)) {
+            return Object.fromEntries(keys.map((key) => [key, localState[key]]));
+        }
+        return Object.fromEntries(Object.entries(keys).map(([key, fallback]) => [
+            key,
+            Object.prototype.hasOwnProperty.call(localState, key) ? localState[key] : fallback
+        ]));
+    };
     global.chrome = {
+        __localState: localState,
         runtime: {
             id: 'extension-id',
             lastError: null,
-            sendMessage: jest.fn((message) => Promise.resolve(
-                message?.action === 'VALIDATE_SCRAPE_RESUME'
-                    ? { valid: true, reason: 'active_owner' }
-                    : (message?.action === 'GET_SCRAPE_DURABILITY'
-                        ? {
-                            status: 'durable',
-                            inFlightTasks: 0,
-                            pendingDownloads: 0,
-                            pendingOperations: 0,
-                            pendingQueueItems: 0,
-                            failedItems: 0
-                        }
-                    : (message?.action === 'SCRAPE_RUN_STATE_WRITE'
-                        ? { status: 'ok' }
-                        : (message?.action === 'R2_BACKUP_CHECK_PRESENT'
-                            ? { status: 'missing' }
-                        : (message?.action === 'SCRAPE_PROCESSED_IDS_ADD'
-                            ? { status: 'ok', processedIds: message.ids || [] }
-                            : undefined))))
-            )),
+            sendMessage: jest.fn(async (message) => {
+                if (message?.action === 'VALIDATE_SCRAPE_RESUME') {
+                    return { valid: true, reason: 'active_owner' };
+                }
+                if (message?.action === 'GET_SCRAPE_DURABILITY') {
+                    return {
+                        status: 'durable',
+                        inFlightTasks: 0,
+                        pendingDownloads: 0,
+                        pendingOperations: 0,
+                        pendingQueueItems: 0,
+                        failedItems: 0
+                    };
+                }
+                if (message?.action === 'GET_CLOUD_CONFIG') {
+                    return { config: { mode: 'local_only' } };
+                }
+                if (message?.action === 'SCRAPE_RUN_STATE_WRITE') return { status: 'ok' };
+                if (message?.action === 'R2_BACKUP_CHECK_PRESENT') return { status: 'missing' };
+                if (message?.action === 'SCRAPE_PROCESSED_IDS_ADD') {
+                    return addMockDestinationReceipts(localState, { localIds: message.ids || [] });
+                }
+                if (message?.action === 'SCRAPE_DESTINATION_RECEIPTS_ADD') {
+                    return addMockDestinationReceipts(localState, message);
+                }
+                return undefined;
+            }),
             onMessage: { addListener: jest.fn() }
         },
         storage: {
             local: {
-                get: jest.fn(() => Promise.resolve({})),
-                set: jest.fn(() => Promise.resolve())
+                get: jest.fn(async (keys) => readLocalState(keys)),
+                set: jest.fn(async (values) => {
+                    Object.assign(localState, values);
+                })
             },
             onChanged: { addListener: jest.fn() }
         }
     };
 }
 
+function addMockAssetReceipt(assetId, destination = 'local') {
+    return addMockDestinationReceipts(chrome.__localState, destination === 'r2'
+        ? { r2Ids: [assetId] }
+        : { localIds: [assetId] });
+}
+
 function createScraper(surface = SCRAPE_SURFACES.savedGallery) {
     const scraper = Object.create(GrokScraper.prototype);
+    initializeGrokScraperState(scraper);
     scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
     scraper.backupMode = false;
     scraper.backupOptions = { mode: 'full', limit: null, options: {} };
@@ -84,6 +148,7 @@ function createScraper(surface = SCRAPE_SURFACES.savedGallery) {
     scraper._pendingInitLease = null;
     scraper._runInvalidationVersion = 0;
     scraper._runStateWriteQueue = Promise.resolve();
+    scraper._savedScanNeedsRewind = false;
     scraper.Config = { actionWait: 0, navWait: 0, surfaceWait: 50 };
     scraper.getCurrentSurface = jest.fn(() => surface);
     scraper.getSavedGalleryScope = jest.fn(() => SAVED_GALLERY_SCOPES.all);
@@ -99,7 +164,7 @@ function captureMetadata(assetId, promptText = 'authoritative prompt') {
         evidenceSource: 'grok_conversation_response',
         conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         assetId,
-        responseId: 'response-1',
+        responseId: assetId,
         promptText,
         assetMetadata: { assetId },
         mediaGenInput: { prompt: promptText }
@@ -110,13 +175,19 @@ function makeConversationInventory(conversationId, assetIds) {
     return {
         schemaVersion: 1,
         conversationId,
+        failureCount: 0,
+        inflightResponseCount: 0,
+        failedResponses: [],
+        inflightResponses: [],
+        videoGenerationResponses: [],
         assets: assetIds.map((assetId, index) => ({
             assetId,
-            responseId: `response-${index + 1}`,
+            responseId: assetId,
             parentResponseId: '',
             mediaKind: index % 2 === 0 ? 'image' : 'video',
             sourceUrl: `https://assets.grok.com/users/example/generated/${assetId}/${index % 2 === 0 ? 'image.jpg' : 'generated_video.mp4'}`,
             promptText: 'candid friends at the beach',
+            promptEvidenceSource: 'response_media_gen_input',
             assetMetadata: {
                 assetId,
                 mimeType: index % 2 === 0 ? 'image/jpeg' : 'video/mp4'
@@ -190,25 +261,31 @@ function mountSemanticSavedImage(sourceUrl, scrollTop = 0) {
     const image = document.createElement('img');
     image.alt = 'Generated image';
     image.src = sourceUrl;
-    card.appendChild(image);
+    const link = document.createElement('a');
+    link.href = `/imagine/post/${getGrokMediaIdentity(sourceUrl)}`;
+    link.appendChild(image);
+    card.appendChild(link);
     list.appendChild(card);
     scroller.appendChild(list);
     document.body.appendChild(scroller);
-    return { scroller, list, card, image };
+    return { scroller, list, card, image, link };
 }
 
-function appendSemanticSavedEntry(list, sourceUrl, mediaType) {
+function appendSemanticSavedEntry(list, sourceUrl, mediaType, postIdentity = getGrokMediaIdentity(sourceUrl)) {
     const card = document.createElement('article');
     card.setAttribute('role', 'listitem');
     const image = document.createElement('img');
     image.alt = 'Generated image';
     image.src = sourceUrl;
-    card.appendChild(image);
+    const link = document.createElement('a');
+    link.href = `/imagine/post/${postIdentity}`;
+    link.appendChild(image);
+    card.appendChild(link);
     const mediaControl = document.createElement('button');
     mediaControl.setAttribute('aria-label', mediaType === 'video' ? 'Play video' : 'Make video');
     card.appendChild(mediaControl);
     list.appendChild(card);
-    return { card, image, mediaControl };
+    return { card, image, link, mediaControl };
 }
 
 const FULL_POINTER_ACTIVATION_EVENTS = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
@@ -762,9 +839,12 @@ describe('Grok Saved semantic candidate and viewport receipts', () => {
         const image = document.createElement('img');
         image.alt = 'Generated image';
         image.src = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-        card.appendChild(image);
+        const link = document.createElement('a');
+        link.href = `/imagine/post/${mediaId}`;
+        link.appendChild(image);
+        card.appendChild(link);
         list.appendChild(card);
-        return { card, image };
+        return { card, image, link };
     };
 
     afterEach(() => {
@@ -1017,10 +1097,13 @@ describe('Grok scrape surface transitions', () => {
     });
 
     test('routes Agent Mode directly to the Agent handler without gallery scrolling', async () => {
+        mockContentChrome();
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
-        scraper.executeAgentView = jest.fn();
+        scraper.executeAgentView = jest.fn(async () => {
+            scraper.state.isRunning = false;
+        });
         scraper.executeListView = jest.fn();
         scraper.executeDetailView = jest.fn();
         const scrollSpy = jest.spyOn(window, 'scrollBy').mockImplementation(() => {});
@@ -1041,6 +1124,7 @@ describe('Grok scrape surface transitions', () => {
         const scraper = createScraper();
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = backupMode ? ['r2'] : ['local'];
         scraper.backupMode = backupMode;
         scraper.getSavedGalleryScope
             .mockReturnValueOnce(SAVED_GALLERY_SCOPES.all)
@@ -1062,7 +1146,6 @@ describe('Grok scrape surface transitions', () => {
         expect(scraper.processItem).not.toHaveBeenCalled();
         expect(activationEvents).toEqual([]);
         expect(scrollSpy).not.toHaveBeenCalled();
-        expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
         scrollSpy.mockRestore();
     });
 
@@ -1075,13 +1158,7 @@ describe('Grok scrape surface transitions', () => {
         const firstUrl = 'https://assets.grok.com/users/u/generated/31000000-0000-4000-8000-000000000001/image.jpg';
         const secondUrl = 'https://assets.grok.com/users/u/generated/31000000-0000-4000-8000-000000000002/image.jpg';
         const { list } = mountSemanticSavedImage(firstUrl);
-        const secondCard = document.createElement('article');
-        secondCard.setAttribute('role', 'listitem');
-        const secondImage = document.createElement('img');
-        secondImage.alt = 'Generated image';
-        secondImage.src = secondUrl;
-        secondCard.appendChild(secondImage);
-        list.appendChild(secondCard);
+        appendSemanticSavedEntry(list, secondUrl, 'image');
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
         scraper.backupMode = backupMode;
@@ -1296,7 +1373,12 @@ describe('Grok scrape surface transitions', () => {
         const firstControl = document.createElement('button');
         firstControl.setAttribute('aria-label', 'Make video');
         card.appendChild(firstControl);
-        appendSemanticSavedEntry(list, `${targetUrl}?duplicate=1`, 'image');
+        appendSemanticSavedEntry(
+            list,
+            `${targetUrl}?duplicate=1`,
+            'image',
+            '34100000-0000-4000-8000-000000000098'
+        );
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
         scraper.backupMode = true;
@@ -1348,8 +1430,18 @@ describe('Grok scrape surface transitions', () => {
             if (renderedSecondWindow) return;
             renderedSecondWindow = true;
             list.textContent = '';
-            appendSemanticSavedEntry(list, targetUrl, 'image');
-            appendSemanticSavedEntry(list, `${targetUrl}?second-card=1`, 'image');
+            appendSemanticSavedEntry(
+                list,
+                targetUrl,
+                'image',
+                '34200000-0000-4000-8000-000000000097'
+            );
+            appendSemanticSavedEntry(
+                list,
+                `${targetUrl}?second-card=1`,
+                'image',
+                '34200000-0000-4000-8000-000000000098'
+            );
         });
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
@@ -1459,7 +1551,10 @@ describe('Grok scrape surface transitions', () => {
                 replacementImage = document.createElement('img');
                 replacementImage.alt = 'Generated image';
                 replacementImage.src = targetUrl;
-                replacementCard.append(replacementImage, document.createElement('video'));
+                const replacementLink = document.createElement('a');
+                replacementLink.href = `/imagine/post/${targetIdentity}`;
+                replacementLink.appendChild(replacementImage);
+                replacementCard.append(replacementLink, document.createElement('video'));
                 card.replaceWith(replacementCard);
             }
         });
@@ -1608,7 +1703,12 @@ describe('Grok scrape surface transitions', () => {
         scraper.sleep = jest.fn(async () => {
             if (duplicateMounted) return;
             duplicateMounted = true;
-            appendSemanticSavedEntry(list, `${targetUrl}?duplicate=1`, 'video');
+            appendSemanticSavedEntry(
+                list,
+                `${targetUrl}?duplicate=1`,
+                'video',
+                '34360000-0000-4000-8000-000000000098'
+            );
         });
 
         await GrokScraper.prototype.processUniqueCanaryTarget.call(scraper, {
@@ -1790,7 +1890,10 @@ describe('Grok scrape surface transitions', () => {
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
         scraper._runVisited.add('card:32000000-0000-4000-8000-000000000001');
-        scraper.processItem = jest.fn().mockResolvedValue();
+        scraper.processItem = jest.fn(async () => {
+            scraper._savedVerificationVisited.add('card:32000000-0000-4000-8000-000000000001');
+            return { status: 'completed' };
+        });
         scraper.queryRunDurabilitySnapshot = jest.fn().mockResolvedValue({ status: 'durable' });
         scraper.waitForRunDurability = jest.fn().mockResolvedValue({ status: 'durable' });
         scraper.stop = jest.fn().mockResolvedValue();
@@ -1804,8 +1907,12 @@ describe('Grok scrape surface transitions', () => {
         try {
             await GrokScraper.prototype.executeListView.call(scraper, 'run-1');
 
-            expect(scraper.processItem).not.toHaveBeenCalled();
-            expect(scraper.waitForRunDurability).toHaveBeenCalledWith('run-1');
+            expect(scraper.processItem).toHaveBeenCalledTimes(1);
+            expect(scraper.waitForRunDurability).toHaveBeenCalledTimes(2);
+            expect(scraper.waitForRunDurability).toHaveBeenCalledWith(
+                'run-1',
+                { timeoutMs: 180000 }
+            );
             expect(scraper.stop).toHaveBeenCalledWith('complete');
             expect(scraper.stop).not.toHaveBeenCalledWith('scan_limit');
         } finally {
@@ -1843,7 +1950,7 @@ describe('Grok scrape surface transitions', () => {
 
         try {
             await expect(GrokScraper.prototype.executeListView.call(scraper, 'run-1'))
-                .resolves.toBeUndefined();
+                .resolves.toEqual({ status: 'stopped' });
 
             expect(scraper._savedScanLedger.stableBottomRounds).toBe(0);
             expect(scraper.waitForRunDurability).not.toHaveBeenCalled();
@@ -1863,6 +1970,7 @@ describe('Grok scrape surface transitions', () => {
         const scraper = createScraper();
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = ['local'];
         scraper.pendingNavigation = {
             runToken: 'run-1',
             runEpoch: 1,
@@ -1881,7 +1989,6 @@ describe('Grok scrape surface transitions', () => {
         );
         expect(scraper.restorePendingGalleryContext).not.toHaveBeenCalled();
         expect(scraper.executeListView).not.toHaveBeenCalled();
-        expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
     });
 
     test.each([
@@ -1927,7 +2034,10 @@ describe('Grok scrape surface transitions', () => {
             const image = document.createElement('img');
             image.alt = 'Generated image';
             image.src = `https://assets.grok.com/users/u/generated/${sourceId}/image.jpg`;
-            card.appendChild(image);
+            const link = document.createElement('a');
+            link.href = `/imagine/post/${sourceId}`;
+            link.appendChild(image);
+            card.appendChild(link);
             list.appendChild(card);
             currentScope = driftedScope;
         });
@@ -1960,7 +2070,7 @@ describe('Grok scrape surface transitions', () => {
         scraper.getGalleryScroller = jest.fn(() => ({ scrollTop: 640, scrollHeight: 2000, clientHeight: 800 }));
         scraper.waitForSurface = jest.fn(() => Promise.resolve(SCRAPE_SURFACES.agentMedia));
         const { image: target } = mountSemanticSavedImage(
-            'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content?size=small',
+            'https://assets.grok.com/users/u/generated/73e5e137-1334-49ea-b06b-a9d9ba891003/content?size=small',
             640
         );
         const makeVideo = document.createElement('button');
@@ -1968,7 +2078,12 @@ describe('Grok scrape surface transitions', () => {
         target.parentElement.appendChild(makeVideo);
         const activationEvents = recordPointerActivationEvents(target);
 
-        await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
+        const outcome = await GrokScraper.prototype.processItem.call(
+            scraper,
+            target,
+            'gallery-clean-id',
+            'run-1'
+        );
 
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
             action: 'SCRAPE_RUN_STATE_WRITE',
@@ -1984,7 +2099,8 @@ describe('Grok scrape surface transitions', () => {
             })
         }));
         expect(activationEvents).toEqual(FULL_POINTER_ACTIVATION_EVENTS);
-        expect(scraper.determineModeAndExecute).toHaveBeenCalledWith('run-1');
+        expect(outcome).toEqual({ status: 'surface_changed', surface: SCRAPE_SURFACES.agentMedia });
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
     });
 
     test('captures one exact card-scoped Saved video source for detail recovery', async () => {
@@ -2002,7 +2118,12 @@ describe('Grok scrape surface transitions', () => {
         video.src = videoUrl;
         card.appendChild(video);
 
-        await GrokScraper.prototype.processItem.call(scraper, target, imageUrl, 'run-1');
+        const outcome = await GrokScraper.prototype.processItem.call(
+            scraper,
+            target,
+            imageUrl,
+            'run-1'
+        );
 
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
             action: 'SCRAPE_RUN_STATE_WRITE',
@@ -2015,7 +2136,8 @@ describe('Grok scrape surface transitions', () => {
                 })
             })
         }));
-        expect(scraper.determineModeAndExecute).toHaveBeenCalledWith('run-1');
+        expect(outcome).toEqual({ status: 'surface_changed', surface: SCRAPE_SURFACES.legacyDetail });
+        expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
     });
 
     test('stops before clicking when Saved scope drifts during the navigation state write', async () => {
@@ -2053,7 +2175,7 @@ describe('Grok scrape surface transitions', () => {
         expect(activationEvents).toEqual([]);
         expect(scraper.waitForSurface).not.toHaveBeenCalled();
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
-        expect(scraper.pendingNavigation).toBeUndefined();
+        expect(scraper.pendingNavigation).toBeNull();
     });
 
     test('captures the semantic Saved scroller and expected-next identity instead of unrelated overflow', async () => {
@@ -2084,7 +2206,10 @@ describe('Grok scrape surface transitions', () => {
             const image = document.createElement('img');
             image.alt = 'Generated image';
             image.src = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-            card.appendChild(image);
+            const link = document.createElement('a');
+            link.href = `/imagine/post/${mediaId}`;
+            link.appendChild(image);
+            card.appendChild(link);
             list.appendChild(card);
             return image;
         };
@@ -2189,16 +2314,24 @@ describe('Grok scrape surface transitions', () => {
         scraper.waitForSurface = jest.fn(() => Promise.resolve(null));
         scraper.failRun = jest.fn(() => Promise.resolve());
         const { image: target } = mountSemanticSavedImage(
-            'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
+            'https://assets.grok.com/users/u/generated/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
         );
         const activationEvents = recordPointerActivationEvents(target);
 
-        await GrokScraper.prototype.processItem.call(scraper, target, 'gallery-clean-id', 'run-1');
-
-        expect(scraper.failRun).toHaveBeenCalledWith(
-            'The selected Saved card did not expose a conversation inventory surface.',
-            'surface_transition_timeout'
+        const outcome = await GrokScraper.prototype.processItem.call(
+            scraper,
+            target,
+            'gallery-clean-id',
+            'run-1'
         );
+
+        expect(outcome).toEqual({ status: 'completed', failed: true });
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(scraper._scrapeFailures.get('card:73e5e137-1334-49ea-b06b-a9d9ba891003'))
+            .toMatchObject({
+                code: 'surface_transition_timeout',
+                message: 'The selected Saved card did not expose a conversation inventory surface.'
+            });
         expect(activationEvents).toEqual(FULL_POINTER_ACTIVATION_EVENTS);
         expect(scraper.determineModeAndExecute).not.toHaveBeenCalled();
     });
@@ -2215,7 +2348,7 @@ describe('Grok scrape surface transitions', () => {
         });
         scraper.waitForSurface = jest.fn();
         const { image: target } = mountSemanticSavedImage(
-            'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
+            'https://assets.grok.com/users/u/generated/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
         );
         const activationEvents = recordPointerActivationEvents(target);
 
@@ -2241,7 +2374,7 @@ describe('Grok scrape surface transitions', () => {
             return Promise.resolve({ status: 'ok' });
         });
         const { image: target } = mountSemanticSavedImage(
-            'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
+            'https://assets.grok.com/users/u/generated/73e5e137-1334-49ea-b06b-a9d9ba891003/content'
         );
         const activationEvents = recordPointerActivationEvents(target);
 
@@ -2291,6 +2424,7 @@ describe('Grok scrape surface transitions', () => {
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = ['local'];
         scraper.pendingNavigation = {
             runToken: 'run-1',
             runEpoch: 1,
@@ -2324,7 +2458,7 @@ describe('Grok scrape surface transitions', () => {
             assets: [
                 {
                     assetId: firstAssetId,
-                    responseId: 'response-1',
+                    responseId: firstAssetId,
                     parentResponseId: '',
                     mediaKind: 'image',
                     sourceUrl: `https://assets.grok.com/users/example/generated/${firstAssetId}/image.jpg`,
@@ -2334,7 +2468,7 @@ describe('Grok scrape surface transitions', () => {
                 },
                 {
                     assetId: secondAssetId,
-                    responseId: 'response-1',
+                    responseId: firstAssetId,
                     parentResponseId: '',
                     mediaKind: 'video',
                     sourceUrl: `https://assets.grok.com/users/example/generated/${secondAssetId}/generated_video.mp4`,
@@ -2355,13 +2489,11 @@ describe('Grok scrape surface transitions', () => {
             entryRunKey: `conversation:${conversationId}`
         };
         scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
-        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
-        scraper.persistProcessedId = jest.fn(async (assetId) => {
-            scraper.processedIds.add(assetId);
-            return true;
+        scraper.performDownload = jest.fn(async (_media, assetId) => {
+            addMockAssetReceipt(assetId);
+            return { status: 'queued' };
         });
         scraper.waitForRunDurability = jest.fn(() => Promise.resolve({ status: 'durable' }));
-        scraper.refreshProcessedIds = jest.fn(() => Promise.resolve(true));
         scraper.executeListView = jest.fn(() => Promise.resolve());
         scraper.failRun = jest.fn(() => Promise.resolve());
         const readyListener = (event) => {
@@ -2377,8 +2509,9 @@ describe('Grok scrape surface transitions', () => {
         document.addEventListener('__gpt_media_fetch_bridge_probe', readyListener);
         document.addEventListener('__gpt_fetch_conversation_asset_inventory', inventoryListener);
 
+        let outcome;
         try {
-            await GrokScraper.prototype.processPendingConversationInventory.call(scraper, 'run-1');
+            outcome = await GrokScraper.prototype.processPendingConversationInventory.call(scraper, 'run-1');
         } finally {
             document.removeEventListener('__gpt_media_fetch_bridge_probe', readyListener);
             document.removeEventListener('__gpt_fetch_conversation_asset_inventory', inventoryListener);
@@ -2400,11 +2533,12 @@ describe('Grok scrape surface transitions', () => {
                 promptText: 'candid friends at the beach'
             })
         );
-        expect(scraper.persistProcessedId).toHaveBeenCalledTimes(2);
+        expect(scraper.processedLocalIds).toEqual(new Set([firstAssetId, secondAssetId]));
         expect(scraper.waitForRunDurability).toHaveBeenCalledWith('run-1', { timeoutMs: 180000 });
         expect(scraper._runVisited).toContain(`conversation:${conversationId}`);
         expect(scraper.pendingNavigation).toBeNull();
-        expect(scraper.executeListView).toHaveBeenCalledWith('run-1');
+        expect(outcome).toEqual({ status: 'completed' });
+        expect(scraper.executeListView).not.toHaveBeenCalled();
         expect(scraper.failRun).not.toHaveBeenCalled();
         await expect(hashGrokConversationAssetInventory(inventory)).resolves.toMatch(/^sha256:2:[a-f0-9]{64}$/);
         await expect(hashGrokConversationAssetInventory({
@@ -2460,7 +2594,8 @@ describe('Grok scrape surface transitions', () => {
         const inventory = makeConversationInventory(conversationId, assetIds);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
-        scraper.processedIds = new Set([assetIds[0]]);
+        scraper.requiredDestinations = ['local'];
+        addMockAssetReceipt(assetIds[0]);
         scraper.pendingNavigation = {
             runToken: 'run-1',
             runEpoch: 1,
@@ -2474,13 +2609,11 @@ describe('Grok scrape surface transitions', () => {
             nextAssetIndex: 1
         };
         scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
-        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
-        scraper.persistProcessedId = jest.fn(async (assetId) => {
-            scraper.processedIds.add(assetId);
-            return true;
+        scraper.performDownload = jest.fn(async (_media, assetId) => {
+            addMockAssetReceipt(assetId);
+            return { status: 'queued' };
         });
         scraper.waitForRunDurability = jest.fn(() => Promise.resolve({ status: 'durable' }));
-        scraper.refreshProcessedIds = jest.fn(() => Promise.resolve(true));
         scraper.executeListView = jest.fn(() => Promise.resolve());
         scraper.failRun = jest.fn(() => Promise.resolve());
 
@@ -2505,6 +2638,7 @@ describe('Grok scrape surface transitions', () => {
         const inventory = makeConversationInventory(conversationId, assetIds);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = ['local'];
         scraper.pendingNavigation = {
             runToken: 'run-1',
             runEpoch: 1,
@@ -2518,7 +2652,6 @@ describe('Grok scrape surface transitions', () => {
             scraper.state.isRunning = false;
             return { status: 'uploaded' };
         });
-        scraper.persistProcessedId = jest.fn();
         scraper.waitForRunDurability = jest.fn();
 
         await withConversationInventoryBridge(inventory, () => (
@@ -2526,7 +2659,6 @@ describe('Grok scrape surface transitions', () => {
         ));
 
         expect(scraper.performDownload).toHaveBeenCalledTimes(1);
-        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
         expect(scraper.waitForRunDurability).not.toHaveBeenCalled();
         expect(scraper.queueRunStateWrite).toHaveBeenCalledTimes(1);
         expect(scraper.queueRunStateWrite).toHaveBeenCalledWith(
@@ -2549,6 +2681,7 @@ describe('Grok scrape surface transitions', () => {
         const inventory = makeConversationInventory(conversationId, assetIds);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = ['local'];
         scraper.pendingNavigation = {
             runToken: 'run-1',
             runEpoch: 1,
@@ -2557,14 +2690,12 @@ describe('Grok scrape surface transitions', () => {
             conversationId
         };
         scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
-        scraper.performDownload = jest.fn((_media, assetId) => Promise.resolve(
-            assetId === assetIds[0]
-                ? { status: 'uploaded' }
-                : { status: 'error', error: 'second asset failed' }
-        ));
-        scraper.persistProcessedId = jest.fn(async (assetId) => {
-            scraper.processedIds.add(assetId);
-            return true;
+        scraper.performDownload = jest.fn(async (_media, assetId) => {
+            if (assetId !== assetIds[0]) {
+                return { status: 'error', error: 'second asset failed' };
+            }
+            addMockAssetReceipt(assetId);
+            return { status: 'queued' };
         });
         scraper.failRun = jest.fn(() => Promise.resolve());
 
@@ -2573,16 +2704,13 @@ describe('Grok scrape surface transitions', () => {
         ));
 
         expect(scraper.performDownload).toHaveBeenCalledTimes(2);
-        expect(scraper.processedIds).toEqual(new Set([assetIds[0]]));
-        expect(scraper.pendingNavigation).toMatchObject({
-            assetIds,
-            nextAssetIndex: 1
+        expect(chrome.__localState.processedLocalIds).toEqual([assetIds[0]]);
+        expect(scraper.pendingNavigation).toBeNull();
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(scraper._scrapeFailures.get(`conversation:${conversationId}`)).toMatchObject({
+            code: 'media_transfer_failed',
+            message: 'second asset failed'
         });
-        expect(scraper.failRun).toHaveBeenCalledWith(
-            'second asset failed',
-            'media_transfer_failed',
-            false
-        );
     });
 
     test('a targeted R2 canary transfers only the exact selected conversation asset', async () => {
@@ -2598,6 +2726,7 @@ describe('Grok scrape surface transitions', () => {
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
         scraper.backupMode = true;
+        scraper.requiredDestinations = ['r2'];
         scraper.backupOptions = {
             mode: 'canary',
             limit: 1,
@@ -2614,7 +2743,7 @@ describe('Grok scrape surface transitions', () => {
         scraper.persistBackupProgress = jest.fn(() => Promise.resolve(true));
         scraper.performDownload = jest.fn(async () => {
             scraper.backupStats.uploaded++;
-            scraper.processedIds.add(assetIds[1]);
+            addMockAssetReceipt(assetIds[1], 'r2');
             return { status: 'uploaded' };
         });
         scraper.stopBackupMode = jest.fn(() => Promise.resolve());
@@ -2642,28 +2771,37 @@ describe('Grok scrape surface transitions', () => {
         scraper.getCurrentSurface.mockImplementation(() => surface);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = ['local'];
         scraper.ensureSavedGalleryAllScope = jest.fn(() => Promise.resolve(true));
         scraper.sleep = jest.fn(() => Promise.resolve());
-        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
-        scraper.persistProcessedId = jest.fn(async (assetId) => {
-            scraper.processedIds.add(assetId);
-            return true;
+        scraper.performDownload = jest.fn(async (_media, assetId) => {
+            addMockAssetReceipt(assetId);
+            return { status: 'queued' };
         });
         scraper.waitForRunDurability = jest.fn(() => Promise.resolve({ status: 'durable' }));
-        scraper.refreshProcessedIds = jest.fn(() => Promise.resolve(true));
-        scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
+        scraper.returnToSavedGallery = jest.fn(async () => {
+            scraper.state.isRunning = false;
+        });
         scraper.failRun = jest.fn(() => Promise.resolve());
-        scraper.determineModeAndExecute.mockImplementation(() => (
-            GrokScraper.prototype.executeAgentView.call(scraper, 'run-1')
-        ));
         image.addEventListener('click', () => {
             surface = SCRAPE_SURFACES.agentMedia;
             window.history.pushState({}, '', `/imagine/agent/current?conversation=${conversationId}`);
         });
 
-        await withConversationInventoryBridge(inventory, () => (
-            GrokScraper.prototype.processItem.call(scraper, image, assetIds[0], 'run-1', 1)
-        ));
+        await withConversationInventoryBridge(inventory, async () => {
+            const outcome = await GrokScraper.prototype.processItem.call(
+                scraper,
+                image,
+                assetIds[0],
+                'run-1',
+                1
+            );
+            expect(outcome).toEqual({
+                status: 'surface_changed',
+                surface: SCRAPE_SURFACES.agentMedia
+            });
+            await GrokScraper.prototype.executeAgentView.call(scraper, 'run-1');
+        });
 
         expect(scraper.performDownload.mock.calls.map(([, assetId]) => assetId)).toEqual(assetIds);
         expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
@@ -2677,6 +2815,7 @@ describe('Grok scrape surface transitions', () => {
         const currentItemId = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = ['local'];
         scraper.pendingNavigation = {
             runToken: 'run-1',
             runEpoch: 1,
@@ -2693,12 +2832,14 @@ describe('Grok scrape surface transitions', () => {
 
         await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
 
-        expect(scraper.failRun).toHaveBeenCalledWith(
-            'Detail view did not expose the Saved conversation identity needed to inventory every asset.',
-            'conversation_identity_missing'
-        );
+        expect(scraper.failRun).not.toHaveBeenCalled();
+        expect(scraper._scrapeFailures.get('asset:58585858-5858-4858-8858-585858585858'))
+            .toMatchObject({
+                code: 'conversation_identity_missing',
+                message: 'Detail view did not expose the Saved conversation identity needed to inventory every asset.'
+            });
         expect(scraper.performDownload).not.toHaveBeenCalled();
-        expect(scraper.returnToSavedGallery).not.toHaveBeenCalled();
+        expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
     });
 
     test('retains the explicit non-Saved legacy detail transfer path', async () => {
@@ -2710,9 +2851,17 @@ describe('Grok scrape surface transitions', () => {
         media.src = currentItemId;
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = ['local'];
         chrome.storage.local.get.mockResolvedValue({ currentItemId });
         scraper.waitForMatchingLegacyDetailMedia = jest.fn(() => Promise.resolve(media));
-        scraper.performDownload = jest.fn(() => Promise.resolve({ status: 'uploaded' }));
+        scraper.performDownload = jest.fn(async () => {
+            addMockAssetReceipt(mediaId);
+            scraper.processedIds.add(mediaId);
+            scraper.processedLocalIds.add(mediaId);
+            return { status: 'queued' };
+        });
+        scraper.waitForRunDurability = jest.fn(() => Promise.resolve({ status: 'durable' }));
+        scraper.refreshProcessedIds = jest.fn(() => Promise.resolve(true));
         scraper.persistProcessedId = jest.fn(() => Promise.resolve(true));
         scraper.returnToSavedGallery = jest.fn(() => Promise.resolve());
         scraper.failRun = jest.fn(() => Promise.resolve());
@@ -2720,7 +2869,7 @@ describe('Grok scrape surface transitions', () => {
         await GrokScraper.prototype.executeDetailView.call(scraper, 'run-1');
 
         expect(scraper.performDownload).toHaveBeenCalledWith(media, currentItemId, 'run-1');
-        expect(scraper.persistProcessedId).toHaveBeenCalledWith(currentItemId, 'run-1');
+        expect(scraper.persistProcessedId).not.toHaveBeenCalled();
         expect(scraper.returnToSavedGallery).toHaveBeenCalledWith('run-1');
         expect(scraper.failRun).not.toHaveBeenCalled();
     });
@@ -2743,7 +2892,10 @@ describe('Grok scrape surface transitions', () => {
         const image = document.createElement('img');
         image.alt = 'Generated image';
         image.src = `https://assets.grok.com/users/u/generated/${sourceId}/image.jpg`;
-        card.appendChild(image);
+        const link = document.createElement('a');
+        link.href = `/imagine/post/${sourceId}`;
+        link.appendChild(image);
+        card.appendChild(link);
         list.appendChild(card);
         scroller.appendChild(list);
         document.body.appendChild(scroller);
@@ -2822,7 +2974,10 @@ describe('Grok scrape surface transitions', () => {
             const image = document.createElement('img');
             image.alt = 'Generated image';
             image.src = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-            card.appendChild(image);
+            const link = document.createElement('a');
+            link.href = `/imagine/post/${mediaId}`;
+            link.appendChild(image);
+            card.appendChild(link);
             list.appendChild(card);
         };
         appendCard('b7b7b7b7-cccc-4ddd-8eee-f6f6f6f6f6f6');
@@ -2899,7 +3054,10 @@ describe('Grok scrape surface transitions', () => {
                 const image = document.createElement('img');
                 image.alt = 'Generated image';
                 image.src = `https://assets.grok.com/users/u/generated/${mediaId}/image.jpg`;
-                card.appendChild(image);
+                const link = document.createElement('a');
+                link.href = `/imagine/post/${mediaId}`;
+                link.appendChild(image);
+                card.appendChild(link);
                 list.appendChild(card);
             }
             scroller.appendChild(list);
@@ -2933,8 +3091,11 @@ describe('Grok scrape surface transitions', () => {
             galleryUrl: 'https://grok.com/imagine/saved'
         };
         scraper.log = jest.fn();
-        scraper.waitForSurface = jest.fn(() => Promise.resolve(null));
+        scraper.waitForSurface = jest.fn()
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(SCRAPE_SURFACES.savedGallery);
         scraper.navigateToGalleryUrl = jest.fn();
+        scraper.restorePendingGalleryContext = jest.fn(() => Promise.resolve(true));
         scraper.failRun = jest.fn();
         const backSpy = jest.spyOn(window.history, 'back').mockImplementation(() => {});
 
@@ -2942,6 +3103,7 @@ describe('Grok scrape surface transitions', () => {
 
         expect(backSpy).toHaveBeenCalledTimes(1);
         expect(scraper.navigateToGalleryUrl).toHaveBeenCalledWith('https://grok.com/imagine/saved');
+        expect(scraper.restorePendingGalleryContext).toHaveBeenCalledWith('run-1');
         expect(scraper.failRun).not.toHaveBeenCalled();
         backSpy.mockRestore();
     });
@@ -3392,8 +3554,8 @@ describe('Grok scrape surface transitions', () => {
             if (message.action === 'R2_BACKUP_UPLOAD') {
                 return { status: 'uploaded', backupProcessedId: mediaId };
             }
-            if (message.action === 'SCRAPE_PROCESSED_IDS_ADD') {
-                return { status: 'ok', processedIds: ['saved-media-url', media.src.split('?')[0], mediaId] };
+            if (message.action === 'SCRAPE_DESTINATION_RECEIPTS_ADD') {
+                return addMockDestinationReceipts(chrome.__localState, message);
             }
             return undefined;
         });
@@ -3406,13 +3568,18 @@ describe('Grok scrape surface transitions', () => {
         )).resolves.toEqual({ status: 'uploaded', backupProcessedId: mediaId });
 
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-            action: 'SCRAPE_PROCESSED_IDS_ADD',
-            ids: ['saved-media-url', media.src.split('?')[0], mediaId],
+            action: 'SCRAPE_DESTINATION_RECEIPTS_ADD',
+            r2Ids: ['saved-media-url', media.src.split('?')[0], mediaId],
             runToken: 'run-1',
             runEpoch: 1,
             kind: 'r2_backup'
         });
         expect(scraper.processedIds).toEqual(new Set(['saved-media-url', media.src.split('?')[0], mediaId]));
+        expect(scraper.processedR2Ids).toEqual(new Set([
+            'saved-media-url',
+            media.src.split('?')[0],
+            mediaId
+        ]));
         expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
             processedIds: expect.any(Array)
         }));
@@ -3446,8 +3613,8 @@ describe('Grok scrape surface transitions', () => {
             if (message.action === 'R2_BACKUP_CHECK_PRESENT') {
                 return { status: 'already_present', assetId: `media_${mediaId}` };
             }
-            if (message.action === 'SCRAPE_PROCESSED_IDS_ADD') {
-                return { status: 'ok', processedIds: ['saved-media-url', media.src, `media_${mediaId}`] };
+            if (message.action === 'SCRAPE_DESTINATION_RECEIPTS_ADD') {
+                return addMockDestinationReceipts(chrome.__localState, message);
             }
             return { status: 'error', error: 'unexpected_action' };
         });
@@ -3488,6 +3655,7 @@ describe('Grok scrape surface transitions', () => {
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = ['r2'];
         scraper.overlay = { readCurrentPromptInput: jest.fn(() => 'unrelated composer text') };
         const media = document.createElement('img');
         media.src = 'https://assets.grok.com/users/u/73e5e137-1334-49ea-b06b-a9d9ba891003/content';
@@ -3496,7 +3664,7 @@ describe('Grok scrape surface transitions', () => {
             evidenceSource: 'grok_conversation_response',
             conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             assetId: '73e5e137-1334-49ea-b06b-a9d9ba891003',
-            responseId: 'response-1',
+            responseId: '73e5e137-1334-49ea-b06b-a9d9ba891003',
             promptText: 'authoritative saved prompt',
             assetMetadata: { assetId: '73e5e137-1334-49ea-b06b-a9d9ba891003' },
             mediaGenInput: { prompt: 'authoritative saved prompt' }
@@ -3526,6 +3694,7 @@ describe('Grok scrape surface transitions', () => {
             promptText: 'authoritative saved prompt',
             captureMetadata,
             blobDataUrl: 'data:image/png;base64,AA==',
+            destinations: ['r2'],
             runToken: 'run-1',
             runEpoch: 1,
             kind: 'sync'
@@ -3538,6 +3707,7 @@ describe('Grok scrape surface transitions', () => {
         const scraper = createScraper(SCRAPE_SURFACES.agentMedia);
         scraper.state.isRunning = true;
         scraper.runToken = 'run-1';
+        scraper.requiredDestinations = ['local'];
         const media = document.createElement('video');
         media.src = 'https://assets.grok.com/videos/73e5e137-1334-49ea-b06b-a9d9ba891003/generated_video.mp4';
         chrome.runtime.sendMessage.mockImplementation(async (message) => {
@@ -3558,6 +3728,7 @@ describe('Grok scrape surface transitions', () => {
             isVideo: true,
             promptText: '',
             blobDataUrl: null,
+            destinations: ['local'],
             runToken: 'run-1',
             runEpoch: 1,
             kind: 'sync'
@@ -3590,6 +3761,7 @@ describe('Grok backup resume state', () => {
         mockContentChrome();
         chrome.storage.local.get.mockResolvedValue(stored);
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         scraper.backupMode = false;
         scraper.backupOptions = { mode: 'full', limit: null, options: {} };
@@ -3628,6 +3800,7 @@ describe('Grok backup resume state', () => {
         chrome.storage.local.get.mockResolvedValue(stored);
         chrome.runtime.sendMessage.mockResolvedValue({ valid: false });
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         scraper.backupMode = false;
         scraper.backupOptions = { mode: 'full', limit: null, options: {} };
@@ -3660,6 +3833,7 @@ describe('Grok backup resume state', () => {
         chrome.storage.local.get.mockResolvedValue(stored);
         chrome.runtime.sendMessage.mockResolvedValue({ valid: false, reason: 'non_owner' });
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         scraper.backupMode = false;
         scraper.backupOptions = { mode: 'full', limit: null, options: {} };
@@ -3696,6 +3870,7 @@ describe('Grok backup resume state', () => {
         chrome.storage.local.get.mockResolvedValue(stored);
         chrome.runtime.sendMessage.mockResolvedValue({ valid: false, reason: 'stale_authority' });
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         scraper.backupMode = false;
         scraper.backupOptions = { mode: 'full', limit: null, options: {} };
@@ -3873,7 +4048,7 @@ describe('Grok run durability completion', () => {
 
         await expect(resultPromise).resolves.toEqual({
             status: 'timeout',
-            reason: 'deadline_exceeded'
+            reason: 'progress_stalled'
         });
     });
 
@@ -4780,14 +4955,27 @@ describe('background scrape lease authority', () => {
         global.Blob = NodeBlob;
     });
 
-    afterEach(() => {
+    afterEach(async () => {
+        const cachedBackground = require.cache[require.resolve('../../background.js')]?.exports;
+        await cachedBackground?.waitForBackgroundInitialization?.().catch(() => {});
         jest.useRealTimers();
         global.fetch = originalFetch;
         Object.defineProperty(global, 'crypto', { configurable: true, value: originalCrypto });
         global.Blob = originalBlob;
-        delete global.chrome;
+        // Chrome remains defined for the lifetime of a real service worker. Keeping the
+        // final mock alive also lets superseded worker promises settle after resetModules.
+        jest.restoreAllMocks();
         jest.resetModules();
     });
+
+    function suppressExpectedBackgroundInitializationTimeout() {
+        const originalConsoleError = console.error;
+        jest.spyOn(console, 'error').mockImplementation((message, error, ...rest) => {
+            if (message === 'Background initialization failed:'
+                && error?.message === 'background_initialization_timeout') return;
+            originalConsoleError.call(console, message, error, ...rest);
+        });
+    }
 
     function r2PresenceLocalState(lease) {
         return {
@@ -4995,10 +5183,8 @@ describe('background scrape lease authority', () => {
             String(url).includes('/v1/objects/verify') && options?.method === 'POST'
         ))).toHaveLength(2);
         expect(global.fetch.mock.calls.filter(([url]) => String(url).includes('/v1/presign'))).toHaveLength(0);
-        expect(harness.storedLocal.processedIds).toEqual([]);
-        expect(harness.chromeApi.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
-            processedIds: expect.any(Array)
-        }));
+        expect(harness.storedLocal.processedIds).toEqual([firstAssetId, secondAssetId]);
+        expect(harness.storedLocal.processedR2Ids).toEqual([firstAssetId, secondAssetId]);
     });
 
     test.each([
@@ -7363,7 +7549,7 @@ describe('background scrape lease authority', () => {
             runToken: lease.token,
             runEpoch: lease.epoch,
             kind: lease.kind,
-            url: 'https://assets.grok.com/generated/queue-race.jpg',
+            url: 'https://public.unit/queue-race.jpg',
             isVideo: false,
             skipLocalDownload: true
         }, { tab: { id: lease.tabId } });
@@ -7541,13 +7727,20 @@ describe('background scrape lease authority', () => {
         }, { tab: { id: lease.tabId } });
         await processedWriteStarted.promise;
         const stopping = background.stopScrapeRun('sync');
-        const reset = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+        const lockedReset = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
             action: 'PROCESSED_IDS_RESET'
         }, { id: harness.chromeApi.runtime.id });
+        await expect(lockedReset.response).resolves.toEqual({
+            status: 'error',
+            error: 'processed_ids_locked_by_active_sync'
+        });
         processedWrite.resolve();
 
         await expect(add.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
         await expect(stopping).resolves.toMatchObject({ status: 'stopped' });
+        const reset = dispatchBackgroundMessageThroughPort(harness.chromeApi, {
+            action: 'PROCESSED_IDS_RESET'
+        }, { id: harness.chromeApi.runtime.id });
         await expect(reset.response).resolves.toEqual({ status: 'ok', processedIds: [] });
         expect(harness.storedLocal.processedIds).toEqual([]);
         expect(background.getProcessedUUIDsForTest()).toEqual([]);
@@ -7955,7 +8148,7 @@ describe('background scrape lease authority', () => {
         }, { tab: { id: lease.tabId } });
         await blocked.promise;
         const stopping = background.stopScrapeRun('r2_backup');
-        await waitForCondition(() => harness.sessionState.activeScrapeRunToken?.status === 'idle');
+        await waitForCondition(() => harness.sessionState.activeScrapeRunToken?.status === 'stopping');
         release.resolve();
 
         await expect(transfer.response).resolves.toEqual({ status: 'ignored', reason: 'stale_authority' });
@@ -8119,7 +8312,8 @@ describe('background scrape lease authority', () => {
             runEpoch: lease.epoch,
             kind: lease.kind,
             url: mediaUrl,
-            isVideo: false
+            isVideo: false,
+            destinations: ['local']
         }, { tab: { id: lease.tabId } });
         await expect(transfer.response).resolves.toEqual({ status: 'queued' });
         await expect(background.stopScrapeRun('sync')).resolves.toMatchObject({ status: 'stopped' });
@@ -8911,6 +9105,7 @@ describe('background scrape lease authority', () => {
     test.each(['marker persistence', 'marker cleanup'])(
         'background readiness fails closed when writer %s never settles, while Stop and a healthy replacement remain operable',
         async (failureMode) => {
+            suppressExpectedBackgroundInitializationTimeout();
             jest.useFakeTimers();
             const lease = createLeaseRecord({ token: `startup-${failureMode.replace(' ', '-')}` });
             const priorWriterKey = 'scrapePersistenceWriter:prior-startup-writer';
@@ -9008,6 +9203,7 @@ describe('background scrape lease authority', () => {
     test.each(['checkpoint write', 'compaction remove'])(
         'prepared startup recovery releases both mutation barriers and fails closed when %s never settles',
         async (failureMode) => {
+            suppressExpectedBackgroundInitializationTimeout();
             jest.useFakeTimers();
             const lease = createLeaseRecord({ token: `recovery-${failureMode.replace(' ', '-')}` });
             const priorJournalKey = 'scrapeCompletionJournal:prior-recovery-checkpoint';
@@ -10297,7 +10493,7 @@ describe('background scrape lease authority', () => {
         });
     });
 
-    test('service-worker hydration ignores legacy ownership and finishes after identity persisted before its phase', async () => {
+    test('service-worker hydration replaces legacy identity with destination receipts before finishing', async () => {
         const mediaId = '73e5e137-1334-49ea-b06b-a9d9ba891051';
         const seeded = await seedRunOwnedDownloadOperation({
             mode: 'dual_write',
@@ -10324,7 +10520,9 @@ describe('background scrape lease authority', () => {
         const processedWrites = harness.chromeApi.storage.local.set.mock.calls
             .filter(([values]) => Object.prototype.hasOwnProperty.call(values, 'processedIds')).length;
         expect(harness.storedLocal.processedIds).toEqual([mediaId]);
-        expect(processedWrites).toBe(0);
+        expect(harness.storedLocal.processedLocalIds).toEqual([mediaId]);
+        expect(harness.storedLocal.processedR2Ids).toEqual([mediaId]);
+        expect(processedWrites).toBe(1);
         expect(harness.chromeApi.alarms.create).toHaveBeenCalledWith(
             'gptCloudRetry',
             expect.objectContaining({ delayInMinutes: expect.any(Number) })
@@ -10611,12 +10809,9 @@ describe('background scrape lease authority', () => {
         const removed = harness.chromeApi.tabs.onRemoved.addListener.mock.calls[0]?.[0];
         expect(removed).toEqual(expect.any(Function));
 
-        removed(lease.tabId, { isWindowClosing: false });
-        await waitForCondition(() => (
-            harness.sessionState.activeScrapeRunToken?.status === 'idle'
-            && harness.storedLocal.scraperState === 'idle'
-        ));
+        await removed(lease.tabId, { isWindowClosing: false });
 
+        expect(harness.sessionState.activeScrapeRunToken?.status).toBe('idle');
         expect(harness.storedLocal).toMatchObject({ scraperState: 'idle', isScraping: false });
     });
 
@@ -10907,7 +11102,9 @@ describe('background scrape lease authority', () => {
             const baseSessionSet = harness.chromeApi.storage.session.set.getMockImplementation();
             harness.chromeApi.storage.session.set.mockImplementation(async (values) => {
                 await baseSessionSet(values);
-                events.push(`session:${values.activeScrapeRunToken.status}`);
+                if (values.activeScrapeRunToken) {
+                    events.push(`session:${values.activeScrapeRunToken.status}`);
+                }
             });
             harness.chromeApi.tabs.sendMessage.mockImplementation((_tabId, message, callback) => {
                 if (message.action.startsWith('INIT_')) {
@@ -10982,12 +11179,15 @@ describe('background scrape lease authority', () => {
                 isScraping: false,
                 isR2Backup: false
             });
-            const stopTombstoneIndex = events.lastIndexOf('session:idle');
+            const stoppingTombstoneIndex = events.indexOf('session:stopping');
             const abortIndex = events.indexOf(
                 `content:${kind === 'r2_backup' ? 'ABORT_R2_BACKUP' : 'ABORT_SCRAPE'}`
             );
-            expect(stopTombstoneIndex).toBeLessThan(abortIndex);
+            const contentStoppedIndex = events.indexOf('content:stop-persisted');
+            const idleTombstoneIndex = events.lastIndexOf('session:idle');
+            expect(stoppingTombstoneIndex).toBeLessThan(abortIndex);
             expect(abortIndex).toBeLessThan(events.indexOf('content:stop-persisted'));
+            expect(contentStoppedIndex).toBeLessThan(idleTombstoneIndex);
         }
     );
 
@@ -11020,7 +11220,8 @@ describe('background scrape lease authority', () => {
             await expect(stop).resolves.toEqual({
                 status: 'stopped',
                 abortAcknowledged: false,
-                transferDrained: true
+                transferDrained: true,
+                refreshOwnerRecommended: true
             });
             const tombstone = { ...harness.sessionState.activeScrapeRunToken };
 
@@ -11035,8 +11236,9 @@ describe('background scrape lease authority', () => {
 });
 
 describe('background scrape start handshake', () => {
-    afterEach(() => {
-        delete global.chrome;
+    afterEach(async () => {
+        const cachedBackground = require.cache[require.resolve('../../background.js')]?.exports;
+        await cachedBackground?.waitForBackgroundInitialization?.().catch(() => {});
         jest.resetModules();
     });
 
@@ -11263,8 +11465,9 @@ describe('background scrape start handshake', () => {
 });
 
 describe('native media download acknowledgement', () => {
-    afterEach(() => {
-        delete global.chrome;
+    afterEach(async () => {
+        const cachedBackground = require.cache[require.resolve('../../background.js')]?.exports;
+        await cachedBackground?.waitForBackgroundInitialization?.().catch(() => {});
         jest.resetModules();
     });
 

@@ -35,6 +35,63 @@ function makeVisible(element, rect = {}) {
 
 let promptedVideoFixtureId = 0;
 
+function getFixtureMediaId(source) {
+    return String(source || '').match(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+    )?.[0]?.toLowerCase() || '';
+}
+
+function createFixtureConversationInventory(conversationId) {
+    const assets = new Map();
+    const sourceMediaSelector = 'img[src], video[src]';
+
+    document.querySelectorAll(sourceMediaSelector).forEach((media) => {
+        const assetId = getFixtureMediaId(media.currentSrc || media.src);
+        if (!assetId || assets.has(assetId)) return;
+        const isVideo = media.tagName === 'VIDEO';
+        const sourceImage = isVideo
+            ? media.parentElement?.querySelector('img[src]')
+            : null;
+        const parentResponseId = sourceImage
+            ? getFixtureMediaId(sourceImage.currentSrc || sourceImage.src)
+            : '';
+        assets.set(assetId, {
+            assetId,
+            responseId: assetId,
+            parentResponseId,
+            mediaKind: isVideo ? 'video' : 'image',
+            sourceUrl: media.currentSrc || media.src,
+            promptText: '',
+            assetMetadata: null,
+            mediaGenInput: null
+        });
+    });
+
+    const failedResponses = Array.from(document.querySelectorAll('[role="alert"]'))
+        .filter((alert) => /generation failed/i.test(alert.textContent || ''))
+        .flatMap((alert) => {
+            const source = alert.closest('.react-flow__node-asset')?.querySelector('img[src]');
+            const parentResponseId = getFixtureMediaId(source?.currentSrc || source?.src);
+            if (!parentResponseId) return [];
+            return [{
+                responseId: `00000000-0000-4000-8000-${parentResponseId.slice(-12)}`,
+                parentResponseId,
+                failureCode: 'provider_result_failed'
+            }];
+        });
+
+    return {
+        schemaVersion: 1,
+        conversationId,
+        failureCount: failedResponses.length,
+        inflightResponseCount: 0,
+        failedResponses,
+        inflightResponses: [],
+        videoGenerationResponses: [],
+        assets: Array.from(assets.values())
+    };
+}
+
 function appendReadyVideoResult(sourceUrl, root = document.body) {
     const resultId = ++promptedVideoFixtureId;
     const target = root.querySelector?.('.react-flow__node-asset.selected') || root;
@@ -146,11 +203,22 @@ function createSavedBatchCard(sourceUrl, onImageClick = null) {
     image.src = sourceUrl;
     image.scrollIntoView = jest.fn();
     if (onImageClick) image.addEventListener('click', onImageClick);
+    const postLink = document.createElement('a');
+    const sourceId = getFixtureMediaId(sourceUrl);
+    postLink.href = window.location.pathname === '/imagine/saved'
+        ? `/imagine/post/${sourceId}?conversation=${sourceId}`
+        : `/imagine/post/${sourceId}`;
+    postLink.addEventListener('click', (event) => event.preventDefault());
+    postLink.scrollIntoView = jest.fn();
+    if (onImageClick) postLink.addEventListener('click', onImageClick);
     const makeVideo = document.createElement('button');
     makeVideo.setAttribute('aria-label', 'Make video');
-    card.append(image, makeVideo);
+    if (onImageClick) makeVideo.addEventListener('click', onImageClick);
+    card.append(image);
+    if (sourceId) card.append(postLink);
+    card.append(makeVideo);
     document.body.appendChild(card);
-    return { card, image, makeVideo };
+    return { card, image, postLink, makeVideo };
 }
 
 function createCurrentSavedBatchCard(sourceId) {
@@ -180,13 +248,9 @@ function createCurrentSavedBatchCard(sourceId) {
 function mountQuickBatchGallery(sourceIds, onAction) {
     document.querySelectorAll('[data-test-quick-batch-card]').forEach((card) => card.remove());
     return sourceIds.map((sourceId) => {
-        const { card, image, makeVideo } = createSavedBatchCard(
+        const { card, makeVideo } = createSavedBatchCard(
             `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`
         );
-        const postLink = document.createElement('a');
-        postLink.href = `/imagine/post/${sourceId}?conversation=${sourceId}`;
-        card.insertBefore(postLink, image);
-        postLink.appendChild(image);
         card.setAttribute('data-test-quick-batch-card', sourceId);
         makeVideo.scrollIntoView = jest.fn();
         makeVideo.addEventListener('click', () => onAction({ sourceId, card }));
@@ -205,15 +269,11 @@ function mountDurablePromptedGallery(sourceIds, onOpen) {
     mountSavedScope('all');
     return sourceIds.map((sourceId) => {
         const sourceUrl = `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`;
-        const { card, image } = createSavedBatchCard(sourceUrl);
-        const postLink = document.createElement('a');
-        postLink.href = `/imagine/post/${sourceId}?conversation=${sourceId}`;
+        const { card, postLink } = createSavedBatchCard(sourceUrl);
         postLink.addEventListener('click', (event) => {
             event.preventDefault();
             onOpen({ sourceId, sourceUrl });
         });
-        card.insertBefore(postLink, image);
-        postLink.appendChild(image);
         return { sourceId, sourceUrl, card, postLink };
     });
 }
@@ -265,8 +325,19 @@ function renderAgentEditor({
     includeAgentAsset = true,
     onSubmit = null,
     produceResult = true,
-    settleSubmit = true
+    settleSubmit = true,
+    acceptSubmissionByNavigation = false
 } = {}) {
+    const conversationId = new URL(window.location.href).searchParams.get('conversation') || '';
+    const sourceAssetId = getFixtureMediaId(sourceUrl);
+    if (sourceAssetId && conversationId) {
+        window.sessionStorage.setItem('gptCurrentGrokSourceHint', JSON.stringify({
+            sourceAssetId,
+            sourcePostId: conversationId,
+            conversationId,
+            capturedAt: Date.now()
+        }));
+    }
     document.body.innerHTML = `${includeAgentAsset ? `
         <div class="react-flow__node-asset selected" data-id="asset-source">
             <img src="${sourceUrl}">
@@ -290,6 +361,16 @@ function renderAgentEditor({
                         if (settleSubmit) event.currentTarget.disabled = true;
                         if (onSubmit) onSubmit();
                         if (produceResult) appendReadyVideoResult(sourceUrl);
+                        if (acceptSubmissionByNavigation && conversationId) {
+                            const resultPostId = `90000000-0000-4000-8000-${String(
+                                ++promptedVideoFixtureId
+                            ).padStart(12, '0')}`;
+                            window.history.pushState(
+                                {},
+                                '',
+                                `/imagine/post/${resultPostId}?conversation=${conversationId}`
+                            );
+                        }
                     }
                 });
                 menuItem.remove();
@@ -324,6 +405,12 @@ function mountVideoGoalSource({ sourceAssetId, sourcePostId, onAction }) {
         '',
         `/imagine/agent/${sourceAssetId}?conversation=${sourcePostId}`
     );
+    window.sessionStorage.setItem('gptCurrentGrokSourceHint', JSON.stringify({
+        sourceAssetId,
+        sourcePostId,
+        conversationId: sourcePostId,
+        capturedAt: Date.now()
+    }));
     document.body.innerHTML = `
         <div class="react-flow">
             <div class="react-flow__node-asset selected" data-id="${sourceNodeId}">
@@ -392,6 +479,9 @@ describe('VideoRetryManager', () => {
     let historyManager;
     let setIntervalSpy;
     let promptedVideoBridgeHandler;
+    let mediaFetchBridgeReadyHandler;
+    let conversationInventoryBridgeHandler;
+    let preventFixtureAnchorNavigation;
     let nativeControlClickSpy;
     let generationLease;
 
@@ -421,6 +511,12 @@ describe('VideoRetryManager', () => {
 
         document.body.innerHTML = '';
         window.history.pushState({}, '', '/');
+        window.sessionStorage.clear();
+        window.scrollTo = jest.fn();
+        preventFixtureAnchorNavigation = (event) => {
+            if (event.target?.closest?.('a[href]')) event.preventDefault();
+        };
+        document.addEventListener('click', preventFixtureAnchorNavigation, true);
 
         promptedVideoBridgeHandler = (event) => {
             const target = document.querySelector(`[data-gpt-prompt-target="${event.detail.marker}"]`);
@@ -430,6 +526,22 @@ describe('VideoRetryManager', () => {
             }));
         };
         document.addEventListener('__gpt_set_prompted_video_content', promptedVideoBridgeHandler);
+
+        mediaFetchBridgeReadyHandler = (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_media_fetch_bridge_ready', {
+                detail: { requestId: event.detail.requestId }
+            }));
+        };
+        conversationInventoryBridgeHandler = (event) => {
+            document.dispatchEvent(new CustomEvent('__gpt_fetch_conversation_asset_inventory_result', {
+                detail: {
+                    requestId: event.detail.requestId,
+                    inventory: createFixtureConversationInventory(event.detail.conversationId)
+                }
+            }));
+        };
+        document.addEventListener('__gpt_media_fetch_bridge_probe', mediaFetchBridgeReadyHandler);
+        document.addEventListener('__gpt_fetch_conversation_asset_inventory', conversationInventoryBridgeHandler);
 
         setIntervalSpy = jest.spyOn(global, 'setInterval').mockImplementation(() => 1);
         generationLease = null;
@@ -580,6 +692,9 @@ describe('VideoRetryManager', () => {
 
     afterEach(() => {
         document.removeEventListener('__gpt_set_prompted_video_content', promptedVideoBridgeHandler);
+        document.removeEventListener('__gpt_media_fetch_bridge_probe', mediaFetchBridgeReadyHandler);
+        document.removeEventListener('__gpt_fetch_conversation_asset_inventory', conversationInventoryBridgeHandler);
+        document.removeEventListener('click', preventFixtureAnchorNavigation, true);
         retryManager.stopObserver();
         retryManager.generateMoreObserver.disconnect();
         jest.restoreAllMocks();
@@ -805,6 +920,7 @@ describe('VideoRetryManager', () => {
         });
         retryManager.sleep = jest.fn().mockResolvedValue();
         retryManager.scrollForMore = jest.fn().mockResolvedValue(false);
+        jest.spyOn(retryManager, '_waitForPromptedProviderAcceptance').mockResolvedValue('pending');
 
         await retryManager.startBatch('quick');
 
@@ -919,6 +1035,12 @@ describe('VideoRetryManager', () => {
             mountGallery();
             return 'returned';
         });
+        jest.spyOn(retryManager, '_waitForPromptedProviderAcceptance')
+            .mockImplementation(async (descriptor) => (
+                descriptor.sourceAssetId !== sourceIds[0] || firstSourceAccepts
+                    ? 'accepted'
+                    : 'pending'
+            ));
 
         await retryManager.startBatch('prompted', 'slow camera push in', { galleryLimit: 2 });
 
@@ -1314,9 +1436,9 @@ describe('VideoRetryManager', () => {
                     checkpointSourceNodeId: 'goal-source-node',
                     baselineAcceptedCount: 0,
                     baselineRejectedCount: 0,
-                    resultBaselineVersion: 1,
-                    baselineResultAssetIds: [],
-                    baselineFailureCount: 0
+                    domResultBaselineVersion: 1,
+                    baselineDomResultAssetIds: [],
+                    baselineDomFailureCount: 0
                 }
             }],
             counts: { accepted: 0, failed: 0, skipped: 0, pending: 1 },
@@ -1392,21 +1514,20 @@ describe('VideoRetryManager', () => {
 
     test('results card open target accepts duplicate links only when they share one post', () => {
         window.history.pushState({}, '', '/imagine');
-        const { card, image } = createSavedBatchCard(
+        const samePostId = 'cdcdcdcd-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const { card, image, postLink: imageLink } = createSavedBatchCard(
             'https://assets.grok.com/users/example/generated/abababab-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg'
         );
-        const imageLink = document.createElement('a');
-        imageLink.href = '/imagine/post/same-post';
-        card.insertBefore(imageLink, image);
+        imageLink.href = `/imagine/post/${samePostId}`;
         imageLink.appendChild(image);
         const overlayLink = document.createElement('a');
-        overlayLink.href = '/imagine/post/same-post';
+        overlayLink.href = `/imagine/post/${samePostId}`;
         card.appendChild(overlayLink);
         const item = retryManager._getQualifiedResultsGalleryItems()[0];
 
         expect(retryManager._getResultsGalleryOpenTarget(item)).toBe(imageLink);
 
-        overlayLink.href = '/imagine/post/different-post';
+        overlayLink.href = '/imagine/post/dededede-bbbb-4ccc-8ddd-eeeeeeeeeeee';
         expect(retryManager._getResultsGalleryOpenTarget(item)).toBeNull();
     });
 
@@ -1421,7 +1542,7 @@ describe('VideoRetryManager', () => {
     test('results card opening fails closed when the trusted native click is unavailable', async () => {
         const sourceUrl = 'https://assets.grok.com/users/example/generated/acdcacdc-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
         window.history.pushState({}, '', '/imagine');
-        const { image } = createSavedBatchCard(sourceUrl);
+        const { image, postLink } = createSavedBatchCard(sourceUrl);
         const item = retryManager._getQualifiedResultsGalleryItems()[0];
         const token = 'results-native-open-failed';
         retryManager.batchRunning = true;
@@ -1437,7 +1558,7 @@ describe('VideoRetryManager', () => {
         await retryManager._processPromptedResultsItem(item, token);
 
         expect(nativeControlClickSpy).toHaveBeenCalledWith(
-            image,
+            postLink,
             token,
             'open prompted batch result',
             expect.any(Function)
@@ -1480,9 +1601,13 @@ describe('VideoRetryManager', () => {
 
         const renderResults = () => {
             document.body.innerHTML = '';
-            const { image } = createSavedBatchCard(sourceUrl);
-            image.addEventListener('click', () => {
-                window.history.pushState({}, '', '/imagine/post/result-card');
+            const { postLink } = createSavedBatchCard(sourceUrl);
+            postLink.addEventListener('click', () => {
+                window.history.pushState(
+                    {},
+                    '',
+                    '/imagine/post/adadadad-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+                );
                 document.body.innerHTML = '';
 
                 const back = makeVisible(document.createElement('button'));
@@ -1512,7 +1637,7 @@ describe('VideoRetryManager', () => {
 
                 document.body.append(back, makeVideo);
             });
-            return image;
+            return postLink;
         };
 
         renderResults();
@@ -2231,10 +2356,10 @@ describe('VideoRetryManager', () => {
     test('Stop during results-card targeting prevents navigation and submission', async () => {
         const sourceUrl = 'https://assets.grok.com/users/example/generated/afafafaf-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
         window.history.pushState({}, '', '/imagine');
-        const { image } = createSavedBatchCard(sourceUrl);
-        const imageClick = jest.fn();
-        image.addEventListener('click', imageClick);
-        image.scrollIntoView = () => retryManager.stopBatch();
+        const { postLink } = createSavedBatchCard(sourceUrl);
+        const openClick = jest.fn();
+        postLink.addEventListener('click', openClick);
+        postLink.scrollIntoView = () => retryManager.stopBatch();
         const item = retryManager._getQualifiedResultsGalleryItems()[0];
         const token = 'results-stop-before-open';
         retryManager.batchRunning = true;
@@ -2246,7 +2371,7 @@ describe('VideoRetryManager', () => {
 
         await retryManager._processPromptedResultsItem(item, token);
 
-        expect(imageClick).not.toHaveBeenCalled();
+        expect(openClick).not.toHaveBeenCalled();
         expect(retryManager.goalCount).toBe(0);
         expect(retryManager.batchRunning).toBe(false);
     });
@@ -2323,7 +2448,8 @@ describe('VideoRetryManager', () => {
     });
 
     test('prompted Saved batch submits through Agent Mode and restores the Saved scroll position', async () => {
-        const sourceUrl = 'https://assets.grok.com/users/example/generated/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        const sourceId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const sourceUrl = `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`;
         const originalScrollY = 240;
         let submitted = 0;
 
@@ -2334,22 +2460,12 @@ describe('VideoRetryManager', () => {
         const renderSavedCard = () => {
             document.body.innerHTML = '';
             mountSavedScope('all');
-            const card = document.createElement('div');
-            card.setAttribute('role', 'listitem');
-            const image = document.createElement('img');
-            image.alt = 'Generated image';
-            image.src = sourceUrl;
-            image.scrollIntoView = jest.fn();
-            const makeVideo = document.createElement('button');
-            makeVideo.setAttribute('aria-label', 'Make video');
-            card.append(image, makeVideo);
-            document.body.appendChild(card);
-            return { card, image };
+            return createSavedBatchCard(sourceUrl);
         };
 
         const { image } = renderSavedCard();
         image.addEventListener('click', () => {
-            window.history.pushState({}, '', '/imagine/agent/agent-1?conversation=conversation-1');
+            window.history.pushState({}, '', `/imagine/agent/${sourceId}?conversation=${sourceId}`);
             document.body.innerHTML = `
                 <div class="react-flow__node-asset selected" data-id="asset-source">
                     <img src="${sourceUrl}">
@@ -2375,6 +2491,11 @@ describe('VideoRetryManager', () => {
                             event.currentTarget.disabled = true;
                             submitted++;
                             appendReadyVideoResult(sourceUrl);
+                            window.history.pushState(
+                                {},
+                                '',
+                                `/imagine/post/91000000-0000-4000-8000-000000000001?conversation=${sourceId}`
+                            );
                         }
                     });
                     addPrompt.remove();
@@ -2386,6 +2507,7 @@ describe('VideoRetryManager', () => {
         });
 
         retryManager.sleep = jest.fn().mockResolvedValue();
+        jest.spyOn(retryManager, '_waitForPromptedVideoSubmissionAccepted').mockResolvedValue(true);
 
         await retryManager.startPromptedBatchFromGallery('slow camera push in', 1);
 
@@ -2396,7 +2518,8 @@ describe('VideoRetryManager', () => {
     });
 
     test('waits for delayed exact Agent media and Make Video readiness before acting', async () => {
-        const sourceUrl = 'https://assets.grok.com/users/example/generated/02020202-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        const sourceId = '02020202-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const sourceUrl = `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`;
         let submitted = 0;
         let readinessPolls = 0;
         window.history.pushState({}, '', '/imagine/saved');
@@ -2407,7 +2530,7 @@ describe('VideoRetryManager', () => {
         };
         const { image } = renderSaved();
         image.addEventListener('click', () => {
-            window.history.pushState({}, '', '/imagine/agent/agent-2?conversation=conversation-2');
+            window.history.pushState({}, '', `/imagine/agent/${sourceId}?conversation=${sourceId}`);
             document.body.innerHTML = '';
             const decoyNode = document.createElement('div');
             decoyNode.className = 'react-flow__node-asset';
@@ -2446,6 +2569,11 @@ describe('VideoRetryManager', () => {
                                 event.currentTarget.disabled = true;
                                 submitted++;
                                 appendReadyVideoResult(sourceUrl);
+                                window.history.pushState(
+                                    {},
+                                    '',
+                                    `/imagine/post/92000000-0000-4000-8000-000000000002?conversation=${sourceId}`
+                                );
                             }
                         });
                     });
@@ -2455,6 +2583,7 @@ describe('VideoRetryManager', () => {
                 document.body.appendChild(makeVideo);
             }
         });
+        jest.spyOn(retryManager, '_waitForPromptedVideoSubmissionAccepted').mockResolvedValue(true);
 
         await retryManager.startPromptedBatchFromGallery('slow camera push in', 1);
 
@@ -2678,8 +2807,9 @@ describe('VideoRetryManager', () => {
     });
 
     test('uses the semantic generated image when a decoy image appears first in the Saved card', async () => {
-        const sourceUrl = 'https://assets.grok.com/users/example/generated/03030303-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
-        const decoyUrl = 'https://assets.grok.com/users/example/generated/04040404-bbbb-4ccc-8ddd-eeeeeeeeeeee/avatar.jpg';
+        const sourceId = '03030303-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const sourceUrl = `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`;
+        const decoyUrl = 'https://assets.grok.com/users/example/avatar.jpg';
         let submitted = 0;
         window.history.pushState({}, '', '/imagine/saved');
 
@@ -2693,10 +2823,11 @@ describe('VideoRetryManager', () => {
             return saved;
         };
         renderSaved(() => {
-            window.history.pushState({}, '', '/imagine/agent/agent-3?conversation=conversation-3');
+            window.history.pushState({}, '', `/imagine/agent/${sourceId}?conversation=${sourceId}`);
             renderAgentEditor({
                 sourceUrl,
                 onSubmit: () => { submitted++; },
+                acceptSubmissionByNavigation: true,
                 onBack: () => {
                     window.history.pushState({}, '', '/imagine/saved');
                     renderSaved();
@@ -2704,24 +2835,27 @@ describe('VideoRetryManager', () => {
             });
         });
         retryManager.sleep = jest.fn().mockResolvedValue();
+        jest.spyOn(retryManager, '_waitForPromptedVideoSubmissionAccepted').mockResolvedValue(true);
 
         await retryManager.startPromptedBatchFromGallery('slow camera push in', 1);
 
         expect(submitted).toBe(1);
         expect(retryManager.batchProcessedSrcs.has('03030303-bbbb-4ccc-8ddd-eeeeeeeeeeee')).toBe(true);
-        expect(retryManager.batchProcessedSrcs.has('04040404-bbbb-4ccc-8ddd-eeeeeeeeeeee')).toBe(false);
+        expect(retryManager.batchProcessedSrcs.has(decoyUrl)).toBe(false);
     });
 
     test('prompted Saved batch accepts a legacy detail editor route', async () => {
-        const sourceUrl = 'https://assets.grok.com/users/example/generated/abababab-bbbb-4ccc-8ddd-eeeeeeeeeeee/image.jpg';
+        const sourceId = 'abababab-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+        const sourceUrl = `https://assets.grok.com/users/example/generated/${sourceId}/image.jpg`;
         let submitted = 0;
         window.history.pushState({}, '', '/imagine/saved');
         createSavedBatchCard(sourceUrl, () => {
-            window.history.pushState({}, '', '/imagine/post/post-1');
+            window.history.pushState({}, '', `/imagine/post/${sourceId}?conversation=${sourceId}`);
             renderAgentEditor({
                 sourceUrl,
                 includeAgentAsset: false,
                 onSubmit: () => { submitted++; },
+                acceptSubmissionByNavigation: true,
                 onBack: () => {
                     window.history.pushState({}, '', '/imagine/saved');
                     document.body.innerHTML = '';
@@ -3144,6 +3278,7 @@ describe('VideoRetryManager', () => {
         const snapshot = {
             savedViewportReceipt: {
                 version: 3,
+                identityKind: 'saved_post',
                 sourceIdentity: sourceId,
                 expectedNextIdentity: null,
                 beforeIdentities: [],
@@ -3236,12 +3371,15 @@ describe('VideoRetryManager', () => {
         const appendCard = (mediaId) => {
             const card = document.createElement('article');
             card.setAttribute('role', 'listitem');
+            const postLink = document.createElement('a');
+            postLink.href = `/imagine/post/${mediaId}?conversation=${mediaId}`;
             const image = document.createElement('img');
             image.alt = 'Generated image';
             image.src = `https://assets.grok.com/users/example/generated/${mediaId}/image.jpg`;
             const makeVideo = document.createElement('button');
             makeVideo.setAttribute('aria-label', 'Make video');
-            card.append(image, makeVideo);
+            postLink.appendChild(image);
+            card.append(postLink, makeVideo);
             list.appendChild(card);
         };
         const back = makeVisible(document.createElement('button'));
@@ -4279,7 +4417,7 @@ describe('VideoRetryManager', () => {
         expect(submitClicks).toBe(1);
     });
 
-    test('prompted video submission is accepted when the verified submit settles', async () => {
+    test('prompted video submission rejects a settled verified submit without a post transition', async () => {
         const { composer, input, submit } = mountFocusedPromptedVideoComposer();
         input.textContent = 'slow camera push in';
         retryManager.promptedVideoComposerRoot = composer;
@@ -4293,10 +4431,10 @@ describe('VideoRetryManager', () => {
         });
 
         await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
-            .resolves.toBe(true);
+            .resolves.toBe(false);
     });
 
-    test('prompted video submission is accepted when the verified composer closes', async () => {
+    test('prompted video submission rejects a closed verified composer without a post transition', async () => {
         const { composer, input } = mountFocusedPromptedVideoComposer();
         input.textContent = 'slow camera push in';
         retryManager.promptedVideoComposerRoot = composer;
@@ -4310,7 +4448,7 @@ describe('VideoRetryManager', () => {
         });
 
         await expect(retryManager._waitForPromptedVideoSubmissionAccepted(receipt, token, 200))
-            .resolves.toBe(true);
+            .resolves.toBe(false);
     });
 
     test('prompted video submission is accepted when Grok opens a new post in the same conversation', async () => {

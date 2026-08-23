@@ -20,6 +20,18 @@ async function setupRemountingQuickBatch(page, {
         const accepted = new Set();
         let actionsAvailable = true;
         const galleryId = 'gpt-quick-batch-fixture';
+        const conversationId = '11111111-1111-4111-8111-111111111111';
+        window.__gptConversationInventoryResponse = () => ({
+            ...window.__buildConversationInventory({
+                conversationId,
+                accountUuid,
+                assets: mediaUuids.map((assetId) => ({ assetId }))
+            }),
+            videoGenerationResponses: Array.from(accepted).map((assetId) => ({
+                responseId: assetId.replace(/^62/, '63'),
+                parentResponseId: assetId
+            }))
+        });
         window.__resolvePromptedBatchNativeClickTarget = (x, y) => Array.from(
             document.querySelectorAll(`${galleryId.startsWith('#') ? galleryId : `#${galleryId}`} button[aria-label="Make video"]`)
         ).find((candidate) => {
@@ -41,7 +53,7 @@ async function setupRemountingQuickBatch(page, {
                 card.dataset.sourceAssetId = mediaUuid;
 
                 const link = document.createElement('a');
-                link.href = `/imagine/post/${mediaUuid}?conversation=11111111-1111-4111-8111-111111111111`;
+                link.href = `/imagine/post/${mediaUuid}?conversation=${conversationId}`;
                 const image = document.createElement('img');
                 image.alt = 'Generated image';
                 image.src = `https://assets.grok.com/users/${accountUuid}/generated/${mediaUuid}/image.jpg`;
@@ -147,6 +159,12 @@ async function setupVideoGoalFixture(page, {
             '',
             `/imagine/agent/${sourceAssetId}?conversation=${sourcePostId}`
         );
+        window.sessionStorage.setItem('gptCurrentGrokSourceHint', JSON.stringify({
+            sourceAssetId,
+            sourcePostId,
+            conversationId: sourcePostId,
+            capturedAt: Date.now()
+        }));
         window.__videoGoalEvents = {
             clicks: [],
             remounts: 0,
@@ -155,6 +173,43 @@ async function setupVideoGoalFixture(page, {
             mountedResults,
             stopRequested: false
         };
+        window.__gptConversationInventoryResponse = () => ({
+            ...window.__buildConversationInventory({
+                conversationId: sourcePostId,
+                accountUuid: 'example',
+                assets: [
+                    { assetId: sourceAssetId },
+                    ...mountedResults.map((assetId) => ({ assetId, mediaKind: 'video' }))
+                ]
+            }),
+            failureCount: failedSignals.length,
+            failedResponses: failedSignals.map((failureAttempt) => ({
+                responseId: `cf000000-0000-4000-8000-${String(failureAttempt).padStart(12, '0')}`,
+                parentResponseId: sourceAssetId
+            })),
+            assets: [
+                {
+                    assetId: sourceAssetId,
+                    responseId: sourceAssetId,
+                    parentResponseId: '',
+                    mediaKind: 'image',
+                    sourceUrl,
+                    promptText: 'candid friends at the beach',
+                    assetMetadata: { assetId: sourceAssetId, mimeType: 'image/jpeg' },
+                    mediaGenInput: { prompt: 'candid friends at the beach' }
+                },
+                ...mountedResults.map((assetId) => ({
+                    assetId,
+                    responseId: assetId,
+                    parentResponseId: sourceAssetId,
+                    mediaKind: 'video',
+                    sourceUrl: `https://assets.grok.com/users/example/generated/${assetId}/video.mp4`,
+                    promptText: 'candid friends at the beach',
+                    assetMetadata: { assetId, mimeType: 'video/mp4' },
+                    mediaGenInput: { prompt: 'candid friends at the beach' }
+                }))
+            ]
+        });
 
         const makeVisible = (element, top = 80, left = 80, width = 180, height = 42) => {
             element.getBoundingClientRect = () => ({

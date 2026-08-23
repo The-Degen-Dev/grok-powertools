@@ -138,6 +138,10 @@ function listCurrentResults() {
     });
 }
 
+function setActiveGrokRoute(path) {
+    window.history.replaceState({}, '', path);
+}
+
 function persistedSourceDescriptor(overrides = {}) {
     return {
         ...expectedDescriptor({
@@ -167,7 +171,7 @@ function mountAgentSource({
             </div>
             ${includeToolbarDecoy ? `
                 <div class="react-flow__node-toolbar" data-id="asset-${dataAssetId}">
-                    <button aria-label="Make Video" aria-haspopup="menu">Toolbar Make Video</button>
+                    <button aria-label="Make Video">Toolbar Make Video</button>
                 </div>
             ` : ''}
         </div>
@@ -284,6 +288,7 @@ function generatedResultBaseline(mediaAssetIds = [], failureCount = 0) {
 describe('Grok Imagine adapter module contract', () => {
     beforeEach(() => {
         document.body.innerHTML = '';
+        setActiveGrokRoute('/');
     });
 
     test('exposes the CommonJS API through the UMD browser global', () => {
@@ -434,7 +439,7 @@ describe('Grok Imagine adapter module contract', () => {
         });
     });
 
-    test('uses the Agent conversation UUID as post context only when no post hint is supplied', () => {
+    test('requires explicit Agent post context instead of treating conversation scope as a post', () => {
         mountAgentSource({ assetId: THIRD_ASSET_ID });
 
         const result = describeCurrentSource({
@@ -446,20 +451,8 @@ describe('Grok Imagine adapter module contract', () => {
         });
 
         expect(result).toEqual({
-            status: 'matched',
-            descriptor: {
-                version: 1,
-                surface: 'agent_media',
-                sourceAssetId: THIRD_ASSET_ID,
-                sourcePostId: SECOND_CONVERSATION_ID,
-                conversationId: SECOND_CONVERSATION_ID,
-                mediaKind: 'image',
-                hrefPath: '/imagine/agent/agent-2',
-                route: `https://grok.com/imagine/agent/agent-2?conversation=${SECOND_CONVERSATION_ID}`,
-                initialOrder: 0,
-                beforeAssetId: '',
-                afterAssetId: ''
-            }
+            status: 'missing',
+            reason: 'agent_source_post_context_missing'
         });
     });
 
@@ -685,6 +678,7 @@ describe('Grok Imagine adapter module contract', () => {
     test('reacquires the exact selected Agent source and ignores its toolbar action decoy', () => {
         const descriptor = persistedSourceDescriptor();
         const { source, toolbarAction, sidePanelAction } = mountAgentSource();
+        setActiveGrokRoute(`/imagine/agent/agent-1?conversation=${CONVERSATION_ID}`);
 
         expect(resolveGalleryItem({ root: document, descriptor })).toEqual({
             status: 'matched',
@@ -755,6 +749,7 @@ describe('Grok Imagine adapter module contract', () => {
     test('resolves a legacy detail source and its linked Add Prompt action', () => {
         const descriptor = persistedSourceDescriptor();
         const { source, sidePanelAction } = mountLegacyDetail();
+        setActiveGrokRoute(`/imagine/post/${FIRST_POST_ID}?conversation=${CONVERSATION_ID}`);
 
         expect(resolveGalleryItem({ root: document, descriptor })).toEqual({
             status: 'matched',
@@ -901,12 +896,6 @@ describe('Grok Imagine adapter module contract', () => {
         const descriptor = listCurrentResults().items[0];
         const card = document.querySelector('[role="listitem"]');
         const quickControl = card.querySelector('button[aria-label="Make video"]');
-        const promptedTrigger = document.createElement('button');
-        promptedTrigger.id = 'make-video-menu-trigger';
-        promptedTrigger.setAttribute('aria-label', 'Make Video');
-        promptedTrigger.setAttribute('aria-haspopup', 'menu');
-        promptedTrigger.setAttribute('aria-controls', 'make-video-menu');
-        document.body.appendChild(promptedTrigger);
 
         expect(resolveMediaAction({
             root: document,
@@ -917,6 +906,11 @@ describe('Grok Imagine adapter module contract', () => {
             stage: 'submit_direct',
             control: quickControl
         });
+
+        const { sidePanelAction: promptedTrigger } = mountLegacyDetail();
+        promptedTrigger.id = 'make-video-menu-trigger';
+        promptedTrigger.setAttribute('aria-controls', 'make-video-menu');
+        setActiveGrokRoute(`/imagine/post/${FIRST_POST_ID}?conversation=${CONVERSATION_ID}`);
         expect(resolveMediaAction({
             root: document,
             descriptor,
@@ -970,10 +964,8 @@ describe('Grok Imagine adapter module contract', () => {
         });
 
         duplicateQuick.remove();
-        const trigger = document.createElement('button');
+        const { sidePanelAction: trigger } = mountLegacyDetail();
         trigger.id = 'ambiguous-prompt-trigger';
-        trigger.setAttribute('aria-label', 'Make Video');
-        trigger.setAttribute('aria-haspopup', 'menu');
         trigger.setAttribute('aria-controls', 'ambiguous-prompt-menu');
         trigger.setAttribute('aria-expanded', 'true');
         trigger.setAttribute('data-state', 'open');
@@ -986,7 +978,8 @@ describe('Grok Imagine adapter module contract', () => {
             <button role="menuitem">Add Prompt</button>
             <button role="menuitem">Add Prompt</button>
         `;
-        document.body.append(trigger, menu);
+        document.body.append(menu);
+        setActiveGrokRoute(`/imagine/post/${FIRST_POST_ID}?conversation=${CONVERSATION_ID}`);
 
         expect(resolveMediaAction({
             root: document,

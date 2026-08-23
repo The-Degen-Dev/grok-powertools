@@ -351,7 +351,9 @@ describe('generation run controller', () => {
             resume: true,
             resumeProof: {
                 surface: 'results_gallery',
-                url: origin().url
+                url: origin().url,
+                sourceAssetId: 'asset-b',
+                sourcePostId: 'post-b'
             }
         }, sender(42, 'document-after-reload'));
 
@@ -546,7 +548,9 @@ describe('generation run controller', () => {
             run: null
         });
         expect(sessionStorage.snapshot()).toEqual({});
-        expect(localStorage.snapshot()).toEqual({});
+        expect(localStorage.snapshot()).toEqual({
+            generationRunRecovery: null
+        });
     });
 
     test('resumes a provider-capacity wait before issuing the same source again', async () => {
@@ -604,9 +608,26 @@ describe('generation run controller', () => {
         }, sender()));
         harness.setNow(run.capacityDeadlineAt);
 
-        const next = await harness.controller.claimGenerationAction({
+        const timedOut = await harness.controller.claimGenerationAction({
             runId: run.runId,
             epoch: run.epoch
+        }, sender());
+
+        expect(timedOut).toEqual(expect.objectContaining({
+            status: 'capacity_timeout',
+            claim: null,
+            run: expect.objectContaining({
+                items: expect.arrayContaining([
+                    expect.objectContaining({
+                        status: 'retryable_failed',
+                        failureCode: 'capacity_timeout'
+                    })
+                ])
+            })
+        }));
+        const next = await harness.controller.claimGenerationAction({
+            runId: timedOut.run.runId,
+            epoch: timedOut.run.epoch
         }, sender());
 
         expect(next.status).toBe('claimed');
@@ -688,7 +709,7 @@ describe('generation run controller', () => {
             acknowledged: true,
             run: expect.objectContaining({ status: 'cancelled' })
         }));
-        expect(events).toEqual(['persist:cancelled', 'notify']);
+        expect(events).toEqual(['persist:cancelling', 'notify', 'persist:cancelled']);
         await expect(harness.controller.reportGenerationAction({
             ...claimed.claim,
             outcome: 'accepted',
@@ -783,10 +804,13 @@ describe('generation run controller', () => {
         }, sender());
 
         expect(cancelled).toEqual(expect.objectContaining({
-            status: 'cancelled',
+            status: 'cancelling',
             acknowledged: false,
-            run: expect.objectContaining({ status: 'cancelled' })
+            run: expect.objectContaining({ status: 'cancelling' })
         }));
+        expect(harness.sessionStorage.snapshot()[GENERATION_RUN_SESSION_KEY]).toEqual(
+            expect.objectContaining({ status: 'cancelling' })
+        );
     });
 
     test('closing the owner tab revokes the active run', async () => {

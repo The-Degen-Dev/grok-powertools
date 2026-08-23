@@ -4,6 +4,7 @@ const {
     getR2BackupCanaryStopReason,
     getR2BackupPageCommandOptions,
     GrokScraper,
+    initializeGrokScraperState,
     SettingsManager,
     selectBackupMediaElement,
     selectMatchingLegacyDetailMedia,
@@ -158,7 +159,33 @@ describe('Grok backup media selection', () => {
 });
 
 function mockChromeForBackground() {
-    return {
+    const localState = {};
+    const sessionState = {};
+    const readStorage = async (state, keys) => {
+        if (keys == null) return cloneJson(state);
+        if (typeof keys === 'object' && !Array.isArray(keys)) {
+            return Object.entries(keys).reduce((result, [key, fallback]) => {
+                result[key] = Object.prototype.hasOwnProperty.call(state, key)
+                    ? cloneJson(state[key])
+                    : cloneJson(fallback);
+                return result;
+            }, {});
+        }
+        const names = Array.isArray(keys) ? keys : [keys];
+        return names.reduce((result, key) => {
+            if (Object.prototype.hasOwnProperty.call(state, key)) {
+                result[key] = cloneJson(state[key]);
+            }
+            return result;
+        }, {});
+    };
+    const writeStorage = async (state, values) => {
+        Object.assign(state, cloneJson(values));
+    };
+    const removeStorage = async (state, keys) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) delete state[key];
+    };
+    const chromeApi = {
         alarms: {
             clear: jest.fn(() => Promise.resolve()),
             create: jest.fn(() => Promise.resolve()),
@@ -177,15 +204,21 @@ function mockChromeForBackground() {
             createDocument: jest.fn(() => Promise.resolve())
         },
         runtime: {
+            id: 'extension-id',
             getURL: jest.fn((path) => path),
             onMessage: { addListener: jest.fn() },
             sendMessage: jest.fn(() => Promise.resolve())
         },
         storage: {
             local: {
-                get: jest.fn(() => Promise.resolve({})),
-                remove: jest.fn(() => Promise.resolve()),
-                set: jest.fn(() => Promise.resolve())
+                get: jest.fn((keys) => readStorage(localState, keys)),
+                remove: jest.fn((keys) => removeStorage(localState, keys)),
+                set: jest.fn((values) => writeStorage(localState, values))
+            },
+            session: {
+                get: jest.fn((keys) => readStorage(sessionState, keys)),
+                remove: jest.fn((keys) => removeStorage(sessionState, keys)),
+                set: jest.fn((values) => writeStorage(sessionState, values))
             },
             onChanged: { addListener: jest.fn() }
         },
@@ -196,12 +229,34 @@ function mockChromeForBackground() {
             sendMessage: jest.fn()
         }
     };
+    chromeApi.__localState = localState;
+    chromeApi.__sessionState = sessionState;
+    return chromeApi;
 }
+
+const pendingBackgroundInitializations = new Set();
+const loadedBackgroundModules = new Set();
+
+afterEach(() => {
+    for (const background of loadedBackgroundModules) {
+        background.cancelPendingMetadataSyncForTest?.();
+    }
+    loadedBackgroundModules.clear();
+});
 
 function loadBackgroundForTest() {
     jest.resetModules();
     global.chrome = mockChromeForBackground();
-    return require('../../background.js');
+    const background = require('../../background.js');
+    loadedBackgroundModules.add(background);
+    const initialization = background.waitForBackgroundInitialization().catch(() => {});
+    pendingBackgroundInitializations.add(initialization);
+    initialization.finally(() => pendingBackgroundInitializations.delete(initialization));
+    return background;
+}
+
+async function settleBackgroundInitializations() {
+    await Promise.allSettled(Array.from(pendingBackgroundInitializations));
 }
 
 function cloneJson(value) {
@@ -316,6 +371,7 @@ function createDurableBackgroundHarness(initialStorage = {}, initialDownloads = 
             jest.resetModules();
             global.chrome = chromeApi;
             const background = require('../../background.js');
+            loadedBackgroundModules.add(background);
             await Promise.resolve();
             return background;
         },
@@ -383,7 +439,7 @@ function authoritativeCaptureMetadata(assetId, promptText = 'authoritative promp
         evidenceSource: 'grok_conversation_response',
         conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         assetId,
-        responseId: 'response-1',
+        responseId: assetId,
         promptText,
         assetMetadata: { assetId, mimeType: 'image/jpeg' },
         mediaGenInput: { prompt: promptText }
@@ -412,7 +468,8 @@ function installR2PresentFetch(sourceUrl, { sourcePromise = null } = {}) {
 }
 
 describe('Grok backup background processed ID persistence', () => {
-    afterEach(() => {
+    afterEach(async () => {
+        await settleBackgroundInitializations();
         delete global.chrome;
         delete global.fetch;
         jest.resetModules();
@@ -515,9 +572,15 @@ describe('Grok backup background processed ID persistence', () => {
             { status: 'uploaded' }
         )).resolves.toBe(true);
 
-        expect(chrome.storage.local.get).toHaveBeenCalledWith(['processedIds']);
+        expect(chrome.storage.local.get).toHaveBeenCalledWith([
+            'processedIds',
+            'processedLocalIds',
+            'processedR2Ids'
+        ]);
         expect(chrome.storage.local.set).toHaveBeenCalledWith({
-            processedIds: ['direct-clean-id', 'background-queued-id', 'queued-media-id']
+            processedIds: ['direct-clean-id', 'background-queued-id', 'queued-media-id'],
+            processedLocalIds: [],
+            processedR2Ids: ['queued-media-id']
         });
         expect(getProcessedUUIDsForTest()).toEqual(['direct-clean-id', 'background-queued-id', 'queued-media-id']);
     });
@@ -536,7 +599,11 @@ describe('Grok backup background processed ID persistence', () => {
             { status: 'uploaded' }
         )).resolves.toBe(false);
 
-        expect(chrome.storage.local.get).not.toHaveBeenCalledWith(['processedIds']);
+        expect(chrome.storage.local.get).not.toHaveBeenCalledWith([
+            'processedIds',
+            'processedLocalIds',
+            'processedR2Ids'
+        ]);
         expect(chrome.storage.local.set).not.toHaveBeenCalledWith(expect.objectContaining({
             processedIds: expect.any(Array)
         }));
@@ -593,7 +660,11 @@ describe('Grok backup background processed ID persistence', () => {
 
         expect(background.getProcessedUUIDsForTest()).toEqual([mediaId]);
         expect(background.getCloudSyncQueueForTest()).toEqual([]);
-        expect(chrome.storage.local.set).toHaveBeenCalledWith({ processedIds: [mediaId] });
+        expect(chrome.storage.local.set).toHaveBeenCalledWith({
+            processedIds: [mediaId],
+            processedLocalIds: [],
+            processedR2Ids: [mediaId]
+        });
     });
 
     test('drops a replayed successful cleanup queue item after its operation already finalized', async () => {
@@ -916,7 +987,11 @@ describe('background-owned processed ID mutations', () => {
         let processedReadCount = 0;
         const defaultGet = harness.chromeApi.storage.local.get.getMockImplementation();
         harness.chromeApi.storage.local.get.mockImplementation((keys) => {
-            if (Array.isArray(keys) && keys.length === 1 && keys[0] === 'processedIds') {
+            if (Array.isArray(keys)
+                && keys.length === 3
+                && keys.includes('processedIds')
+                && keys.includes('processedLocalIds')
+                && keys.includes('processedR2Ids')) {
                 processedReadCount += 1;
                 if (processedReadCount === 1) {
                     return new Promise((resolve) => { releaseFirstRead = () => resolve({ processedIds: [] }); });
@@ -944,7 +1019,12 @@ describe('background-owned processed ID mutations', () => {
         let releaseFirstRead;
         const defaultGet = harness.chromeApi.storage.local.get.getMockImplementation();
         harness.chromeApi.storage.local.get.mockImplementation((keys) => {
-            if (!releaseFirstRead && Array.isArray(keys) && keys.length === 1 && keys[0] === 'processedIds') {
+            if (!releaseFirstRead
+                && Array.isArray(keys)
+                && keys.length === 3
+                && keys.includes('processedIds')
+                && keys.includes('processedLocalIds')
+                && keys.includes('processedR2Ids')) {
                 return new Promise((resolve) => { releaseFirstRead = () => resolve({ processedIds: [] }); });
             }
             return defaultGet(keys);
@@ -1026,35 +1106,47 @@ describe('content processed ID mutation messages', () => {
         }));
     });
 
-    test('checks the active run token before and after a scrape add response', async () => {
+    test('checks the active run token before and after a destination receipt response', async () => {
         let resolveMutation;
         chrome.runtime.sendMessage.mockImplementation((message) => {
-            if (message.action === 'SCRAPE_PROCESSED_IDS_ADD') {
+            if (message.action === 'SCRAPE_DESTINATION_RECEIPTS_ADD') {
                 return new Promise((resolve) => { resolveMutation = resolve; });
             }
             return Promise.resolve();
         });
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.state = { isRunning: true };
         scraper.runToken = 'run-1';
         scraper.runEpoch = 1;
-        scraper.processedIds = new Set();
+        scraper.backupMode = true;
+        scraper.refreshProcessedIds = jest.fn(() => Promise.resolve(true));
         scraper.handleExtensionContextInvalidated = jest.fn();
 
-        const persistence = scraper.persistProcessedId('media-a', 'run-1');
+        const sourceUrl = 'https://assets.grok.com/users/user-1/generated/media-a/image.jpg';
+        const persistence = scraper.recordDurableBackupResult({
+            status: 'uploaded',
+            backupProcessedId: 'media-a',
+            assetId: 'asset-a'
+        }, sourceUrl, 'post-a', 'run-1');
         await waitForAssertion(() => expect(resolveMutation).toEqual(expect.any(Function)));
         scraper.runToken = 'run-2';
-        resolveMutation({ status: 'ok', processedIds: ['media-a'] });
+        resolveMutation({
+            status: 'ok',
+            processedIds: ['media-a'],
+            localIds: [],
+            r2Ids: ['media-a']
+        });
 
-        await expect(persistence).resolves.toBe(false);
-        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-            action: 'SCRAPE_PROCESSED_IDS_ADD',
-            ids: ['media-a'],
+        await expect(persistence).resolves.toEqual({ status: 'error', error: 'Backup stopped.' });
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'SCRAPE_DESTINATION_RECEIPTS_ADD',
+            r2Ids: expect.arrayContaining(['post-a', sourceUrl, 'media-a', 'asset-a']),
             runToken: 'run-1',
             runEpoch: 1,
-            kind: 'sync'
-        });
-        expect(scraper.processedIds).toEqual(new Set());
+            kind: 'r2_backup'
+        }));
+        expect(scraper.refreshProcessedIds).not.toHaveBeenCalled();
     });
 });
 
@@ -1319,7 +1411,14 @@ describe('native download processed ID lifecycle', () => {
         await Promise.resolve(harness.getDownloadChangedListener()({ id: 48, state: { current: 'complete' } }));
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(harness.storageState.processedIds).toEqual([mediaId]);
+        expect(harness.storageState.processedIds).toEqual([
+            mediaId,
+            expect.stringMatching(/^url_[a-f0-9]{8}$/)
+        ]);
+        expect(harness.storageState.processedLocalIds).toEqual([
+            mediaId,
+            expect.stringMatching(/^url_[a-f0-9]{8}$/)
+        ]);
         expect(queryOnlySuggest.mock.calls[0][0].filename).toMatch(/\/url_[a-f0-9]{8}\.jpg$/);
         expect(queryOnlySuggest.mock.calls[0][0].filename).not.toContain(queryId);
         expect(errorSpy).not.toHaveBeenCalledWith('Background initialization failed:', expect.anything());
@@ -1422,7 +1521,7 @@ describe('cloud-only download proof and cleanup ordering', () => {
             evidenceSource: 'grok_conversation_response',
             conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             assetId: mediaId,
-            responseId: 'response-1',
+            responseId: mediaId,
             promptText: 'authoritative prompt',
             assetMetadata: { assetId: mediaId, mimeType: 'image/jpeg', width: 1024, height: 1024 },
             mediaGenInput: { prompt: 'authoritative prompt' }
@@ -3272,6 +3371,7 @@ describe('Grok backup canary flow', () => {
     test('does not start backup from unsafe page-origin full backup commands', () => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.startBackupMode = jest.fn();
         scraper.stopBackupMode = jest.fn();
         scraper.start = jest.fn();
@@ -3315,6 +3415,7 @@ describe('Grok backup canary flow', () => {
             }
         };
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         scraper.getCurrentSurface = jest.fn(() => 'saved_gallery');
         scraper.getSavedGalleryScope = jest.fn(() => 'all');
@@ -3371,6 +3472,7 @@ describe('Grok backup canary flow', () => {
             }
         };
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
         scraper.backupOptions = { mode: 'full', limit: null, options: {} };
         scraper.backupStats = { totalSeen: 0, uploaded: 0, alreadyPresent: 0, queued: 0, errors: 0 };
@@ -3415,6 +3517,7 @@ describe('Grok backup canary flow', () => {
             }
         };
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.startBackupMode = jest.fn();
 
         scraper.handlePageCommand({ action: 'INIT_R2_CANARY' });
@@ -3440,6 +3543,7 @@ describe('Grok backup canary flow', () => {
             }
         };
         const scraper = Object.create(GrokScraper.prototype);
+        initializeGrokScraperState(scraper);
         scraper.state = { isRunning: true, currentIndex: 0, mode: 'DETAIL' };
         scraper.runToken = 'run-1';
         scraper.runEpoch = 1;

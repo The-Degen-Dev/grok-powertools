@@ -56,6 +56,17 @@ function createOverlayHarness() {
     return { overlay, retryManager };
 }
 
+function makeVisible(element) {
+    element.getBoundingClientRect = () => ({
+        left: 0,
+        top: 0,
+        right: 480,
+        bottom: 48,
+        width: 480,
+        height: 48
+    });
+}
+
 describe('saved prompt helpers', () => {
     test('normalizes legacy saved prompts to v2 schema', () => {
         const normalized = normalizeSavedPrompts([
@@ -111,6 +122,7 @@ describe('prompted batch input source', () => {
         const input = document.createElement('textarea');
         input.setAttribute('aria-required', 'true');
         input.value = 'typed prompt from input bar';
+        makeVisible(input);
         document.body.appendChild(input);
 
         const { overlay, retryManager } = createOverlayHarness();
@@ -131,6 +143,7 @@ describe('prompted batch input source', () => {
         const input = document.createElement('textarea');
         input.setAttribute('aria-required', 'true');
         input.value = '';
+        makeVisible(input);
         document.body.appendChild(input);
 
         const { overlay, retryManager } = createOverlayHarness();

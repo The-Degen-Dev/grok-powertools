@@ -75,3 +75,6 @@ global.chrome = {
         }
     }
 };
+
+window.scrollTo = () => {};
+window.scrollBy = () => {};

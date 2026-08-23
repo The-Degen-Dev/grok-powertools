@@ -244,7 +244,10 @@ describe('background recreate workflow wiring', () => {
         global.chrome = mockChromeForBackground();
 
         const background = loadBackground();
-        await expect(background.dispatchNativeClick(123, { x: 10, y: 20 })).resolves.toEqual({ ok: true });
+        await expect(background.dispatchNativeClick(123, { x: 10, y: 20 })).resolves.toEqual({
+            ok: true,
+            clickState: 'click_sent'
+        });
 
         expect(global.chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 123 }, '1.3', expect.any(Function));
         expect(global.chrome.debugger.sendCommand.mock.calls.map((call) => call[1])).toEqual([
@@ -278,7 +281,11 @@ describe('background recreate workflow wiring', () => {
         expect(keepAlive).toBe(true);
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: 'workflow_aborted' });
+        expect(sendResponse).toHaveBeenCalledWith({
+            ok: false,
+            error: 'workflow_aborted',
+            clickState: 'unknown'
+        });
         expect(global.chrome.debugger.attach).not.toHaveBeenCalled();
     });
 
@@ -297,7 +304,7 @@ describe('background recreate workflow wiring', () => {
         expect(keepAlive).toBe(true);
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+        expect(sendResponse).toHaveBeenCalledWith({ ok: true, clickState: 'click_sent' });
         expect(global.chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 654 }, '1.3', expect.any(Function));
     });
 
@@ -441,7 +448,11 @@ describe('background recreate workflow wiring', () => {
             activeWorkflow: {
                 kind: 'recreate',
                 status: 'running',
-                runId: 'recreate-active'
+                phase: null,
+                counts: null,
+                isOwner: false,
+                recoveryActions: [],
+                authority: null
             }
         });
     });

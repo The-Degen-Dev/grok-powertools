@@ -350,6 +350,11 @@ describe('bridge prompted video editor targeting', () => {
                 inventory: {
                     schemaVersion: 1,
                     conversationId,
+                    failureCount: 0,
+                    inflightResponseCount: 0,
+                    failedResponses: [],
+                    inflightResponses: [],
+                    videoGenerationResponses: [],
                     assets: [
                         expect.objectContaining({
                             assetId: imageAssetId,
@@ -427,6 +432,11 @@ describe('bridge prompted video editor targeting', () => {
                 inventory: {
                     schemaVersion: 1,
                     conversationId,
+                    failureCount: 0,
+                    inflightResponseCount: 0,
+                    failedResponses: [],
+                    inflightResponses: [],
+                    videoGenerationResponses: [],
                     assets: [expect.objectContaining({
                         assetId,
                         mediaKind: 'image',
@@ -487,6 +497,11 @@ describe('bridge prompted video editor targeting', () => {
                 inventory: {
                     schemaVersion: 1,
                     conversationId,
+                    failureCount: 0,
+                    inflightResponseCount: 0,
+                    failedResponses: [],
+                    inflightResponses: [],
+                    videoGenerationResponses: [],
                     assets: [expect.objectContaining({
                         assetId,
                         responseId: 'first-response',
@@ -566,8 +581,8 @@ describe('bridge prompted video editor targeting', () => {
                         conversationId,
                         assets: [{
                             assetId,
-                            responseId: 'response-1',
-                            parentResponseId: 'parent-1',
+                            responseId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                            parentResponseId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
                             mediaKind: 'image',
                             sourceUrl: `https://assets.grok.com/users/example/generated/${assetId}/image.jpg`,
                             promptText: 'candid friends at the beach',
@@ -742,7 +757,11 @@ describe('bridge prompted video editor targeting', () => {
                 detail: { imageUrl: 'https://assets.grok.com/uploaded-image.png' }
             }));
 
-            expect(window._lastUploadedImageUrl).toBe('https://assets.grok.com/uploaded-image.png');
+            expect(window._lastUploadedImageReceipt).toMatchObject({
+                imageUrl: 'https://assets.grok.com/uploaded-image.png',
+                capturedAt: expect.any(Number),
+                dialog: null
+            });
             expect(logSpy).toHaveBeenCalledTimes(1);
         } finally {
             document.documentElement.removeAttribute(bridgeMarker);
@@ -755,7 +774,7 @@ describe('bridge prompted video editor targeting', () => {
             const listener = globalThis[listenerKey];
             if (listener) document.removeEventListener('__gpt_upload_complete', listener);
             delete globalThis[listenerKey];
-            delete window._lastUploadedImageUrl;
+            delete window._lastUploadedImageReceipt;
             logSpy.mockRestore();
         }
     });
@@ -792,7 +811,11 @@ describe('bridge prompted video editor targeting', () => {
                 detail: { imageUrl: 'https://assets.grok.com/reinjected-image.png' }
             }));
 
-            expect(window._lastUploadedImageUrl).toBe('https://assets.grok.com/reinjected-image.png');
+            expect(window._lastUploadedImageReceipt).toMatchObject({
+                imageUrl: 'https://assets.grok.com/reinjected-image.png',
+                capturedAt: expect.any(Number),
+                dialog: null
+            });
             expect(logSpy).toHaveBeenCalledTimes(1);
         } finally {
             document.documentElement.removeAttribute(bridgeMarker);
@@ -802,7 +825,7 @@ describe('bridge prompted video editor targeting', () => {
             const listener = globalThis[listenerKey];
             if (listener) document.removeEventListener('__gpt_upload_complete', listener);
             delete globalThis[listenerKey];
-            delete window._lastUploadedImageUrl;
+            delete window._lastUploadedImageReceipt;
             logSpy.mockRestore();
         }
     });

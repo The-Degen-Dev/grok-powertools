@@ -302,14 +302,18 @@ describe('generation run state contract', () => {
     test('requires outcome-specific receipts with exact source identity', () => {
         const claimed = claimNext(createRun());
 
-        expect(() => reportClaim(claimed.state, claimed.claim, 'accepted', {
+        const accepted = reportClaim(claimed.state, claimed.claim, 'accepted', {
             receipt: {
                 sourceAssetId: 'asset-a',
                 sourcePostId: 'post-a',
                 observedState: 'submit_dispatched',
                 observedAt: BASE_TIME + 1
             }
-        })).toThrow('INVALID_GENERATION_EVENT');
+        });
+        expect(getItem(accepted, claimed.claim.itemId)).toEqual(expect.objectContaining({
+            status: 'accepted',
+            lastOutcome: 'accepted'
+        }));
         expect(() => reportClaim(claimed.state, claimed.claim, 'accepted', {
             receipt: {
                 sourceAssetId: 'asset-a',
@@ -430,7 +434,10 @@ describe('generation run state contract', () => {
             baselineRejectedCount: 0,
             resultBaselineVersion: 1,
             baselineResultAssetIds: ['result-before-1'],
-            baselineFailureCount: 0
+            baselineFailureCount: 0,
+            sourceResponseId: '10000000-0000-4000-8000-000000000001',
+            baselineFailureResponseIds: [],
+            baselineInflightResponseIds: []
         };
 
         const checkpointed = reportClaim(claimed.state, claimed.claim, 'composer_ready', { receipt });
