@@ -64,6 +64,7 @@ function createOverlay(providerUrl, overrides = {}) {
 describe('provider-aware overlay', () => {
     beforeEach(() => {
         document.body.innerHTML = '';
+        jest.restoreAllMocks();
     });
 
     test('shows ChatGPT Images provider state without adding a second prompt box', () => {
@@ -89,6 +90,19 @@ describe('provider-aware overlay', () => {
         expect(overlay.el.querySelector('#gptChatGptImageSection')).toBeNull();
         expect(overlay.el.querySelector('#gptRecreateSection').style.display).not.toBe('none');
         expect(overlay.el.querySelector('#gptAutoRetrySection').style.display).not.toBe('none');
+    });
+
+    test('starts Quick Batch with the currently visible gallery limit', async () => {
+        const { overlay, retryManager } = createOverlay('https://grok.com/imagine');
+        const galleryLimit = overlay.el.querySelector('#gptGalleryLimit');
+        galleryLimit.value = '1';
+
+        overlay.el.querySelector('#gptQuickBatchBtn').click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(retryManager.startBatch).toHaveBeenCalledWith('quick', null, {
+            galleryLimit: 1
+        });
     });
 
     test('tracks native ChatGPT image send and writes provider run ledger entry', async () => {
@@ -123,10 +137,12 @@ describe('provider-aware overlay', () => {
             }
         }));
         const createChatGptResultSnapshot = jest.fn(() => ({ signatures: [] }));
-        const appendProviderRunLedgerEntry = jest.fn(() => Promise.resolve({ runId: 'provider_run_1' }));
+        const sendMessage = jest.spyOn(chrome.runtime, 'sendMessage').mockResolvedValue({
+            status: 'ok',
+            entry: { runId: 'provider_run_1' }
+        });
         const { overlay, historyManager } = createOverlay('https://chatgpt.com/images/', {
-            chatGptActions: { ...ChatGPTImagesActions, createChatGptResultSnapshot, waitForChatGptResultDelta },
-            providerRunLedger: { ...ProviderRunLedger, appendProviderRunLedgerEntry }
+            chatGptActions: { ...ChatGPTImagesActions, createChatGptResultSnapshot, waitForChatGptResultDelta }
         });
 
         send.click();
@@ -138,12 +154,39 @@ describe('provider-aware overlay', () => {
             signatures: []
         }), expect.objectContaining({ prompt: 'a brass observatory' }));
         expect(historyManager.add).toHaveBeenCalledWith('a brass observatory', 'image');
-        expect(appendProviderRunLedgerEntry).toHaveBeenCalledWith(expect.objectContaining({
-            providerId: 'chatgpt-images',
-            workflow: 'text-to-image',
-            prompt: 'a brass observatory',
-            status: 'generated'
+        expect(sendMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            action: 'PROVIDER_RUN_LEDGER_APPEND',
+            entry: expect.objectContaining({
+                providerId: 'chatgpt-images',
+                workflow: 'text-to-image',
+                prompt: 'a brass observatory',
+                status: 'submitted'
+            })
+        }));
+        expect(sendMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+            action: 'PROVIDER_RUN_LEDGER_APPEND',
+            entry: expect.objectContaining({
+                providerId: 'chatgpt-images',
+                workflow: 'text-to-image',
+                prompt: 'a brass observatory',
+                status: 'generated'
+            })
         }));
         expect(overlay.el.querySelector('#gptStatusBadge').textContent).toBe('Generated image ready');
+    });
+
+    test('preserves the original provider ledger rejection', async () => {
+        const ledgerError = new Error('ledger write failed');
+        const sendMessage = jest.spyOn(chrome.runtime, 'sendMessage').mockRejectedValue(ledgerError);
+        const { overlay } = createOverlay('https://chatgpt.com/images/');
+
+        await expect(overlay.appendProviderRun({
+            providerId: 'chatgpt-images',
+            workflow: 'text-to-image',
+            status: 'submitted'
+        })).rejects.toBe(ledgerError);
+        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'PROVIDER_RUN_LEDGER_APPEND'
+        }));
     });
 });

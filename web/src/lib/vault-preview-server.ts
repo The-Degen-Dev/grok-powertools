@@ -1,4 +1,5 @@
 import { getWorkerHost, workerJson } from "@/lib/vault-server";
+import { dedupeAssets } from "@/lib/vault-dedupe";
 import {
   parseVaultCounts,
   parseVaultGap,
@@ -33,33 +34,6 @@ function dedupePrompts(prompts: VaultPrompt[]): VaultPrompt[] {
     seen.add(key);
     return true;
   });
-}
-
-function dedupeAssets(assets: VaultAsset[]): VaultAsset[] {
-  const byAssetId = new Map<string, VaultAsset>();
-  for (const asset of assets) {
-    const current = byAssetId.get(asset.assetId);
-    if (!current) {
-      byAssetId.set(asset.assetId, asset);
-      continue;
-    }
-
-    const legacyObjectKeys = new Set(current.legacyObjectKeys);
-    if (asset.canonicalObjectKey && asset.canonicalObjectKey !== current.canonicalObjectKey) {
-      legacyObjectKeys.add(asset.canonicalObjectKey);
-    }
-    for (const objectKey of asset.legacyObjectKeys) {
-      if (objectKey !== current.canonicalObjectKey) legacyObjectKeys.add(objectKey);
-    }
-
-    byAssetId.set(asset.assetId, {
-      ...current,
-      legacyObjectKeys: [...legacyObjectKeys],
-      lastSeenAt: asset.lastSeenAt || current.lastSeenAt,
-      updatedAt: asset.updatedAt || current.updatedAt,
-    });
-  }
-  return [...byAssetId.values()];
 }
 
 async function fetchAllInventoryPages(): Promise<{ assets: VaultAsset[]; warnings: string[]; truncated: boolean }> {

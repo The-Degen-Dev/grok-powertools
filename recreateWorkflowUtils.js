@@ -11,6 +11,7 @@
 })(typeof self !== 'undefined' ? self : typeof globalThis !== 'undefined' ? globalThis : this, function () {
     const ALLOWED_RECREATE_IMAGE_MIME_TYPES = [
         'image/jpeg',
+        'image/jpg',
         'image/png',
         'image/gif',
         'image/webp',
@@ -38,6 +39,9 @@
     const FINAL_VIDEO_PROMPT_MARKER = 'FINAL_IMAGINE_VIDEO_PROMPT:';
     const MAX_REFERENCE_BYTES = 8 * 1024 * 1024;
     const MAX_VIDEO_REFERENCE_BYTES = 32 * 1024 * 1024;
+    const RECREATE_MIME_TYPE_ALIASES = Object.freeze({
+        'image/jpg': 'image/jpeg'
+    });
     const SENSITIVE_EXACT_DIAGNOSTIC_KEYS = new Set([
         'dataurl',
         'reference'
@@ -132,11 +136,16 @@
     }
 
     function getReferenceKindFromMimeType(mimeType) {
-        const normalizedMimeType = String(mimeType || '').toLowerCase();
+        const normalizedMimeType = normalizeRecreateMimeType(mimeType);
         if (ALLOWED_RECREATE_VIDEO_MIME_TYPES.includes(normalizedMimeType)) return 'video';
         if (normalizedMimeType === 'image/gif') return 'video';
         if (ALLOWED_RECREATE_IMAGE_MIME_TYPES.includes(normalizedMimeType)) return 'image';
         return '';
+    }
+
+    function normalizeRecreateMimeType(mimeType) {
+        const normalized = String(mimeType || '').trim().toLowerCase();
+        return RECREATE_MIME_TYPE_ALIASES[normalized] || normalized;
     }
 
     function getDecodedBase64ByteLengthForLimit(base64, maxBytes) {
@@ -158,7 +167,7 @@
         const match = String(dataUrl || '').match(/^data:([^;,]+);base64,([a-zA-Z0-9+/=\s]+)$/);
         if (!match) throw fail('reference_invalid');
 
-        const mimeType = match[1].toLowerCase();
+        const mimeType = normalizeRecreateMimeType(match[1]);
         if (!ALLOWED_RECREATE_IMAGE_MIME_TYPES.includes(mimeType)) throw fail('reference_invalid');
 
         const base64 = match[2].replace(/\s+/g, '');
@@ -172,7 +181,7 @@
         const match = String(dataUrl || '').match(/^data:([^;,]+);base64,([a-zA-Z0-9+/=\s]+)$/);
         if (!match) throw fail('reference_invalid');
 
-        const mimeType = match[1].toLowerCase();
+        const mimeType = normalizeRecreateMimeType(match[1]);
         const kind = getReferenceKindFromMimeType(mimeType);
         if (!kind) throw fail('reference_invalid');
 
@@ -186,7 +195,7 @@
     function normalizeRecreateReference(input) {
         if (!input || typeof input !== 'object') throw fail('reference_missing');
 
-        const rawMimeType = String(input.mimeType || '').toLowerCase();
+        const rawMimeType = normalizeRecreateMimeType(input.mimeType);
         const url = String(input.url || '').trim();
         const requestedKind = input.kind === 'video' || input.kind === 'image' ? input.kind : '';
         const parsed = input.dataUrl ? parseRecreateMediaDataUrl(input.dataUrl) : null;
@@ -205,7 +214,7 @@
             throw fail('reference_invalid');
         }
 
-        const mimeType = String(input.mimeType || (parsed ? parsed.mimeType : rawMimeType)).toLowerCase();
+        const mimeType = normalizeRecreateMimeType(input.mimeType || (parsed ? parsed.mimeType : rawMimeType));
         if (parsed && mimeType !== parsed.mimeType) {
             throw fail('reference_invalid');
         }
@@ -520,6 +529,7 @@
         isTrustedGrokPostUrl,
         isTrustedGrokMediaUrl,
         isTrustedGrokVideoUrl,
+        normalizeRecreateMimeType,
         normalizeRecreateReference,
         parseRecreateDataUrl,
         parseRecreateMediaDataUrl

@@ -2127,6 +2127,1028 @@ npx playwright test -c .artifacts/playwright.phase3.config.js .artifacts/phase3-
                     </tr>
                 </tbody>
             </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Durable Run Authority</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Quick Batch, Prompted Batch, and Video Goal now share a background-owned
+                            run contract. The authoritative lease lives in
+                            <code>chrome.storage.session</code>; a redacted local journal supports
+                            operator status without storing prompts or transient claims. Sync, R2,
+                            Recreate, and generation starts pass through one serialized authority gate.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            The plan listed <code>manifest.json</code> among likely files, but the run
+                            state and controller are service-worker-only helpers. They are packaged but
+                            intentionally not injected into web pages, so no manifest runtime entry was
+                            added.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            An unacknowledged claim expires into Retry Failed and a provider-capacity
+                            wait times out into Retry Failed. Neither case automatically replays a
+                            potentially submitted source. A hard navigation may transfer authority only
+                            with proof from the current Grok URL and the exact source identity.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None for the authority layer. Live provider behavior still requires the
+                            later workflow migrations and approval-gated Chrome runs.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            Focused state, controller, background wiring, and Recreate cancellation
+                            checks pass. This is structural proof only, not a claim that the user-facing
+                            workflows are usable yet.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Quick Batch</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Quick Batch snapshots stable asset/post descriptors, claims one source at
+                            a time from the background authority, reacquires the native Make Video
+                            control after React remounts, and advances only after source-scoped provider
+                            acceptance. It does not wait for video generation to finish before dispatching
+                            the next eligible source.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Quick Batch no longer uses the shared legacy <code>batchQueue</code> of live DOM
+                            nodes. That queue remains temporarily only for legacy helper compatibility;
+                            user-facing Prompted Batch now uses the same descriptor contract.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            A click with no provider acceptance evidence is retried only within the
+                            configured attempt budget, then remains eligible for explicit Retry Failed.
+                            Ambiguous source identity fails closed instead of risking generation against
+                            the wrong card.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None for deterministic Quick Batch behavior. A live credit-spending lane
+                            remains approval-gated until Prompted Batch and Video Goal share this runner.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Prompted Batch</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Prompted Batch now uses the same background-owned descriptor and claim
+                            contract as Quick Batch. It opens the exact source, selects Make Video then
+                            Add Prompt, writes only into the verified video composer, persists a
+                            source-scoped checkpoint before Submit, and advances only after fresh
+                            provider acceptance. Gallery runs return to their captured URL and scroll
+                            position; direct-detail runs can submit the requested count from one source
+                            without waiting for generated videos to finish.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            The legacy Saved, results, and detail Prompted loops remain in the file only
+                            for temporary compatibility with direct helper coverage, but no user-facing
+                            Prompted entry point routes to them. They will be removed after Video Goal
+                            and workflow-isolation migration confirm no shared callers remain.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            A reload after Submit evaluates the persisted pre-submit checkpoint and
+                            never automatically clicks Submit again. If acceptance cannot be proved,
+                            that item becomes Retry Failed rather than risking a duplicate generation.
+                            The checkpoint stores only source identity, action, source kind, stable node
+                            identity, and accepted/rejected baseline counts. It stores no prompt, cookie,
+                            signed URL, or composer content.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None for deterministic Prompted behavior. Agent direct starts use the
+                            conversation UUID as contextual post identity only when no gallery post hint
+                            exists because current Agent DOM does not expose a post UUID. Live generation
+                            remains separately approval-gated.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Video Goal and Current Grok Cards</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Video Goal keeps one exact selected source and increments only for one new
+                            playable video identity. Current Agent Mode binds its Make Video control by
+                            the selected node's exact <code>data-id</code>. Current detail pages open the
+                            Make Video menu and choose the exact <code>Quick Animate</code> item, never
+                            Add Prompt or Precise Edit. Current Saved cards bind the overlay post link,
+                            sibling generated media branch, and action controls as one card identity.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Live read-only inspection showed two Grok changes that were not represented
+                            in the approved fixtures: Saved media can be a sibling of the post link with
+                            an empty <code>alt</code>, and detail Video Goal now reaches Quick Animate
+                            through a menu. Task 6 therefore includes the shared card/media adapter and
+                            Sync gallery-image recognition instead of changing Video Goal alone.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Sibling media is accepted only when one direct card branch owns all generated
+                            media for one asset. Multiple branches or identities fail closed. A submitted
+                            Video Goal survives remount or extension reload from its checkpoint without a
+                            second click, but an ambiguous or unplayable result does not increment progress.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            The inspected Chrome session had no populated <code>/imagine</code> results
+                            conversation, so that live surface remains for the approval-gated browser lane.
+                            Current Agent Prompted Batch may require opening its source-bound toolbar panel
+                            before the Add Prompt menu appears; that control has not been activated live
+                            because its provider-side effect is not yet proven harmless.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Validation</td>
+                        <td>
+                            Current Saved, detail, and Agent structures were inspected through one narrow
+                            Chrome tab without tab enumeration. Deterministic browser scenarios cover card
+                            remounts, current overlay cards, Prompted return, three Video Goal outputs,
+                            retry, ambiguity, Stop, and reload resume. No live generation was started.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Recreate Authority</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Recreate binds every helper message to the exact owner document and keeps
+                            Stop in <code>cancelling</code> until that document acknowledges cancellation
+                            or the bounded authority clear fails closed. Result proof compares a persisted
+                            pre-submit signature baseline with one new playable result. Video proof requires
+                            fetched non-empty bytes and a stable digest, not a poster or URL alone.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Current may fall back outside Agent/detail only when exactly one visible
+                            supported source exists. Multiple candidates or unsupported surfaces fail
+                            closed instead of selecting the first media element.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Retry remains unavailable while cancellation authority is unresolved. This
+                            delays recovery by the bounded acknowledgement window, but prevents the prior
+                            document and a replacement run from submitting concurrently.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            Live Current, local-file, retry, result, and pending-phase Stop behavior remain
+                            approval-gated. Deterministic proof is not live provider proof.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Multi-Asset Sync</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            The authenticated conversation response is the Saved-entry inventory. Sync
+                            verifies that the selected card asset belongs to it, hashes the full sanitized
+                            inventory with SHA-256, transfers every image/video in stable order, and advances
+                            its version-2 cursor only from durable per-asset receipts. Agent/detail navigation
+                            is used only to acquire a missing conversation ID.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Inventory parser checks live beside the existing bridge contract checks instead
+                            of a new dedicated file because the page-world parser is intentionally private.
+                            The former Saved-origin one-preview fallback was removed because it could silently
+                            omit sibling assets.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            No second permanent conversation ledger was added. After a reload, Sync may
+                            re-fetch a completed conversation and derive completion from existing processed
+                            asset IDs. That extra read prevents a historical preview ID from hiding newly
+                            discovered siblings.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            The current live <code>/responses</code> shape and Saved-card linkage still need
+                            narrow read-only inspection. No live Sync, download, upload, R2 write, or
+                            processed-ID mutation has run during this implementation phase.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-20 Extension Reliability Recovery: Live Grok 2.0 Contract Correction</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            The durable generation journal remains the authority layer, but its browser
+                            receipts now follow the current live UI. Saved and results origins persist the
+                            real nested gallery viewport receipt. Current post pages accept one unambiguous
+                            generated asset inside the main article. Add Prompt may convert the same
+                            <code>.query-bar</code> in place, but that path is accepted only after the exact
+                            Video generation mode and one scoped Make video submit remain stable.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Quick Batch again treats an atomically journaled native card-action dispatch as
+                            its completion boundary instead of waiting for a provider progress marker that
+                            current Grok does not render. Prompted Batch still requires the composer itself
+                            to clear, settle, disable, or navigate after submit before the item is accepted.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            A native generation click and its submitted checkpoint are serialized in the
+                            background controller so navigation cannot lose the dispatch record and cause a
+                            duplicate click on resume. If a dispatched Prompted submission cannot later be
+                            proven, it fails closed as outcome unknown rather than being retried automatically.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            Live credit-spending Quick and Prompted runs, and live Sync or R2 writes, remain
+                            behind the explicit approval gate. The current UI was inspected without
+                            submitting media generation or mutating cloud state.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-21 Extension Reliability Recovery: Direct-Post Generation Receipts</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            A current Grok 2.0 Saved/detail post is allowed to have no conversation ID
+                            before submission. The durable dispatch checkpoint uses the exact source post
+                            and asset; after native submission, a different post containing that same source
+                            asset is the child receipt. Video Goal additionally persists the verified child
+                            post ID so it can follow the result after Grok replaces the source image.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Conversation inventory remains stronger evidence when available, but it is no
+                            longer a pre-click requirement. Current direct posts create their conversation
+                            only after the native request, so requiring it earlier prevented every launch.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            A uniquely source-bound child route counts as launch acceptance before the video
+                            finishes. This restores continuous batch dispatch while retaining fail-closed
+                            behavior for missing or ambiguous source binding. Video Goal still waits for one
+                            playable result before incrementing its goal.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            The live account currently reports <code>Usage limit reached</code>. The run now
+                            pauses immediately with Retry Failed preserved instead of consuming automatic
+                            retries, but a completed live video remains blocked until Grok credits are
+                            available. Sync/R2 validation is independent of that provider limit.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-22 Sync/R2 Recovery: Immutable Starting Checkpoint</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Work continues only on <code>codex/grok-extension-recovery</code> from
+                            <code>2fad80ed411af6f9df289ec6382a24b7ca4fb742</code>, nine commits ahead
+                            of its remote. The inherited dirty state is preserved in place. No reset,
+                            stash, overwrite, live Sync, R2 write, processed-ID mutation, or push occurred
+                            while taking this checkpoint.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            The untracked path named <code>None</code> is retained even though its name
+                            appears accidental. Deleting or renaming it is outside the approved recovery
+                            scope until its provenance is reviewed.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The existing uncommitted patch is large: 6,997 insertions and 1,589 deletions
+                            across 13 tracked files. Repairs will be layered onto this exact state and
+                            validated incrementally rather than rebasing or reconstructing it.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            Live response-ID shape remains intentionally unresolved until one sanitized,
+                            read-only provider response can be inspected. Production mutations remain behind
+                            the explicit bounded-manifest approval gate.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-22 Sync/R2 Recovery: Navigation And Lease Gate</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Verified R2 presence records an R2 destination receipt and updates the
+                            backward-compatible processed-ID union. A reset remains locked while Stop is
+                            still in <code>stopping</code>; it is permitted only after Stop returns. Stop
+                            fences transfers with a <code>stopping</code> lease before owner abort and
+                            writes the final idle tombstone after drain.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Several old tests treated verified R2 presence as read-only, supplied local
+                            destinations to R2 runs, or expected the final idle tombstone before transfer
+                            drain. Those fixtures were updated to the approved destination-scoped durability
+                            and one-owner lease contracts instead of weakening production checks.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            A bounded revocation-persistence failure still rejects Stop, but now writes an
+                            idle session tombstone after the old epoch is fenced. This permits a replacement
+                            run without allowing the timed-out journal write to regain authority. Coverage
+                            proves the late write cannot regress a newer retained retry checkpoint after
+                            compaction and service-worker restart.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None for the deterministic navigation/lease slice. The file now passes 326 of
+                            326 tests. Live Chrome and production R2 proof remain unstarted and approval-gated.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-22 Sync/R2 Recovery: Deterministic Contract Repair</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            The production scraper constructor and direct test instances now share one
+                            side-effect-free state initializer. Backup tests use stateful local and session
+                            storage adapters, and popup tests consume the background-owned workflow status
+                            and authority envelope used by the live popup.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            An obsolete test called the removed content-owned processed-ID writer. It now
+                            verifies the destination-receipt message and stale-run fence used in production.
+                            No removed writer was restored.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Fixing the fixtures exposed a real reset ordering race. Reset now rejects
+                            immediately while Sync is starting, active, or stopping, then reserves its place
+                            in the processed-state serializer and rechecks authority before and after the
+                            write. This preserves user-reset ordering without allowing a late scrape write
+                            to repopulate state.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            None for the focused deterministic gate. The five Sync-adjacent suites now pass
+                            478 of 478 tests. Whole-suite and mocked-browser validation remain in progress;
+                            no live extension reload or production mutation has occurred.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-22 Sync/R2 Recovery: Browser Harness And Canary Transition</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Mocked browser transfers now write destination receipts only while both the
+                            stored lease and the content scraper retain the same active run token and epoch.
+                            The Saved fixture advances a deterministic clock, performs real bounded scroll
+                            progress, supports repeated returns, and can hold conversation inventory across
+                            a Stop boundary.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Old assertions expected Agent preview URLs, content-owned processed URL writes,
+                            and DOM media ambiguity checks. They now use canonical inventory URLs, UUID
+                            destination receipts, background durability, and duplicate authoritative
+                            inventory as the fail-closed case. The current production scan guard is 5,000
+                            attempts, so its stale 1,000-attempt test label was corrected.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Authenticated image bridge failure is not terminal when the background can still
+                            transfer the canonical URL. Videos are intentionally URL-staged instead of
+                            inlined. A real canary control-flow defect was fixed: the targeted Saved
+                            coordinator now preserves <code>surface_changed</code> so Agent inventory runs
+                            instead of leaving an active backup stranded on Agent Mode.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            The focused mocked Sync/R2 browser gate passes 13 of 13, including cold
+                            reinjection, Stop during inventory and transfer, Cloud-only fallback, R2
+                            presence and error, and targeted canary return. The full mocked browser suite
+                            and whole unit suite still need reconciliation. Live Chrome and production R2
+                            remain untouched and approval-gated.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-22 Sync/R2 Recovery: Whole-Suite Reconciliation</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Deterministic readiness remains all-or-nothing even though the Sync slice is
+                            green. Stronger gallery-resume proof, explicit provider-capacity timeout,
+                            fail-closed recovery tombstones, and two-phase cancellation remain production
+                            contracts; their stale unit expectations were updated instead of weakening the
+                            controller.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            None from the approved scope. Generation flows are not being submitted live,
+                            but their deterministic suites must still pass before any Sync canary.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Four fresh subagents were given disjoint test-only scopes with inherited
+                            context disabled. This parallelizes fixture repair without duplicating the
+                            parent task history that caused the earlier storage incident.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            The generation controller is now 24 of 24. The last full snapshots were 939
+                            of 1,018 unit tests and 40 of 56 mocked browser tests; those counts predate the
+                            controller and provider-registry fixture corrections. Live Chrome and R2 have
+                            not been touched.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-22 Production Sync Recovery</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Live Grok Saved may contain distinct post cards that reuse one asset UUID.
+                            Gallery identity therefore remains the unique asset/post pair with a unique
+                            post UUID; asset UUID alone is the R2 dedupe identity and is not required to be
+                            gallery-unique. Saved scrolling now selects only an element that both declares
+                            scrolling and has a scrollable range, otherwise it uses the window.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            The first approved canary failed before transfer because the adapter rejected
+                            legitimate duplicate asset UUIDs. After correcting that assumption, one
+                            Cloud-only image uploaded successfully. Exhaustive R2 inventory moved from
+                            16,496 to 16,497 objects and from 12,165 to 12,166 unique asset UUIDs, with no
+                            other object-count delta.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Duplicate post UUIDs and duplicate asset/post pairs still fail closed. Popup
+                            Stop now accepts the owner tab ID from the authority object only when the
+                            message sender has no tab, which supports the extension popup without weakening
+                            content-script ownership checks.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            The first bounded Sync processed one multi-asset conversation, then exposed a
+                            non-scrolling overflow-visible ancestor and a popup Stop authority mismatch.
+                            A later live Stop reached Idle, but the run also exposed two additional release
+                            blockers: direct uploads stored canonical <code>media_&lt;uuid&gt;</code> R2
+                            receipts while conversation verification checked the bare provider UUID, and
+                            a debounced processed-ID metadata snapshot uploaded after Stop returned. The
+                            receipt contract now recognizes both identities and persists both for new
+                            direct uploads. Stop and completion now drain processed-ID mutations and the
+                            metadata debounce/queue before returning. These changes still require a fresh
+                            live reload and bounded proof before the 25-entry run may continue.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-22 Authenticated Media Transfer Recovery</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            Cloud-only Sync now sends large images and videos directly through the durable
+                            R2 queue instead of creating a Chrome download. The queue fetches authenticated
+                            Grok media with extension credentials and records the R2 receipt only after
+                            dedupe, upload, and verification succeed. Existing authenticated download
+                            operations use the same queue and retain their local artifact until the R2
+                            receipt is durable.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            The prior offscreen <code>file://</code> reader is no longer used by the live
+                            transfer path. Live Chrome proved that Chrome could download the media but the
+                            offscreen document could not read the downloaded path, producing
+                            <code>stage=file-read</code> and a durability timeout.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            Local-only and Dual-write still use Chrome downloads so their local durability
+                            contract is unchanged. The first recovery attempt uses the smaller credentialed
+                            extension-fetch path already present in the queue. If the provider rejects that
+                            fetch live, the fallback will be a bounded bridge byte transfer rather than
+                            restoring the unproven offscreen file reader.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            Live proof passed after reloading the exact unpacked extension. One formerly
+                            failing video reached <code>Uploaded to R2</code>, Stop drained to Idle, no
+                            owner-tab extension failure surfaced, and timestamp-bounded R2 inventory showed
+                            exactly one new video object from that run. The 25-entry run now requires an
+                            exact conversation bound rather than a timer.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <h2>2026-08-22 Bounded Sync Acceptance</h2>
+            <table>
+                <thead>
+                    <tr><th>Category</th><th>Notes</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Design decisions</td>
+                        <td>
+                            The production acceptance run uses an optional one-run entry limit. A Saved
+                            conversation consumes one slot immediately before its first transfer attempt.
+                            Attempted and durably completed conversation UUIDs are persisted separately in
+                            the authoritative run mirror, so failures cannot permit a twenty-sixth entry and
+                            reload cannot double-count a resumed conversation.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Deviations</td>
+                        <td>
+                            Normal Start Sync remains unlimited. The limit is a single-use internal start
+                            option used for the approved 25-entry production proof; it does not change the
+                            popup or ordinary overlay workflow.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Tradeoffs</td>
+                        <td>
+                            The limit is capped at 100 and counts attempted conversations rather than media
+                            assets or only successful conversations. A multi-asset conversation counts once,
+                            while every sibling asset must still become durable before that conversation is
+                            reported as completed. A failed entry consumes one of the 25 acceptance slots.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Open questions</td>
+                        <td>
+                            The first live bounded run was stopped manually after 9 attempted entries: 6
+                            were already durable and 3 failed their media transfer. The original counter
+                            tracked only durable successes and could therefore exceed the approved 25-entry
+                            mutation ceiling. R2 inventory remained at 16,527 rows and showed zero objects
+                            created during that run. All visible Saved media came from
+                            <code>assets.grok.com</code>, while the manifest did not grant that exact host to
+                            the service worker. The recovery adds that narrow permission and now requires a
+                            fresh reload plus proof of 25 total attempts, no twenty-sixth transfer, Saved
+                            viewport restoration, and zero failed entries.
+                            After the user reloaded the extension, the controlled Saved tab confirmed the
+                            exact <code>assets.grok.com</code> host permission, Cloud-only mode, an idle
+                            workflow, and a drained queue. The immediate read-only baseline at
+                            <code>2026-08-22T22:38:47.685Z</code> was 43 pages, 16,527 R2 media objects,
+                            9,916 images, 6,611 videos, and 12,196 unique asset UUIDs.
+                            The reloaded run was stopped after 10 attempts because 3 missing assets still
+                            failed while 6 already-present conversations were durable; no R2 object count
+                            changed. A read-only audit of the same live conversations found the exact Grok
+                            2.0 drift: response-level <code>mediaGenInput</code> now carries image-to-video
+                            controls, while the original image prompt remains under attachment-level
+                            <code>mediaGenInput.textToImage.prompt</code>. The bridge had discarded that
+                            attachment prompt whenever the response object existed. Prompt provenance now
+                            prefers response evidence, falls back to attachment evidence, and records
+                            <code>unavailable</code> when Grok genuinely provides no prompt, such as an
+                            unprompted video child. It never invents prompt text, and immutable asset
+                            metadata remains required.
+                            After the corrected bridge was reloaded, a second read-only inventory sample
+                            found 21 response-level prompts, 5 attachment-level prompt fallbacks, 2
+                            genuinely unavailable video-child prompts, and zero invalid prompt-evidence
+                            records across the first 10 visible conversations. The bounded production run
+                            then reached its terminal <code>entry_limit</code> state with exactly 25 of 25
+                            attempted conversations durable, zero failed entries, no pending transfer or
+                            queue work, and Saved restored. Paginated R2 inventory moved from 16,527 to
+                            16,537 media objects: 9 new images, 1 new video, and 10 new unique assets.
+                            Four read-only multi-asset reconciliations proved both persisted R2 receipts
+                            and canonical R2 presence for every sibling asset: 12 of 12, 3 of 3, 2 of 2,
+                            and 3 of 3. R2 inventory uses the canonical
+                            <code>media_&lt;provider UUID&gt;</code> identity, while the persisted receipt set
+                            intentionally recognizes both provider and canonical identities.
+                            A separate Stop exercise acquired a running 25-entry authority and issued Stop
+                            before the first conversation attempt. It reached Idle with Saved restored,
+                            no retained navigation, no pending queue work, and unchanged processed-ID
+                            counts. A five-second late-write window also left paginated R2 inventory fixed
+                            at 16,537 objects, proving the stopped run was fenced before mutation.
+                            The first page-reload exercise resumed through 8 attempted conversations, then
+                            exposed a hydration race: Saved was visibly on All after load, but the content
+                            script sampled the All/Liked controls while their selection state was still
+                            unknown and treated that transient state as permanent scope drift. Resume now
+                            waits within the existing 10-second surface bound for unknown scope to settle.
+                            A real Liked selection still fails immediately, and an unresolved scope still
+                            fails closed when the bound expires. Viewport restoration likewise tolerates
+                            only transient unknown or verified All, never Liked.
+                            After that source was loaded, the next bounded reload exercise resumed with the
+                            same lease but exposed a second reload race: the first post-resume conversation
+                            progress write could miss the one-second state-write bound. The gallery
+                            coordinator then returned without revoking its still-running authority, leaving
+                            the UI at 21 attempted and 20 durable with no transfer in flight. Replaying that
+                            exact pending inventory under the same lease completed immediately, confirming
+                            the media and R2 paths were healthy. Critical conversation-progress writes now
+                            get two idempotent three-second attempts under the same token and epoch. If they
+                            still fail, or any coordinator exits without a terminal result, Sync stops with
+                            an explicit reason instead of remaining falsely active.
+                            The next real page-reload exercise stopped cleanly rather than orphaning its
+                            lease, but failed with <code>gallery_restore_timeout</code> after 10 attempted
+                            and 9 durable conversations. The version-3 viewport receipt contained the exact
+                            Saved scroll offset and ordered post neighborhood, yet restoration waited for
+                            that virtualized neighborhood to appear before applying the stored offset. A
+                            hard reload therefore started at the wrong viewport and could never satisfy the
+                            proof condition. Restoration now repeatedly seeks the stored offset while the
+                            Saved list hydrates, then still requires the exact ordered-neighborhood receipt
+                            before inventory processing or gallery continuation can resume.
+                            After reloading that source, a bounded run was interrupted with a persisted
+                            version-3 receipt at 21 attempted and 20 durable conversations, scroll offset
+                            752, and an exact two-before/two-after Saved post neighborhood. The refreshed
+                            content script resumed the lease, completed at the exact 25-entry limit, and
+                            returned to Saved All with no stored failures, pending navigation, active page
+                            authority, or background Sync authority. Processed-ID counts remained 13,060
+                            union, 0 local, and 55 R2 receipts. This is the live nonzero-viewport proof that
+                            the seek-before-verify ordering fixes the hard-reload failure without weakening
+                            the ordered-neighborhood gate.
+                            Destination canaries then ran against the production settings without resetting
+                            state. One Local-only Saved conversation reached <code>entry_limit</code> with
+                            no failures and added 11 explicit local receipts across its 12-asset inventory;
+                            the remaining asset was already satisfied by the backward-compatible legacy
+                            local receipt rule. A two-conversation Dual-write bound used the already-durable
+                            first conversation as a no-op and transferred exactly one missing asset from the
+                            second: local receipts rose from 11 to 12, R2 receipts from 55 to 56, and the R2
+                            uploaded-byte counter increased by 485,676 bytes. Both runs drained their
+                            background authority and cloud queue. Production settings were restored to
+                            Cloud-only, <code>GrokVault</code>, prefix <code>grok-powertools/v1</code>, and
+                            the existing masked Worker credential configuration.
+                            Retry Unsynced was exercised only as a no-op because no natural retryable item
+                            existed: queue count stayed zero, processing stayed false, no error appeared,
+                            and <code>lastSyncAt</code> did not change. The approved metadata-only backfill
+                            then covered 44 saved prompts, 50 prompt-history entries, 13,072 processed IDs,
+                            and one manifest. R2 reported all four snapshots unchanged, so the queue drained
+                            without duplicate metadata writes. The controlled Saved tab recorded no
+                            extension-origin uncaught exception, warning, or error event during the
+                            destination canaries and metadata operations.
+                            After live acceptance, the first full unit gate passed 1,003 of 1,018 tests
+                            and failed 15 across four suites. The remaining deterministic work is grouped
+                            rather than treated as one undifferentiated suite failure: two Video Goal
+                            resume-checkpoint cases, two viewport-scope assertions affected by the new
+                            seek ordering plus one interrupted-inventory fixture, one sender-authority
+                            rejection, a shared dual-write retry/finalizer cluster, and one results-gallery
+                            duplicate-identity fail-open. The gate also exposed JSDOM navigation and
+                            <code>scrollBy</code> console noise that must be removed before claiming a clean
+                            unit run. Live settings remain restored and idle while these deterministic
+                            failures are repaired.
+                            The 15-failure cluster was resolved without weakening the production safety
+                            contracts. Video Goal resume fixtures now carry the current DOM-result baseline;
+                            interrupted Sync inventory fixtures preserve the same normalized prompt-evidence
+                            source used by the bridge; background lease lookup trusts only the runtime sender
+                            tab, never a request-supplied tab ID; and results galleries fail closed when two
+                            cards reuse an asset identity. Saved is intentionally different: distinct Saved
+                            posts may reuse one media asset, so its version-3 receipts and reacquisition remain
+                            post-scoped while targeted media canaries still reject more than one matching asset.
+                            Viewport restoration now observes scope before its first seek and permanently
+                            rejects Liked or unknown after All has been verified, preventing a stale receipt
+                            from moving either the Saved scroller or the window after scope drift.
+                            A product regression in authenticated Cloud-only and Dual-write recovery was also
+                            found. The dirty branch re-fetched a protected <code>assets.grok.com</code> source
+                            from the service worker after Chrome had already downloaded it, losing the page
+                            authentication context. Recovery now reads the completed file through the existing
+                            offscreen <code>READ_FILE_FOR_UPLOAD</code> channel and uploads those exact bytes
+                            through the current R2 dedupe and authority guards. Public media remains queue-owned:
+                            the linked download operation mirrors a redacted failure for diagnostics, but only
+                            the queue advances the retry count, avoiding duplicate retries. Stop no longer waits
+                            on the processed-ID mutation queue after revoking its authority, which removed a
+                            circular wait while preserving the existing rollback fence against late writes.
+                            The four previously failing suites now pass in focused runs: 326 navigation tests,
+                            110 backup tests, 30 adapter tests, and 131 retry-manager tests. The shared JSDOM
+                            scroll shims are plain no-ops rather than process-wide mocks so per-test spies do not
+                            inherit call history. Test fixtures now prevent JSDOM's unsupported default anchor
+                            navigation, keep the Chrome mock alive for the same lifetime as a real service worker,
+                            and await background initialization before teardown. Expected startup-timeout cases
+                            suppress only their exact tested error while preserving any unexpected console output.
+                            The full unit gate passes all 33 suites and 1,018 assertions. Its remaining console
+                            errors and warnings are the expected telemetry from explicit upload, metadata,
+                            interruption, and retry failure tests, not uncaught harness failures.
+                            The mocked browser gate passes all 56 workflows. Its 5,000-attempt scan-limit fixture
+                            was corrected to use a genuinely scrollable container; the production 5,000-attempt
+                            ceiling was not reduced. Lint, syntax checks for every changed JavaScript file,
+                            extension packaging, the release allowlist, and <code>git diff --check</code> also pass.
+                            The package contains only the 21 allowlisted extension files and was created in the
+                            system temporary directory, outside the worktree.
+                            A later combined gate exposed one intermittent acceptance-isolation failure even
+                            though the exact production config-revocation case passed repeatedly. The cause was
+                            test lifecycle, not the MV3 queue authority: prior CommonJS background instances could
+                            retain their two-second metadata debounce after their owning test had ended, then call
+                            the next test's global fetch mock. A CommonJS-only cleanup export now cancels pending
+                            metadata debounce work, and the durable background harness disposes every loaded module
+                            after each test. The production extension never calls this hook. The exact revocation
+                            case passed ten consecutive focused runs, all 110 backup tests pass, and the complete
+                            1,018-test unit gate passes twice consecutively after the cleanup.
+                            Final-tree validation then passed lint, all 56 mocked Playwright workflows, JavaScript
+                            syntax checks for every changed script, extension packaging and its 21-file allowlist,
+                            and <code>git diff --check</code>. The final review found no changed environment,
+                            Worker, R2/D1, OAuth, dependency, lockfile, or cloud-state files; no added binary;
+                            no tab-enumeration path; and no new TODO, FIXME, debugger, dynamic-eval, or unredacted
+                            media log. The three inherited untracked files remain byte-identical to their starting
+                            SHA-256 fingerprints and are excluded from staging.
+                            The first clean-checkout CI run then found one portability defect in the existing
+                            acceptance evidence starter: ignored local state had created
+                            <code>acceptance/runs/</code> on this Mac, but a fresh runner had no parent directory.
+                            The starter now creates that ignored parent when absent, then retains the existing
+                            non-recursive per-run directory creation and overwrite refusal. This changes no
+                            extension runtime or production acceptance data.
+                            On 2026-08-23, live inspection of a current Grok 2.0 results page found that both
+                            Quick Batch and Prompted Batch were rejected by their shared gallery adapter before
+                            either workflow started. Result cards still exposed stable post links and UUIDs, but
+                            their images had moved from <code>assets.grok.com/.../generated/&lt;uuid&gt;</code> to
+                            <code>imagine-public.x.ai/imagine-public/images/&lt;uuid&gt;</code> and used prompt text
+                            as <code>alt</code> content. The adapter and legacy card helper now recognize that exact
+                            trusted host/path identity. Results detection still requires exactly one card-owned
+                            Make Video action, so public-media recommendation cards on the empty Imagine home do
+                            not become batch-eligible. Saved behavior, Sync state, processed IDs, cloud settings,
+                            and generation run contracts were intentionally left unchanged. Fresh result cards
+                            can initially expose only a base64 image while retaining their stable UUID in one
+                            asset-scoped post link; that exact combination is now accepted without treating an
+                            arbitrary data image as generated media. Live inspection also found that the Quick
+                            Batch button ignored the visible Gallery Limit and fell back to stale stored settings.
+                            Quick now passes the visible value into the durable run, matching Prompted Batch.
+                            Three deliberately stopped diagnostic Quick runs dispatched one source each before
+                            terminal acceptance, so they are evidence of dispatch only, not completion proof.
+                            The first uninterrupted canary then proved the latest durable runner had changed the
+                            product contract: it persisted one native click, waited for provider-result evidence
+                            that Grok does not expose reliably for the direct card action, and mislabeled the
+                            dispatch as failed. Quick Batch now treats an atomically journaled, sender-tab native
+                            click as its success boundary, waits briefly for an immediate rejection or ambiguous
+                            remount, returns to the origin, and advances without waiting for video completion.
+                            This intentionally restores the earlier rapid-dispatch behavior while retaining stable
+                            identities, one background-owned lease, cancellation fencing, and no-duplicate resume.
+                            A second canary exposed a navigation race: the background persisted
+                            <code>submitted</code>, Grok remounted the page, and the content script lost its later
+                            terminal report. Quick's background-owned native-click transaction now advances the
+                            item to accepted-dispatch before returning from a confirmed
+                            <code>click_sent</code>. An uncertain or unsent native click remains submitted and is
+                            never silently treated as dispatched.
+                            Prompted Batch retains provider launch verification because it owns a composer submit.
+                            A fresh one-source Quick canary from a two-image results page reached
+                            <code>Quick Batch: Dispatched (1/1)</code> in about one second with no pending journal,
+                            proving the restored rapid-dispatch boundary in the live extension.
+                            The first bounded Prompted canary failed before opening a video composer or submitting
+                            a video, so it spent no video credit. Its live route trace repeatedly transitioned
+                            between the results origin and the selected <code>/imagine/post/&lt;uuid&gt;</code> page,
+                            then reported <code>source identity unproven</code>. Inspection of that exact page
+                            showed the current Grok 2.0 source image and Make Video menu inside a full-height
+                            detail shell with a sibling <code>aside[aria-label="Post details"]</code>; there is no
+                            legacy <code>article</code> or <code>data-media-frame</code>. The adapter now scopes
+                            this modern shell, excludes segment thumbnails inside the details aside, and binds the
+                            route UUID to the one source image outside it. The transition wait no longer treats a
+                            detail URL alone as readiness: it requires a matching source identity and the same
+                            actionable Make Video control across the existing quiescence window. A fresh
+                            uninterrupted one-source Prompted canary remains required after reloading this patch.
+                            A no-submit live settings inspection established that Grok currently defaults video
+                            generation to <code>480p</code> and <code>15s</code>. The duration was changed to
+                            <code>6s</code> for the bounded canary. Returning to Imagine preserved Video mode, and
+                            the next intended image-fixture prompt therefore created one unintended but bounded
+                            <code>480p/6s</code> text-to-video result. This was an operator validation error, not an
+                            extension dispatch, and it is recorded rather than hidden. Image mode was explicitly
+                            restored and verified before creating the next fixture set.
+                            The next Prompted attempt exposed a second modern-detail identity case. SPA-opened
+                            source images can remain a <code>data:image/...</code> URL indefinitely, with their
+                            stable UUID present only in the <code>/imagine/post/&lt;uuid&gt;</code> route. The adapter
+                            now accepts that route-bound identity only when the modern detail shell has exactly
+                            one source image outside the Post details aside. Arbitrary data images and segment
+                            thumbnails remain ineligible. The same attempt also exposed a false success label:
+                            a permanent identity failure produced terminal counts of zero accepted and one failed,
+                            but the overlay rendered <code>Complete (0/1)</code>. Quick and Prompted success labels
+                            now require zero failed items; permanent failures render as warnings and only
+                            retryable failures advertise Retry Failed. A read-only reproduction of that same
+                            SPA detail revealed the remaining ambiguity: Grok nests an
+                            <code>article[data-media-frame]</code> around the source image inside the canonical
+                            modern Post-details shell. The adapter had registered both the shell and its nested
+                            legacy article. Modern shells are now authoritative, and only their descendant legacy
+                            link/frame/article candidates are excluded; standalone legacy details remain supported.
+                            Before another live attempt, an exact JSDOM contract probe reproduced the modern shell,
+                            nested frame, route UUID, one data image, and Make Video menu. It initially caught that
+                            the unique-frame branch still discarded the data image before route binding. After that
+                            branch was corrected, the probe returned one matched legacy-detail descriptor and one
+                            matching Prompted submission receipt for the route UUID. The final live Prompted canary
+                            began from a fresh two-image candid beach results page with Gallery Limit and Video Goal
+                            both set to one. It opened exactly one source in the current SPA detail, selected Add
+                            Prompt, filled the supplied motion prompt, submitted once at 480p, reached one distinct
+                            child result route, returned to the original Imagine results route, and terminated as
+                            <code>Prompted Batch: Complete (1/1)</code>. The second source remained eligible and
+                            untouched, and the durable journal had no pending item. Grok reset the composer duration
+                            to 15s despite the earlier 6s setting, so this proves one bounded Prompted dispatch and
+                            return at 480p/15s rather than the intended 480p/6s. No repeat was submitted because it
+                            would spend another credit without increasing workflow coverage. The exact current DOM
+                            shape is now a regression fixture: one modern Post-details shell, one nested
+                            <code>article[data-media-frame]</code>, one route-bound data image, and one Make Video
+                            menu. Its source description, Add Prompt resolution, and submission receipt all pass
+                            together without requiring the temporary image URL to contain a UUID. The full mocked
+                            browser gate then caught a separate Quick completion fault after all ten cards were
+                            dispatched. Once every card had changed from Make Video to progress, the eligible-results
+                            detector correctly returned unsupported, but origin recovery incorrectly interpreted
+                            that as leaving the captured results grid and invoked browser Back. Results-origin
+                            recovery now verifies the exact captured route and neighborhood receipt before relying
+                            on action eligibility. A different grid on the same route still fails the receipt check,
+                            while an exhausted original grid returns without navigation. The final release review
+                            also found that the production background native-click handler still accepted only the
+                            old <code>submitted</code> controller response. Quick's atomic click path now returns
+                            <code>accepted</code> after a real <code>click_sent</code>, so the background incorrectly
+                            converted a successful persisted dispatch into an error response. The handler and mocked
+                            browser contract now accept both legitimate statuses, and the mock emits the production
+                            <code>click_sent</code> state so the atomic path is exercised rather than bypassed. Final
+                            deterministic validation on the resulting tree passed ESLint, all 1,026 unit tests, all
+                            56 mocked Playwright extension tests, <code>git diff --check</code>, and extension
+                            packaging. The final package contained only the runtime allowlist and was written to the
+                            system temporary directory, not the repository.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <details>
+                <summary>Starting file fingerprints (SHA-256)</summary>
+                <pre>background.js a32b9a5cbe2d99e2b514f26b61fcc780dbb9e8477726a17258a0e091a765ad0e
+bridge.js 666b4482ae39d6792023ea69a04c7b3709af9446d75004240a75e052132bb43f
+content.js 5fd628a72a63051cd65c5a8d1aab05a2da888f5e490beb756c9044a5d62af121
+generationRunController.js e42888279217a8426b9832fc18da89ef294bca36f8f42a74d458bb94fff892a0
+generationRunState.js 5e6f513808a7a3d4176f07c8189f49772ac0b781121214bc0eb709a4b681e86c
+grokImagineAdapter.js d17c071d391cee627b9fc75371b90a57a950332ddb04e36e8b7a0adcab7a6d80
+implementation-notes.html dd28388863841a9ced747c6c68d374773fad87d1f1bce0310da46575701c1dcd
+manifest.json f7abf6cad57c0ef01767e4844a0897358f19138f6b1ee93da9063e176b45a8d4
+popup.js 031d461f80548a2a9f7f32f6795a3ffaa4ab58680216e9f49baacea2e07a6194
+providerRegistry.js 25e041c070ed72f4098b395ea3c93a02b006a974d1d4d15da6d79607ece4f149
+recreateWorkflowBackground.js b80c4bd34aa231f32c8bc26bb238e7236468923ea85a5c7984dac313d47eb684
+recreateWorkflowContent.js 2812c822c6bdfa37c9affdc5f127df207096d4a0a17ad74ed3b7c6914efc1052
+recreateWorkflowUtils.js 3b01ef76dc878986c489b0d2623a7e4e361281ef447ce098aad7dafff3f23762
+None 1196b9689a838107b3240ac8e2cfee946e0afc1445f75856c599725a28249d40
+docs/superpowers/plans/2026-08-11-grok-imagine-2-compatibility-recovery.md 4d9a04c2eba5593b0d171b63a193abbcfb1308665cf4483649e7f50ef539df5a
+docs/superpowers/plans/2026-08-21-grok-extension-recovery-continuation-handoff.md dd4c8a9c60dce044b037c29c3fcd4c324ea229825eebb71096d6e75e327af7ae</pre>
+            </details>
         </main>
     </body>
 </html>

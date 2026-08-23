@@ -17,6 +17,7 @@
   "host_permissions": [
     "*://*.x.com/*",
     "*://*.grok.x.ai/*",
+    "*://assets.grok.com/*",
     "*://imagine-public.x.ai/*",
     "*://grok.com/*",
     "*://*.grok.com/*",
@@ -33,7 +34,14 @@
   "web_accessible_resources": [
     {
       "resources": ["bridge.js"],
-      "matches": ["*://grok.com/*", "*://*.grok.com/*", "*://*.x.com/*"]
+      "matches": [
+        "*://grok.com/*",
+        "*://*.grok.com/*",
+        "*://grok.x.ai/*",
+        "*://*.grok.x.ai/*",
+        "*://x.com/*",
+        "*://*.x.com/*"
+      ]
     }
   ],
   "content_scripts": [
@@ -50,6 +58,7 @@
         "providerRegistry.js",
         "providerRunLedger.js",
         "chatgptImagesContent.js",
+        "grokImagineAdapter.js",
         "recreateWorkflowUtils.js",
         "recreateWorkflowContent.js",
         "content.js"

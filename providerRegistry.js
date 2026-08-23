@@ -79,14 +79,37 @@
         return new URL('https://unsupported.invalid/');
     }
 
-    function isGrokHost(hostname) {
+    function isGrokImagineHost(hostname) {
         return (
             hostname === 'grok.com' ||
             hostname.endsWith('.grok.com') ||
-            hostname.endsWith('.x.com') ||
-            hostname.endsWith('.grok.x.ai') ||
-            hostname === 'imagine-public.x.ai'
+            hostname === 'grok.x.ai' ||
+            hostname.endsWith('.grok.x.ai')
         );
+    }
+
+    function isLegacyGrokXHost(hostname) {
+        return hostname === 'x.com' || hostname.endsWith('.x.com');
+    }
+
+    function isGrokPublicMediaHost(hostname) {
+        return hostname === 'imagine-public.x.ai';
+    }
+
+    function isGrokImagineRoute(url) {
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+
+        if (isGrokImagineHost(url.hostname)) {
+            return url.pathname === '/imagine' || url.pathname.startsWith('/imagine/');
+        }
+
+        if (isLegacyGrokXHost(url.hostname)) {
+            return url.pathname === '/i/grok' || url.pathname.startsWith('/i/grok/');
+        }
+
+        if (url.protocol === 'https:' && isGrokPublicMediaHost(url.hostname)) return true;
+
+        return false;
     }
 
     function detectProvider(value) {
@@ -97,7 +120,7 @@
             return getProvider(PROVIDER_IDS.UNKNOWN);
         }
 
-        if ((url.protocol === 'https:' || url.protocol === 'http:') && isGrokHost(url.hostname)) {
+        if (isGrokImagineRoute(url)) {
             return getProvider(PROVIDER_IDS.GROK_IMAGINE);
         }
 

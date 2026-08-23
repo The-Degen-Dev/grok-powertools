@@ -12,6 +12,7 @@ const {
     fetchViaBackgroundAsDataUrl,
     fetchViaBridgeAsDataUrl,
     fetchViaBridgeAsBlobUrl,
+    getPersistedGeneratedResultCandidateSignature,
     hasUploadPreview,
     injectEditorText,
     readBlobAsDataUrl,
@@ -42,6 +43,28 @@ function createVisibleComposer() {
     composer.getBoundingClientRect = () => ({ width: 640, height: 128, left: 80, top: 420 });
     document.body.appendChild(composer);
     return composer;
+}
+
+function createImagineComposer() {
+    const composer = createVisibleComposer();
+    composer.classList.add('query-bar');
+
+    const imageMode = document.createElement('button');
+    imageMode.textContent = 'Image';
+    imageMode.setAttribute('data-state', 'checked');
+    makeVisibleElement(imageMode);
+
+    const videoMode = document.createElement('button');
+    videoMode.textContent = 'Video';
+    videoMode.setAttribute('data-state', 'unchecked');
+    makeVisibleElement(videoMode);
+    videoMode.addEventListener('click', () => {
+        imageMode.setAttribute('data-state', 'unchecked');
+        videoMode.setAttribute('data-state', 'checked');
+    });
+
+    composer.append(imageMode, videoMode);
+    return { composer, imageMode, videoMode };
 }
 
 function appendGeneratedImage(overrides = {}) {
@@ -98,6 +121,12 @@ function appendVisibleGrokEditor(container) {
     editor.setAttribute('aria-label', 'Ask Grok anything');
     makeVisibleElement(editor);
     container.appendChild(editor);
+
+    const attach = document.createElement('button');
+    attach.setAttribute('aria-label', 'Attach');
+    makeVisibleElement(attach);
+    container.appendChild(attach);
+
     return editor;
 }
 
@@ -389,16 +418,26 @@ describe('recreate content helpers', () => {
         );
     });
 
-    test('selects the current generated image using shared scoring', async () => {
-        const img = document.createElement('img');
-        img.alt = 'Generated image';
-        img.src = 'data:image/png;base64,aGVsbG8=';
-        Object.defineProperty(img, 'naturalWidth', { value: 720 });
-        Object.defineProperty(img, 'naturalHeight', { value: 720 });
-        img.getBoundingClientRect = () => ({ left: 400, top: 300, width: 200, height: 200 });
-        document.body.appendChild(img);
-
-        const selected = await selectCurrentGeneratedImage({ documentRef: document, utils });
+    test('selects the exact current image resolved by the Grok adapter', async () => {
+        const selected = await selectCurrentGeneratedImage({
+            documentRef: document,
+            locationRef: { href: 'https://grok.com/imagine/agent/agent-a?conversation=conversation-a' },
+            utils,
+            grokAdapter: {
+                detectGrokSurface: () => 'agent_media',
+                resolveCurrentSourceMedia: () => ({
+                    status: 'matched',
+                    sourceUrl: 'data:image/png;base64,aGVsbG8=',
+                    descriptor: {
+                        surface: 'agent_media',
+                        mediaKind: 'image',
+                        sourceAssetId: '73e5e137-1334-49ea-b06b-a9d9ba891003',
+                        sourcePostId: 'f37b4494-f17a-409a-a1de-afbca701d55f',
+                        conversationId: 'd66a30c2-8995-45f3-8b51-6831355ebc28'
+                    }
+                })
+            }
+        });
         expect(selected).toEqual(
             expect.objectContaining({
                 mimeType: 'image/png',
@@ -416,15 +455,25 @@ describe('recreate content helpers', () => {
             })
         );
 
-        const img = document.createElement('img');
-        img.alt = 'A striking minimalist abstract geometric artwork presented as a square with thick black frame.';
-        img.src = 'https://imagine-public.x.ai/imagine-public/images/post-detail.jpg';
-        Object.defineProperty(img, 'naturalWidth', { value: 720 });
-        Object.defineProperty(img, 'naturalHeight', { value: 1280 });
-        img.getBoundingClientRect = () => ({ left: 480, top: 120, width: 320, height: 568 });
-        document.body.appendChild(img);
-
-        const selected = await selectCurrentGeneratedImage({ documentRef: document, utils });
+        const selected = await selectCurrentGeneratedImage({
+            documentRef: document,
+            locationRef: { href: 'https://grok.com/imagine/post/f37b4494-f17a-409a-a1de-afbca701d55f' },
+            utils,
+            grokAdapter: {
+                detectGrokSurface: () => 'legacy_detail',
+                resolveCurrentSourceMedia: () => ({
+                    status: 'matched',
+                    sourceUrl: 'https://imagine-public.x.ai/imagine-public/images/post-detail.jpg',
+                    descriptor: {
+                        surface: 'legacy_detail',
+                        mediaKind: 'image',
+                        sourceAssetId: '73e5e137-1334-49ea-b06b-a9d9ba891003',
+                        sourcePostId: 'f37b4494-f17a-409a-a1de-afbca701d55f',
+                        conversationId: ''
+                    }
+                })
+            }
+        });
 
         expect(selected).toEqual(
             expect.objectContaining({
@@ -437,6 +486,38 @@ describe('recreate content helpers', () => {
             'https://imagine-public.x.ai/imagine-public/images/post-detail.jpg',
             expect.objectContaining({ credentials: 'omit' })
         );
+    });
+
+    test('refuses a visible generated image when its Grok source is unproven', async () => {
+        appendGeneratedImage({ src: LARGE_IMAGE_DATA_URL });
+
+        await expect(selectCurrentGeneratedImage({
+            documentRef: document,
+            locationRef: { href: 'https://grok.com/imagine' },
+            utils,
+            grokAdapter: {
+                detectGrokSurface: () => 'unsupported',
+                resolveCurrentSourceMedia: () => ({ status: 'unsupported' })
+            }
+        })).rejects.toThrow('reference_source_unproven');
+    });
+
+    test('refuses multiple visible images when their Grok source is unproven', async () => {
+        appendGeneratedImage({ src: LARGE_IMAGE_DATA_URL });
+        appendGeneratedImage({
+            src: `data:image/png;base64,${Buffer.alloc(12 * 1024, 2).toString('base64')}`,
+            getBoundingClientRect: () => ({ left: 680, top: 120, width: 320, height: 320 })
+        });
+
+        await expect(selectCurrentGeneratedImage({
+            documentRef: document,
+            locationRef: { href: 'https://grok.com/imagine' },
+            utils,
+            grokAdapter: {
+                detectGrokSurface: () => 'unsupported',
+                resolveCurrentSourceMedia: () => ({ status: 'unsupported' })
+            }
+        })).rejects.toThrow('reference_source_unproven');
     });
 
     test('resolves a Grok post URL to its shared video reference', async () => {
@@ -483,9 +564,9 @@ describe('recreate content helpers', () => {
         expect(resolved.dataUrl).toMatch(/^data:video\/mp4;base64,/);
     });
 
-    test('throws reference_missing when no current generated image is available', async () => {
+    test('throws reference_source_unproven when no current generated source is available', async () => {
         await expect(selectCurrentGeneratedImage({ documentRef: document, utils })).rejects.toThrow(
-            'reference_missing'
+            'reference_source_unproven'
         );
     });
 
@@ -974,10 +1055,12 @@ describe('recreate content DOM actions', () => {
     });
 
     test('uploads a reference file and detects upload preview', () => {
+        const composer = createVisibleComposer();
+        appendVisibleGrokEditor(composer);
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/png';
-        document.body.appendChild(input);
+        composer.appendChild(input);
 
         expect(
             uploadReferenceFile(
@@ -997,7 +1080,7 @@ describe('recreate content DOM actions', () => {
         Object.defineProperty(preview, 'naturalWidth', { value: 120 });
         Object.defineProperty(preview, 'naturalHeight', { value: 90 });
         preview.getBoundingClientRect = () => ({ width: 120, height: 90, left: 0, top: 0 });
-        document.body.appendChild(preview);
+        composer.appendChild(preview);
 
         expect(hasUploadPreview(document)).toBe(true);
     });
@@ -1043,10 +1126,12 @@ describe('recreate content DOM actions', () => {
         overlay.appendChild(overlayInput);
         document.body.appendChild(overlay);
 
+        const composer = createVisibleComposer();
+        appendVisibleGrokEditor(composer);
         const grokInput = document.createElement('input');
         grokInput.type = 'file';
         grokInput.multiple = true;
-        document.body.appendChild(grokInput);
+        composer.appendChild(grokInput);
 
         expect(
             uploadReferenceFile(
@@ -1090,7 +1175,7 @@ describe('recreate content DOM actions', () => {
         expect(hasUploadPreview(document)).toBe(true);
     });
 
-    test('upload preview detection accepts small Grok thumbnails near attach control', () => {
+    test('upload preview detection accepts small Grok thumbnails inside the composer', () => {
         const composer = createVisibleComposer();
         appendVisibleGrokEditor(composer);
         const attach = document.createElement('button');
@@ -1103,7 +1188,7 @@ describe('recreate content DOM actions', () => {
         Object.defineProperty(preview, 'naturalWidth', { value: 448 });
         Object.defineProperty(preview, 'naturalHeight', { value: 672 });
         preview.getBoundingClientRect = () => ({ width: 34, height: 34, left: 545, top: 429 });
-        document.body.appendChild(preview);
+        composer.appendChild(preview);
 
         expect(hasUploadPreview(document)).toBe(true);
     });
@@ -1157,7 +1242,7 @@ describe('recreate content DOM actions', () => {
             preview.getBoundingClientRect = () => ({ width: 120, height: 90, left: 0, top: 0 });
             composer.appendChild(preview);
         });
-        document.body.appendChild(input);
+        composer.appendChild(input);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Send');
@@ -1170,7 +1255,7 @@ describe('recreate content DOM actions', () => {
             answer.textContent = 'FINAL_IMAGINE_PROMPT:\nA red cabin in snow.';
             document.body.appendChild(answer);
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const result = await runChatPromptStep(
             {
@@ -1228,7 +1313,7 @@ describe('recreate content DOM actions', () => {
             answer.textContent = 'FINAL_IMAGINE_VIDEO_PROMPT:\nA 10-second handheld clip of two people embracing slowly.';
             document.body.appendChild(answer);
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const result = await runChatPromptStep(
             {
@@ -1278,7 +1363,7 @@ describe('recreate content DOM actions', () => {
             preview.getBoundingClientRect = () => ({ width: 120, height: 90, left: 0, top: 0 });
             composer.appendChild(preview);
         });
-        document.body.appendChild(input);
+        composer.appendChild(input);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
@@ -1291,7 +1376,7 @@ describe('recreate content DOM actions', () => {
             answer.textContent = 'FINAL_IMAGINE_PROMPT:\nA geometry prompt.';
             document.body.appendChild(answer);
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const overlay = document.createElement('div');
         overlay.id = 'grok-powertools-overlay';
@@ -1342,7 +1427,7 @@ describe('recreate content DOM actions', () => {
             preview.getBoundingClientRect = () => ({ width: 120, height: 90, left: 0, top: 0 });
             composer.appendChild(preview);
         });
-        document.body.appendChild(input);
+        composer.appendChild(input);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Send');
@@ -1355,7 +1440,7 @@ describe('recreate content DOM actions', () => {
             answer.textContent = 'FINAL_IMAGINE_PROMPT:\nA contenteditable request.';
             document.body.appendChild(answer);
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         global.fetch = jest.fn(() => Promise.reject(new Error('network')));
         const uninstallBridge = installContentEditableBridge();
@@ -1402,7 +1487,7 @@ describe('recreate content DOM actions', () => {
             preview.getBoundingClientRect = () => ({ width: 120, height: 90, left: 0, top: 0 });
             composer.appendChild(preview);
         });
-        document.body.appendChild(input);
+        composer.appendChild(input);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Send');
@@ -1415,7 +1500,7 @@ describe('recreate content DOM actions', () => {
             answer.textContent = 'FINAL_IMAGINE_PROMPT:\nA fallback contenteditable request.';
             document.body.appendChild(answer);
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const result = await runChatPromptStep(
             {
@@ -1496,10 +1581,12 @@ describe('recreate content DOM actions', () => {
     });
 
     test('runChatPromptStep fails when upload preview is missing', async () => {
+        const composer = createVisibleComposer();
+        appendVisibleGrokEditor(composer);
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/png';
-        document.body.appendChild(input);
+        composer.appendChild(input);
 
         await expect(
             runChatPromptStep(
@@ -1519,17 +1606,19 @@ describe('recreate content DOM actions', () => {
     });
 
     test('runChatPromptStep ignores preexisting matching upload previews', async () => {
+        const composer = createVisibleComposer();
+        appendVisibleGrokEditor(composer);
         const stalePreview = document.createElement('img');
         stalePreview.src = 'blob:old-upload-preview';
         Object.defineProperty(stalePreview, 'naturalWidth', { value: 120 });
         Object.defineProperty(stalePreview, 'naturalHeight', { value: 90 });
         stalePreview.getBoundingClientRect = () => ({ width: 120, height: 90, left: 0, top: 0 });
-        document.body.appendChild(stalePreview);
+        composer.appendChild(stalePreview);
 
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/png';
-        document.body.appendChild(input);
+        composer.appendChild(input);
 
         await expect(
             runChatPromptStep(
@@ -1576,10 +1665,11 @@ describe('recreate content DOM actions', () => {
                 },
                 { documentRef: document, timeoutMs: 100, intervalMs: 1 }
             )
-        ).rejects.toThrow('chat_editor_missing');
+        ).rejects.toThrow('chat_composer_missing');
     });
 
     test('runChatPromptStep fails when submit is missing', async () => {
+        const composer = createVisibleComposer();
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/png';
@@ -1589,14 +1679,14 @@ describe('recreate content DOM actions', () => {
             Object.defineProperty(preview, 'naturalWidth', { value: 120 });
             Object.defineProperty(preview, 'naturalHeight', { value: 90 });
             preview.getBoundingClientRect = () => ({ width: 120, height: 90, left: 0, top: 0 });
-            document.body.appendChild(preview);
+            composer.appendChild(preview);
         });
-        document.body.appendChild(input);
+        composer.appendChild(input);
 
         const editor = document.createElement('textarea');
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         await expect(
             runChatPromptStep(
@@ -1616,6 +1706,7 @@ describe('recreate content DOM actions', () => {
     });
 
     test('runChatPromptStep fails when assistant answer never appears', async () => {
+        const composer = createVisibleComposer();
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/png';
@@ -1625,14 +1716,14 @@ describe('recreate content DOM actions', () => {
             Object.defineProperty(preview, 'naturalWidth', { value: 120 });
             Object.defineProperty(preview, 'naturalHeight', { value: 90 });
             preview.getBoundingClientRect = () => ({ width: 120, height: 90, left: 0, top: 0 });
-            document.body.appendChild(preview);
+            composer.appendChild(preview);
         });
-        document.body.appendChild(input);
+        composer.appendChild(input);
 
         const editor = document.createElement('textarea');
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
@@ -1642,7 +1733,7 @@ describe('recreate content DOM actions', () => {
         submit.addEventListener('click', () => {
             editor.value = '';
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const chromeRuntime = {
             sendMessage: jest.fn(() => Promise.resolve({ ok: true }))
@@ -1667,11 +1758,12 @@ describe('recreate content DOM actions', () => {
     });
 
     test('submits Imagine prompt after editor injection enables submit', async () => {
+        const { composer } = createImagineComposer();
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
@@ -1681,7 +1773,7 @@ describe('recreate content DOM actions', () => {
         submit.addEventListener('click', () => {
             appendGeneratedImage();
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const uninstallBridge = installContentEditableBridge();
         const uninstallMediaBridge = installMediaDataUrlBridge();
@@ -1729,12 +1821,78 @@ describe('recreate content DOM actions', () => {
         expect(submitEvents.map((event) => event.type)).toEqual(CLICK_EVENT_SEQUENCE);
     });
 
-    test('runImagineSubmitStep waits through low-resolution placeholder result cards', async () => {
+    test('runImagineSubmitStep Stop cancels an in-flight submit wait before any late click or result', async () => {
+        const { composer } = createImagineComposer();
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
+
+        const submit = document.createElement('button');
+        submit.setAttribute('aria-label', 'Submit');
+        submit.disabled = false;
+        submit.getBoundingClientRect = () => ({ width: 40, height: 40, left: 0, top: 0 });
+        submit.addEventListener('click', () => {
+            appendGeneratedImage();
+        });
+        composer.appendChild(submit);
+
+        const abortController = new AbortController();
+        const abortOnEditorInjection = (event) => {
+            if (String(event.detail?.text || '').includes('A red cabin in snow.')) abortController.abort();
+        };
+        document.addEventListener('__gpt_set_editor_content', abortOnEditorInjection);
+        const uninstallBridge = installContentEditableBridge();
+        const uninstallMediaBridge = installMediaDataUrlBridge();
+        const nativeClick = jest.fn(async () => {
+            submit.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            return { ok: true };
+        });
+
+        let outcome;
+        try {
+            const pendingResult = runImagineSubmitStep(
+                {
+                    runId: 'recreate_stop_1',
+                    generatedPrompt: 'A red cabin in snow.',
+                    autoSubmit: true
+                },
+                {
+                    documentRef: document,
+                    timeoutMs: 100,
+                    resultTimeoutMs: 100,
+                    intervalMs: 1,
+                    nativeClick,
+                    signal: abortController.signal
+                }
+            );
+
+            outcome = await pendingResult.then(
+                (value) => ({ status: 'resolved', value }),
+                (error) => ({ status: 'rejected', error })
+            );
+        } finally {
+            uninstallMediaBridge();
+            uninstallBridge();
+            document.removeEventListener('__gpt_set_editor_content', abortOnEditorInjection);
+        }
+
+        expect(nativeClick).not.toHaveBeenCalled();
+        expect(document.querySelector('img[alt="Generated image"]')).toBeNull();
+        expect(outcome).toEqual({
+            status: 'rejected',
+            error: expect.objectContaining({ code: 'workflow_aborted' })
+        });
+    });
+
+    test('runImagineSubmitStep waits through low-resolution placeholder result cards', async () => {
+        const { composer } = createImagineComposer();
+        const editor = document.createElement('div');
+        editor.contentEditable = 'true';
+        editor.setAttribute('aria-label', 'Ask Grok anything');
+        makeVisibleElement(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
@@ -1748,7 +1906,7 @@ describe('recreate content DOM actions', () => {
                 getBoundingClientRect: () => ({ left: 320, top: 120, width: 354, height: 433 })
             });
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const uninstallBridge = installContentEditableBridge();
 
@@ -1783,11 +1941,12 @@ describe('recreate content DOM actions', () => {
     });
 
     test('runImagineSubmitStep succeeds when placeholder cards hydrate to Grok media', async () => {
+        const { composer } = createImagineComposer();
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
@@ -1807,7 +1966,7 @@ describe('recreate content DOM actions', () => {
                 Object.defineProperty(img, 'naturalHeight', { configurable: true, value: 1248 });
             }, 5);
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const uninstallBridge = installContentEditableBridge();
         const uninstallMediaBridge = installMediaDataUrlBridge();
@@ -1848,12 +2007,13 @@ describe('recreate content DOM actions', () => {
     });
 
     test('runImagineSubmitStep selects video mode and verifies generated video bytes', async () => {
+        const composer = createVisibleComposer();
         const imageMode = document.createElement('button');
         imageMode.textContent = 'Image';
         imageMode.setAttribute('data-state', 'checked');
         imageMode.disabled = false;
         makeVisibleElement(imageMode);
-        document.body.appendChild(imageMode);
+        composer.appendChild(imageMode);
 
         const videoMode = document.createElement('button');
         videoMode.textContent = 'Video';
@@ -1865,13 +2025,13 @@ describe('recreate content DOM actions', () => {
             imageMode.setAttribute('data-state', 'unchecked');
             videoMode.setAttribute('data-state', 'checked');
         });
-        document.body.appendChild(videoMode);
+        composer.appendChild(videoMode);
 
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
@@ -1882,7 +2042,7 @@ describe('recreate content DOM actions', () => {
                 src: 'https://imagine-public.x.ai/imagine-public/share-videos/generated_1080_hd.mp4'
             });
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         global.fetch = jest.fn(() =>
             Promise.resolve({
@@ -1925,15 +2085,16 @@ describe('recreate content DOM actions', () => {
         expect(videoModeEvents.map((event) => event.type)).toEqual(CLICK_EVENT_SEQUENCE);
     });
 
-    test('runImagineSubmitStep verifies blob video bytes on an opened Imagine post', async () => {
+    test('runImagineSubmitStep verifies inline blob video bytes', async () => {
         window.history.pushState({}, '', '/imagine/post/live-video-proof');
+        const composer = createVisibleComposer();
 
         const imageMode = document.createElement('button');
         imageMode.textContent = 'Image';
         imageMode.setAttribute('data-state', 'checked');
         imageMode.disabled = false;
         makeVisibleElement(imageMode);
-        document.body.appendChild(imageMode);
+        composer.appendChild(imageMode);
 
         const videoMode = document.createElement('button');
         videoMode.textContent = 'Video';
@@ -1944,13 +2105,13 @@ describe('recreate content DOM actions', () => {
             imageMode.setAttribute('data-state', 'unchecked');
             videoMode.setAttribute('data-state', 'checked');
         });
-        document.body.appendChild(videoMode);
+        composer.appendChild(videoMode);
 
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
@@ -1961,7 +2122,7 @@ describe('recreate content DOM actions', () => {
                 src: 'blob:https://grok.com/generated-video-proof'
             });
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         global.fetch = jest.fn(() =>
             Promise.resolve({
@@ -1993,7 +2154,7 @@ describe('recreate content DOM actions', () => {
                         byteLength: 12288,
                         outputMediaHash: expect.any(String),
                         openable: true,
-                        openableSurface: 'opened-post-blob-video'
+                        openableSurface: 'inline-blob-media'
                     })
                 })
             );
@@ -2014,48 +2175,77 @@ describe('recreate content DOM actions', () => {
             duration: 10
         });
 
-        await expect(
-            runImaginePostValidationStep(
-                {
-                    runId: 'recreate_video_post_1',
-                    targetMode: 'video',
-                    referenceKind: 'video'
-                },
-                { documentRef: document, resultTimeoutMs: 100, intervalMs: 1 }
-            )
-        ).resolves.toEqual(
-            expect.objectContaining({
-                ok: true,
-                mediaKind: 'video',
-                resultReady: true,
-                result: expect.objectContaining({
+        const videoDataUrl = `data:video/mp4;base64,${Buffer.alloc(12 * 1024, 1).toString('base64')}`;
+        const uninstallMediaBridge = installMediaDataUrlBridge(videoDataUrl);
+
+        try {
+            await expect(
+                runImaginePostValidationStep(
+                    {
+                        runId: 'recreate_video_post_1',
+                        targetMode: 'video',
+                        referenceKind: 'video'
+                    },
+                    { documentRef: document, resultTimeoutMs: 100, intervalMs: 1 }
+                )
+            ).resolves.toEqual(
+                expect.objectContaining({
+                    ok: true,
                     mediaKind: 'video',
-                    sourceKind: 'trusted-grok-video',
-                    url: trustedVideoUrl,
-                    byteLength: 0,
-                    outputMediaHash: null,
-                    openable: true,
-                    openableSurface: 'opened-post-playable-video'
+                    resultReady: true,
+                    result: expect.objectContaining({
+                        mediaKind: 'video',
+                        sourceKind: 'trusted-grok-video',
+                        url: trustedVideoUrl,
+                        byteLength: 12288,
+                        outputMediaHash: expect.any(String),
+                        openable: true
+                    })
                 })
-            })
-        );
+            );
+        } finally {
+            uninstallMediaBridge();
+        }
     });
 
-    test('runImagineSubmitStep opens full-size data result cards before accepting them', async () => {
+    test('opened-post validation rejects a stale public URL when only its signed query changed', async () => {
+        window.history.pushState({}, '', '/imagine/post/stale-public-proof');
+        const candidate = appendGeneratedImage({
+            src: 'https://images-public.x.ai/generated/stale-public-proof.jpg?cache=2'
+        });
+        const baselineSignature = getPersistedGeneratedResultCandidateSignature({
+            ...collectGeneratedImageCandidates(document).find((entry) => entry.element === candidate),
+            src: 'https://images-public.x.ai/generated/stale-public-proof.jpg?cache=1'
+        }, 'image');
+
+        await expect(runImaginePostValidationStep({
+            runId: 'recreate_stale_public_1',
+            targetMode: 'image',
+            referenceKind: 'image',
+            baselineSignatures: [baselineSignature]
+        }, {
+            documentRef: document,
+            resultTimeoutMs: 10,
+            intervalMs: 1
+        })).rejects.toThrow('imagine_result_timeout');
+    });
+
+    test('runImagineSubmitStep verifies full-size inline data result cards', async () => {
         Object.defineProperty(window, 'innerHeight', { configurable: true, value: 996 });
         Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1728 });
+        const { composer } = createImagineComposer();
 
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
         submit.disabled = false;
         submit.getBoundingClientRect = () => ({ width: 40, height: 40, left: 1328.5, top: 924 });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const dataResultUrl = `data:image/jpeg;base64,${Buffer.alloc(130 * 1024, 1).toString('base64')}`;
         const trustedResultUrl = 'https://imagine-public.x.ai/imagine-public/images/manual-proof.jpg';
@@ -2120,11 +2310,8 @@ describe('recreate content DOM actions', () => {
                     resultReady: true,
                     result: expect.objectContaining({
                         sourceKind: 'data-url',
-                        openedSourceKind: 'trusted-grok-media',
-                        openedUrl: trustedResultUrl,
-                        postUrl: expect.stringContaining('/imagine/post/manual-proof'),
-                        openableSurface: 'opened-post',
-                        byteLength: 12288,
+                        openableSurface: 'inline-data-media',
+                        byteLength: 130 * 1024,
                         openable: true
                     })
                 })
@@ -2135,22 +2322,18 @@ describe('recreate content DOM actions', () => {
             window.history.pushState({}, '', '/');
         }
 
-        expect(nativeClick).toHaveBeenCalledTimes(2);
-        expect(chromeRuntime.sendMessage).toHaveBeenCalledWith({
-            action: 'FETCH_GPT_RECREATE_REFERENCE_DATA_URL',
-            url: trustedResultUrl
-        });
+        expect(nativeClick).toHaveBeenCalledTimes(1);
+        expect(chromeRuntime.sendMessage).not.toHaveBeenCalled();
         expect(nativeClicks[0]).toEqual({ x: 1348.5, y: 944 });
-        expect(nativeClicks[1].x).toBe(446);
-        expect(nativeClicks[1].y).toBeLessThan(830);
     });
 
     test('runImagineSubmitStep rejects full-size Grok media that cannot be fetched as image bytes', async () => {
+        const { composer } = createImagineComposer();
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
@@ -2164,7 +2347,7 @@ describe('recreate content DOM actions', () => {
                 getBoundingClientRect: () => ({ left: 320, top: 120, width: 354, height: 433 })
             });
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const uninstallBridge = installContentEditableBridge();
 
@@ -2199,18 +2382,22 @@ describe('recreate content DOM actions', () => {
 
     test('runImagineSubmitStep does not accept stale result cards that existed before submit', async () => {
         appendGeneratedImage();
+        const { composer } = createImagineComposer();
 
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
         submit.disabled = false;
         submit.getBoundingClientRect = () => ({ width: 40, height: 40, left: 0, top: 0 });
-        document.body.appendChild(submit);
+        submit.addEventListener('click', () => {
+            editor.textContent = '';
+        });
+        composer.appendChild(submit);
 
         const uninstallBridge = installContentEditableBridge();
 
@@ -2237,19 +2424,24 @@ describe('recreate content DOM actions', () => {
     });
 
     test('runImagineSubmitStep fails when submit stays disabled', async () => {
+        const { composer } = createImagineComposer();
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
-        submit.disabled = true;
+        submit.disabled = false;
         submit.getBoundingClientRect = () => ({ width: 40, height: 40, left: 0, top: 0 });
         const submitEvents = recordClickEvents(submit);
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
+        const disableSubmitOnEditorInjection = () => {
+            submit.disabled = true;
+        };
+        document.addEventListener('__gpt_set_editor_content', disableSubmitOnEditorInjection);
         const uninstallBridge = installContentEditableBridge();
 
         try {
@@ -2265,6 +2457,7 @@ describe('recreate content DOM actions', () => {
             ).rejects.toThrow('imagine_submit_disabled');
         } finally {
             uninstallBridge();
+            document.removeEventListener('__gpt_set_editor_content', disableSubmitOnEditorInjection);
         }
         expect(submitEvents).toEqual([]);
     });
@@ -2283,11 +2476,12 @@ describe('recreate content DOM actions', () => {
     });
 
     test('runImagineSubmitStep maps submit click failures', async () => {
+        const { composer } = createImagineComposer();
         const editor = document.createElement('div');
         editor.contentEditable = 'true';
         editor.setAttribute('aria-label', 'Ask Grok anything');
         makeVisibleElement(editor);
-        document.body.appendChild(editor);
+        composer.appendChild(editor);
 
         const submit = document.createElement('button');
         submit.setAttribute('aria-label', 'Submit');
@@ -2298,7 +2492,7 @@ describe('recreate content DOM actions', () => {
             if (event.type === 'click') throw new Error('click failed');
             return originalDispatchEvent(event);
         });
-        document.body.appendChild(submit);
+        composer.appendChild(submit);
 
         const uninstallBridge = installContentEditableBridge();
 
@@ -2369,7 +2563,13 @@ describe('recreate content bridge', () => {
             expect(keepAlive).toBe(true);
         });
 
-        expect(actions.runChatPromptStep).toHaveBeenCalledWith(request);
+        expect(actions.runChatPromptStep).toHaveBeenCalledWith(
+            request,
+            expect.objectContaining({
+                signal: expect.any(AbortSignal),
+                authority: expect.objectContaining({ runId: 'recreate_1' })
+            })
+        );
         expect(response).toEqual({
             ok: false,
             runId: 'recreate_1',

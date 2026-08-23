@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grok Extension Reliability Recovery - Implementation Notes</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      line-height: 1.5;
+    }
+    body {
+      margin: 0;
+      background: Canvas;
+      color: CanvasText;
+    }
+    main {
+      width: min(960px, calc(100% - 32px));
+      margin: 32px auto 64px;
+    }
+    header, section {
+      border-bottom: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+      padding: 0 0 24px;
+      margin: 0 0 24px;
+    }
+    h1, h2 {
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    h1 { font-size: 24px; }
+    h2 { font-size: 17px; }
+    code {
+      background: color-mix(in srgb, CanvasText 10%, transparent);
+      padding: 2px 4px;
+    }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 8px 24px;
+    }
+    .label { opacity: 0.65; }
+    li + li { margin-top: 8px; }
+    .empty { opacity: 0.65; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Grok Extension Reliability Recovery</h1>
+      <div class="meta">
+        <div><span class="label">Started:</span> 2026-08-20</div>
+        <div><span class="label">Branch:</span> <code>codex/grok-extension-recovery</code></div>
+        <div><span class="label">Baseline:</span> <code>35f6bc7</code></div>
+        <div><span class="label">Checkpoint:</span> <code>f6ece2a</code></div>
+        <div><span class="label">Manifest:</span> <code>0.2.0</code></div>
+        <div><span class="label">Status:</span> Tasks 2-8 deterministic implementation complete; Task 9 next</div>
+      </div>
+    </header>
+
+    <section>
+      <h2>Design Decisions</h2>
+      <ul>
+        <li>Quick Batch uses every eligible card discovered from the starting gallery, capped by the existing Gallery Limit.</li>
+        <li>Provider-accepted state, not click dispatch or return navigation, is the only batch progress signal.</li>
+        <li>Generation run state will be background-owned; the existing Sync lease remains separate.</li>
+        <li>Sync will reuse serialized <code>processedIds</code> for durable per-asset UUIDs and keep only the active conversation inventory in the existing run mirror.</li>
+        <li>The Grok adapter treats asset ID plus post ID as gallery identity. Conversation ID is metadata scope and is never sufficient to identify a card.</li>
+        <li>Agent Mode binds the one selected <code>.react-flow__node-asset</code> by stable node/media asset identity. The persisted post ID remains context because current Agent DOM does not expose it.</li>
+        <li>Submission acceptance must be new and source-scoped. Control disappearance, return navigation, unrelated progress, and stale result media remain pending.</li>
+        <li>Prompted Batch persists only a flat source/action checkpoint with baseline counters. Prompts, cookies, signed URLs, and composer DOM are not persisted.</li>
+        <li>Direct Agent starts use the conversation UUID as contextual post identity only when no gallery post hint exists, because current Agent DOM exposes no post UUID.</li>
+        <li>Current Saved cards bind one overlay post link to one sibling generated-media branch inside the same masonry-card wrapper. Empty image alt text is supported only for trusted generated asset URLs.</li>
+        <li>Video Goal uses the source-bound Agent toolbar action or the exact detail Make Video then Quick Animate path. Add Prompt and Precise Edit are excluded from Goal.</li>
+        <li>Recreate authority is bound to the exact owner document. Stop remains in a cancelling state until that document acknowledges cancellation or the bounded authority clear fails closed.</li>
+        <li>Recreate result proof uses a pre-submit signature baseline and requires one new playable result. Video proof requires fetched non-empty media bytes rather than a poster or URL alone.</li>
+        <li>Sync treats the authenticated conversation response as the complete Saved-entry inventory. A visible card is only an entry point and never completion proof.</li>
+        <li>Sync progress version 2 derives its cursor from durable per-asset receipts. A queued or attempted transfer cannot move the cursor past a missing receipt.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Deviations</h2>
+      <ul>
+        <li>Task 6 expanded into the shared gallery adapter after live inspection showed that current Saved links and media are siblings and generated images may have empty alt text.</li>
+        <li>The approved direct Video Goal action is represented by Quick Animate on current detail pages, so the runner opens the menu before checkpointing and dispatching that exact item.</li>
+        <li>The inventory parser remains private to the page bridge and is exercised through its request/result contract in <code>tests/unit/bridge.test.js</code>. A second parser test module was not created because it would require exporting a page-world implementation solely for tests.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Tradeoffs</h2>
+      <ul>
+        <li>A second permanent Sync ledger was rejected because it would duplicate thousands of IDs and increase Chrome storage quota and write-race risk.</li>
+        <li>The adapter/controller extraction adds three focused runtime files, but removes repeated selector and state logic from the 8,000-line content script.</li>
+        <li>Agent identity cannot re-prove the source post ID from current DOM. The adapter therefore requires exact unique asset agreement and fails closed on duplicate, disagreement, or multiple selected nodes.</li>
+        <li>Current sibling media is accepted only when one direct card branch resolves to one asset identity. Multiple branches fail closed rather than guessing which media belongs to the post link.</li>
+        <li>No permanent conversation-completion ledger was added. A reload may re-fetch an already completed conversation, then derives completion from existing processed asset IDs. This costs one read but prevents an old preview ID from hiding later sibling assets.</li>
+        <li>Agent and legacy detail surfaces are used only to acquire a missing conversation ID for a Saved-origin run. The old one-preview transfer fallback was removed because it could silently omit sibling assets.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Open Questions</h2>
+      <ul>
+        <li>The current Chrome session had no populated <code>/imagine</code> results conversation, so live results-page proof remains pending.</li>
+        <li>The current Agent toolbar Make Video control is source-bound but its Prompted transition has not been activated live because a provider-side effect cannot yet be excluded. This remains part of the separate generation approval gate.</li>
+        <li>The current live <code>/responses</code> payload and Saved-card conversation linkage still need read-only inspection before the approved Sync lane. No live Sync, download, upload, R2 write, or processed-ID mutation has run during Tasks 7-8.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Validation Log</h2>
+      <ul>
+        <li>Planning baseline: lint passed.</li>
+        <li>Planning baseline: 902 unit tests passed, but one background initialization console error made the run an invalid clean signal.</li>
+        <li>Planning baseline: 48 mocked Playwright tests passed.</li>
+        <li>Read-only live Saved inspection confirmed current Make Video controls and stable post/asset identities without enumerating Chrome tabs.</li>
+        <li>Source fingerprint before runtime edits: <code>manifest.json 7e4a0e02</code>, <code>content.js b0bcc265</code>, <code>background.js d8ad9106</code>, <code>bridge.js b8d3eae8</code>, and <code>popup.js 00b56c70</code> using SHA-256 prefixes.</li>
+        <li>Quick Batch unit regression: three stable source identities fail after a full gallery remount; the current implementation processes only the first source.</li>
+        <li>Quick Batch unit regression: a dispatched click without provider acceptance evidence incorrectly increments progress from zero to one.</li>
+        <li>Quick Batch unit regression: remount discovery dispatches the first stable source twice before continuing.</li>
+        <li>Quick Batch Playwright regression: a ten-card current-Grok fixture that remounts after each accepted action accepts only the first card.</li>
+        <li>Prompted Batch Playwright regression: an unsettled submit followed by successful return navigation is incorrectly reported as complete and increments progress.</li>
+        <li>Recreate regression: cancelling while the Imagine submit control is still pending does not revoke the wait; the control is clicked after cancellation and can create a late result.</li>
+        <li>Sync regression: a conversation response containing two attachment assets produces no conversation inventory event, confirming the current path cannot enumerate every authoritative asset.</li>
+        <li>Adapter and generation-state contract suites are syntax- and lint-clean, and fail only because their runtime modules do not exist yet. They remain assigned to Tasks 2 and 3.</li>
+        <li>Task 2: 19 adapter tests passed across gallery, Saved, Agent, legacy detail, action selection, source-scoped acceptance, rejection, ambiguity, remount, and playable-result cases.</li>
+        <li>Task 2: manifest order, direct reinjection order, and release package allowlist tests passed; the package list contains <code>grokImagineAdapter.js</code>.</li>
+        <li>Task 3: one background-owned generation authority now serializes Quick Batch, Prompted Batch, Video Goal, Sync/R2, and Recreate starts; claims, capacity waits, cancellation, and reload transfer are durable and bounded.</li>
+        <li>Task 4: Quick Batch now snapshots stable descriptors, reacquires controls after remount, advances only on source-scoped provider acceptance, and preserves failed sources for explicit retry.</li>
+        <li>Task 5: Prompted Batch now snapshots stable descriptors, opens the exact source, selects Make Video then Add Prompt, persists a source-scoped pre-submit checkpoint, advances after provider acceptance without waiting for video completion, and retries only failed sources.</li>
+        <li>Task 5: a reloaded owner document can resume an in-flight Prompted submission from its persisted checkpoint without dispatching Submit again.</li>
+        <li>Task 6 read-only live inspection: Saved uses overlay post links with sibling generated media; current images can have empty alt text; Agent toolbar controls carry the selected node's exact <code>data-id</code>; detail Make Video exposes Add Prompt, Spicy, and Quick Animate.</li>
+        <li>Task 6: Video Goal now records acceptance and one new playable result per attempt, retries source-scoped failure, fails closed on multiple results, stops without a late retry, and resumes submitted or accepted checkpoints without a second native click.</li>
+        <li>Task 6: deterministic browser runs cover current Saved overlay cards, durable Prompted return, Quick remounts, and Video Goal remount/retry/Stop/reload paths. This is not live generation proof.</li>
+        <li>Task 7: Recreate now persists owner-document authority and source/result baselines, requires exact document authorization for helper messages, retains valid references for retry, and blocks Retry until cancellation authority clears.</li>
+        <li>Task 7: Current fallback accepts only one visible supported source; ambiguous or unsupported surfaces fail closed. Video completion requires non-empty fetched bytes and a stable media digest.</li>
+        <li>Task 8: the page bridge inventories every attachment asset in stable response order, derives current key-only media URLs, strips URL credentials, rejects conflicting duplicates, and caps asset count and UTF-8 serialized bytes.</li>
+        <li>Task 8: Sync verifies selected membership, hashes the full sanitized inventory with SHA-256, processes every asset, resumes at the first missing durable receipt, and never scans Agent Mode as a gallery.</li>
+        <li>Task 8: deterministic runtime checks cover multi-asset image/video entries, duplicate agreement/conflict, missing selected media, partial failure retry, Stop, resume, exact canary targeting, and Saved-to-Agent identity acquisition. This is not live Sync or R2 proof.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

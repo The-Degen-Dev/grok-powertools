@@ -22,7 +22,7 @@
         <div class="card status-card">
             <div class="status-header">
                 <span class="label">STATUS</span>
-                <span id="statusText" class="value">Ready</span>
+                <span id="statusText" class="value">Loading settings...</span>
             </div>
             <div class="progress-track">
                 <div id="progressFill" class="progress-fill" style="width: 0%"></div>
@@ -31,7 +31,7 @@
 
         <!-- Primary Controls -->
         <div class="controls-grid">
-            <button id="startBtn" class="btn btn-primary">
+            <button id="startBtn" class="btn btn-primary" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                     stroke-linecap="round" stroke-linejoin="round">
                     <polygon points="5 3 19 12 5 21 5 3"></polygon>
@@ -146,9 +146,9 @@
                 <button id="cloudClearBtn" class="btn btn-secondary">Clear Cloud Status</button>
                 <button id="resetProcessedIdsBtn" class="btn btn-secondary" title="Clears the list of already-processed items so the scraper will re-scan everything. Use when items were skipped due to previous errors.">Reset Processed IDs</button>
                 <button id="cloudMediaCanaryBtn" class="btn btn-secondary"
-                    title="Uploads one unprocessed media file to R2, then stops without clearing processed IDs. Navigate to Grok Favorites first.">One Media R2 Canary</button>
+                    title="Uploads one unprocessed media item to R2, then stops. Navigate to Grok Imagine Saved first.">One Media R2 Canary</button>
                 <button id="cloudMediaBackupBtn" class="btn btn-primary"
-                    title="Scrapes ALL favorites and uploads every media file to R2. Navigate to Grok Favorites first.">Full Media Backup</button>
+                    title="Scans the complete Grok Imagine Saved view across every Saved identity, verifies current R2 presence, and uploads only missing media. Navigate to Grok Imagine Saved first.">Full Media Backup</button>
             </div>
             <div id="r2BackupProgress" class="cloud-status-box" style="display: none;">
                 <div class="cloud-status-row">

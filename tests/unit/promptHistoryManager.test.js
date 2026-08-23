@@ -13,7 +13,16 @@ describe('PromptHistoryManager', () => {
 
         const editor = document.createElement('div');
         editor.setAttribute('contenteditable', 'true');
+        editor.setAttribute('role', 'textbox');
         editor.textContent = 'A handheld 10-second embrace.';
+        editor.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 480,
+            bottom: 48,
+            width: 480,
+            height: 48
+        });
         document.body.appendChild(editor);
 
         const submit = document.createElement('button');

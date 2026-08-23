@@ -170,7 +170,7 @@ describe('cloudSyncUtils', () => {
 
     test('uses the media UUID, not the user UUID, for assets.grok.com generated video URLs', () => {
         const identity = CloudSyncUtils.resolveMediaAssetIdentity({
-            sourceUrl: 'https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/22222222-2222-4222-8222-222222222222/generated_video.mp4?token=secret',
+            sourceUrl: 'https://assets.grok.com/users/11111111-1111-4111-8111-111111111111/generated/22222222-2222-4222-8222-222222222222/generated_video.mp4?request=33333333-3333-4333-8333-333333333333',
             finalPath: 'GrokVault/user_1/2026-03-01_Auto/generated_video.mp4',
             contentType: 'video/mp4',
             contentSha256: 'b'.repeat(64)
@@ -178,6 +178,25 @@ describe('cloudSyncUtils', () => {
 
         expect(identity.kind).toBe('stable_media_id');
         expect(identity.assetId).toBe('media_22222222-2222-4222-8222-222222222222');
+    });
+
+    test('extracts Grok media identity from the pathname only', () => {
+        const accountId = '11111111-1111-4111-8111-111111111111';
+        const mediaId = '22222222-2222-4222-8222-222222222222';
+        const laterPathId = '33333333-3333-4333-8333-333333333333';
+        const queryId = '44444444-4444-4444-8444-444444444444';
+        const hashId = '55555555-5555-4555-8555-555555555555';
+
+        expect(CloudSyncUtils.extractGrokMediaId(mediaId)).toBe(mediaId);
+        expect(CloudSyncUtils.extractGrokMediaId(
+            `https://assets.grok.com/users/${accountId}/generated/${mediaId}/derived/${laterPathId}/image.jpg?request=${queryId}#${hashId}`
+        )).toBe(mediaId);
+        expect(CloudSyncUtils.extractGrokMediaId(
+            `https://assets.grok.com/users/${accountId}/legacy/${laterPathId}/image.jpg?request=${queryId}`
+        )).toBe(laterPathId);
+        expect(CloudSyncUtils.extractGrokMediaId(
+            `https://assets.grok.com/generated/image.jpg?request=${queryId}#${hashId}`
+        )).toBe('');
     });
 
     test('media dedupe key is stable across date-folder reruns for same media UUID', () => {

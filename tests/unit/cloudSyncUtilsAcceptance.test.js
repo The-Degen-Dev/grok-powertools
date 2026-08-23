@@ -1,6 +1,18 @@
 const CloudSync = require('../../cloudSyncUtils.js');
 
 describe('CloudSync acceptance context', () => {
+    test('recognizes only an exact normalized acceptance run prefix as acceptance config', () => {
+        expect(CloudSync.isAcceptanceCloudConfig({
+            keyPrefix: '/acceptance/run-20260609-001/'
+        })).toBe(true);
+        expect(CloudSync.isAcceptanceCloudConfig({
+            keyPrefix: 'acceptance/run-20260609-001/nested'
+        })).toBe(false);
+        expect(CloudSync.isAcceptanceCloudConfig({
+            keyPrefix: 'grok-powertools/v1'
+        })).toBe(false);
+    });
+
     test('normalizes a valid acceptance context', () => {
         expect(CloudSync.normalizeAcceptanceContext({
             runId: 'run-20260609-001',
