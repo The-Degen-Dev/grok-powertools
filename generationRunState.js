@@ -20,6 +20,7 @@
         'running',
         'waiting_capacity',
         'retryable_failed',
+        'cancelling',
         'completed',
         'cancelled',
         'failed'
@@ -59,6 +60,8 @@
         capacity_available: new Set(['type', 'runId', 'epoch', 'now']),
         capacity_timeout: new Set(['type', 'runId', 'epoch', 'now']),
         retry_failed: new Set(['type', 'runId', 'epoch', 'now']),
+        begin_cancel: new Set(['type', 'runId', 'epoch', 'now']),
+        finish_cancel: new Set(['type', 'runId', 'epoch', 'now']),
         cancel: new Set(['type', 'runId', 'epoch', 'now']),
         expire_claim: new Set(['type', 'runId', 'epoch', 'now']),
         transfer_owner: new Set(['type', 'runId', 'epoch', 'ownerDocumentId', 'now']),
@@ -89,7 +92,8 @@
         'hrefPath',
         'sourceAssetId',
         'sourcePostId',
-        'conversationId'
+        'conversationId',
+        'viewportReceipt'
     ]);
     const DESCRIPTOR_KEYS = new Set([
         'version',
@@ -135,12 +139,19 @@
         'baselineRejectedCount',
         'resultBaselineVersion',
         'baselineResultAssetIds',
-        'baselineFailureCount'
+        'baselineFailureCount',
+        'sourceResponseId',
+        'baselineFailureResponseIds',
+        'baselineInflightResponseIds',
+        'baselineVideoGenerationResponseIds',
+        'domResultBaselineVersion',
+        'baselineDomResultAssetIds',
+        'baselineDomFailureCount'
     ]);
     const RECEIPT_STATES_BY_OUTCOME = {
         composer_ready: new Set(['composer_ready']),
         submitted: new Set(['submitted', 'submit_dispatched']),
-        accepted: new Set(['provider_accepted']),
+        accepted: new Set(['provider_accepted', 'submit_dispatched']),
         completed: new Set(['playable_result'])
     };
     const JOURNAL_KEYS = new Set([
@@ -278,6 +289,9 @@
         if ('scrollY' in normalized) {
             assertFiniteNumber(normalized.scrollY);
         }
+        if ('viewportReceipt' in normalized && !isPlainObject(normalized.viewportReceipt)) {
+            throw stateError('INVALID_GENERATION_STATE');
+        }
         return normalized;
     }
 
@@ -364,7 +378,9 @@
         const resultBaselineKeys = [
             'resultBaselineVersion',
             'baselineResultAssetIds',
-            'baselineFailureCount'
+            'baselineFailureCount',
+            'sourceResponseId',
+            'baselineFailureResponseIds'
         ];
         const resultBaselineFieldCount = resultBaselineKeys.filter((key) => key in normalized).length;
         if (resultBaselineFieldCount !== 0 && resultBaselineFieldCount !== resultBaselineKeys.length) {
@@ -379,6 +395,58 @@
                 throw stateError('INVALID_GENERATION_EVENT');
             }
             assertInteger(normalized.baselineFailureCount, 0, Number.MAX_SAFE_INTEGER, 'INVALID_GENERATION_EVENT');
+            if (typeof normalized.sourceResponseId !== 'string'
+                || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalized.sourceResponseId)
+                || !Array.isArray(normalized.baselineFailureResponseIds)
+                || normalized.baselineFailureResponseIds.length > MAX_ITEMS
+                || normalized.baselineFailureResponseIds.some((value) => (
+                    typeof value !== 'string'
+                    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+                ))
+                || new Set(normalized.baselineFailureResponseIds).size
+                    !== normalized.baselineFailureResponseIds.length) {
+                throw stateError('INVALID_GENERATION_EVENT');
+            }
+            if ('baselineInflightResponseIds' in normalized
+                && (!Array.isArray(normalized.baselineInflightResponseIds)
+                    || normalized.baselineInflightResponseIds.length > MAX_ITEMS
+                    || normalized.baselineInflightResponseIds.some((value) => (
+                        typeof value !== 'string'
+                        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+                    ))
+                    || new Set(normalized.baselineInflightResponseIds).size
+                        !== normalized.baselineInflightResponseIds.length)) {
+                throw stateError('INVALID_GENERATION_EVENT');
+            }
+        }
+        const domResultBaselineKeys = [
+            'domResultBaselineVersion',
+            'baselineDomResultAssetIds',
+            'baselineDomFailureCount'
+        ];
+        const domResultBaselineFieldCount = domResultBaselineKeys
+            .filter((key) => key in normalized).length;
+        if (domResultBaselineFieldCount !== 0
+            && domResultBaselineFieldCount !== domResultBaselineKeys.length) {
+            throw stateError('INVALID_GENERATION_EVENT');
+        }
+        if (domResultBaselineFieldCount === domResultBaselineKeys.length) {
+            assertInteger(normalized.domResultBaselineVersion, 1, 1, 'INVALID_GENERATION_EVENT');
+            if (!Array.isArray(normalized.baselineDomResultAssetIds)
+                || normalized.baselineDomResultAssetIds.length > MAX_ITEMS
+                || normalized.baselineDomResultAssetIds.some((value) => (
+                    typeof value !== 'string' || !value
+                ))
+                || new Set(normalized.baselineDomResultAssetIds).size
+                    !== normalized.baselineDomResultAssetIds.length) {
+                throw stateError('INVALID_GENERATION_EVENT');
+            }
+            assertInteger(
+                normalized.baselineDomFailureCount,
+                0,
+                Number.MAX_SAFE_INTEGER,
+                'INVALID_GENERATION_EVENT'
+            );
         }
         return normalized;
     }
@@ -641,7 +709,29 @@
         };
     }
 
-    function cancelState(state, now) {
+    function beginCancelState(state, now) {
+        const items = state.items.map((item) => {
+            if (!['targeting', 'composer_ready', 'submitted'].includes(item.status)) return item;
+            return {
+                ...item,
+                status: 'queued',
+                failureCode: item.failureCode || 'cancelling'
+            };
+        });
+        return {
+            ...state,
+            epoch: state.epoch + 1,
+            status: 'cancelling',
+            items,
+            activeClaim: null,
+            counts: calculateCounts(items),
+            updatedAt: now,
+            capacityWaitStartedAt: 0,
+            capacityDeadlineAt: 0
+        };
+    }
+
+    function finishCancelState(state, now) {
         const items = state.items.map((item) => {
             if (item.status === 'accepted' || item.status === 'permanent_failed') return item;
             return {
@@ -652,7 +742,6 @@
         });
         return {
             ...state,
-            epoch: state.epoch + 1,
             status: 'cancelled',
             items,
             activeClaim: null,
@@ -662,6 +751,10 @@
             capacityWaitStartedAt: 0,
             capacityDeadlineAt: 0
         };
+    }
+
+    function cancelState(state, now) {
+        return finishCancelState(beginCancelState(state, now), now);
     }
 
     function reduceReport(state, event) {
@@ -830,17 +923,32 @@
             };
             requestedStatus = 'waiting_capacity';
         } else if (event.outcome === 'retryable_failed') {
-            const exhausted = attemptsThisRound > state.options.maxRetries;
-            nextItem = {
-                ...item,
-                status: exhausted ? 'retryable_failed' : 'queued',
-                attemptCount,
-                attemptsThisRound,
-                failureCode,
-                receipt: null,
-                lastClaimId: event.claimId,
-                lastOutcome: event.outcome
-            };
+            const pauseForProviderLimit = failureCode === 'provider_usage_limit';
+            if (acceptedVideoGoalAttempt) {
+                nextItem = {
+                    ...item,
+                    status: 'retryable_failed',
+                    failureCode,
+                    receipt: item.receipt,
+                    lastClaimId: event.claimId,
+                    lastOutcome: event.outcome
+                };
+                requestedStatus = 'retryable_failed';
+            } else {
+                const exhausted = pauseForProviderLimit
+                    || attemptsThisRound > state.options.maxRetries;
+                nextItem = {
+                    ...item,
+                    status: exhausted ? 'retryable_failed' : 'queued',
+                    attemptCount,
+                    attemptsThisRound,
+                    failureCode,
+                    receipt: null,
+                    lastClaimId: event.claimId,
+                    lastOutcome: event.outcome
+                };
+                if (pauseForProviderLimit) requestedStatus = 'retryable_failed';
+            }
         } else if (event.outcome === 'permanent_failed') {
             nextItem = {
                 ...item,
@@ -1016,9 +1124,11 @@
                     status: 'queued',
                     attemptsThisRound: 0,
                     failureCode: '',
-                    receipt: null,
+                    receipt: state.kind === 'video_goal' ? item.receipt : null,
                     lastClaimId: '',
-                    lastOutcome: ''
+                    lastOutcome: state.kind === 'video_goal' && item.receipt
+                        ? 'retry_reconcile'
+                        : ''
                 };
             });
             if (retriedCount === 0) throw stateError('INVALID_GENERATION_TRANSITION');
@@ -1033,6 +1143,22 @@
                 updatedAt: event.now,
                 completedAt: 0
             };
+        }
+
+        if (event.type === 'begin_cancel') {
+            if (state.status === 'cancelling'
+                || state.status === 'cancelled'
+                || state.status === 'completed') {
+                throw stateError('INVALID_GENERATION_TRANSITION');
+            }
+            return beginCancelState(state, event.now);
+        }
+
+        if (event.type === 'finish_cancel') {
+            if (state.status !== 'cancelling') {
+                throw stateError('INVALID_GENERATION_TRANSITION');
+            }
+            return finishCancelState(state, event.now);
         }
 
         if (event.type === 'cancel') {

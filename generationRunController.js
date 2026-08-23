@@ -14,6 +14,7 @@
 })(typeof self !== 'undefined' ? self : typeof globalThis !== 'undefined' ? globalThis : this, function (State) {
     const GENERATION_RUN_SESSION_KEY = 'generationRunLease';
     const GENERATION_RUN_JOURNAL_KEY = 'generationRunJournal';
+    const GENERATION_RUN_RECOVERY_KEY = 'generationRunRecovery';
     const TERMINAL_STATUSES = new Set(['completed', 'cancelled', 'failed']);
     const GALLERY_SURFACES = new Set(['results_gallery', 'saved_gallery']);
     const DETAIL_SURFACES = new Set(['agent_media', 'legacy_detail']);
@@ -64,6 +65,13 @@
             : null;
     }
 
+    function getImaginePostId(url) {
+        const match = String(url?.pathname || '').match(
+            /^\/imagine\/post\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i
+        );
+        return String(match?.[1] || '').toLowerCase();
+    }
+
     function assertResumeProof(run, request, sender) {
         if (request?.resume !== true || !request?.resumeProof) {
             throw controllerError('GENERATION_RESUME_PROOF_REQUIRED');
@@ -74,17 +82,55 @@
         if (!senderUrl
             || !proofUrl
             || senderUrl.origin !== proofUrl.origin
-            || senderUrl.pathname !== proofUrl.pathname
-            || senderUrl.search !== proofUrl.search) {
+            || senderUrl.pathname !== proofUrl.pathname) {
             throw controllerError('GENERATION_RESUME_PROOF_INVALID');
+        }
+        const senderConversationId = senderUrl.searchParams.get('conversation') || '';
+        const proofConversationId = proofUrl.searchParams.get('conversation') || '';
+        if (proofConversationId && senderConversationId !== proofConversationId) {
+            throw controllerError('GENERATION_RESUME_PROOF_INVALID');
+        }
+
+        const submittedGoalItem = run.kind === 'video_goal'
+            ? getActiveClaimItem(run)
+            : null;
+        const submittedConversationId = String(submittedGoalItem?.descriptor?.conversationId || '');
+        if (proof.videoGoalSubmitted === true
+            && submittedGoalItem?.status === 'submitted'
+            && submittedConversationId
+            && proof.conversationId === submittedConversationId
+            && proofUrl.searchParams.get('conversation') === submittedConversationId
+            && ((proof.surface === 'agent_media' && proofUrl.pathname.startsWith('/imagine/agent/'))
+                || (proof.surface === 'legacy_detail' && proofUrl.pathname.startsWith('/imagine/post/')))) {
+            return;
+        }
+
+        const submittedItem = getActiveClaimItem(run);
+        const childPostId = getImaginePostId(proofUrl);
+        if (proof.submissionChild === true
+            && submittedItem?.status === 'submitted'
+            && proof.surface === 'legacy_detail'
+            && childPostId
+            && childPostId !== String(submittedItem.descriptor.sourcePostId || '').toLowerCase()
+            && childPostId !== String(submittedItem.descriptor.sourceAssetId || '').toLowerCase()
+            && proof.sourceAssetId === submittedItem.descriptor.sourceAssetId
+            && proof.sourcePostId === submittedItem.descriptor.sourcePostId) {
+            return;
         }
 
         if (GALLERY_SURFACES.has(proof.surface)) {
             const originUrl = parseGrokUrl(run.origin?.url);
+            const originConversationId = originUrl?.searchParams.get('conversation') || '';
+            const descriptor = getActiveClaimItem(run)?.descriptor
+                || run.items.find((item) => item.status === 'queued')?.descriptor
+                || run.items[0]?.descriptor;
             if (proof.surface !== run.origin?.surface
                 || !originUrl
                 || proofUrl.pathname !== originUrl.pathname
-                || proofUrl.searchParams.get('conversation') !== originUrl.searchParams.get('conversation')) {
+                || (originConversationId && proofConversationId !== originConversationId)
+                || !descriptor
+                || proof.sourceAssetId !== descriptor.sourceAssetId
+                || proof.sourcePostId !== descriptor.sourcePostId) {
                 throw controllerError('GENERATION_RESUME_PROOF_INVALID');
             }
             return;
@@ -171,7 +217,7 @@
         const cancellationAckTimeoutMs = Number.isFinite(options.cancellationAckTimeoutMs)
             ? Math.max(1, options.cancellationAckTimeoutMs)
             : 3000;
-        if (!sessionStorage?.get || !sessionStorage?.set || !localStorage?.set) {
+        if (!sessionStorage?.get || !sessionStorage?.set || !localStorage?.get || !localStorage?.set) {
             throw controllerError('GENERATION_STORAGE_UNAVAILABLE');
         }
 
@@ -184,8 +230,15 @@
             if (initialized) return currentRun;
             if (!initializationPromise) {
                 initializationPromise = (async () => {
-                    const stored = await sessionStorage.get([GENERATION_RUN_SESSION_KEY]);
-                    const candidate = stored?.[GENERATION_RUN_SESSION_KEY];
+                    const [stored, local] = await Promise.all([
+                        sessionStorage.get([GENERATION_RUN_SESSION_KEY]),
+                        localStorage.get([GENERATION_RUN_RECOVERY_KEY])
+                    ]);
+                    const sessionCandidate = stored?.[GENERATION_RUN_SESSION_KEY];
+                    const recoveryCandidate = local?.[GENERATION_RUN_RECOVERY_KEY];
+                    const candidate = sessionCandidate?.schemaVersion === 1 && sessionCandidate.runId
+                        ? sessionCandidate
+                        : recoveryCandidate;
                     if (candidate && candidate.schemaVersion === 1 && candidate.runId) {
                         try {
                             if (typeof State.validateGenerationRun === 'function') {
@@ -194,8 +247,12 @@
                                 State.sanitizeGenerationRun(candidate);
                             }
                             currentRun = clone(candidate);
+                            if (candidate === recoveryCandidate) {
+                                await sessionStorage.set({ [GENERATION_RUN_SESSION_KEY]: currentRun });
+                            }
                         } catch {
                             await sessionStorage.remove?.([GENERATION_RUN_SESSION_KEY]);
+                            await localStorage.set({ [GENERATION_RUN_RECOVERY_KEY]: null });
                             currentRun = null;
                         }
                     } else {
@@ -227,7 +284,10 @@
             await sessionStorage.set({ [GENERATION_RUN_SESSION_KEY]: storedRun });
             currentRun = storedRun;
             try {
-                await localStorage.set({ [GENERATION_RUN_JOURNAL_KEY]: journal });
+                await localStorage.set({
+                    [GENERATION_RUN_JOURNAL_KEY]: journal,
+                    [GENERATION_RUN_RECOVERY_KEY]: isActiveRun(storedRun) ? storedRun : null
+                });
             } catch {
                 // Session storage owns workflow authority. A diagnostic journal
                 // failure must never roll back a persisted transition.
@@ -374,6 +434,11 @@
                                 now: claimNow
                             });
                             await persist(currentRun);
+                            return {
+                                status: 'capacity_timeout',
+                                claim: null,
+                                run: publicRun(currentRun)
+                            };
                         } else if (!request?.capacityAvailable) {
                             return { status: 'waiting', claim: null, run: publicRun() };
                         } else {
@@ -431,6 +496,68 @@
             });
         }
 
+        async function dispatchGenerationAction(request, sender, dispatch) {
+            return enqueue(async () => {
+                try {
+                    assertOwner(sender, {
+                        requireDocument: true,
+                        documentError: 'STALE_GENERATION_CLAIM'
+                    });
+                    if (typeof dispatch !== 'function') {
+                        throw controllerError('GENERATION_DISPATCH_UNAVAILABLE');
+                    }
+                    const assertAuthorized = async () => {
+                        const activeClaim = currentRun?.activeClaim;
+                        const item = currentRun?.items?.find((candidate) => (
+                            candidate.itemId === request?.itemId
+                        ));
+                        if (!activeClaim
+                            || currentRun.runId !== request?.runId
+                            || currentRun.epoch !== request?.epoch
+                            || activeClaim.claimId !== request?.claimId
+                            || activeClaim.itemId !== request?.itemId
+                            || (item?.status !== 'targeting' && item?.status !== 'composer_ready')) {
+                            throw controllerError('STALE_GENERATION_CLAIM');
+                        }
+                    };
+                    await assertAuthorized();
+                    let dispatchResult;
+                    let dispatchUncertain = false;
+                    try {
+                        dispatchResult = await dispatch(assertAuthorized);
+                        await assertAuthorized();
+                    } catch (error) {
+                        if (error?.clickState === 'not_dispatched') throw error;
+                        dispatchUncertain = true;
+                        dispatchResult = {
+                            ok: false,
+                            clickState: error?.clickState || 'unknown'
+                        };
+                    }
+                    const run = State.reduceGenerationRun(currentRun, {
+                        type: 'report',
+                        runId: request?.runId,
+                        epoch: request?.epoch,
+                        itemId: request?.itemId,
+                        claimId: request?.claimId,
+                        outcome: 'submitted',
+                        failureCode: '',
+                        receipt: request?.receipt ?? null,
+                        now: now()
+                    });
+                    await persist(run);
+                    return {
+                        status: 'submitted',
+                        dispatchResult,
+                        dispatchUncertain,
+                        run: publicRun(run)
+                    };
+                } catch (error) {
+                    return rejected(error);
+                }
+            });
+        }
+
         async function retryFailedGenerationItems(request, sender) {
             return enqueue(async () => {
                 try {
@@ -453,28 +580,42 @@
             return enqueue(async () => {
                 try {
                     assertOwner(sender);
-                    const run = State.reduceGenerationRun(currentRun, {
-                        type: 'cancel',
+                    const cancelling = State.reduceGenerationRun(currentRun, {
+                        type: 'begin_cancel',
                         runId: request?.runId,
                         epoch: request?.epoch,
                         now: now()
                     });
-                    await persist(run);
+                    await persist(cancelling);
                     let acknowledged = false;
                     try {
                         const response = await withTimeout(notifyCancellation({
-                            runId: run.runId,
-                            epoch: run.epoch,
-                            ownerTabId: run.ownerTabId,
-                            ownerDocumentId: run.ownerDocumentId
+                            runId: cancelling.runId,
+                            epoch: cancelling.epoch,
+                            ownerTabId: cancelling.ownerTabId,
+                            ownerDocumentId: cancelling.ownerDocumentId
                         }), cancellationAckTimeoutMs);
                         acknowledged = Boolean(response?.acknowledged);
                     } catch {
                         acknowledged = false;
                     }
+                    if (!acknowledged) {
+                        return {
+                            status: 'cancelling',
+                            acknowledged: false,
+                            run: publicRun(cancelling)
+                        };
+                    }
+                    const run = State.reduceGenerationRun(currentRun, {
+                        type: 'finish_cancel',
+                        runId: currentRun.runId,
+                        epoch: currentRun.epoch,
+                        now: now()
+                    });
+                    await persist(run);
                     return {
                         status: 'cancelled',
-                        acknowledged,
+                        acknowledged: true,
                         run: publicRun(run)
                     };
                 } catch (error) {
@@ -483,13 +624,44 @@
             });
         }
 
-        async function getGenerationRunStatus() {
-            await initialize();
-            if (!currentRun) return { status: 'idle', run: null };
-            return {
-                status: isActiveRun(currentRun) ? 'active' : currentRun.status,
-                run: publicRun()
-            };
+        async function getGenerationRunStatus(_request = {}, sender = {}) {
+            return enqueue(async () => {
+                if (!currentRun) return { status: 'idle', run: null };
+                if (currentRun.status === 'cancelling') {
+                    const senderTabId = getSenderTabId(sender);
+                    const senderDocumentId = String(sender?.documentId || '').trim();
+                    const ownerDocumentReplaced = senderTabId === currentRun.ownerTabId
+                        && senderDocumentId
+                        && senderDocumentId !== currentRun.ownerDocumentId;
+                    let acknowledged = ownerDocumentReplaced;
+                    if (!acknowledged) {
+                        try {
+                            const response = await withTimeout(notifyCancellation({
+                                runId: currentRun.runId,
+                                epoch: currentRun.epoch,
+                                ownerTabId: currentRun.ownerTabId,
+                                ownerDocumentId: currentRun.ownerDocumentId
+                            }), cancellationAckTimeoutMs);
+                            acknowledged = Boolean(response?.acknowledged);
+                        } catch {
+                            acknowledged = false;
+                        }
+                    }
+                    if (acknowledged) {
+                        currentRun = State.reduceGenerationRun(currentRun, {
+                            type: 'finish_cancel',
+                            runId: currentRun.runId,
+                            epoch: currentRun.epoch,
+                            now: now()
+                        });
+                        await persist(currentRun);
+                    }
+                }
+                return {
+                    status: isActiveRun(currentRun) ? 'active' : currentRun.status,
+                    run: publicRun()
+                };
+            });
         }
 
         async function cancelGenerationRunForOwnerTab(tabId) {
@@ -515,6 +687,7 @@
             startGenerationRun,
             claimGenerationAction,
             reportGenerationAction,
+            dispatchGenerationAction,
             retryFailedGenerationItems,
             cancelGenerationRun,
             cancelGenerationRunForOwnerTab,

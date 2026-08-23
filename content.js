@@ -44,8 +44,252 @@ function isChatGptImagesProvider(provider) {
     return provider && provider.id === 'chatgpt-images';
 }
 
+function isUsableGrokComposer(element) {
+    if (!element || !element.isConnected || element.closest('#grok-powertools-overlay')) return false;
+    if (element.disabled || element.readOnly || element.getAttribute('aria-disabled') === 'true') return false;
+    const style = window.getComputedStyle ? window.getComputedStyle(element) : null;
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || 1) <= 0)) {
+        return false;
+    }
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) return false;
+    if (element instanceof HTMLTextAreaElement) return true;
+    const editable = String(element.getAttribute('contenteditable') || element.contentEditable || '').toLowerCase();
+    return editable === 'true' || editable === 'plaintext-only' || element.isContentEditable;
+}
+
+function getGrokComposerCandidates(root = document) {
+    return Array.from(root.querySelectorAll(
+        'textarea[aria-required="true"], textarea[aria-label], textarea[placeholder], '
+        + '[contenteditable="true"][role="textbox"], [contenteditable="plaintext-only"][role="textbox"]'
+    )).filter(isUsableGrokComposer);
+}
+
+function getGrokComposerContractText(element) {
+    return [
+        element.getAttribute('aria-label'),
+        element.getAttribute('placeholder'),
+        element.getAttribute('data-placeholder')
+    ].filter(Boolean).join(' ');
+}
+
+function resolveVisibleGrokComposer(triggerElement = null) {
+    const candidates = getGrokComposerCandidates();
+    if (!candidates.length) return null;
+    const triggerRoot = triggerElement?.closest?.('.query-bar, form, [role="dialog"], aside[aria-label="Post details"]');
+    const activeElement = document.activeElement;
+    const scored = candidates.map((element, index) => {
+        let score = 0;
+        if (element === activeElement) score += 100;
+        if (triggerRoot && triggerRoot.contains(element)) score += 80;
+        if (element.closest('.query-bar')) score += 20;
+        if (/ask\s+grok|message\s+grok|prompt/i.test(getGrokComposerContractText(element))) score += 10;
+        if (element instanceof HTMLTextAreaElement && element.getAttribute('aria-required') === 'true') score += 5;
+        return { element, index, score };
+    }).sort((left, right) => right.score - left.score || left.index - right.index);
+    if (scored.length > 1 && scored[0].score === scored[1].score) return null;
+    return scored[0].element;
+}
+
+function markGrokComposerForBridge(composer) {
+    if (!composer) return { marker: '', release: () => {} };
+    const marker = `gpt_prompt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    composer.setAttribute('data-gpt-prompt-target', marker);
+    return {
+        marker,
+        release: () => {
+            if (composer.getAttribute('data-gpt-prompt-target') === marker) {
+                composer.removeAttribute('data-gpt-prompt-target');
+            }
+        }
+    };
+}
+
 const EXTENSION_CONTEXT_REFRESHED_MESSAGE = 'Grok Power Tools reloaded. Refresh this Grok tab before continuing.';
 const SCRAPE_RUN_STATE_WRITE_TIMEOUT_MS = 1000;
+const SCRAPE_CRITICAL_RUN_STATE_WRITE_TIMEOUT_MS = 3000;
+const MAX_SYNC_ENTRY_LIMIT = 100;
+const GENERATION_MUTATING_WORKFLOW_KINDS = new Set(['quick_batch', 'prompted_batch', 'video_goal']);
+const MUTATING_WORKFLOW_LABELS = {
+    sync: 'Sync',
+    r2_backup: 'R2 Backup',
+    quick_batch: 'Quick Batch',
+    prompted_batch: 'Prompted Batch',
+    video_goal: 'Video Goal',
+    recreate: 'Recreate',
+    template_batch: 'Template Batch',
+    quality_repeat: 'Quality Repeat',
+    authority_conflict: 'workflow authority conflict'
+};
+const ownedPageWorkflowAuthorities = new Map();
+
+function getMutatingWorkflowLabel(kind) {
+    return MUTATING_WORKFLOW_LABELS[kind] || 'another workflow';
+}
+
+async function startOwnedPageWorkflow(kind, counts = null) {
+    const result = await safeChromeRuntimeSendMessage({
+        action: 'PAGE_WORKFLOW_START',
+        kind,
+        counts
+    }, `start ${kind}`);
+    if (result.invalidated) return { status: 'invalidated', authority: null };
+    const workflow = result.value?.activeWorkflow;
+    const response = {
+        status: result.value?.status || 'rejected',
+        error: result.value?.error || '',
+        activeWorkflow: workflow || null,
+        authority: result.value?.status === 'started' && workflow?.authority
+            ? { ...workflow.authority }
+            : null
+    };
+    if (response.authority) {
+        ownedPageWorkflowAuthorities.set(response.authority.runId, response.authority);
+    }
+    return response;
+}
+
+async function updateOwnedPageWorkflow(authority, counts = null) {
+    if (!authority) return false;
+    const result = await safeChromeRuntimeSendMessage({
+        action: 'PAGE_WORKFLOW_UPDATE',
+        ...authority,
+        counts
+    }, `update ${authority.kind}`);
+    return !result.invalidated && result.value?.status === 'updated';
+}
+
+async function finishOwnedPageWorkflow(authority, action = 'PAGE_WORKFLOW_COMPLETE') {
+    if (!authority) return false;
+    const result = await safeChromeRuntimeSendMessage({
+        action,
+        ...authority
+    }, `finish ${authority.kind}`);
+    const finished = !result.invalidated
+        && (result.value?.status === 'completed' || result.value?.status === 'stopped');
+    if (finished || result.value?.reason === 'stale_authority') {
+        ownedPageWorkflowAuthorities.delete(authority.runId);
+    }
+    return finished;
+}
+
+function startOwnedPageWorkflowHeartbeat(authority, getCounts, onAuthorityLost) {
+    if (!authority) return () => {};
+    let stopped = false;
+    let inFlight = false;
+    const beat = async () => {
+        if (stopped || inFlight) return;
+        inFlight = true;
+        try {
+            const current = ownedPageWorkflowAuthorities.get(authority.runId);
+            if (!current) {
+                stopped = true;
+                return;
+            }
+            const counts = typeof getCounts === 'function' ? getCounts() : null;
+            const updated = await updateOwnedPageWorkflow(authority, counts);
+            if (!updated) {
+                stopped = true;
+                ownedPageWorkflowAuthorities.delete(authority.runId);
+                onAuthorityLost?.();
+            }
+        } finally {
+            inFlight = false;
+        }
+    };
+    const timer = setInterval(beat, 10000);
+    return () => {
+        stopped = true;
+        clearInterval(timer);
+    };
+}
+
+const pageWorkflowPingListenerKey = '__gptPowerToolsPageWorkflowPingListenerInstalled';
+if (typeof module !== 'undefined' || !globalThis[pageWorkflowPingListenerKey]) {
+    const installed = safeChromeAddListener(() => chrome.runtime.onMessage, (request, _sender, sendResponse) => {
+        if (request?.action !== 'PAGE_WORKFLOW_PING') return false;
+        const authority = ownedPageWorkflowAuthorities.get(String(request.runId || ''));
+        const alive = Boolean(
+            authority
+            && authority.kind === request.kind
+            && authority.runId === request.runId
+            && authority.epoch === request.epoch
+        );
+        sendResponse({
+            alive,
+            runId: alive ? authority.runId : '',
+            epoch: alive ? authority.epoch : null
+        });
+        return false;
+    }, 'listen for page workflow heartbeat probes');
+    if (typeof module === 'undefined' && installed.ok) {
+        globalThis[pageWorkflowPingListenerKey] = true;
+    }
+}
+
+async function mutatePromptHistoryStorage(operation, payload = {}) {
+    const result = await safeChromeRuntimeSendMessage({
+        action: 'PROMPT_HISTORY_MUTATE',
+        operation,
+        ...payload
+    }, `${operation} prompt history`);
+    if (result.invalidated) return { ok: false, invalidated: true, promptHistory: [] };
+    return {
+        ok: result.value?.status === 'ok',
+        invalidated: false,
+        error: result.value?.error || '',
+        promptHistory: Array.isArray(result.value?.promptHistory) ? result.value.promptHistory : []
+    };
+}
+
+async function mutateSavedPromptsStorage(operation, payload = {}) {
+    const result = await safeChromeRuntimeSendMessage({
+        action: 'SAVED_PROMPTS_MUTATE',
+        operation,
+        ...payload
+    }, `${operation} saved prompts`);
+    if (result.invalidated) return { ok: false, invalidated: true, savedPrompts: [] };
+    return {
+        ok: result.value?.status === 'ok',
+        invalidated: false,
+        error: result.value?.error || '',
+        savedPrompts: Array.isArray(result.value?.savedPrompts) ? result.value.savedPrompts : []
+    };
+}
+const extensionContextState = {
+    invalidated: false,
+    messageShown: false,
+    handlers: new Set()
+};
+
+function isExtensionContextActive() {
+    if (extensionContextState.invalidated) return false;
+    if (typeof module !== 'undefined') return true;
+    if (getChromeRuntime()) return true;
+    latchExtensionContextInvalidated();
+    return false;
+}
+
+function latchExtensionContextInvalidated() {
+    if (extensionContextState.invalidated) return false;
+    extensionContextState.invalidated = true;
+    extensionContextState.handlers.forEach((handler) => {
+        try {
+            handler();
+        } catch {
+            // Every handler is best-effort after the extension context is gone.
+        }
+    });
+    return true;
+}
+
+function registerExtensionContextInvalidationHandler(handler) {
+    if (typeof handler !== 'function') return () => {};
+    extensionContextState.handlers.add(handler);
+    if (extensionContextState.invalidated) handler();
+    return () => extensionContextState.handlers.delete(handler);
+}
 
 function isExtensionContextInvalidatedError(error) {
     const message = String(error && (error.message || error) || '');
@@ -74,6 +318,7 @@ function getChromeStorageArea(areaName, methodName) {
 }
 
 function contextInvalidatedResult(operation, value) {
+    if (typeof module === 'undefined') latchExtensionContextInvalidated();
     return { ok: false, invalidated: true, operation, value };
 }
 
@@ -126,7 +371,19 @@ async function safeChromeRuntimeSendMessage(message, operation = 'send message',
                             if (typeof nextValue !== 'undefined') settle(nextValue);
                         }, reject);
                     }
-                    fallbackTimer = setTimeout(() => settle(undefined), 1000);
+                    const longRunningActions = new Set([
+                        'START_GPT_RECREATE',
+                        'R2_BACKUP_UPLOAD',
+                        'DOWNLOAD_MEDIA'
+                    ]);
+                    const timeoutMs = longRunningActions.has(message?.action)
+                        ? 30 * 60 * 1000
+                        : 30 * 1000;
+                    fallbackTimer = setTimeout(() => {
+                        if (settled) return;
+                        settled = true;
+                        reject(new Error(`${message?.action || 'runtime_message'}_timeout`));
+                    }, timeoutMs);
                 } catch (error) {
                     reject(error);
                 }
@@ -170,7 +427,9 @@ function safeChromeRuntimeGetURL(path) {
 }
 
 function showExtensionContextRefreshed(target) {
+    if (extensionContextState.messageShown) return;
     if (target && typeof target.setStatus === 'function') {
+        extensionContextState.messageShown = true;
         target.setStatus(EXTENSION_CONTEXT_REFRESHED_MESSAGE, 'error');
     }
 }
@@ -189,7 +448,13 @@ function showExtensionContextRefreshed(target) {
         const existing = globalThis[listenerKey];
         if (typeof existing === 'function') return existing;
         const listener = (event) => {
-            window._lastUploadedImageUrl = event.detail && event.detail.imageUrl;
+            const dialog = Array.from(document.querySelectorAll('[role="dialog"]'))
+                .find((candidate) => candidate.getBoundingClientRect().width > 0 && candidate.getBoundingClientRect().height > 0);
+            window._lastUploadedImageReceipt = {
+                imageUrl: event.detail && event.detail.imageUrl,
+                capturedAt: Date.now(),
+                dialog: dialog || null
+            };
             console.log('GrokPowerTools: Captured uploaded image URL');
         };
         globalThis[listenerKey] = listener;
@@ -479,6 +744,40 @@ function getGrokConversationId(value) {
     }
 }
 
+function normalizeSyncEntryLimit(value) {
+    const limit = Number(value);
+    return Number.isInteger(limit) && limit > 0 && limit <= MAX_SYNC_ENTRY_LIMIT
+        ? limit
+        : null;
+}
+
+function normalizeSyncEntryLimitState(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const entryLimit = normalizeSyncEntryLimit(value.entryLimit);
+    if (!entryLimit) return null;
+    const completedConversationIds = Array.from(new Set(
+        (Array.isArray(value.completedConversationIds) ? value.completedConversationIds : [])
+            .map((conversationId) => getGrokConversationId(
+                `https://grok.com/?conversation=${conversationId}`
+            ))
+            .filter(Boolean)
+    )).slice(0, entryLimit);
+    const attemptedConversationIds = Array.from(new Set([
+        ...completedConversationIds,
+        ...(Array.isArray(value.attemptedConversationIds) ? value.attemptedConversationIds : [])
+            .map((conversationId) => getGrokConversationId(
+                `https://grok.com/?conversation=${conversationId}`
+            ))
+            .filter(Boolean)
+    ])).slice(0, entryLimit);
+    return {
+        version: 2,
+        entryLimit,
+        attemptedConversationIds,
+        completedConversationIds
+    };
+}
+
 function getSavedCardConversationId(card) {
     if (!card) return '';
     const ownedLinks = [
@@ -712,6 +1011,42 @@ function evaluateGalleryReceipt({
 }
 
 function getSavedGalleryEntries(root = document) {
+    if (GrokImagineAdapter?.listGalleryItems && GrokImagineAdapter?.resolveGalleryItem) {
+        const listed = GrokImagineAdapter.listGalleryItems({
+            root,
+            surface: 'saved_gallery'
+        });
+        if (listed.status !== 'ok') return [];
+        return listed.items.map((descriptor) => {
+            const resolved = GrokImagineAdapter.resolveGalleryItem({
+                root,
+                descriptor
+            });
+            if (resolved.status !== 'matched') return null;
+            const mediaCandidates = Array.from(resolved.card.querySelectorAll('video, img'))
+                .filter((media) => (
+                    findMediaCardRoot(media) === resolved.card
+                    && getGrokMediaIdentity(getBackupMediaElementSrc(media))
+                        === descriptor.sourceAssetId
+                ));
+            const preferredTag = descriptor.mediaKind === 'video' ? 'video' : 'img';
+            const media = mediaCandidates.find((candidate) => (
+                candidate.tagName?.toLowerCase() === preferredTag
+            )) || mediaCandidates[0];
+            const sourceUrl = getBackupMediaElementSrc(media);
+            return media && sourceUrl ? {
+                card: resolved.card,
+                image: media,
+                sourceUrl,
+                sourceIdentity: descriptor.sourceAssetId,
+                cardIdentity: descriptor.sourcePostId,
+                conversationId: descriptor.conversationId
+                    || getSavedCardConversationId(resolved.card),
+                mediaKind: descriptor.mediaKind,
+                descriptor
+            } : null;
+        }).filter(Boolean);
+    }
     return getGrokGeneratedCardImages(root)
         .map((image) => {
             const card = findMediaCardRoot(image);
@@ -726,6 +1061,69 @@ function getSavedGalleryEntries(root = document) {
             } : null;
         })
         .filter((entry) => entry?.sourceIdentity && entry?.cardIdentity);
+}
+
+const GROK_CURRENT_SOURCE_HINT_SESSION_KEY = 'gptCurrentGrokSourceHint';
+
+function captureCurrentGrokSourceHint(event) {
+    if (!GrokImagineAdapter?.listGalleryItems || !GrokImagineAdapter?.resolveGalleryItem) return;
+    const surface = GrokImagineAdapter.detectGrokSurface({
+        root: document,
+        location: window.location
+    });
+    if (surface !== 'saved_gallery' && surface !== 'results_gallery') return;
+    const target = event?.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const listed = GrokImagineAdapter.listGalleryItems({
+        root: document,
+        surface
+    });
+    if (listed.status !== 'ok') return;
+    const matches = listed.items.filter((descriptor) => {
+        const resolved = GrokImagineAdapter.resolveGalleryItem({ root: document, descriptor });
+        return resolved.status === 'matched' && resolved.card.contains(target);
+    });
+    if (matches.length !== 1) return;
+    const descriptor = matches[0];
+    try {
+        window.sessionStorage.setItem(GROK_CURRENT_SOURCE_HINT_SESSION_KEY, JSON.stringify({
+            sourceAssetId: descriptor.sourceAssetId,
+            sourcePostId: descriptor.sourcePostId,
+            conversationId: descriptor.conversationId || '',
+            capturedAt: Date.now()
+        }));
+    } catch { }
+}
+
+function getCurrentGrokSourcePostIdHint() {
+    let hint;
+    try {
+        hint = JSON.parse(window.sessionStorage.getItem(GROK_CURRENT_SOURCE_HINT_SESSION_KEY) || 'null');
+    } catch {
+        return '';
+    }
+    const sourceAssetId = getGrokMediaIdentity(hint?.sourceAssetId);
+    const sourcePostId = getGrokMediaIdentity(hint?.sourcePostId);
+    const currentConversationId = getGrokConversationId(window.location.href);
+    if (!sourceAssetId || !sourcePostId) return '';
+    if (hint.conversationId && currentConversationId && hint.conversationId !== currentConversationId) return '';
+    const selectedNodes = Array.from(document.querySelectorAll('.react-flow__node-asset'))
+        .filter((node) => (
+            node.classList.contains('selected')
+            || node.getAttribute('aria-selected') === 'true'
+            || node.getAttribute('data-state') === 'selected'
+        ));
+    if (selectedNodes.length !== 1) return '';
+    const selectedAssetIds = new Set(Array.from(selectedNodes[0].querySelectorAll('img, video'))
+        .map((media) => getGrokMediaIdentity(getBackupMediaElementSrc(media)))
+        .filter(Boolean));
+    return selectedAssetIds.size === 1 && selectedAssetIds.has(sourceAssetId)
+        ? sourcePostId
+        : '';
+}
+
+function setupCurrentGrokSourceHintCapture() {
+    document.addEventListener('pointerdown', captureCurrentGrokSourceHint, true);
 }
 
 function getSavedGalleryEntryMediaType(entry) {
@@ -788,7 +1186,7 @@ function isSavedGalleryScrollableElement(element) {
         || /^(?:auto|scroll|overlay)$/.test(style.overflowY)
         || /^(?:auto|scroll|overlay)$/.test(style.overflow);
     const hasScrollableRange = Number(element.scrollHeight || 0) > Number(element.clientHeight || 0) + 1;
-    return declaresOverflow || hasScrollableRange;
+    return declaresOverflow && hasScrollableRange;
 }
 
 function getSavedGalleryScroller(list) {
@@ -919,6 +1317,10 @@ async function restoreSavedViewportReceipt(receiptValue, {
         if (!hasValidScope()) return { status: 'invalid_scope', receipt };
         if (detectGrokScrapeSurface(document, window.location) === SCRAPE_SURFACES.savedGallery) {
             const context = getSavedGalleryContext(document);
+            if (attempt > 0 && context && !hasOrderedSavedNeighborhood(context.entries, receipt)) {
+                if (!hasValidScope()) return { status: 'invalid_scope', receipt };
+                setSavedGalleryScrollTop(context.scroller, receipt.scrollTop);
+            }
             if (context && hasOrderedSavedNeighborhood(context.entries, receipt)) {
                 if (!hasValidScope()) return { status: 'invalid_scope', receipt };
                 const positionRestored = setSavedGalleryScrollTop(context.scroller, receipt.scrollTop);
@@ -998,6 +1400,8 @@ function waitForMediaFetchBridgeReady(root = document, timeoutMs = 5000, pollInt
     });
 }
 
+const MEDIA_DATA_URL_INLINE_MAX_BYTES = 8 * 1024 * 1024;
+
 async function fetchMediaDataUrlViaBridge(sourceUrl, root = document, timeoutMs = 30000) {
     await waitForMediaFetchBridgeReady(root, Math.min(5000, timeoutMs));
     const requestId = `fetch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1016,11 +1420,23 @@ async function fetchMediaDataUrlViaBridge(sourceUrl, root = document, timeoutMs 
             }
             root.addEventListener('__gpt_fetch_media_data_url_result', handleResult);
             root.dispatchEvent(new CustomEvent('__gpt_fetch_media_data_url', {
-                detail: { url: sourceUrl, requestId }
+                detail: {
+                    url: sourceUrl,
+                    requestId,
+                    maxInlineBytes: MEDIA_DATA_URL_INLINE_MAX_BYTES
+                }
             }));
         });
 
         if (result.dataUrl) return { dataUrl: result.dataUrl, size: result.size || 0, type: result.type || '' };
+        if (result.tooLarge) {
+            return {
+                dataUrl: null,
+                size: result.size || 0,
+                type: result.type || '',
+                tooLarge: true
+            };
+        }
         throw new Error('Bridge fetch returned no media data');
     } finally {
         root.dispatchEvent(new CustomEvent('__gpt_fetch_media_release', { detail: { requestId } }));
@@ -1133,6 +1549,44 @@ function normalizeGrokConversationAssetInventory(value, conversationId) {
     if (value.assets.length > GROK_CONVERSATION_INVENTORY_MAX_ASSETS) {
         throw new Error('conversation_inventory_asset_limit');
     }
+    const failureCount = Number(value.failureCount || 0);
+    const inflightResponseCount = Number(value.inflightResponseCount || 0);
+    if (!Number.isInteger(failureCount) || failureCount < 0
+        || !Number.isInteger(inflightResponseCount) || inflightResponseCount < 0) {
+        throw new Error('conversation_inventory_state_invalid');
+    }
+    const normalizeResponseIdentities = (records, code) => {
+        if (records === undefined) return [];
+        if (!Array.isArray(records)) throw new Error(code);
+        const seen = new Set();
+        return records.map((record) => {
+            if (!record || typeof record !== 'object' || Array.isArray(record)) {
+                throw new Error(code);
+            }
+            const responseId = String(record.responseId || '').trim().toLowerCase();
+            const parentResponseId = String(record.parentResponseId || '').trim().toLowerCase();
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(responseId)
+                || (parentResponseId
+                    && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(parentResponseId))
+                || seen.has(responseId)) {
+                throw new Error(code);
+            }
+            seen.add(responseId);
+            return { responseId, parentResponseId };
+        });
+    };
+    const failedResponses = normalizeResponseIdentities(
+        value.failedResponses,
+        'conversation_inventory_failed_response_invalid'
+    );
+    const inflightResponses = normalizeResponseIdentities(
+        value.inflightResponses,
+        'conversation_inventory_inflight_response_invalid'
+    );
+    const videoGenerationResponses = normalizeResponseIdentities(
+        value.videoGenerationResponses,
+        'conversation_inventory_video_response_invalid'
+    );
     if (getGrokSerializedByteLength(JSON.stringify(value)) > GROK_CONVERSATION_INVENTORY_MAX_BYTES) {
         throw new Error('conversation_inventory_too_large');
     }
@@ -1152,6 +1606,13 @@ function normalizeGrokConversationAssetInventory(value, conversationId) {
             ? candidate.mediaKind
             : '';
         if (!mediaKind) throw new Error('conversation_asset_media_type_missing');
+        const responseId = String(candidate.responseId || '').trim().toLowerCase();
+        const parentResponseId = String(candidate.parentResponseId || '').trim().toLowerCase();
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(responseId)
+            || (parentResponseId
+                && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(parentResponseId))) {
+            throw new Error('conversation_asset_response_identity_invalid');
+        }
 
         let parsed;
         try {
@@ -1170,13 +1631,23 @@ function normalizeGrokConversationAssetInventory(value, conversationId) {
             || getGrokMediaIdentity(parsed.toString()) !== assetId
         ) throw new Error('conversation_asset_source_invalid');
 
+        const promptText = String(candidate.promptText || '');
+        const promptEvidenceSource = [
+            'response_media_gen_input',
+            'asset_media_gen_input',
+            'unavailable'
+        ].includes(candidate.promptEvidenceSource)
+            ? candidate.promptEvidenceSource
+            : (promptText.trim() ? 'response_media_gen_input' : 'unavailable');
+
         return {
             assetId,
-            responseId: String(candidate.responseId || ''),
-            parentResponseId: String(candidate.parentResponseId || ''),
+            responseId,
+            parentResponseId,
             mediaKind,
             sourceUrl: parsed.toString(),
-            promptText: String(candidate.promptText || ''),
+            promptText,
+            promptEvidenceSource,
             assetMetadata: candidate.assetMetadata && typeof candidate.assetMetadata === 'object'
                 ? normalizeGrokInventoryMetadataValue(candidate.assetMetadata)
                 : null,
@@ -1186,7 +1657,16 @@ function normalizeGrokConversationAssetInventory(value, conversationId) {
         };
     });
 
-    return { schemaVersion: 1, conversationId: normalizedConversationId, assets };
+    return {
+        schemaVersion: 1,
+        conversationId: normalizedConversationId,
+        failureCount,
+        inflightResponseCount,
+        failedResponses,
+        inflightResponses,
+        videoGenerationResponses,
+        assets
+    };
 }
 
 async function fetchGrokConversationAssetInventoryViaBridge(
@@ -1218,6 +1698,10 @@ async function fetchGrokConversationAssetInventoryViaBridge(
     return normalizeGrokConversationAssetInventory(inventory, normalizedConversationId);
 }
 
+if (typeof globalThis !== 'undefined') {
+    globalThis.GrokPowerToolsFetchConversationAssetInventory = fetchGrokConversationAssetInventoryViaBridge;
+}
+
 function stableSerializeGrokInventoryValue(value) {
     if (Array.isArray(value)) return `[${value.map(stableSerializeGrokInventoryValue).join(',')}]`;
     if (value && typeof value === 'object') {
@@ -1233,6 +1717,10 @@ async function hashGrokConversationAssetInventory(inventory) {
     const canonical = stableSerializeGrokInventoryValue({
         schemaVersion: inventory.schemaVersion,
         conversationId: inventory.conversationId,
+        failureCount: inventory.failureCount,
+        inflightResponseCount: inventory.inflightResponseCount,
+        failedResponses: inventory.failedResponses,
+        inflightResponses: inventory.inflightResponses,
         assets: inventory.assets
     });
     const digest = await globalThis.crypto.subtle.digest(
@@ -1254,6 +1742,7 @@ function buildCaptureMetadataFromConversationAsset(inventory, asset) {
         responseId: asset.responseId,
         parentResponseId: asset.parentResponseId,
         promptText: asset.promptText,
+        promptEvidenceSource: asset.promptEvidenceSource,
         assetMetadata: asset.assetMetadata,
         mediaGenInput: asset.mediaGenInput
     };
@@ -1404,11 +1893,35 @@ function isBackupScrollerAtBottom(state) {
 
 const REQUIRED_STABLE_BOTTOM_ROUNDS = 8;
 const MINIMUM_STABLE_BOTTOM_MS = 6000;
-const BACKUP_MAX_SCROLL_ATTEMPTS = 1000;
-const SYNC_MAX_SCROLL_ATTEMPTS = 200;
+const SAVED_SCAN_MAX_SCROLL_ATTEMPTS = 5000;
 const SAVED_BOTTOM_PROBE_WAIT_MS = 750;
 const CANARY_TARGET_TYPE_SETTLE_ATTEMPTS = 10;
 const CANARY_TARGET_TYPE_SETTLE_INTERVAL_MS = 200;
+const SAVED_SCAN_MAX_VERIFICATION_RESTARTS = 3;
+
+function getSyncDestinationsForCloudMode(mode) {
+    if (mode === 'cloud_only') return ['r2'];
+    if (mode === 'dual_write') return ['local', 'r2'];
+    return ['local'];
+}
+
+function normalizeScrapeDestinations(values) {
+    const destinations = Array.isArray(values)
+        ? values.filter((value) => value === 'local' || value === 'r2')
+        : [];
+    return Array.from(new Set(destinations)).sort();
+}
+
+function scrapeDestinationsMatch(left, right) {
+    const normalizedLeft = normalizeScrapeDestinations(left);
+    const normalizedRight = normalizeScrapeDestinations(right);
+    return normalizedLeft.length === normalizedRight.length
+        && normalizedLeft.every((value, index) => value === normalizedRight[index]);
+}
+
+function appendUniqueIdentity(order, value) {
+    if (value && !order.includes(value)) order.push(value);
+}
 
 function createSavedScanLedger(now = Date.now()) {
     return {
@@ -1638,6 +2151,15 @@ function formatBackupMediaError(stage, code, value) {
     ].join(' ');
 }
 
+function getSafeSavedEntryFailureDetail(value) {
+    const text = String(value || '').trim();
+    if (/^[a-z0-9_-]{1,80}$/i.test(text)) return text;
+    if (/^stage=[a-z0-9_-]+ code=[a-z0-9_-]+ media=(?:unknown|\.\.\.[a-f0-9]{8})$/i.test(text)) {
+        return text;
+    }
+    return '';
+}
+
 function getR2BackupCanaryStopReason(options = {}, stats = {}) {
     if (options.mode !== 'canary') return null;
     const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : 1;
@@ -1802,9 +2324,16 @@ class SettingsManager {
         }, 'listen for settings changes');
     }
     get(key) { return this.settings[key]; }
-    set(key, value) { this.settings[key] = value; this.save(); this.notify(); }
-    setAll(updates) { this.settings = { ...this.settings, ...updates }; this.save(); this.notify(); }
-    save() { safeChromeStorageSet('sync', { gptGlobalSettings: this.settings }, 'save settings').catch(() => {}); }
+    set(key, value) { this.settings[key] = value; this.save({ [key]: value }); this.notify(); }
+    setAll(updates) { this.settings = { ...this.settings, ...updates }; this.save(updates); this.notify(); }
+    save(updates) {
+        safeChromeRuntimeSendMessage({
+            action: 'GLOBAL_SETTINGS_PATCH',
+            updates
+        }, 'save settings').then((result) => {
+            if (result.invalidated) this.notify();
+        }).catch(() => {});
+    }
     subscribe(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
     notify() { this.listeners.forEach(cb => cb(this.settings)); }
     export() { return JSON.stringify(this.settings, null, 2); }
@@ -1838,7 +2367,11 @@ class SettingsManager {
         }
         catch (e) { console.error(e); return false; }
     }
-    reset() { this.settings = { ...SettingsDefaults }; this.save(); this.notify(); }
+    reset() {
+        this.settings = { ...SettingsDefaults };
+        this.save(this.settings);
+        this.notify();
+    }
 }
 
 class PromptHistoryManager {
@@ -1846,8 +2379,10 @@ class PromptHistoryManager {
         this.settingsManager = settingsManager;
         this.history = [];
         this.listeners = new Set();
+        this.captureEnabled = true;
         this.init();
         this.setupCapture();
+        this.setupStorageSync();
     }
     async init() {
         const storedResult = await safeChromeStorageGet('local', ['promptHistory'], {}, 'load history');
@@ -1859,15 +2394,16 @@ class PromptHistoryManager {
 
         // Clicks (Video or Submit)
         window.addEventListener('click', (e) => {
+            if (!this.captureEnabled) return;
             // Video Button
-            const btn = e.target.closest('button[aria-label="Make video"]');
+            const btn = e.target.closest('button[aria-label="Make video" i]');
             if (btn) {
                 console.log('GPT: Make Video clicked');
                 this.captureCurrentPrompt('video', btn);
             }
 
             // Image Submit Button
-            const submitBtn = e.target.closest('button[aria-label="Submit"]');
+            const submitBtn = e.target.closest('button[aria-label="Submit"], button[aria-label="Send"]');
             if (submitBtn) {
                 console.log('GPT: Submit clicked');
                 this.captureCurrentPrompt(this.consumePromptCaptureHint() || 'image', submitBtn);
@@ -1876,14 +2412,32 @@ class PromptHistoryManager {
 
         // Enter Key in Textarea
         window.addEventListener('keydown', (e) => {
+            if (!this.captureEnabled) return;
             if (e.key === 'Enter' && !e.shiftKey) {
-                const ta = e.target.closest('textarea');
-                if (ta) {
-                    console.log('GPT: Enter pressed with len', ta.value.length);
-                    this.captureCurrentPrompt(this.consumePromptCaptureHint() || 'image', ta);
+                const composer = e.target.closest(
+                    'textarea[aria-required="true"], '
+                    + 'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"], '
+                    + '#prompt-textarea[contenteditable="true"][role="textbox"]'
+                );
+                if (composer) {
+                    this.captureCurrentPrompt(this.consumePromptCaptureHint() || 'image', composer);
                 }
             }
         }, true); // <--- Capture Phase
+    }
+
+    setupStorageSync() {
+        safeChromeAddListener(() => chrome.storage.onChanged, (changes, area) => {
+            if (area !== 'local' || !changes.promptHistory) return;
+            this.history = Array.isArray(changes.promptHistory.newValue)
+                ? changes.promptHistory.newValue
+                : [];
+            this.notify();
+        }, 'listen for prompt history changes');
+    }
+
+    setCaptureEnabled(enabled) {
+        this.captureEnabled = !!enabled;
     }
 
     consumePromptCaptureHint() {
@@ -1896,14 +2450,12 @@ class PromptHistoryManager {
 
     captureCurrentPrompt(type = 'image', triggerEl = null) {
         let text = '';
-        const ta = document.querySelector('textarea[aria-required="true"]');
-        const ce = document.querySelector('[contenteditable="true"]');
+        const composer = resolveVisibleGrokComposer(triggerEl);
 
-        // 1. Try Main Textarea first, then contenteditable
-        if (ta && ta.value && ta.value.trim().length > 0) {
-            text = ta.value.trim();
-        } else if (ce && ce.textContent && ce.textContent.trim().length > 0) {
-            text = ce.textContent.trim();
+        if (composer instanceof HTMLTextAreaElement && composer.value && composer.value.trim().length > 0) {
+            text = composer.value.trim();
+        } else if (composer && composer.textContent && composer.textContent.trim().length > 0) {
+            text = composer.textContent.trim();
         }
 
         // 2. If 'video' and text is empty, try to find context from trigger element (Card)
@@ -1935,27 +2487,30 @@ class PromptHistoryManager {
         }
     }
 
-    add(text, type = 'image') {
-        // De-duplicate if same text AND type
-        if (this.history.length > 0 && this.history[0].text === text && this.history[0].type === type) {
-            this.history[0].timestamp = Date.now();
-        } else {
-            this.history.unshift({
-                id: Date.now().toString(),
-                text: text,
-                type: type,
-                timestamp: Date.now()
-            });
-        }
+    async add(text, type = 'image') {
+        const timestamp = Date.now();
         const limit = this.settingsManager.get('historyLimit') || 50;
-        if (this.history.length > limit) this.history = this.history.slice(0, limit);
-        this.save();
-    }
-    save() {
-        safeChromeStorageSet('local', { promptHistory: this.history }, 'save history').catch(() => {});
+        const result = await mutatePromptHistoryStorage('add', {
+            entry: {
+                id: `history_${timestamp}_${Math.random().toString(16).slice(2, 10)}`,
+                text,
+                type,
+                timestamp
+            },
+            limit
+        });
+        if (!result.ok) return false;
+        this.history = result.promptHistory;
         this.notify();
+        return true;
     }
-    clear() { this.history = []; this.save(); }
+    async clear() {
+        const result = await mutatePromptHistoryStorage('clear');
+        if (!result.ok) return false;
+        this.history = result.promptHistory;
+        this.notify();
+        return true;
+    }
     subscribe(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
     notify() { this.listeners.forEach(cb => cb(this.history)); }
 }
@@ -1983,8 +2538,11 @@ class GrokOverlay {
         this.recreateAbortRequested = false;
         this.recreateUiRunSequence = 0;
         this.recreateRetryAvailable = false;
+        this.recreateActiveRunId = '';
         this.recreatePasteHandler = null;
         this.chatGptImageRunning = false;
+        this.activeWorkflowStatus = { status: 'idle', activeWorkflow: null };
+        this.activeWorkflowRefreshPromise = null;
 
         if (typeof document !== 'undefined') {
             this.render();
@@ -1992,7 +2550,16 @@ class GrokOverlay {
             this.restoreState();
             this.settingsManager.subscribe(s => this.onSettingsChange(s));
             this.historyManager.subscribe(h => this.renderHistoryList(h));
+            this.setupSavedPromptsStorageSync();
         }
+    }
+
+    setupSavedPromptsStorageSync() {
+        safeChromeAddListener(() => chrome.storage.onChanged, (changes, area) => {
+            if (area !== 'local' || !changes.savedPrompts) return;
+            this.savedPrompts = normalizeSavedPrompts(changes.savedPrompts.newValue);
+            this.renderSavedList();
+        }, 'listen for saved prompt changes');
     }
 
     async restoreState() {
@@ -2490,11 +3057,19 @@ class GrokOverlay {
                 this.setRecreateStatus('workflow_unavailable', 'error');
                 return;
             }
-            this.recreateAbortRequested = true;
-            this.setRecreateStopping(true);
-            this.setRecreateStatus('Stopping...', 'info');
             try {
-                const result = await safeChromeRuntimeSendMessage({ action: 'ABORT_GPT_RECREATE' }, 'abort recreate workflow');
+                const authority = await this.getOwnedWorkflowAuthority('recreate');
+                if (!authority) {
+                    this.setRecreateStatus('Recreate authority changed. Refresh this Grok tab.', 'error');
+                    return;
+                }
+                this.recreateAbortRequested = true;
+                this.setRecreateStopping(true);
+                this.setRecreateStatus('Stopping...', 'info');
+                const result = await safeChromeRuntimeSendMessage({
+                    action: 'ABORT_GPT_RECREATE',
+                    ...authority
+                }, 'abort recreate workflow');
                 if (result.invalidated) {
                     this.recreateAbortRequested = false;
                     this.setRecreateStopping(false);
@@ -2517,6 +3092,7 @@ class GrokOverlay {
                     this.recreateAbortRequested = false;
                     this.recreateRetryAvailable = !!this.recreateReference && retrySafe;
                     this.setRecreateRunning(false);
+                    await this.refreshActiveWorkflowStatus();
                     this.setRecreateStatus(
                         retrySafe
                             ? 'Cancelled. Reference retained for retry.'
@@ -2570,7 +3146,7 @@ class GrokOverlay {
         this.el.querySelector('#gptAddPromptBtn').addEventListener('click', () => this.saveCurrentPrompt(this.savedPromptType));
 
         // --- Template Batch ---
-        this.templateBatchManager = new TemplateBatchManager(this.toast);
+        this.templateBatchManager = new TemplateBatchManager(this.toast, this);
         this.el.querySelector('#gptTemplateBatchBtn').addEventListener('click', async () => {
             const count = parseInt(this.el.querySelector('#gptTemplateBatchCount').value, 10) || 10;
             const templateId = this.el.querySelector('#gptTemplateSelect').value;
@@ -2589,8 +3165,8 @@ class GrokOverlay {
             this.el.querySelector('#gptTemplateBatchBtn').style.display = '';
             this.el.querySelector('#gptTemplateBatchStopBtn').style.display = 'none';
         });
-        this.el.querySelector('#gptTemplateBatchStopBtn').addEventListener('click', () => {
-            this.templateBatchManager.stop();
+        this.el.querySelector('#gptTemplateBatchStopBtn').addEventListener('click', async () => {
+            await this.templateBatchManager.stop();
             this.el.querySelector('#gptTemplateBatchBtn').style.display = '';
             this.el.querySelector('#gptTemplateBatchStopBtn').style.display = 'none';
         });
@@ -2604,39 +3180,62 @@ class GrokOverlay {
             const count = Math.max(1, parseInt(this.el.querySelector('#gptQualityRepeatCount').value, 10) || 5);
             this.retryManager.startQualityRepeat(count);
         });
-        this.el.querySelector('#gptQualityRepeatStopBtn').addEventListener('click', () => {
-            this.retryManager.stopQualityRepeat();
+        this.el.querySelector('#gptQualityRepeatStopBtn').addEventListener('click', async () => {
+            await this.retryManager.stopQualityRepeat();
         });
 
         this.el.querySelector('#gptScrapeDownloadBtn').addEventListener('click', async () => {
             const btn = this.el.querySelector('#gptScrapeDownloadBtn');
             const stopBtn = this.el.querySelector('#gptScrapeStopBtn');
             const status = this.el.querySelector('#gptScrapeStatus');
+            const entryLimit = normalizeSyncEntryLimit(btn.dataset.syncEntryLimit);
+            delete btn.dataset.syncEntryLimit;
             btn.style.display = 'none';
             stopBtn.style.display = '';
             status.textContent = 'Starting gallery scan...';
-            const result = await safeChromeRuntimeSendMessage({ action: 'START_SCRAPE' }, 'start overlay scrape');
+            const result = await safeChromeRuntimeSendMessage({
+                action: 'START_SCRAPE',
+                ...(entryLimit ? { entryLimit } : {})
+            }, 'start overlay scrape');
             if (result.invalidated || result.value?.status !== 'started') {
                 btn.style.display = '';
                 stopBtn.style.display = 'none';
                 status.textContent = result.value?.error || EXTENSION_CONTEXT_REFRESHED_MESSAGE;
             }
+            await this.refreshActiveWorkflowStatus();
         });
         this.el.querySelector('#gptScrapeStopBtn').addEventListener('click', async () => {
             const btn = this.el.querySelector('#gptScrapeDownloadBtn');
             const stopBtn = this.el.querySelector('#gptScrapeStopBtn');
             const status = this.el.querySelector('#gptScrapeStatus');
-            btn.style.display = 'none';
-            stopBtn.style.display = '';
-            status.textContent = 'Stopping...';
-            const result = await safeChromeRuntimeSendMessage({ action: 'STOP_SCRAPE' }, 'stop overlay scrape');
-            if (!result.invalidated && result.value?.status === 'stopped') {
-                btn.style.display = '';
-                stopBtn.style.display = 'none';
-                status.textContent = 'Stopped.';
+            const authority = await this.getOwnedWorkflowAuthority('sync');
+            if (!authority) {
+                status.textContent = 'Sync authority changed. Refresh this Grok tab.';
                 return;
             }
-            status.textContent = result.value?.error || EXTENSION_CONTEXT_REFRESHED_MESSAGE;
+            btn.style.display = 'none';
+            stopBtn.style.display = '';
+            stopBtn.disabled = true;
+            status.textContent = 'Stopping...';
+            const result = await safeChromeRuntimeSendMessage({
+                action: 'STOP_SCRAPE',
+                ...authority
+            }, 'stop overlay scrape');
+            if (!result.invalidated && result.value?.status === 'stopped') {
+                await this.refreshActiveWorkflowStatus();
+                btn.style.display = '';
+                stopBtn.style.display = 'none';
+                stopBtn.disabled = false;
+                status.textContent = result.value.refreshOwnerRecommended
+                    ? 'Stopped. Refresh this Grok tab before starting another run.'
+                    : 'Stopped.';
+                return;
+            }
+            await this.refreshActiveWorkflowStatus();
+            stopBtn.disabled = false;
+            status.textContent = result.value?.status === 'stopping'
+                ? 'Still stopping. Refresh this Grok tab if Retry Stop does not clear it.'
+                : (result.value?.error || EXTENSION_CONTEXT_REFRESHED_MESSAGE);
         });
 
         const bindInput = (id, key, type = 'int') => {
@@ -2729,6 +3328,179 @@ class GrokOverlay {
         if (this.logViewer) this.logViewer.addLog(msg, type);
     }
 
+    handleExtensionContextInvalidated() {
+        this.recreateAbortRequested = true;
+        this.templateBatchManager?.stop();
+        [
+            '#gptRecreateStartBtn',
+            '#gptRecreateStopBtn',
+            '#gptStartGoalBtn',
+            '#gptQuickBatchBtn',
+            '#gptPromptedBatchBtn',
+            '#gptBatchStopBtn',
+            '#gptBatchResumeBtn',
+            '#gptBatchRetryFailedBtn',
+            '#gptBatchCancelRunBtn',
+            '#gptTemplateBatchBtn',
+            '#gptTemplateBatchStopBtn',
+            '#gptQualityRepeatBtn',
+            '#gptQualityRepeatStopBtn',
+            '#gptScrapeDownloadBtn',
+            '#gptScrapeStopBtn'
+        ].forEach((selector) => {
+            const control = this.el?.querySelector(selector);
+            if (control) control.disabled = true;
+        });
+        showExtensionContextRefreshed(this);
+    }
+
+    setWorkflowMessage(element, message) {
+        if (!element) return;
+        if (element.dataset.workflowMessage !== 'true') {
+            element.dataset.workflowPreviousText = element.textContent || '';
+        }
+        element.dataset.workflowMessage = 'true';
+        element.textContent = message;
+    }
+
+    clearWorkflowMessage(element) {
+        if (!element || element.dataset.workflowMessage !== 'true') return;
+        element.textContent = element.dataset.workflowPreviousText || '';
+        delete element.dataset.workflowMessage;
+        delete element.dataset.workflowPreviousText;
+    }
+
+    applyActiveWorkflowStatus(response) {
+        const normalized = response && typeof response === 'object'
+            ? response
+            : { status: 'idle', activeWorkflow: null };
+        this.activeWorkflowStatus = normalized;
+        const workflow = normalized.status === 'active' || normalized.status === 'conflict'
+            ? normalized.activeWorkflow
+            : null;
+        const activeKind = workflow?.kind || '';
+        const activeLabel = getMutatingWorkflowLabel(activeKind);
+        const isGeneration = GENERATION_MUTATING_WORKFLOW_KINDS.has(activeKind);
+        const isOwner = workflow?.isOwner === true;
+        const blockedSuffix = isOwner ? '' : ' in another Grok tab';
+
+        const generationButtons = [
+            '#gptStartGoalBtn',
+            '#gptQuickBatchBtn',
+            '#gptPromptedBatchBtn'
+        ];
+        generationButtons.forEach((selector) => {
+            const button = this.el?.querySelector(selector);
+            if (button) button.disabled = Boolean(workflow);
+        });
+        const batchStatus = this.el?.querySelector('#gptBatchStatus');
+        if (workflow && !isGeneration) {
+            if (batchStatus) batchStatus.style.display = 'block';
+            this.setWorkflowMessage(batchStatus, `Generation blocked by ${activeLabel}${blockedSuffix}.`);
+        } else {
+            this.clearWorkflowMessage(batchStatus);
+            if (batchStatus && !this.retryManager?.batchRunning && !this.retryManager?.goalRunning) {
+                batchStatus.style.display = 'none';
+            }
+        }
+
+        const recreateStart = this.el?.querySelector('#gptRecreateStartBtn');
+        const recreateStop = this.el?.querySelector('#gptRecreateStopBtn');
+        const recreateStatus = this.el?.querySelector('#gptRecreateStatus');
+        if (activeKind === 'recreate' && isOwner) {
+            this.setRecreateRunning(true);
+            this.setRecreateStopping(workflow.status === 'stopping');
+            this.setWorkflowMessage(
+                recreateStatus,
+                workflow.status === 'stopping'
+                    ? 'Recreate is still stopping. Refresh this Grok tab if it does not clear.'
+                    : `Recreate active: ${workflow.phase || 'workflow'}.`
+            );
+        } else if (workflow) {
+            if (recreateStart) recreateStart.disabled = true;
+            if (recreateStop && !this.recreateRunning) recreateStop.style.display = 'none';
+            this.setWorkflowMessage(recreateStatus, `Recreate blocked by ${activeLabel}${blockedSuffix}.`);
+        } else {
+            if (recreateStart) recreateStart.disabled = false;
+            this.clearWorkflowMessage(recreateStatus);
+            this.setRecreateRunning(false);
+        }
+
+        const scrapeStart = this.el?.querySelector('#gptScrapeDownloadBtn');
+        const scrapeStop = this.el?.querySelector('#gptScrapeStopBtn');
+        const scrapeStatus = this.el?.querySelector('#gptScrapeStatus');
+        if (activeKind === 'sync' && isOwner) {
+            if (scrapeStart) scrapeStart.style.display = 'none';
+            if (scrapeStop) {
+                scrapeStop.style.display = '';
+                scrapeStop.disabled = false;
+                scrapeStop.textContent = workflow.status === 'stopping' ? 'Retry Stop' : 'Stop';
+            }
+            this.setWorkflowMessage(
+                scrapeStatus,
+                workflow.status === 'stopping'
+                    ? 'Sync is still stopping. Refresh this Grok tab if it does not clear.'
+                    : 'Sync active.'
+            );
+        } else if (workflow) {
+            if (scrapeStart) {
+                scrapeStart.style.display = '';
+                scrapeStart.disabled = true;
+            }
+            if (scrapeStop) scrapeStop.style.display = 'none';
+            this.setWorkflowMessage(scrapeStatus, `Gallery Sync blocked by ${activeLabel}${blockedSuffix}.`);
+        } else {
+            if (scrapeStart) {
+                scrapeStart.style.display = '';
+                scrapeStart.disabled = false;
+            }
+            if (scrapeStop) {
+                scrapeStop.style.display = 'none';
+                scrapeStop.disabled = false;
+                scrapeStop.textContent = 'Stop';
+            }
+            this.clearWorkflowMessage(scrapeStatus);
+        }
+
+        ['#gptTemplateBatchBtn', '#gptQualityRepeatBtn'].forEach((selector) => {
+            const button = this.el?.querySelector(selector);
+            if (button) button.disabled = Boolean(workflow);
+        });
+        return normalized;
+    }
+
+    async refreshActiveWorkflowStatus() {
+        if (this.activeWorkflowRefreshPromise) return this.activeWorkflowRefreshPromise;
+        this.activeWorkflowRefreshPromise = (async () => {
+            const result = await safeChromeRuntimeSendMessage(
+                { action: 'GET_ACTIVE_WORKFLOW_STATUS' },
+                'load active workflow status'
+            );
+            if (result.invalidated) {
+                this.handleExtensionContextInvalidated();
+                return null;
+            }
+            return this.applyActiveWorkflowStatus(result.value);
+        })();
+        try {
+            return await this.activeWorkflowRefreshPromise;
+        } finally {
+            this.activeWorkflowRefreshPromise = null;
+        }
+    }
+
+    async getOwnedWorkflowAuthority(kind) {
+        const status = await this.refreshActiveWorkflowStatus();
+        const workflow = status?.activeWorkflow;
+        if (status?.status !== 'active'
+            || workflow?.kind !== kind
+            || workflow?.isOwner !== true
+            || !workflow.authority) {
+            return null;
+        }
+        return { ...workflow.authority };
+    }
+
     setChatGptStatus(text, type = 'neutral') {
         this.setStatus(text, type === 'info' ? 'neutral' : type);
     }
@@ -2742,7 +3514,18 @@ class GrokOverlay {
             return null;
         }
         try {
-            return await this.providerRunLedger.appendProviderRunLedgerEntry(entry);
+            const result = await safeChromeRuntimeSendMessage({
+                action: 'PROVIDER_RUN_LEDGER_APPEND',
+                entry
+            }, 'append provider run');
+            if (result.invalidated) {
+                showExtensionContextRefreshed(this);
+                return null;
+            }
+            if (result.value?.status !== 'ok') {
+                throw new Error(result.value?.error || 'provider_run_ledger_failed');
+            }
+            return result.value.entry || null;
         } catch (error) {
             if (isExtensionContextInvalidatedError(error)) {
                 showExtensionContextRefreshed(this);
@@ -2859,11 +3642,16 @@ class GrokOverlay {
 
         this.savedPrompts = normalized;
         if (migrated) {
-            const result = await safeChromeStorageSet('local', { savedPrompts: normalized }, 'migrate saved prompts');
+            const result = await mutateSavedPromptsStorage('normalize');
             if (result.invalidated) {
                 showExtensionContextRefreshed(this);
                 return;
             }
+            if (!result.ok) {
+                this.toast.show('Saved prompts could not be migrated', 'error');
+                return;
+            }
+            this.savedPrompts = normalizeSavedPrompts(result.savedPrompts);
         }
         this.renderSavedList();
     }
@@ -2921,7 +3709,10 @@ class GrokOverlay {
             main.className = 'gpt-prompt-tag gpt-saved-main';
             main.textContent = item.name || item.text.substring(0, 24);
             main.title = item.text;
-            main.onclick = () => this.injectPrompt(item.text, 'append');
+            main.onclick = () => this.injectPrompt(
+                item.text,
+                item.type === SAVED_PROMPT_TYPES.full ? 'replace' : 'append'
+            );
 
             const actions = document.createElement('div');
             actions.className = 'gpt-prompt-actions';
@@ -2972,25 +3763,33 @@ class GrokOverlay {
             const typeIcon = h.type === 'video' ? '🎥' : '🖼️';
             const typeClass = h.type === 'video' ? 'video' : 'image';
 
-            item.innerHTML = `
-                <div class="gpt-history-text">${h.text}</div>
-                <div class="gpt-history-meta">
-                    <span class="gpt-history-type ${typeClass}">${typeIcon}</span>
-                    <span>${timeStr}</span>
-                </div>
-            `;
+            const text = document.createElement('div');
+            text.className = 'gpt-history-text';
+            text.textContent = h.text;
+            const meta = document.createElement('div');
+            meta.className = 'gpt-history-meta';
+            const type = document.createElement('span');
+            type.className = `gpt-history-type ${typeClass}`;
+            type.textContent = typeIcon;
+            const time = document.createElement('span');
+            time.textContent = timeStr;
+            meta.append(type, time);
+            item.append(text, meta);
             list.appendChild(item);
         });
     }
 
-    async persistSavedPrompts(nextPrompts) {
-        const normalized = normalizeSavedPrompts(nextPrompts);
-        this.savedPrompts = normalized;
-        const result = await safeChromeStorageSet('local', { savedPrompts: normalized }, 'save prompts');
+    async mutateSavedPrompts(operation, payload = {}) {
+        const result = await mutateSavedPromptsStorage(operation, payload);
         if (result.invalidated) {
             showExtensionContextRefreshed(this);
             return false;
         }
+        if (!result.ok) {
+            this.toast.show(result.error || 'Saved prompt change failed', 'error');
+            return false;
+        }
+        this.savedPrompts = normalizeSavedPrompts(result.savedPrompts);
         this.renderSavedList();
         return true;
     }
@@ -3018,7 +3817,7 @@ class GrokOverlay {
             updatedAt: now
         };
 
-        await this.persistSavedPrompts([...this.savedPrompts, item]);
+        if (!await this.mutateSavedPrompts('add', { item })) return;
         this.toast.show(normalizedType === SAVED_PROMPT_TYPES.partial ? 'Partial Saved' : 'Prompt Saved', 'success');
     }
 
@@ -3049,9 +3848,7 @@ class GrokOverlay {
             updatedAt: Date.now()
         };
 
-        const next = [...this.savedPrompts];
-        next[index] = updated;
-        await this.persistSavedPrompts(next);
+        if (!await this.mutateSavedPrompts('update', { itemId, item: updated })) return;
         this.toast.show('Saved prompt updated', 'success');
     }
 
@@ -3060,8 +3857,7 @@ class GrokOverlay {
         if (!target) return;
         if (!confirm(`Delete "${target.name}"?`)) return;
 
-        const next = this.savedPrompts.filter((item) => item.id !== itemId);
-        await this.persistSavedPrompts(next);
+        if (!await this.mutateSavedPrompts('delete', { itemId })) return;
         this.toast.show('Saved prompt deleted', 'success');
     }
 
@@ -3086,7 +3882,7 @@ class GrokOverlay {
                 updatedAt: now
             }
         ];
-        await this.persistSavedPrompts([...this.savedPrompts, ...examples]);
+        if (!await this.mutateSavedPrompts('merge', { items: examples })) return;
         this.toast.show('Examples Loaded', 'success');
     }
 
@@ -3096,25 +3892,58 @@ class GrokOverlay {
             if (chatGptPrompt) return chatGptPrompt;
         }
 
-        const ta = document.querySelector('textarea[aria-required="true"]');
-        if (ta && ta.value && ta.value.trim()) return ta.value.trim();
-        const ce = document.querySelector('[contenteditable="true"]');
-        if (ce && ce.textContent && ce.textContent.trim()) return ce.textContent.trim();
+        const composer = resolveVisibleGrokComposer();
+        if (composer instanceof HTMLTextAreaElement && composer.value && composer.value.trim()) {
+            return composer.value.trim();
+        }
+        if (composer && composer.textContent && composer.textContent.trim()) return composer.textContent.trim();
         return '';
     }
 
     captureTemplateImageUrl() {
-        // Method 1: Find a user-uploaded image in the template dialog
-        const dialog = document.querySelector('[role="dialog"]');
-        if (dialog) {
-            const imgs = Array.from(dialog.querySelectorAll('img')).filter(img => {
-                const src = img.src || '';
-                return src.includes('assets.grok.com/users/') && !src.includes('share-images') && !src.includes('share-videos');
-            });
-            if (imgs.length > 0) return imgs[0].src;
+        const isTrustedUploadUrl = (value) => {
+            try {
+                const url = new URL(String(value || ''));
+                return url.protocol === 'https:'
+                    && url.hostname === 'assets.grok.com'
+                    && url.pathname.startsWith('/users/')
+                    && !url.pathname.includes('/share-images/')
+                    && !url.pathname.includes('/share-videos/');
+            } catch {
+                return false;
+            }
+        };
+        const visibleDialogs = Array.from(document.querySelectorAll('[role="dialog"]')).filter((dialog) => {
+            const rect = dialog.getBoundingClientRect();
+            return dialog.isConnected && rect.width > 0 && rect.height > 0;
+        });
+        if (visibleDialogs.length !== 1) {
+            delete window._lastUploadedImageReceipt;
+            return null;
         }
-        // Method 2: Captured from intercepted upload-file response
-        if (window._lastUploadedImageUrl) return window._lastUploadedImageUrl;
+        const dialog = visibleDialogs[0];
+        const imageUrls = Array.from(new Set(
+            Array.from(dialog.querySelectorAll('img'))
+                .map((image) => image.currentSrc || image.src || '')
+                .filter(isTrustedUploadUrl)
+        ));
+        if (imageUrls.length === 1) {
+            delete window._lastUploadedImageReceipt;
+            return imageUrls[0];
+        }
+        if (imageUrls.length > 1) {
+            delete window._lastUploadedImageReceipt;
+            return null;
+        }
+
+        const receipt = window._lastUploadedImageReceipt;
+        const receiptValid = receipt
+            && receipt.dialog === dialog
+            && dialog.isConnected
+            && Date.now() - Number(receipt.capturedAt || 0) <= 10 * 60 * 1000
+            && isTrustedUploadUrl(receipt.imageUrl);
+        delete window._lastUploadedImageReceipt;
+        if (receiptValid) return receipt.imageUrl;
         return null;
     }
 
@@ -3163,6 +3992,9 @@ class GrokOverlay {
     }
 
     formatRecreateStatus(response, fallback = 'Recreate workflow failed.') {
+        if (response?.activeWorkflow?.kind) {
+            return `Recreate blocked by ${getMutatingWorkflowLabel(response.activeWorkflow.kind)}.`;
+        }
         if (!response || !response.error) return fallback;
         if (response.phase && response.phase !== 'done') return `${response.phase}: ${response.error}`;
         return response.error;
@@ -3185,6 +4017,23 @@ class GrokOverlay {
         else if (type === 'success') this.toast.show(message, 'success');
     }
 
+    handleRecreateStatus(request = {}) {
+        const runId = String(request.runId || '');
+        if (this.recreateActiveRunId && runId && this.recreateActiveRunId !== runId) return;
+        if (runId) this.recreateActiveRunId = runId;
+        const message = request.phase && request.phase !== 'done'
+            ? `${request.phase}: ${request.message || request.error || ''}`
+            : (request.message || request.error || '');
+        this.setRecreateStatus(message, request.type || 'info');
+        if (request.terminal !== true) return;
+
+        this.recreateAbortRequested = false;
+        this.recreateRetryAvailable = !!this.recreateReference && request.retrySafe === true;
+        this.recreateActiveRunId = '';
+        this.setRecreateRunning(false);
+        this.refreshActiveWorkflowStatus().catch(() => {});
+    }
+
     setRecreateRunning(running) {
         this.recreateRunning = !!running;
         const startBtn = this.el.querySelector('#gptRecreateStartBtn');
@@ -3198,6 +4047,17 @@ class GrokOverlay {
             stopBtn.disabled = false;
             stopBtn.textContent = 'Stop';
         }
+        [
+            '#gptStartGoalBtn',
+            '#gptQuickBatchBtn',
+            '#gptPromptedBatchBtn',
+            '#gptScrapeDownloadBtn',
+            '#gptTemplateBatchBtn',
+            '#gptQualityRepeatBtn'
+        ].forEach((selector) => {
+            const control = this.el.querySelector(selector);
+            if (control) control.disabled = !!running;
+        });
     }
 
     setRecreateStopping(stopping) {
@@ -3242,7 +4102,10 @@ class GrokOverlay {
         const selectCurrent = actions.selectCurrentGeneratedMedia || actions.selectCurrentGeneratedImage;
         if (typeof selectCurrent !== 'function') throw new Error('workflow_unavailable');
 
-        this.recreateReference = await selectCurrent();
+        const sourcePostIdHint = getCurrentGrokSourcePostIdHint();
+        this.recreateReference = await selectCurrent(
+            sourcePostIdHint ? { sourcePostIdHint } : {}
+        );
         this.recreateRetryAvailable = false;
         this.setRecreateStatus(`Selected current Grok ${this.getRecreateReferenceKind()}.`, 'success');
     }
@@ -3289,9 +4152,11 @@ class GrokOverlay {
         }
 
         this.recreateAbortRequested = false;
+        this.recreateActiveRunId = '';
         const uiRunSequence = ++this.recreateUiRunSequence;
         this.setRecreateRunning(true);
         this.setRecreateStatus('Starting recreate workflow...', 'info');
+        let acknowledgedRun = false;
 
         try {
             const bestPracticesEnabled = !!this.el.querySelector('#gptRecreateBestPractices')?.checked;
@@ -3310,7 +4175,11 @@ class GrokOverlay {
                 return;
             }
 
-            if (response && response.ok) {
+            if (response && response.ok && response.started === true) {
+                acknowledgedRun = true;
+                this.recreateActiveRunId = String(response.runId || this.recreateActiveRunId || '');
+                this.setRecreateStatus('Recreate running in dedicated Grok work tabs...', 'info');
+            } else if (response && response.ok) {
                 this.recreateRetryAvailable = false;
                 const label = response.referenceKind === 'video' || this.getRecreateReferenceKind() === 'video' ? 'video' : 'image';
                 this.setRecreateStatus(`Generated ${label} ready.`, 'success');
@@ -3326,7 +4195,9 @@ class GrokOverlay {
         } finally {
             if (uiRunSequence !== this.recreateUiRunSequence) return;
             if (this.recreateAbortRequested) return;
+            if (acknowledgedRun) return;
             this.setRecreateRunning(false);
+            await this.refreshActiveWorkflowStatus();
         }
     }
 
@@ -3335,8 +4206,27 @@ class GrokOverlay {
             return this.appendPromptText(text);
         }
 
-        const ta = document.querySelector('textarea[aria-required="true"]');
+        if (isChatGptImagesProvider(this.provider)
+            && typeof this.chatGptActions?.fillChatGptPromptInput === 'function') {
+            try {
+                this.chatGptActions.fillChatGptPromptInput(text);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        const ta = resolveVisibleGrokComposer();
         if (ta) {
+            if (!(ta instanceof HTMLTextAreaElement)) {
+                const target = markGrokComposerForBridge(ta);
+                ta.focus();
+                document.dispatchEvent(new CustomEvent('__gpt_set_editor_content', {
+                    detail: { text, marker: target.marker }
+                }));
+                setTimeout(target.release, 0);
+                return true;
+            }
             ta.focus();
             // Reset React's internal value tracker so it detects our programmatic change
             const tracker = ta._valueTracker;
@@ -3350,24 +4240,39 @@ class GrokOverlay {
             nativeInputValueSetter.call(ta, text);
             ta.dispatchEvent(new Event('input', { bubbles: true }));
             ta.dispatchEvent(new Event('change', { bubbles: true }));
-        } else {
-            // Fallback: contenteditable div (TipTap/ProseMirror on Grok)
-            const ce = document.querySelector('[contenteditable="true"]');
-            if (ce) {
-                ce.focus();
-                document.dispatchEvent(new CustomEvent('__gpt_set_editor_content', {
-                    detail: { text }
-                }));
-            }
+            return true;
         }
+        return false;
     }
 
     appendPromptText(text) {
         const snippet = sanitizeSavedPromptText(text);
         if (!snippet) return false;
 
-        const ta = document.querySelector('textarea[aria-required="true"]');
+        if (isChatGptImagesProvider(this.provider)
+            && typeof this.chatGptActions?.fillChatGptPromptInput === 'function'
+            && typeof this.chatGptActions?.readChatGptPromptInput === 'function') {
+            try {
+                const current = this.chatGptActions.readChatGptPromptInput();
+                const next = mergePromptTextForAppend(current, snippet, SAVED_PROMPT_DELIMITER);
+                this.chatGptActions.fillChatGptPromptInput(next);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        const ta = resolveVisibleGrokComposer();
         if (ta) {
+            if (!(ta instanceof HTMLTextAreaElement)) {
+                const target = markGrokComposerForBridge(ta);
+                ta.focus();
+                document.dispatchEvent(new CustomEvent('__gpt_append_editor_content', {
+                    detail: { text: SAVED_PROMPT_DELIMITER + snippet, marker: target.marker }
+                }));
+                setTimeout(target.release, 0);
+                return true;
+            }
             ta.focus();
             const start = Number.isFinite(ta.selectionStart) ? ta.selectionStart : ta.value.length;
             const end = Number.isFinite(ta.selectionEnd) ? ta.selectionEnd : start;
@@ -3381,15 +4286,6 @@ class GrokOverlay {
             ta.dispatchEvent(new Event('input', { bubbles: true }));
             ta.dispatchEvent(new Event('change', { bubbles: true }));
             ta.setSelectionRange(next.caret, next.caret);
-            return true;
-        }
-
-        const ce = document.querySelector('[contenteditable="true"]');
-        if (ce) {
-            ce.focus();
-            document.dispatchEvent(new CustomEvent('__gpt_append_editor_content', {
-                detail: { text: SAVED_PROMPT_DELIMITER + snippet }
-            }));
             return true;
         }
 
@@ -3458,15 +4354,17 @@ const PROMPTED_VIDEO_FOCUS_POLL_MS = 100;
 const PROMPTED_VIDEO_FOCUS_WAIT_ATTEMPTS = 20;
 const PROMPTED_VIDEO_FOCUS_QUIESCENCE_MS = 500;
 const PROMPTED_VIDEO_SUBMIT_ACCEPTANCE_TIMEOUT_MS = 3000;
-const PROMPTED_RESULTS_CAPACITY_WAIT_MS = 60000;
+const GENERATION_CAPACITY_WAIT_MS = 15 * 60 * 1000;
+const GENERATION_CAPACITY_POLL_MS = 1000;
 const GENERATION_ACCEPTANCE_POLL_MS = 250;
 const GENERATION_ACCEPTANCE_TIMEOUT_MS = 15000;
 const GENERATION_RESULT_POLL_MS = 500;
 const GENERATION_RESULT_TIMEOUT_MS = 180000;
+const VIDEO_GOAL_HARD_RESULT_WAIT_MS = 720000;
 const AGENT_ACTION_QUIESCENCE_MS = 500;
 const PROMPTED_VIDEO_INPUT_SELECTOR =
     'div[contenteditable="true"][role="textbox"][aria-label="Ask Grok anything"]';
-const PROMPTED_VIDEO_LEGACY_SUBMIT_SELECTOR = 'button[aria-label="Make video"]';
+const PROMPTED_VIDEO_LEGACY_SUBMIT_SELECTOR = 'button[aria-label="Make video" i]';
 const PROMPTED_VIDEO_GROK2_SUBMIT_SELECTOR = 'button[aria-label="Send"]';
 const PROMPTED_VIDEO_SUBMIT_SELECTOR =
     `${PROMPTED_VIDEO_LEGACY_SUBMIT_SELECTOR}, ${PROMPTED_VIDEO_GROK2_SUBMIT_SELECTOR}`;
@@ -3481,7 +4379,7 @@ class VideoRetryManager {
         this.overlay = overlay;
         this.settingsManager = settingsManager;
         this.historyManager = historyManager;
-        this.BUTTON_SELECTOR = 'button[aria-label="Make video"]';
+        this.BUTTON_SELECTOR = 'button[aria-label="Make video" i]';
         this.PROGRESS_SELECTOR = 'button[aria-label="Video Options"]';
         this.currentRetry = 0;
         this.lastClickTime = 0;
@@ -3521,6 +4419,13 @@ class VideoRetryManager {
         this.qualityRepeatRunning = false;
         this.qualityRepeatTotal = 0;
         this.qualityRepeatCompleted = 0;
+        this.qualityRepeatGeneratedImages = 0;
+        this.qualityRepeatWorkflowAuthority = null;
+        this.qualityRepeatKnownIdentities = new Set();
+        this.qualityRepeatButtonIndex = -1;
+        this.qualityRepeatButtonCount = 0;
+        this.qualityRepeatInlineContainer = null;
+        this.qualityRepeatInlineSources = new WeakMap();
 
         this.settingsManager.subscribe(() => this.updateConfig());
         this.updateConfig();
@@ -3541,6 +4446,23 @@ class VideoRetryManager {
     // --- Fix 1: Safe overlay access ---
     safeStatus(msg, type) {
         if (this.overlay && this.overlay.setStatus) this.overlay.setStatus(msg, type);
+    }
+
+    handleExtensionContextInvalidated() {
+        this.batchAborted = true;
+        this.batchRunning = false;
+        this.goalRunning = false;
+        this.batchStartPending = false;
+        this.batchRunToken = null;
+        this.qualityRepeatRunning = false;
+        this.isVerifying = false;
+        this.targetContext = null;
+        this._clearPromptedVideoComposerRoot();
+        this.stopObserver();
+        if (this.generateMoreObserver) this.generateMoreObserver.disconnect();
+        this.updateBatchButtons(false);
+        this.updateQualityRepeatUI(false, 'Stopped: refresh this page to reconnect the extension.');
+        showExtensionContextRefreshed(this.overlay);
     }
 
     // --- Fix 2: Find the card container closest to viewport center ---
@@ -3630,7 +4552,8 @@ class VideoRetryManager {
     }
 
     isBatchRunActive(runToken = this.batchRunToken) {
-        return !!runToken
+        return isExtensionContextActive()
+            && !!runToken
             && (this.batchRunning || this.goalRunning)
             && !this.batchAborted
             && this.batchRunToken === runToken;
@@ -3851,7 +4774,7 @@ class VideoRetryManager {
     _getBoundAgentMakeVideoTriggers(binding) {
         if (!this._resolveCurrentAgentMediaBinding(binding)) return [];
         return Array.from(document.querySelectorAll(
-            'button[aria-label="Make Video"][aria-haspopup="menu"]'
+            'button[aria-label="Make Video" i][aria-haspopup="menu"]'
         )).filter((button) => this._isActionableAutomationTarget(button)
             && !button.closest('.react-flow, .react-flow__node-asset, .react-flow__node-toolbar'));
     }
@@ -3888,7 +4811,7 @@ class VideoRetryManager {
             return candidates.length === 1 ? candidates[0] : null;
         }
         return Array.from(document.querySelectorAll(
-            'button[aria-label="Make Video"][aria-haspopup="menu"]'
+            'button[aria-label="Make Video" i][aria-haspopup="menu"]'
         )).find((button) => this._isActionableAutomationTarget(button)) || null;
     }
 
@@ -3999,7 +4922,7 @@ class VideoRetryManager {
         if (immediate) return immediate;
 
         const attempts = Math.max(1, Math.ceil(
-            PROMPTED_RESULTS_CAPACITY_WAIT_MS / PROMPTED_VIDEO_FOCUS_POLL_MS
+            GENERATION_CAPACITY_WAIT_MS / PROMPTED_VIDEO_FOCUS_POLL_MS
         ));
         let announcedWait = false;
         for (let attempt = 0; attempt < attempts; attempt++) {
@@ -4029,13 +4952,79 @@ class VideoRetryManager {
         return null;
     }
 
-    _getVerifiedPromptedVideoComposers() {
+    _getVerifiedPromptedVideoComposers(requireActionableSubmit = true) {
         const roots = new Set(Array.from(document.querySelectorAll(PROMPTED_VIDEO_INPUT_SELECTOR))
             .map((input) => this._findPromptedVideoComposerRoot(input))
             .filter(Boolean));
         return Array.from(roots)
-            .map((root) => this._getVerifiedPromptedVideoComposer(root))
+            .map((root) => this._getVerifiedPromptedVideoComposer(root, requireActionableSubmit))
             .filter(Boolean);
+    }
+
+    _capturePromptedVideoComposerBaseline() {
+        const roots = new Set(Array.from(document.querySelectorAll(PROMPTED_VIDEO_INPUT_SELECTOR))
+            .map((input) => input.closest('.query-bar') || this._findPromptedVideoComposerRoot(input))
+            .filter((root) => this._isVisibleAutomationTarget(root)));
+        if (roots.size !== 1) return { root: null, input: null, submitCount: 0 };
+
+        const root = Array.from(roots)[0];
+        const inputs = Array.from(root.querySelectorAll(PROMPTED_VIDEO_INPUT_SELECTOR))
+            .filter((input) => (input.closest('.query-bar') || this._findPromptedVideoComposerRoot(input)) === root);
+        const submitCount = Array.from(root.querySelectorAll(PROMPTED_VIDEO_LEGACY_SUBMIT_SELECTOR))
+            .filter((button) => this._isVisibleAutomationTarget(button, 72)).length;
+        return {
+            root,
+            input: inputs.length === 1 ? inputs[0] : null,
+            submitCount
+        };
+    }
+
+    _isExactCurrentVideoComposer(composer) {
+        return !!composer
+            && !!this._getExactPromptedVideoRadioGroup(
+                composer.root,
+                'Generation mode',
+                ['Image', 'Video'],
+                'Video'
+            );
+    }
+
+    async _waitForSameRootPromptedVideoComposer(runToken, baseline) {
+        if (!baseline?.root || !baseline.input || baseline.submitCount !== 0) return null;
+        const requiredStablePolls = Math.max(
+            2,
+            Math.ceil(PROMPTED_VIDEO_FOCUS_QUIESCENCE_MS / PROMPTED_VIDEO_FOCUS_POLL_MS)
+        );
+        let stableComposer = null;
+        let stablePolls = 0;
+
+        for (let attempt = 0; attempt < PROMPTED_VIDEO_FOCUS_WAIT_ATTEMPTS; attempt++) {
+            if (!this.isPromptedBatchTokenActive(runToken)) return null;
+            const composers = this._getVerifiedPromptedVideoComposers(false);
+            if (composers.length > 1) return null;
+            const composer = composers[0] || null;
+            if (composer && composer.root !== baseline.root) return null;
+            if (composer
+                && composer.root === baseline.root
+                && composer.input === baseline.input
+                && this._isExactCurrentVideoComposer(composer)) {
+                if (stableComposer?.submitButton === composer.submitButton) {
+                    stablePolls += 1;
+                } else {
+                    stableComposer = composer;
+                    stablePolls = 1;
+                }
+                if (stablePolls >= requiredStablePolls) {
+                    this.promptedVideoComposerRoot = composer.root;
+                    return composer;
+                }
+            } else {
+                stableComposer = null;
+                stablePolls = 0;
+            }
+            await this.sleep(PROMPTED_VIDEO_FOCUS_POLL_MS);
+        }
+        return null;
     }
 
     async _waitForLegacyPromptedVideoSubmitButton(runToken) {
@@ -4309,6 +5298,14 @@ class VideoRetryManager {
         const validateAgentBinding = () => !agentBinding
             || !!this._resolveCurrentAgentMediaBinding(agentBinding);
         if (!validateAgentBinding()) return false;
+        const existingComposers = this._getVerifiedPromptedVideoComposers(false)
+            .filter((composer) => this._isExactCurrentVideoComposer(composer));
+        if (existingComposers.length > 1) return false;
+        if (existingComposers.length === 1) {
+            this.promptedVideoComposerRoot = existingComposers[0].root;
+            this.promptedVideoModeContract = 'current_menu';
+            return true;
+        }
         let currentTrigger = null;
         if (agentBinding) {
             if (readyMakeVideoTrigger) {
@@ -4338,11 +5335,21 @@ class VideoRetryManager {
             }
 
             if (!this.isPromptedBatchTokenActive(runToken) || !validateAgentBinding()) return false;
+            const composerBaseline = this._capturePromptedVideoComposerBaseline();
             const focusTransition = this._startPromptedVideoFocusTransition();
             let composer;
             try {
                 this.simulateClick(addPromptItem);
-                composer = await this._waitForFocusedPromptedVideoComposer(runToken, focusTransition);
+                composer = await this._waitForSameRootPromptedVideoComposer(
+                    runToken,
+                    composerBaseline
+                );
+                if (!composer) {
+                    composer = await this._waitForFocusedPromptedVideoComposer(
+                        runToken,
+                        focusTransition
+                    );
+                }
             } finally {
                 this._stopPromptedVideoFocusTransition(focusTransition);
             }
@@ -4392,7 +5399,13 @@ class VideoRetryManager {
         };
     }
 
-    async _clickPromptedBatchNativeControl(target, runToken, operation, validateTarget) {
+    async _clickPromptedBatchNativeControl(
+        target,
+        runToken,
+        operation,
+        validateTarget,
+        generationDispatch = null
+    ) {
         if (!this.isPromptedBatchTokenActive(runToken) || !target) return false;
         const click = this._getPromptedBatchNativeClickPoint(target);
         if (!click) return false;
@@ -4410,11 +5423,16 @@ class VideoRetryManager {
 
             const response = await safeChromeRuntimeSendMessage({
                 action: 'GPT_PROMPTED_VIDEO_NATIVE_CLICK',
-                click
+                click,
+                ...(generationDispatch ? { generationDispatch } : {})
             }, operation);
             if (!response.ok || response.invalidated || response.value?.ok !== true) {
                 if (response.invalidated) showExtensionContextRefreshed(this.overlay);
                 return false;
+            }
+            if (generationDispatch) {
+                if (response.value?.generation?.status !== 'submitted') return false;
+                this._rememberGenerationRun(response.value.generation);
             }
             return this.isPromptedBatchTokenActive(runToken);
         } catch (error) {
@@ -4472,15 +5490,6 @@ class VideoRetryManager {
 
         for (let attempt = 0; attempt < attempts; attempt++) {
             if (!this.isBatchRunActive(runToken)) return false;
-            const inputValue = receipt.input instanceof HTMLTextAreaElement
-                ? receipt.input.value
-                : receipt.input.textContent;
-            const inputChanged = !!receipt.inputValue
-                && String(inputValue || '').trim() !== receipt.inputValue;
-            const composerClosed = !receipt.composerRoot.isConnected;
-            const submitSettled = !receipt.submitButton.isConnected
-                || receipt.submitButton.disabled
-                || receipt.submitButton.getAttribute('aria-disabled') === 'true';
             const currentPostId = this._getImaginePostId(window.location.href);
             const currentConversationId = this._getImagineConversationId(window.location.href);
             const acceptedPostOpened = !!receipt.postId
@@ -4490,14 +5499,7 @@ class VideoRetryManager {
                 && !!currentConversationId
                 && currentConversationId === receipt.conversationId;
 
-            if (
-                inputChanged
-                || composerClosed
-                || submitSettled
-                || acceptedPostOpened
-            ) {
-                return true;
-            }
+            if (acceptedPostOpened) return true;
             await this.sleep(PROMPTED_VIDEO_FOCUS_POLL_MS);
         }
 
@@ -4674,11 +5676,27 @@ class VideoRetryManager {
     }
 
     _getGenerationOrigin(surface, descriptor = null) {
+        let viewportReceipt = null;
+        if (descriptor && surface === 'saved_gallery') {
+            viewportReceipt = captureSavedViewportReceipt({
+                sourceIdentity: descriptor.sourcePostId
+            });
+        } else if (descriptor && surface === 'results_gallery') {
+            const sourceIds = new Set([
+                descriptor.sourcePostId,
+                descriptor.sourceAssetId
+            ].filter(Boolean));
+            const originItem = this._getQualifiedResultsGalleryItems()
+                .find((item) => sourceIds.has(item.sourceId));
+            if (originItem) viewportReceipt = this._captureResultsGalleryReceipt(originItem);
+        }
         return {
             surface,
             url: window.location.href,
             pathname: window.location.pathname,
-            scrollY: Math.round(window.scrollY || document.documentElement.scrollTop || 0),
+            scrollY: viewportReceipt?.scrollTop
+                ?? Math.round(window.scrollY || document.documentElement.scrollTop || 0),
+            ...(viewportReceipt ? { viewportReceipt } : {}),
             ...(descriptor ? {
                 hrefPath: descriptor.hrefPath || '',
                 sourceAssetId: descriptor.sourceAssetId,
@@ -4717,10 +5735,56 @@ class VideoRetryManager {
 
         if (surface === 'results_gallery' || surface === 'saved_gallery') {
             if (surface !== this.generationRun?.origin?.surface) return null;
-            return { surface, url };
+            if (!descriptor) return null;
+            const resolved = GrokImagineAdapter.resolveGalleryItem({
+                root: document,
+                descriptor
+            });
+            if (resolved.status !== 'matched') return null;
+            return {
+                surface,
+                url,
+                sourceAssetId: descriptor.sourceAssetId,
+                sourcePostId: descriptor.sourcePostId
+            };
         }
 
         if (!descriptor) return null;
+        const activeItem = this.generationRun?.items?.find((item) => (
+            item.status === 'targeting'
+            || item.status === 'composer_ready'
+            || item.status === 'submitted'
+        )) || null;
+        if (activeItem?.status === 'submitted' && surface === 'legacy_detail') {
+            const checkpoint = this._restoreAdapterSubmissionReceipt(activeItem.receipt);
+            const submissionStatus = checkpoint
+                ? GrokImagineAdapter.evaluateSubmissionReceipt({ root: document, receipt: checkpoint })
+                : 'pending';
+            if (submissionStatus === 'accepted'
+                || submissionStatus === 'rejected'
+                || submissionStatus === 'usage_limited') {
+                return {
+                    surface,
+                    url,
+                    sourceAssetId: descriptor.sourceAssetId,
+                    sourcePostId: descriptor.sourcePostId,
+                    submissionChild: true
+                };
+            }
+        }
+        const currentConversationId = getGrokConversationId(url);
+        if (this.generationRun?.kind === 'video_goal'
+            && activeItem?.status === 'submitted'
+            && descriptor.conversationId
+            && currentConversationId === descriptor.conversationId
+            && (surface === 'legacy_detail' || surface === 'agent_media')) {
+            return {
+                surface,
+                url,
+                conversationId: currentConversationId,
+                videoGoalSubmitted: true
+            };
+        }
         const identityReceipt = GrokImagineAdapter.captureSubmissionReceipt({
             root: document,
             descriptor,
@@ -4739,12 +5803,13 @@ class VideoRetryManager {
         const response = await this._sendGenerationMessage({
             action: 'GENERATION_RUN_START',
             kind,
-            origin: this._getGenerationOrigin(surface, items.length === 1 ? items[0] : null),
+            origin: this._getGenerationOrigin(surface, items[0] || null),
             items,
             prompt,
             options
         }, `start ${kind}`);
         this._rememberGenerationRun(response);
+        await this.overlay?.refreshActiveWorkflowStatus?.();
         return response;
     }
 
@@ -4779,25 +5844,31 @@ class VideoRetryManager {
         if (this.generationCancellationListenerInstalled) return;
         const listener = (request, _sender, sendResponse) => {
             if (request?.action !== 'GENERATION_RUN_CANCELLED') return false;
-            const matches = this.generationRun
-                && request.runId === this.generationRun.runId
-                && request.epoch >= this.generationRun.epoch;
-            if (matches) {
+            const localActive = this.generationRun
+                && !['completed', 'cancelled', 'failed'].includes(this.generationRun.status);
+            const differentActiveRun = localActive && request.runId !== this.generationRun.runId;
+            const acknowledged = Boolean(request.runId) && !differentActiveRun;
+            const matches = acknowledged
+                && this.generationRun
+                && request.runId === this.generationRun.runId;
+            if (acknowledged) {
                 this.batchAborted = true;
                 this.batchRunning = false;
                 this.goalRunning = false;
                 this.batchRunToken = null;
-                this.generationRun = {
-                    ...this.generationRun,
-                    epoch: request.epoch,
-                    status: 'cancelled'
-                };
+                if (matches) {
+                    this.generationRun = {
+                        ...this.generationRun,
+                        epoch: request.epoch,
+                        status: 'cancelled'
+                    };
+                }
                 this._clearPromptedVideoComposerRoot();
                 this.updateBatchButtons(false);
                 this.updateGenerationRunControls(this.generationRun);
                 this.safeStatus('Generation run cancelled', 'neutral');
             }
-            sendResponse({ acknowledged: Boolean(matches) });
+            sendResponse({ acknowledged });
             return false;
         };
         const installed = safeChromeAddListener(
@@ -4819,12 +5890,26 @@ class VideoRetryManager {
         this.updateGenerationRunControls(this.generationRun);
         if (this.generationRun.status === 'retryable_failed') {
             this.safeStatus(
-                `${this.generationRun.kind}: ${this.generationRun.counts.accepted} accepted, ${this.generationRun.counts.failed} failed. Retry Failed or Cancel Run.`,
+                `${this.generationRun.kind}: ${this.generationRun.counts.accepted} accepted, ${this.generationRun.counts.failed} failed.${this._getGenerationFailureSummary(this.generationRun)} Retry Failed or Cancel Run.`,
                 'warning'
             );
             return true;
         }
         return this.resumeGenerationRun({ automatic: true });
+    }
+
+    _getGenerationFailureSummary(run = this.generationRun) {
+        const codes = Array.from(new Set((run?.items || [])
+            .map((item) => item.failureCode)
+            .filter(Boolean)));
+        if (codes.length === 0) return '';
+        const labels = {
+            provider_usage_limit: ' Grok usage limit reached.',
+            provider_rejected: ' Grok rejected the generation.',
+            submission_outcome_unconfirmed: ' Grok did not expose a verifiable launch receipt.',
+            provider_capacity: ' Grok generation capacity is unavailable.'
+        };
+        return labels[codes[0]] || ` Failure: ${codes[0].replace(/_/g, ' ')}.`;
     }
 
     async resumeGenerationRun(options = {}) {
@@ -4841,7 +5926,52 @@ class VideoRetryManager {
         }
 
         const descriptor = this._getActiveGenerationDescriptor();
-        if (!this._buildGenerationResumeProof(descriptor)) {
+        let runtimePrepared = false;
+        const prepareRuntime = () => {
+            if (runtimePrepared) return;
+            this.batchAborted = false;
+            this.batchContext = this.generationRun.origin.surface;
+            this.batchRunToken = this.createBatchRunToken();
+            if (this.generationRun.kind === 'video_goal') {
+                this.goalRunning = true;
+                this.batchRunning = false;
+                this.batchMode = null;
+                this.goalTotal = this.generationRun.options.goalCount;
+                this.goalCount = this.generationRun.goalProgress;
+            } else {
+                this.goalRunning = false;
+                this.batchRunning = true;
+                this.batchMode = this.generationRun.kind === 'quick_batch' ? 'quick' : 'prompted';
+                this.goalTotal = this.generationRun.items.length;
+            }
+            runtimePrepared = true;
+            this.updateCounters();
+        };
+        const clearPreparedRuntime = () => {
+            if (!runtimePrepared) return;
+            this.batchRunning = false;
+            this.goalRunning = false;
+            this.batchRunToken = null;
+            runtimePrepared = false;
+        };
+
+        let resumeProof = this._buildGenerationResumeProof(descriptor);
+        const originSurface = this.generationRun.origin?.surface;
+        if (!resumeProof
+            && (originSurface === 'results_gallery' || originSurface === 'saved_gallery')) {
+            let originPath = '';
+            try {
+                originPath = new URL(this.generationRun.origin.url).pathname;
+            } catch { }
+            if (originPath && window.location.pathname === originPath) {
+                prepareRuntime();
+                await this._waitForGenerationOrigin(this.batchRunToken, 15000);
+                resumeProof = this._buildGenerationResumeProof(descriptor);
+                if (!resumeProof) clearPreparedRuntime();
+            }
+        }
+
+        if (!resumeProof) {
             const originUrl = this.generationRun.origin?.url;
             if (!originUrl || options.automatic) {
                 this.safeStatus('Resume Run: return to the original Grok source', 'warning');
@@ -4852,25 +5982,13 @@ class VideoRetryManager {
             return true;
         }
 
-        this.batchAborted = false;
-        this.batchContext = this.generationRun.origin.surface;
-        this.batchRunToken = this.createBatchRunToken();
+        prepareRuntime();
         this.generationResumePending = true;
         this.updateGenerationRunControls(this.generationRun);
         if (this.generationRun.kind === 'video_goal') {
-            this.goalRunning = true;
-            this.batchRunning = false;
-            this.batchMode = null;
-            this.goalTotal = this.generationRun.options.goalCount;
-            this.goalCount = this.generationRun.goalProgress;
-            this.updateCounters();
             await this._runVideoGoal(this.batchRunToken);
             return true;
         }
-        this.goalRunning = false;
-        this.batchRunning = true;
-        this.batchMode = this.generationRun.kind === 'quick_batch' ? 'quick' : 'prompted';
-        this.goalTotal = this.generationRun.items.length;
         this.updateBatchButtons(true);
         if (this.generationRun.kind === 'quick_batch') {
             await this._runQuickBatch(this.batchRunToken);
@@ -4937,6 +6055,20 @@ class VideoRetryManager {
         });
     }
 
+    _createGenerationDispatch(claim, checkpoint) {
+        return {
+            runId: claim.runId,
+            epoch: claim.epoch,
+            itemId: claim.itemId,
+            claimId: claim.claimId,
+            receipt: this._createCheckpointedGenerationReceipt(
+                claim,
+                'submit_dispatched',
+                checkpoint
+            )
+        };
+    }
+
     _restoreAdapterSubmissionReceipt(receipt) {
         if (receipt?.checkpointVersion !== 1
             || !Number.isInteger(receipt.baselineAcceptedCount)
@@ -4958,25 +6090,292 @@ class VideoRetryManager {
     }
 
     _createVideoGoalReceipt(claim, observedState, checkpoint, resultBaseline, extra = {}) {
+        const providerBaseline = resultBaseline?.version === 1
+            ? {
+                resultBaselineVersion: resultBaseline.version,
+                baselineResultAssetIds: [...resultBaseline.mediaAssetIds],
+                baselineFailureCount: resultBaseline.failureCount,
+                sourceResponseId: resultBaseline.sourceResponseId,
+                baselineFailureResponseIds: [...resultBaseline.failureResponseIds],
+                baselineInflightResponseIds: [...(resultBaseline.inflightResponseIds || [])],
+                baselineVideoGenerationResponseIds: [
+                    ...(resultBaseline.videoGenerationResponseIds || [])
+                ]
+            }
+            : {};
         return {
             ...this._createCheckpointedGenerationReceipt(claim, observedState, checkpoint),
-            resultBaselineVersion: resultBaseline.version,
-            baselineResultAssetIds: [...resultBaseline.mediaAssetIds],
-            baselineFailureCount: resultBaseline.failureCount,
+            ...providerBaseline,
             ...extra
+        };
+    }
+
+    _createDomResultBaselineReceiptFields(baseline) {
+        if (baseline?.version !== 1
+            || !Array.isArray(baseline.mediaAssetIds)
+            || !Number.isInteger(baseline.failureCount)) {
+            return {};
+        }
+        return {
+            domResultBaselineVersion: baseline.version,
+            baselineDomResultAssetIds: [...baseline.mediaAssetIds],
+            baselineDomFailureCount: baseline.failureCount
+        };
+    }
+
+    _createVideoGoalDispatch(claim, checkpoint, resultBaseline, extra = {}) {
+        return {
+            runId: claim.runId,
+            epoch: claim.epoch,
+            itemId: claim.itemId,
+            claimId: claim.claimId,
+            receipt: this._createVideoGoalReceipt(
+                claim,
+                'submit_dispatched',
+                checkpoint,
+                resultBaseline,
+                extra
+            )
         };
     }
 
     _restoreGeneratedResultBaseline(receipt) {
         if (receipt?.resultBaselineVersion !== 1
             || !Array.isArray(receipt.baselineResultAssetIds)
-            || !Number.isInteger(receipt.baselineFailureCount)) {
+            || !Number.isInteger(receipt.baselineFailureCount)
+            || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                String(receipt.sourceResponseId || '')
+            )
+            || !Array.isArray(receipt.baselineFailureResponseIds)) {
             return null;
         }
         return {
             version: 1,
             mediaAssetIds: [...receipt.baselineResultAssetIds],
-            failureCount: receipt.baselineFailureCount
+            failureCount: receipt.baselineFailureCount,
+            sourceResponseId: receipt.sourceResponseId.toLowerCase(),
+            failureResponseIds: [...receipt.baselineFailureResponseIds],
+            inflightResponseIds: Array.isArray(receipt.baselineInflightResponseIds)
+                ? [...receipt.baselineInflightResponseIds]
+                : [],
+            videoGenerationResponseIds: Array.isArray(receipt.baselineVideoGenerationResponseIds)
+                ? [...receipt.baselineVideoGenerationResponseIds]
+                : null
+        };
+    }
+
+    _restoreDomGeneratedResultBaseline(receipt) {
+        if (receipt?.domResultBaselineVersion !== 1
+            || !Array.isArray(receipt.baselineDomResultAssetIds)
+            || !Number.isInteger(receipt.baselineDomFailureCount)) {
+            return null;
+        }
+        return {
+            version: 1,
+            mediaAssetIds: [...receipt.baselineDomResultAssetIds],
+            failureCount: receipt.baselineDomFailureCount
+        };
+    }
+
+    async _captureVideoGoalInventoryBaseline(descriptor) {
+        const conversationId = getGrokConversationId(
+            `https://grok.com/?conversation=${descriptor?.conversationId || ''}`
+        );
+        if (!conversationId) return null;
+        const inventory = await fetchGrokConversationAssetInventoryViaBridge(conversationId);
+        const sourceAsset = inventory.assets.find((asset) => (
+            asset.assetId === descriptor?.sourceAssetId
+        ));
+        const sourceResponseId = String(sourceAsset?.responseId || '').toLowerCase();
+        if (!sourceResponseId) return null;
+        return {
+            version: 1,
+            mediaAssetIds: inventory.assets
+                .filter((asset) => (
+                    asset.mediaKind === 'video'
+                    && asset.parentResponseId === sourceResponseId
+                ))
+                .map((asset) => asset.assetId)
+                .sort(),
+            failureCount: inventory.failureCount,
+            sourceResponseId,
+            failureResponseIds: inventory.failedResponses
+                .filter((response) => response.parentResponseId === sourceResponseId)
+                .map((response) => response.responseId)
+                .sort(),
+            inflightResponseIds: inventory.inflightResponses
+                .filter((response) => response.parentResponseId === sourceResponseId)
+                .map((response) => response.responseId)
+                .sort(),
+            videoGenerationResponseIds: inventory.videoGenerationResponses
+                .filter((response) => response.parentResponseId === sourceResponseId)
+                .map((response) => response.responseId)
+                .sort()
+        };
+    }
+
+    _findPlayableVideoByAssetId(assetId) {
+        const matches = Array.from(document.querySelectorAll('video'))
+            .filter((video) => getGrokMediaIdentity(getBackupMediaElementSrc(video)) === assetId);
+        if (matches.length > 1) {
+            const playable = matches.filter((video) => (
+                Number(video.readyState) >= 2
+                && Number.isFinite(Number(video.duration))
+                && Number(video.duration) > 0
+                && Number(video.videoWidth) > 0
+                && Number(video.videoHeight) > 0
+            ));
+            return playable.length === 1 ? playable[0] : null;
+        }
+        const video = matches[0];
+        return video
+            && Number(video.readyState) >= 2
+            && Number.isFinite(Number(video.duration))
+            && Number(video.duration) > 0
+            && Number(video.videoWidth) > 0
+            && Number(video.videoHeight) > 0
+            ? video
+            : null;
+    }
+
+    async _verifyPlayableVideoSource(asset, runToken, timeoutMs = 20000) {
+        if (!asset?.assetId || !asset.sourceUrl || !this.isBatchRunActive(runToken)) return false;
+        if (this._findPlayableVideoByAssetId(asset.assetId)) return true;
+
+        const probe = document.createElement('video');
+        probe.preload = 'metadata';
+        probe.muted = true;
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeoutId);
+                probe.removeAttribute('src');
+                try { probe.load(); } catch { }
+                resolve(value && this.isBatchRunActive(runToken));
+            };
+            const verify = () => finish(
+                Number.isFinite(Number(probe.duration))
+                && Number(probe.duration) > 0
+                && Number(probe.videoWidth) > 0
+                && Number(probe.videoHeight) > 0
+            );
+            const timeoutId = setTimeout(() => finish(false), timeoutMs);
+            probe.addEventListener('loadedmetadata', verify, { once: true });
+            probe.addEventListener('canplay', verify, { once: true });
+            probe.addEventListener('error', () => finish(false), { once: true });
+            probe.src = asset.sourceUrl;
+            try { probe.load(); } catch { finish(false); }
+        });
+    }
+
+    async _inspectVideoGoalInventoryResult(descriptor, before, runToken, timeoutMs = 30000) {
+        const conversationId = getGrokConversationId(
+            `https://grok.com/?conversation=${descriptor?.conversationId || ''}`
+        );
+        if (!conversationId || before?.version !== 1
+            || !Array.isArray(before.mediaAssetIds)
+            || !Number.isInteger(before.failureCount)
+            || !before.sourceResponseId
+            || !Array.isArray(before.failureResponseIds)) {
+            return { status: 'ambiguous', resultAssetId: '' };
+        }
+        const inventory = await fetchGrokConversationAssetInventoryViaBridge(
+            conversationId,
+            document,
+            timeoutMs
+        );
+        if (inventory.failureCount < before.failureCount) {
+            return { status: 'ambiguous', resultAssetId: '' };
+        }
+        const baselineAssetIds = new Set(before.mediaAssetIds.map(getGrokMediaIdentity).filter(Boolean));
+        const baselineFailureIds = new Set(before.failureResponseIds);
+        const baselineInflightIds = new Set(before.inflightResponseIds || []);
+        const failures = inventory.failedResponses.filter((response) => (
+            response.parentResponseId === before.sourceResponseId
+            && !baselineFailureIds.has(response.responseId)
+        ));
+        const candidates = inventory.assets.filter((asset) => (
+            asset.mediaKind === 'video'
+            && asset.parentResponseId === before.sourceResponseId
+            && !baselineAssetIds.has(asset.assetId)
+        ));
+        if (failures.length > 1 || candidates.length > 1
+            || (failures.length === 1 && candidates.length === 1)) {
+            return { status: 'ambiguous', resultAssetId: '' };
+        }
+        if (failures.length === 1) return { status: 'failed', resultAssetId: '' };
+        if (candidates.length === 1) {
+            const playable = await this._verifyPlayableVideoSource(
+                candidates[0],
+                runToken,
+                timeoutMs
+            );
+            if (playable) return { status: 'ready', resultAssetId: candidates[0].assetId };
+        }
+        const sourceInflight = inventory.inflightResponses.filter((response) => (
+            response.parentResponseId === before.sourceResponseId
+            && !baselineInflightIds.has(response.responseId)
+        ));
+        const inflight = sourceInflight.length > 0;
+        return {
+            status: inflight ? 'inflight' : 'pending',
+            resultAssetId: '',
+            progressSignature: JSON.stringify({
+                candidates: candidates.map((asset) => asset.assetId).sort(),
+                failures: failures.map((response) => response.responseId).sort(),
+                inflight: sourceInflight.map((response) => response.responseId).sort(),
+                inflightCount: inventory.inflightResponseCount
+            })
+        };
+    }
+
+    async _waitForVideoGoalInventoryResult(
+        descriptor,
+        before,
+        runToken,
+        timeoutMs = GENERATION_RESULT_TIMEOUT_MS
+    ) {
+        if (before?.version !== 1) return { status: 'ambiguous', resultAssetId: '' };
+        const idleTimeoutMs = Math.max(1000, Number(timeoutMs) || GENERATION_RESULT_TIMEOUT_MS);
+        const startedAt = Date.now();
+        const hardDeadline = startedAt + Math.max(
+            idleTimeoutMs + 120000,
+            VIDEO_GOAL_HARD_RESULT_WAIT_MS
+        );
+        let idleDeadline = startedAt + idleTimeoutMs;
+        let lastProgressSignature = '';
+        while (this.isBatchRunActive(runToken)
+            && Date.now() < hardDeadline
+            && Date.now() < idleDeadline) {
+            let inspection;
+            try {
+                inspection = await this._inspectVideoGoalInventoryResult(
+                    descriptor,
+                    before,
+                    runToken,
+                    Math.min(30000, Math.max(1000, hardDeadline - Date.now()))
+                );
+            } catch {
+                if (!this.isBatchRunActive(runToken)) {
+                    return { status: 'cancelled', resultAssetId: '' };
+                }
+                await this.sleep(Math.min(2000, Math.max(0, idleDeadline - Date.now())));
+                continue;
+            }
+            if (inspection.status !== 'pending' && inspection.status !== 'inflight') {
+                return inspection;
+            }
+            if (inspection.progressSignature !== lastProgressSignature) {
+                lastProgressSignature = inspection.progressSignature;
+                idleDeadline = Math.min(hardDeadline, Date.now() + idleTimeoutMs);
+            }
+            await this.sleep(Math.min(2000, Math.max(0, idleDeadline - Date.now())));
+        }
+        return {
+            status: this.isBatchRunActive(runToken) ? 'timeout' : 'cancelled',
+            resultAssetId: ''
         };
     }
 
@@ -4989,6 +6388,89 @@ class VideoRetryManager {
             await this.sleep(GENERATION_ACCEPTANCE_POLL_MS);
         }
         return 'pending';
+    }
+
+    async _inspectPromptedProviderAcceptance(descriptor, baseline, checkpoint, runToken) {
+        const adapterStatus = checkpoint
+            ? GrokImagineAdapter.evaluateSubmissionReceipt({ root: document, receipt: checkpoint })
+            : 'pending';
+        if (adapterStatus === 'accepted'
+            || adapterStatus === 'rejected'
+            || adapterStatus === 'usage_limited') {
+            return adapterStatus;
+        }
+        if (!baseline?.sourceResponseId || !descriptor?.conversationId) {
+            return adapterStatus === 'ambiguous' ? 'ambiguous' : 'pending';
+        }
+
+        const inventory = await fetchGrokConversationAssetInventoryViaBridge(
+            descriptor.conversationId,
+            document,
+            10000
+        );
+        if (!this.isBatchRunActive(runToken)) return 'cancelled';
+        const baselineAssetIds = new Set(baseline.mediaAssetIds || []);
+        const baselineFailureIds = new Set(baseline.failureResponseIds || []);
+        const baselineInflightIds = new Set(baseline.inflightResponseIds || []);
+        const baselineVideoGenerationIds = Array.isArray(baseline.videoGenerationResponseIds)
+            ? new Set(baseline.videoGenerationResponseIds)
+            : null;
+        const newFailures = inventory.failedResponses.filter((response) => (
+            response.parentResponseId === baseline.sourceResponseId
+            && !baselineFailureIds.has(response.responseId)
+        ));
+        const newVideos = inventory.assets.filter((asset) => (
+            asset.mediaKind === 'video'
+            && asset.parentResponseId === baseline.sourceResponseId
+            && !baselineAssetIds.has(asset.assetId)
+        ));
+        const inflight = inventory.inflightResponses.filter((response) => (
+            response.parentResponseId === baseline.sourceResponseId
+            && !baselineInflightIds.has(response.responseId)
+        ));
+        const videoGenerationResponses = baselineVideoGenerationIds
+            ? inventory.videoGenerationResponses.filter((response) => (
+                response.parentResponseId === baseline.sourceResponseId
+                && !baselineVideoGenerationIds.has(response.responseId)
+            ))
+            : [];
+        const responseIds = new Set([
+            ...newFailures.map((response) => response.responseId),
+            ...newVideos.map((asset) => asset.responseId),
+            ...inflight.map((response) => response.responseId),
+            ...videoGenerationResponses.map((response) => response.responseId)
+        ].filter(Boolean));
+        if (responseIds.size > 1) return 'ambiguous';
+        if (newFailures.length === 1) return 'rejected';
+        if (newVideos.length > 0 || inflight.length > 0 || videoGenerationResponses.length > 0) {
+            return 'accepted';
+        }
+        return adapterStatus === 'ambiguous' ? 'ambiguous' : 'pending';
+    }
+
+    async _waitForPromptedProviderAcceptance(
+        descriptor,
+        baseline,
+        checkpoint,
+        runToken,
+        timeoutMs = GENERATION_ACCEPTANCE_TIMEOUT_MS
+    ) {
+        const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || GENERATION_ACCEPTANCE_TIMEOUT_MS);
+        while (this.isBatchRunActive(runToken) && Date.now() < deadline) {
+            try {
+                const status = await this._inspectPromptedProviderAcceptance(
+                    descriptor,
+                    baseline,
+                    checkpoint,
+                    runToken
+                );
+                if (status !== 'pending') return status;
+            } catch {
+                if (!this.isBatchRunActive(runToken)) return 'cancelled';
+            }
+            await this.sleep(Math.min(1000, Math.max(0, deadline - Date.now())));
+        }
+        return this.isBatchRunActive(runToken) ? 'pending' : 'cancelled';
     }
 
     async _waitForGeneratedResult(
@@ -5032,11 +6514,46 @@ class VideoRetryManager {
             && control.getAttribute('aria-disabled') !== 'true';
     }
 
+    async _settleQuickBatchSubmission(claim, baseline, checkpoint, runToken) {
+        const acceptance = await this._waitForPromptedProviderAcceptance(
+            claim.descriptor,
+            baseline,
+            checkpoint,
+            runToken,
+            claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
+        );
+        if (acceptance === 'accepted') {
+            await this._reportGenerationAction(
+                claim,
+                'accepted',
+                '',
+                this._createGenerationReceipt(claim, 'provider_accepted')
+            );
+        } else if (acceptance === 'usage_limited') {
+            await this._reportGenerationAction(
+                claim,
+                'retryable_failed',
+                'provider_usage_limit'
+            );
+        } else if (acceptance === 'rejected') {
+            await this._reportGenerationAction(claim, 'retryable_failed', 'provider_rejected');
+        } else if (acceptance !== 'cancelled') {
+            await this._reportGenerationAction(
+                claim,
+                'retryable_failed',
+                'submission_outcome_unconfirmed'
+            );
+        }
+        if (acceptance === 'cancelled') return 'cancelled';
+        return this._returnToGenerationOrigin(runToken);
+    }
+
     async _runQuickBatch(runToken) {
-        const maxSteps = Math.max(10, this.goalTotal * ((this.settingsManager.settings.maxRetries || 0) + 3));
+        const retryBudget = Math.max(0, Number(this.generationRun?.options?.maxRetries) || 0);
+        const maxSteps = Math.max(10, this.goalTotal * (retryBudget + 3));
         const maxIterations = maxSteps + Math.max(
             1,
-            Math.ceil((this.generationRun?.options?.capacityTimeoutMs || 120000) / GENERATION_ACCEPTANCE_POLL_MS)
+            Math.ceil((this.generationRun?.options?.capacityTimeoutMs || 120000) / GENERATION_CAPACITY_POLL_MS)
         );
         let steps = 0;
         let iterations = 0;
@@ -5045,7 +6562,7 @@ class VideoRetryManager {
             const waitingDescriptor = this.generationRun?.status === 'waiting_capacity'
                 ? this._getCapacityDescriptor()
                 : null;
-            if (waitingDescriptor) await this.sleep(GENERATION_ACCEPTANCE_POLL_MS);
+            if (waitingDescriptor) await this.sleep(GENERATION_CAPACITY_POLL_MS);
             const claimResponse = await this._claimGenerationAction(waitingDescriptor ? {
                 capacityAvailable: this._isGenerationActionAvailable(waitingDescriptor, 'quick_video')
             } : {});
@@ -5059,15 +6576,50 @@ class VideoRetryManager {
             }
             if (claimResponse.status !== 'claimed' && claimResponse.status !== 'resumed') break;
 
-            steps += 1;
             const claim = claimResponse.claim;
             const descriptor = claim.descriptor;
+            const persistedItem = this._getGenerationItem(claim.itemId);
+            if (persistedItem?.status === 'submitted') {
+                steps += 1;
+                const checkpoint = this._restoreAdapterSubmissionReceipt(persistedItem.receipt);
+                const baseline = this._restoreGeneratedResultBaseline(persistedItem.receipt);
+                if (!checkpoint) {
+                    await this._reportGenerationAction(
+                        claim,
+                        'permanent_failed',
+                        'submission_checkpoint_missing'
+                    );
+                    const returned = await this._returnToGenerationOrigin(runToken);
+                    if (returned === 'navigating' || returned === 'cancelled') return;
+                    continue;
+                }
+                const settled = await this._settleQuickBatchSubmission(
+                    claim,
+                    baseline,
+                    checkpoint,
+                    runToken
+                );
+                if (settled === 'navigating' || settled === 'cancelled') return;
+                await this.sleep(500);
+                continue;
+            }
+            const located = await this._locateGenerationGalleryDescriptor(descriptor, runToken);
+            if (located.status !== 'matched') {
+                steps += 1;
+                await this._reportGenerationAction(
+                    claim,
+                    located.status === 'ambiguous' ? 'permanent_failed' : 'retryable_failed',
+                    located.reason || 'gallery_item_missing'
+                );
+                continue;
+            }
             const resolved = GrokImagineAdapter.resolveMediaAction({
                 root: document,
                 descriptor,
                 action: 'quick_video'
             });
             if (resolved.status !== 'matched') {
+                steps += 1;
                 await this._reportGenerationAction(
                     claim,
                     resolved.status === 'ambiguous' ? 'permanent_failed' : 'retryable_failed',
@@ -5089,6 +6641,7 @@ class VideoRetryManager {
                 action: 'quick_video'
             });
             if (reacquired.status !== 'matched') {
+                steps += 1;
                 await this._reportGenerationAction(claim, 'retryable_failed', 'media_action_remounted');
                 continue;
             }
@@ -5098,8 +6651,15 @@ class VideoRetryManager {
                 action: 'quick_video'
             });
             if (!receipt) {
+                steps += 1;
                 await this._reportGenerationAction(claim, 'retryable_failed', 'submission_receipt_missing');
                 continue;
+            }
+            let resultBaseline;
+            try {
+                resultBaseline = await this._captureVideoGoalInventoryBaseline(descriptor);
+            } catch {
+                resultBaseline = null;
             }
             const clicked = await this._clickPromptedBatchNativeControl(
                 reacquired.control,
@@ -5109,30 +6669,23 @@ class VideoRetryManager {
                     root: document,
                     descriptor,
                     action: 'quick_video'
-                }).control === reacquired.control
+                }).control === reacquired.control,
+                this._createVideoGoalDispatch(claim, receipt, resultBaseline)
             );
             if (!clicked) {
+                steps += 1;
                 await this._reportGenerationAction(claim, 'retryable_failed', 'native_click_failed');
                 continue;
             }
-
-            const acceptance = await this._waitForAdapterSubmission(receipt, runToken);
-            if (acceptance === 'accepted') {
-                await this._reportGenerationAction(
-                    claim,
-                    'accepted',
-                    '',
-                    this._createGenerationReceipt(claim, 'provider_accepted')
-                );
-            } else if (acceptance === 'ambiguous') {
-                await this._reportGenerationAction(claim, 'permanent_failed', 'acceptance_ambiguous');
-            } else if (acceptance !== 'cancelled') {
-                await this._reportGenerationAction(
-                    claim,
-                    'retryable_failed',
-                    acceptance === 'rejected' ? 'provider_rejected' : 'acceptance_unproven'
-                );
-            }
+            steps += 1;
+            const settled = await this._settleQuickBatchSubmission(
+                claim,
+                resultBaseline,
+                receipt,
+                runToken
+            );
+            if (settled === 'navigating' || settled === 'cancelled') return;
+            await this.sleep(500);
         }
 
         const run = this.generationRun;
@@ -5149,10 +6702,11 @@ class VideoRetryManager {
             const failed = run?.counts?.failed || 0;
             const pending = run?.counts?.pending || 0;
             this.safeStatus(
-                `Quick Batch: ${run?.counts?.accepted || 0} accepted, ${failed} failed, ${pending} pending. Retry Failed is available.`,
+                `Quick Batch: ${run?.counts?.accepted || 0} accepted, ${failed} failed, ${pending} pending.${this._getGenerationFailureSummary(run)} Retry Failed is available.`,
                 'warning'
             );
         }
+        await this.overlay?.refreshActiveWorkflowStatus?.();
     }
 
     _getGenerationItem(itemId) {
@@ -5178,6 +6732,109 @@ class VideoRetryManager {
         return control
             ? { status: 'matched', control, card: resolved.card }
             : { status: 'missing', reason: 'source_open_target_missing' };
+    }
+
+    _getGenerationGalleryContext(surface) {
+        if (!GrokImagineAdapter?.resolveGallerySurface) {
+            return { status: 'missing', reason: 'gallery_adapter_unavailable' };
+        }
+        const resolved = GrokImagineAdapter.resolveGallerySurface({
+            root: document,
+            surface
+        });
+        if (resolved.status !== 'matched') return resolved;
+        return {
+            ...resolved,
+            scroller: getSavedGalleryScroller(resolved.galleryRoot)
+        };
+    }
+
+    async _collectGenerationGalleryItems(surface, requestedLimit) {
+        const limit = Math.max(1, Number(requestedLimit) || 1);
+        const gallery = this._getGenerationGalleryContext(surface);
+        if (gallery.status !== 'matched') {
+            return { status: gallery.status, reason: gallery.reason, items: [] };
+        }
+        const scroller = gallery.scroller;
+        const original = getSavedScrollerSnapshot(scroller);
+        const collected = new Map();
+        let stableBottomRounds = 0;
+        let lastScrollHeight = -1;
+
+        setSavedGalleryScrollTop(scroller, 0);
+        await this.sleep(300);
+        try {
+            for (let step = 0; step < 100 && collected.size < limit; step++) {
+                const listed = GrokImagineAdapter.listGalleryItems({ root: document, surface });
+                if (listed.status !== 'ok') return listed;
+                for (const descriptor of listed.items) {
+                    const key = `${descriptor.sourceAssetId}:${descriptor.sourcePostId}`;
+                    if (!collected.has(key)) collected.set(key, descriptor);
+                    if (collected.size >= limit) break;
+                }
+                if (collected.size >= limit) break;
+
+                const before = getSavedScrollerSnapshot(scroller);
+                const maxTop = Math.max(0, before.scrollHeight - before.clientHeight);
+                const nextTop = Math.min(maxTop, before.scrollTop + Math.max(320, before.clientHeight * 0.8));
+                setSavedGalleryScrollTop(scroller, nextTop);
+                await this.sleep(350);
+                const after = getSavedScrollerSnapshot(scroller);
+                const atBottom = after.scrollTop >= Math.max(0, after.scrollHeight - after.clientHeight - 2);
+                const stableHeight = after.scrollHeight === lastScrollHeight;
+                stableBottomRounds = atBottom && stableHeight ? stableBottomRounds + 1 : 0;
+                lastScrollHeight = after.scrollHeight;
+                if (stableBottomRounds >= 3) break;
+            }
+        } finally {
+            setSavedGalleryScrollTop(scroller, original.scrollTop);
+            await this.sleep(250);
+        }
+
+        const items = Array.from(collected.values()).slice(0, limit);
+        return {
+            status: 'ok',
+            items: items.map((descriptor, index) => ({
+                ...descriptor,
+                initialOrder: index,
+                beforeAssetId: items[index - 1]?.sourceAssetId || '',
+                afterAssetId: items[index + 1]?.sourceAssetId || ''
+            }))
+        };
+    }
+
+    async _locateGenerationGalleryDescriptor(descriptor, runToken) {
+        let resolved = GrokImagineAdapter.resolveGalleryItem({ root: document, descriptor });
+        if (resolved.status === 'matched' || resolved.status === 'ambiguous') return resolved;
+        const surface = descriptor.surface;
+        if (surface !== 'results_gallery' && surface !== 'saved_gallery') return resolved;
+
+        const gallery = this._getGenerationGalleryContext(surface);
+        if (gallery.status !== 'matched') return gallery;
+        const scroller = gallery.scroller;
+        const original = getSavedScrollerSnapshot(scroller);
+        let stableBottomRounds = 0;
+        let lastScrollHeight = -1;
+        setSavedGalleryScrollTop(scroller, 0);
+        await this.sleep(250);
+
+        for (let step = 0; step < 100 && this.isBatchRunActive(runToken); step++) {
+            resolved = GrokImagineAdapter.resolveGalleryItem({ root: document, descriptor });
+            if (resolved.status === 'matched' || resolved.status === 'ambiguous') return resolved;
+            const before = getSavedScrollerSnapshot(scroller);
+            const maxTop = Math.max(0, before.scrollHeight - before.clientHeight);
+            const nextTop = Math.min(maxTop, before.scrollTop + Math.max(320, before.clientHeight * 0.8));
+            setSavedGalleryScrollTop(scroller, nextTop);
+            await this.sleep(300);
+            const after = getSavedScrollerSnapshot(scroller);
+            const atBottom = after.scrollTop >= Math.max(0, after.scrollHeight - after.clientHeight - 2);
+            const stableHeight = after.scrollHeight === lastScrollHeight;
+            stableBottomRounds = atBottom && stableHeight ? stableBottomRounds + 1 : 0;
+            lastScrollHeight = after.scrollHeight;
+            if (stableBottomRounds >= 3) break;
+        }
+        setSavedGalleryScrollTop(scroller, original.scrollTop);
+        return resolved;
     }
 
     _isPromptedCapacityAvailable(descriptor, prompt) {
@@ -5213,24 +6870,38 @@ class VideoRetryManager {
         for (let attempt = 0; attempt < attempts; attempt++) {
             if (!this.isBatchRunActive(runToken)) return false;
             const surface = this._detectGenerationSurface();
+            const originConversationId = getGrokConversationId(originUrl.toString());
+            const currentConversationId = getGrokConversationId(window.location.href);
             const routeMatches = window.location.pathname === originUrl.pathname
-                && window.location.search === originUrl.search;
+                && (!originConversationId || originConversationId === currentConversationId);
             if (surface === origin.surface && routeMatches) {
+                if (origin.viewportReceipt && surface === 'saved_gallery') {
+                    const restored = await restoreSavedViewportReceipt(origin.viewportReceipt, {
+                        isActive: () => this.isBatchRunActive(runToken),
+                        isScopeValid: () => this._detectGenerationSurface() === 'saved_gallery'
+                            && window.location.pathname === originUrl.pathname
+                            && (!originConversationId
+                                || getGrokConversationId(window.location.href) === originConversationId),
+                        sleep: (delay) => this.sleep(delay),
+                        timeoutMs: Math.max(200, timeoutMs - (attempt * 200)),
+                        pollInterval: 200
+                    });
+                    return restored.status === 'restored';
+                }
+                if (origin.viewportReceipt && surface === 'results_gallery') {
+                    return this._waitForPromptedBatchResultsSurface(
+                        origin.viewportReceipt,
+                        runToken,
+                        Math.max(200, timeoutMs - (attempt * 200))
+                    );
+                }
                 if (!restoredScroll && typeof window.scrollTo === 'function') {
                     window.scrollTo({ top: origin.scrollY || 0, behavior: 'instant' });
                     restoredScroll = true;
                     await this.sleep(200);
                     if (!this.isBatchRunActive(runToken)) return false;
                 }
-                const pendingDescriptor = this.generationRun?.items?.find((item) => (
-                    item.status === 'queued'
-                ))?.descriptor;
-                const sourceMatches = !pendingDescriptor
-                    || GrokImagineAdapter.resolveGalleryItem({
-                        root: document,
-                        descriptor: pendingDescriptor
-                    }).status === 'matched';
-                if (sourceMatches) return true;
+                return true;
             }
             await this.sleep(200);
         }
@@ -5239,27 +6910,44 @@ class VideoRetryManager {
 
     async _returnToGenerationOrigin(runToken) {
         const origin = this.generationRun?.origin;
-        if (!origin || (origin.surface !== 'results_gallery' && origin.surface !== 'saved_gallery')) {
+        const supportedSurfaces = new Set([
+            'results_gallery',
+            'saved_gallery',
+            'legacy_detail',
+            'agent_media'
+        ]);
+        if (!origin || !supportedSurfaces.has(origin.surface)) {
             return 'returned';
         }
         if (await this._waitForGenerationOrigin(runToken, 200)) return 'returned';
 
-        const backControl = this._findPromptedBatchBackControl();
-        if (backControl) {
-            await this._clickPromptedBatchNativeControl(
-                backControl,
-                runToken,
-                'return to prompted batch origin',
-                () => this._findPromptedBatchBackControl() === backControl
-            );
-            if (await this._waitForGenerationOrigin(runToken)) return 'returned';
-        } else if (typeof window.history?.back === 'function') {
+        const detailOrigin = origin.surface === 'legacy_detail' || origin.surface === 'agent_media';
+        if (detailOrigin && typeof window.history?.back === 'function') {
             window.history.back();
             if (await this._waitForGenerationOrigin(runToken)) return 'returned';
         }
 
+        if (!detailOrigin) {
+            const backControl = this._findPromptedBatchBackControl();
+            let nativeBackDispatched = false;
+            if (backControl) {
+                nativeBackDispatched = await this._clickPromptedBatchNativeControl(
+                    backControl,
+                    runToken,
+                    'return to generation origin',
+                    () => this._findPromptedBatchBackControl() === backControl
+                );
+                if (nativeBackDispatched
+                    && await this._waitForGenerationOrigin(runToken)) return 'returned';
+            }
+            if (typeof window.history?.back === 'function') {
+                window.history.back();
+                if (await this._waitForGenerationOrigin(runToken)) return 'returned';
+            }
+        }
+
         if (!this.isBatchRunActive(runToken)) return 'cancelled';
-        this.safeStatus('Prompted Batch: recovering the original gallery...', 'warning');
+        this.safeStatus('Generation run: recovering the original source...', 'warning');
         window.location.assign(origin.url);
         return 'navigating';
     }
@@ -5276,6 +6964,10 @@ class VideoRetryManager {
         const descriptor = claim.descriptor;
         const surface = this._detectGenerationSurface();
         if (surface === 'results_gallery' || surface === 'saved_gallery') {
+            const located = await this._locateGenerationGalleryDescriptor(descriptor, runToken);
+            if (located.status !== 'matched') {
+                return { status: located.status, reason: located.reason || 'gallery_item_missing' };
+            }
             const resolved = this._getPromptedOpenTarget(descriptor);
             if (resolved.status !== 'matched') {
                 return { status: resolved.status, reason: resolved.reason };
@@ -5346,7 +7038,7 @@ class VideoRetryManager {
         }
         if (!composer) return { status: 'missing', reason: 'prompted_composer_missing' };
 
-        const submit = await this._waitForPromptedResultsSubmitButton(
+        const submit = await this._waitForPromptedVideoSubmitButton(
             runToken,
             editor.agentBinding || null
         );
@@ -5364,7 +7056,10 @@ class VideoRetryManager {
 
     async _finishPromptedClaimOnOrigin(_claim, runToken) {
         const originSurface = this.generationRun?.origin?.surface;
-        if (originSurface !== 'results_gallery' && originSurface !== 'saved_gallery') return 'returned';
+        if (!['results_gallery', 'saved_gallery', 'legacy_detail', 'agent_media']
+            .includes(originSurface)) {
+            return 'returned';
+        }
         const returned = await this._returnToGenerationOrigin(runToken);
         if (returned === 'returned') {
             this.safeStatus(
@@ -5378,15 +7073,16 @@ class VideoRetryManager {
     async _executePromptedClaim(claim, runToken) {
         this.batchPrompt = claim.prompt;
         const persistedItem = this._getGenerationItem(claim.itemId);
-        if (persistedItem?.status === 'submitted' || persistedItem?.status === 'composer_ready') {
+        if (persistedItem?.status === 'submitted') {
             const checkpoint = this._restoreAdapterSubmissionReceipt(persistedItem.receipt);
-            const acceptance = checkpoint
-                ? await this._waitForAdapterSubmission(
-                    checkpoint,
-                    runToken,
-                    claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
-                )
-                : 'ambiguous';
+            const baseline = this._restoreGeneratedResultBaseline(persistedItem.receipt);
+            const acceptance = await this._waitForPromptedProviderAcceptance(
+                claim.descriptor,
+                baseline,
+                checkpoint,
+                runToken,
+                claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
+            );
             if (acceptance === 'accepted') {
                 await this._reportGenerationAction(
                     claim,
@@ -5394,12 +7090,12 @@ class VideoRetryManager {
                     '',
                     this._createGenerationReceipt(claim, 'provider_accepted')
                 );
+            } else if (acceptance === 'usage_limited') {
+                await this._reportPromptedFailure(claim, 'provider_usage_limit');
+            } else if (acceptance === 'rejected') {
+                await this._reportPromptedFailure(claim, 'provider_rejected');
             } else if (acceptance !== 'cancelled') {
-                await this._reportPromptedFailure(
-                    claim,
-                    acceptance === 'rejected' ? 'provider_rejected' : 'acceptance_unproven',
-                    acceptance === 'ambiguous'
-                );
+                await this._reportPromptedFailure(claim, 'submission_outcome_unconfirmed');
             }
             return this._finishPromptedClaimOnOrigin(claim, runToken);
         }
@@ -5435,13 +7131,27 @@ class VideoRetryManager {
             await this._reportPromptedFailure(claim, 'submission_checkpoint_missing');
             return this._finishPromptedClaimOnOrigin(claim, runToken);
         }
-        const composerCheckpoint = await this._reportGenerationAction(
-            claim,
-            'composer_ready',
-            '',
-            this._createCheckpointedGenerationReceipt(claim, 'composer_ready', checkpoint)
-        );
-        if (composerCheckpoint?.status === 'rejected') return 'stopped';
+        let resultBaseline;
+        try {
+            resultBaseline = await this._captureVideoGoalInventoryBaseline(claim.descriptor);
+        } catch {
+            resultBaseline = null;
+        }
+        if (persistedItem?.status !== 'composer_ready') {
+            const composerCheckpoint = await this._reportGenerationAction(
+                claim,
+                'composer_ready',
+                '',
+                this._createCheckpointedGenerationReceipt(claim, 'composer_ready', checkpoint)
+            );
+            if (composerCheckpoint?.status === 'rejected') return 'stopped';
+        }
+
+        const submissionReceipt = this._capturePromptedVideoSubmissionReceipt();
+        if (!submissionReceipt) {
+            await this._reportPromptedFailure(claim, 'submission_receipt_missing');
+            return this._finishPromptedClaimOnOrigin(claim, runToken);
+        }
 
         const submitted = await this._clickPromptedBatchNativeControl(
             prepared.submit,
@@ -5449,21 +7159,16 @@ class VideoRetryManager {
             'click prompted video submit',
             () => this._findPromptedVideoSubmitButton() === prepared.submit
                 && (!opened.editor.agentBinding
-                    || !!this._resolveCurrentAgentMediaBinding(opened.editor.agentBinding))
+                    || !!this._resolveCurrentAgentMediaBinding(opened.editor.agentBinding)),
+            this._createVideoGoalDispatch(claim, checkpoint, resultBaseline)
         );
         if (!submitted) {
             await this._reportPromptedFailure(claim, 'native_submit_failed');
             return this._finishPromptedClaimOnOrigin(claim, runToken);
         }
-        const submittedCheckpoint = await this._reportGenerationAction(
-            claim,
-            'submitted',
-            '',
-            this._createCheckpointedGenerationReceipt(claim, 'submit_dispatched', checkpoint)
-        );
-        if (submittedCheckpoint?.status === 'rejected') return 'stopped';
-
-        const acceptance = await this._waitForAdapterSubmission(
+        const acceptance = await this._waitForPromptedProviderAcceptance(
+            claim.descriptor,
+            resultBaseline,
             checkpoint,
             runToken,
             claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
@@ -5475,12 +7180,12 @@ class VideoRetryManager {
                 '',
                 this._createGenerationReceipt(claim, 'provider_accepted')
             );
+        } else if (acceptance === 'usage_limited') {
+            await this._reportPromptedFailure(claim, 'provider_usage_limit');
+        } else if (acceptance === 'rejected') {
+            await this._reportPromptedFailure(claim, 'provider_rejected');
         } else if (acceptance !== 'cancelled') {
-            await this._reportPromptedFailure(
-                claim,
-                acceptance === 'rejected' ? 'provider_rejected' : 'acceptance_unproven',
-                acceptance === 'ambiguous'
-            );
+            await this._reportPromptedFailure(claim, 'submission_outcome_unconfirmed');
         }
         return this._finishPromptedClaimOnOrigin(claim, runToken);
     }
@@ -5492,7 +7197,7 @@ class VideoRetryManager {
         );
         const maxIterations = maxSteps + Math.max(
             1,
-            Math.ceil((this.generationRun?.options?.capacityTimeoutMs || 120000) / GENERATION_ACCEPTANCE_POLL_MS)
+            Math.ceil((this.generationRun?.options?.capacityTimeoutMs || 120000) / GENERATION_CAPACITY_POLL_MS)
         );
         let steps = 0;
         let iterations = 0;
@@ -5501,7 +7206,7 @@ class VideoRetryManager {
             const waitingDescriptor = this.generationRun?.status === 'waiting_capacity'
                 ? this._getCapacityDescriptor()
                 : null;
-            if (waitingDescriptor) await this.sleep(GENERATION_ACCEPTANCE_POLL_MS);
+            if (waitingDescriptor) await this.sleep(GENERATION_CAPACITY_POLL_MS);
             const claimResponse = await this._claimGenerationAction(waitingDescriptor ? {
                 capacityAvailable: this._isPromptedCapacityAvailable(
                     waitingDescriptor,
@@ -5523,10 +7228,16 @@ class VideoRetryManager {
                 if (['completed', 'cancelled', 'retryable_failed', 'failed'].includes(this.generationRun?.status)) break;
                 continue;
             }
+            if (claimResponse.status === 'capacity_timeout') {
+                const returned = await this._returnToGenerationOrigin(runToken);
+                if (returned === 'navigating' || returned === 'cancelled') return;
+                if (this.generationRun?.status === 'retryable_failed') break;
+                continue;
+            }
             if (claimResponse.status !== 'claimed' && claimResponse.status !== 'resumed') break;
 
-            steps += 1;
             const result = await this._executePromptedClaim(claimResponse.claim, runToken);
+            if (result !== 'capacity') steps += 1;
             if (result === 'navigating' || result === 'stopped' || result === 'cancelled') return;
         }
 
@@ -5540,12 +7251,13 @@ class VideoRetryManager {
             this.safeStatus(`Prompted Batch: Complete (${run.counts.accepted}/${run.items.length})`, 'success');
         } else if (run?.status === 'retryable_failed') {
             this.safeStatus(
-                `Prompted Batch: ${run.counts.accepted} accepted, ${run.counts.failed} failed. Retry Failed is available.`,
+                `Prompted Batch: ${run.counts.accepted} accepted, ${run.counts.failed} failed.${this._getGenerationFailureSummary(run)} Retry Failed is available.`,
                 'warning'
             );
         } else if (run?.status === 'cancelled' || this.batchAborted) {
             this.safeStatus(`Prompted Batch: Stopped (${run?.counts?.accepted || 0}/${run?.items?.length || 0})`, 'neutral');
         }
+        await this.overlay?.refreshActiveWorkflowStatus?.();
     }
 
     async _startPromptedBatchDurable(prompt, options = {}) {
@@ -5558,21 +7270,28 @@ class VideoRetryManager {
         let galleryLimit = 0;
         let videoGoal = 0;
         if (surface === 'results_gallery' || surface === 'saved_gallery') {
-            const listed = GrokImagineAdapter.listGalleryItems({ root: document, surface });
+            const mounted = GrokImagineAdapter.listGalleryItems({ root: document, surface });
+            if (mounted.status !== 'ok') {
+                this.safeStatus(`Prompted Batch: ${mounted.reason || 'Gallery identity is ambiguous'}`, 'warning');
+                return false;
+            }
+            galleryLimit = Math.max(1, parseInt(options.galleryLimit, 10) || mounted.items.length);
+            const listed = await this._collectGenerationGalleryItems(surface, galleryLimit);
             if (listed.status !== 'ok') {
                 this.safeStatus(`Prompted Batch: ${listed.reason || 'Gallery identity is ambiguous'}`, 'warning');
                 return false;
             }
-            galleryLimit = Math.max(1, parseInt(options.galleryLimit, 10) || listed.items.length);
             items = listed.items.filter((descriptor) => descriptor.mediaKind === 'image').slice(0, galleryLimit);
         } else if (surface === 'agent_media' || surface === 'legacy_detail') {
+            const sourcePostIdHint = getCurrentGrokSourcePostIdHint();
             const described = GrokImagineAdapter.describeCurrentSource({
                 root: document,
                 surface,
                 location: {
                     pathname: window.location.pathname,
                     search: window.location.search
-                }
+                },
+                ...(sourcePostIdHint ? { sourcePostIdHint } : {})
             });
             if (described.status !== 'matched') {
                 this.safeStatus(`Prompted Batch: ${described.reason || 'Select one generated source'}`, 'warning');
@@ -5603,11 +7322,14 @@ class VideoRetryManager {
         this.generationRun = null;
         if (prompt && this.historyManager?.add) this.historyManager.add(prompt, 'video');
 
+        const retryEnabled = this.settingsManager.settings.autoRetryEnabled === true;
         const runOptions = {
-            maxRetries: Math.max(0, Number(this.settingsManager.settings.maxRetries) || 0),
+            maxRetries: retryEnabled
+                ? Math.max(0, Number(this.settingsManager.settings.maxRetries) || 0)
+                : 0,
             action: 'prompted_video',
             acceptanceTimeoutMs: GENERATION_ACCEPTANCE_TIMEOUT_MS,
-            capacityTimeoutMs: PROMPTED_RESULTS_CAPACITY_WAIT_MS
+            capacityTimeoutMs: GENERATION_CAPACITY_WAIT_MS
         };
         if (galleryLimit) runOptions.galleryLimit = galleryLimit;
         if (videoGoal) runOptions.videoGoal = videoGoal;
@@ -5623,7 +7345,7 @@ class VideoRetryManager {
             this.batchRunToken = null;
             this.safeStatus(
                 started?.activeWorkflow?.kind
-                    ? `Prompted Batch blocked by active ${started.activeWorkflow.kind}`
+                    ? `Prompted Batch blocked by ${getMutatingWorkflowLabel(started.activeWorkflow.kind)}.`
                     : `Prompted Batch: ${started?.error || 'Could not start'}`,
                 'warning'
             );
@@ -5708,47 +7430,264 @@ class VideoRetryManager {
         return { status: 'ready', action: resolved };
     }
 
+    async _completeVideoGoalClaim(claim, resultAssetId) {
+        const completedResponse = await this._reportGenerationAction(
+            claim,
+            'completed',
+            '',
+            this._createGenerationReceipt(claim, 'playable_result', { resultAssetId })
+        );
+        if (!completedResponse || completedResponse.status === 'rejected') return 'stopped';
+        if (completedResponse.run?.status === 'running') {
+            const source = GrokImagineAdapter.resolveMediaAction({
+                root: document,
+                descriptor: claim.descriptor,
+                action: 'goal_video'
+            });
+            const originUrl = completedResponse.run.origin?.url;
+            if (source.status !== 'matched' && originUrl) {
+                this.safeStatus('Video Goal: returning to the original source...', 'info');
+                window.location.assign(originUrl);
+                return 'navigating';
+            }
+        }
+        return 'completed';
+    }
+
+    _captureVideoGoalDomBaseline(descriptor) {
+        return GrokImagineAdapter.captureGeneratedResultBaseline({
+            root: document,
+            descriptor,
+            mediaKind: 'video'
+        });
+    }
+
+    _inspectVideoGoalDomResult(descriptor, before, checkpoint, resultPostId = '') {
+        const submissionStatus = checkpoint
+            ? GrokImagineAdapter.evaluateSubmissionReceipt({ root: document, receipt: checkpoint })
+            : 'pending';
+        if (submissionStatus === 'usage_limited') {
+            return {
+                status: 'failed',
+                resultAssetId: '',
+                failureCode: 'provider_usage_limit'
+            };
+        }
+        if (submissionStatus === 'rejected') {
+            return {
+                status: 'failed',
+                resultAssetId: '',
+                failureCode: 'provider_result_failed'
+            };
+        }
+        const result = GrokImagineAdapter.inspectGeneratedResult({
+            root: document,
+            before,
+            expected: {
+                sourceAssetId: descriptor.sourceAssetId,
+                sourcePostId: descriptor.sourcePostId,
+                resultPostId,
+                mediaKind: 'video'
+            }
+        });
+        if (result.status === 'pending' && submissionStatus === 'accepted') {
+            return { ...result, status: 'inflight' };
+        }
+        return result;
+    }
+
+    async _waitForVideoGoalDomResult(
+        descriptor,
+        before,
+        checkpoint,
+        resultPostId,
+        runToken,
+        timeoutMs = GENERATION_RESULT_TIMEOUT_MS
+    ) {
+        const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || GENERATION_RESULT_TIMEOUT_MS);
+        while (this.isBatchRunActive(runToken) && Date.now() < deadline) {
+            const result = this._inspectVideoGoalDomResult(
+                descriptor,
+                before,
+                checkpoint,
+                resultPostId
+            );
+            if (result.status !== 'pending' && result.status !== 'inflight') return result;
+            await this.sleep(Math.min(GENERATION_RESULT_POLL_MS, Math.max(0, deadline - Date.now())));
+        }
+        return {
+            status: this.isBatchRunActive(runToken) ? 'timeout' : 'cancelled',
+            resultAssetId: ''
+        };
+    }
+
+    async _finishVideoGoalFailureOnOrigin(claim, code, permanent, runToken) {
+        await this._reportVideoGoalFailure(claim, code, permanent);
+        const returned = await this._returnToGenerationOrigin(runToken);
+        return returned === 'navigating' || returned === 'cancelled' ? returned : 'failed';
+    }
+
     async _executeVideoGoalClaim(claim, runToken) {
         const persistedItem = this._getGenerationItem(claim.itemId);
         let checkpoint = this._restoreAdapterSubmissionReceipt(persistedItem?.receipt);
         let resultBaseline = this._restoreGeneratedResultBaseline(persistedItem?.receipt);
-        const acceptedAlready = persistedItem?.status === 'submitted'
-            && persistedItem?.lastOutcome === 'accepted';
+        let domResultBaseline = this._restoreDomGeneratedResultBaseline(persistedItem?.receipt);
+        let resultPostId = String(persistedItem?.receipt?.resultPostId || '');
+        const composerReadyAlready = persistedItem?.status === 'composer_ready';
+        const dispatchedAlready = persistedItem?.status === 'submitted';
+        const acceptedAlready = dispatchedAlready && persistedItem?.lastOutcome === 'accepted';
+        let resumedPriorDispatch = false;
+        const resultBaselineAvailable = () => !!resultBaseline || !!domResultBaseline;
+        const receiptExtra = () => {
+            const currentPostId = this._getImaginePostId(window.location.href);
+            if (currentPostId
+                && currentPostId !== claim.descriptor.sourcePostId
+                && currentPostId !== claim.descriptor.sourceAssetId) {
+                resultPostId = currentPostId;
+            }
+            return {
+                ...this._createDomResultBaselineReceiptFields(domResultBaseline),
+                ...(resultPostId ? { resultPostId } : {})
+            };
+        };
 
-        if (!acceptedAlready
-            && (persistedItem?.status === 'composer_ready' || persistedItem?.status === 'submitted')) {
-            if (!checkpoint || !resultBaseline) {
+        if (persistedItem?.lastOutcome === 'retry_reconcile'
+            && checkpoint
+            && resultBaselineAvailable()) {
+            let inspection = { status: 'pending', resultAssetId: '' };
+            try {
+                inspection = resultBaseline
+                    ? await this._inspectVideoGoalInventoryResult(
+                        claim.descriptor,
+                        resultBaseline,
+                        runToken,
+                        15000
+                    )
+                    : this._inspectVideoGoalDomResult(
+                        claim.descriptor,
+                        domResultBaseline,
+                        checkpoint,
+                        resultPostId
+                    );
+            } catch {
+                inspection = { status: 'pending', resultAssetId: '' };
+            }
+            if (inspection.failureCode === 'provider_usage_limit') {
+                return this._finishVideoGoalFailureOnOrigin(
+                    claim,
+                    'provider_usage_limit',
+                    false,
+                    runToken
+                );
+            }
+            if (inspection.status === 'ambiguous') {
+                await this._reportVideoGoalFailure(claim, 'result_ambiguous', true);
+                return 'ambiguous';
+            }
+            if (inspection.status === 'ready' || inspection.status === 'inflight') {
+                const submittedResponse = await this._reportGenerationAction(
+                    claim,
+                    'submitted',
+                    '',
+                    this._createVideoGoalReceipt(
+                        claim,
+                        'submit_dispatched',
+                        checkpoint,
+                        resultBaseline,
+                        receiptExtra()
+                    )
+                );
+                if (!submittedResponse || submittedResponse.status === 'rejected') return 'stopped';
+                const acceptedResponse = await this._reportGenerationAction(
+                    claim,
+                    'accepted',
+                    '',
+                    this._createVideoGoalReceipt(
+                        claim,
+                        'submit_dispatched',
+                        checkpoint,
+                        resultBaseline,
+                        receiptExtra()
+                    )
+                );
+                if (!acceptedResponse || acceptedResponse.status === 'rejected') return 'stopped';
+                if (inspection.status === 'ready') {
+                    return this._completeVideoGoalClaim(claim, inspection.resultAssetId);
+                }
+                resumedPriorDispatch = true;
+            } else {
+                checkpoint = null;
+                resultBaseline = null;
+                domResultBaseline = null;
+            }
+        }
+
+        if (dispatchedAlready || resumedPriorDispatch) {
+            if (!checkpoint || !resultBaselineAvailable()) {
                 await this._reportVideoGoalFailure(claim, 'goal_checkpoint_missing', true);
                 return 'failed';
             }
-            const acceptance = await this._waitForAdapterSubmission(
-                checkpoint,
-                runToken,
-                claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
-            );
-            if (acceptance !== 'accepted') {
-                if (acceptance !== 'cancelled') {
-                    await this._reportVideoGoalFailure(
+            if (!acceptedAlready && !resumedPriorDispatch) {
+                const acceptance = await this._waitForPromptedProviderAcceptance(
+                    claim.descriptor,
+                    resultBaseline,
+                    checkpoint,
+                    runToken,
+                    claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
+                );
+                if (acceptance === 'usage_limited') {
+                    return this._finishVideoGoalFailureOnOrigin(
                         claim,
-                        acceptance === 'rejected' ? 'provider_rejected' : 'acceptance_unproven',
-                        acceptance === 'ambiguous'
+                        'provider_usage_limit',
+                        false,
+                        runToken
                     );
                 }
-                return acceptance;
-            }
-            const acceptedResponse = await this._reportGenerationAction(
-                claim,
-                'accepted',
-                '',
-                this._createVideoGoalReceipt(
+                if (acceptance === 'rejected') {
+                    return this._finishVideoGoalFailureOnOrigin(
+                        claim,
+                        'provider_rejected',
+                        false,
+                        runToken
+                    );
+                }
+                if (acceptance === 'cancelled') return 'cancelled';
+                if (acceptance !== 'accepted') {
+                    return this._finishVideoGoalFailureOnOrigin(
+                        claim,
+                        'submission_outcome_unconfirmed',
+                        false,
+                        runToken
+                    );
+                }
+                const acceptedResponse = await this._reportGenerationAction(
                     claim,
-                    'provider_accepted',
-                    checkpoint,
-                    resultBaseline
-                )
-            );
-            if (!acceptedResponse || acceptedResponse.status === 'rejected') return 'stopped';
-        } else if (!acceptedAlready) {
+                    'accepted',
+                    '',
+                    this._createVideoGoalReceipt(
+                        claim,
+                        'submit_dispatched',
+                        checkpoint,
+                        resultBaseline,
+                        receiptExtra()
+                    )
+                );
+                if (!acceptedResponse || acceptedResponse.status === 'rejected') return 'stopped';
+            }
+        } else {
+            if (!composerReadyAlready) {
+                try {
+                    resultBaseline = await this._captureVideoGoalInventoryBaseline(claim.descriptor);
+                } catch {
+                    resultBaseline = null;
+                }
+                domResultBaseline = this._captureVideoGoalDomBaseline(claim.descriptor);
+            }
+            if (!resultBaselineAvailable()) {
+                await this._reportVideoGoalFailure(claim, 'goal_checkpoint_missing', true);
+                return 'failed';
+            }
+
             const prepared = await this._prepareVideoGoalControl(claim, runToken);
             if (prepared.status === 'cancelled') return 'cancelled';
             if (prepared.status === 'capacity') {
@@ -5763,35 +7702,49 @@ class VideoRetryManager {
                 );
                 return prepared.status;
             }
-            const resolved = prepared.action;
-
-            checkpoint = GrokImagineAdapter.captureSubmissionReceipt({
-                root: document,
-                descriptor: claim.descriptor,
-                action: 'goal_video'
-            });
-            resultBaseline = GrokImagineAdapter.captureGeneratedResultBaseline({
-                root: document,
-                descriptor: claim.descriptor,
-                mediaKind: 'video'
-            });
-            if (!checkpoint || !resultBaseline) {
+            if (!composerReadyAlready) {
+                checkpoint = GrokImagineAdapter.captureSubmissionReceipt({
+                    root: document,
+                    descriptor: claim.descriptor,
+                    action: 'goal_video'
+                });
+            }
+            if (!checkpoint) {
                 await this._reportVideoGoalFailure(claim, 'goal_checkpoint_missing', true);
                 return 'failed';
             }
 
-            const readyCheckpoint = await this._reportGenerationAction(
-                claim,
-                'composer_ready',
-                '',
-                this._createVideoGoalReceipt(
+            if (!composerReadyAlready) {
+                const readyCheckpoint = await this._reportGenerationAction(
                     claim,
                     'composer_ready',
-                    checkpoint,
-                    resultBaseline
-                )
-            );
-            if (readyCheckpoint?.status === 'rejected') return 'stopped';
+                    '',
+                    this._createVideoGoalReceipt(
+                        claim,
+                        'composer_ready',
+                        checkpoint,
+                        resultBaseline,
+                        receiptExtra()
+                    )
+                );
+                if (readyCheckpoint?.status === 'rejected') return 'stopped';
+            }
+
+            const dispatchPrepared = await this._prepareVideoGoalControl(claim, runToken);
+            if (dispatchPrepared.status === 'cancelled') return 'cancelled';
+            if (dispatchPrepared.status === 'capacity') {
+                await this._reportGenerationAction(claim, 'capacity', 'provider_capacity');
+                return 'capacity';
+            }
+            if (dispatchPrepared.status !== 'ready') {
+                await this._reportVideoGoalFailure(
+                    claim,
+                    dispatchPrepared.reason || 'goal_action_missing',
+                    dispatchPrepared.status === 'ambiguous'
+                );
+                return dispatchPrepared.status;
+            }
+            const resolved = dispatchPrepared.action;
 
             const clicked = await this._clickPromptedBatchNativeControl(
                 resolved.control,
@@ -5808,56 +7761,68 @@ class VideoRetryManager {
                     return current.status === 'matched'
                         && current.stage === resolved.stage
                         && current.control === resolved.control;
-                }
+                },
+                this._createVideoGoalDispatch(
+                    claim,
+                    checkpoint,
+                    resultBaseline,
+                    receiptExtra()
+                )
             );
             if (!clicked) {
                 await this._reportVideoGoalFailure(claim, 'native_click_failed');
                 return 'failed';
             }
 
-            const submittedCheckpoint = await this._reportGenerationAction(
-                claim,
-                'submitted',
-                '',
-                this._createVideoGoalReceipt(
-                    claim,
-                    'submit_dispatched',
-                    checkpoint,
-                    resultBaseline
-                )
-            );
-            if (submittedCheckpoint?.status === 'rejected') return 'stopped';
-
-            const acceptance = await this._waitForAdapterSubmission(
+            const acceptance = await this._waitForPromptedProviderAcceptance(
+                claim.descriptor,
+                resultBaseline,
                 checkpoint,
                 runToken,
                 claim.options.acceptanceTimeoutMs || GENERATION_ACCEPTANCE_TIMEOUT_MS
             );
-            if (acceptance !== 'accepted') {
-                if (acceptance !== 'cancelled') {
-                    await this._reportVideoGoalFailure(
-                        claim,
-                        acceptance === 'rejected' ? 'provider_rejected' : 'acceptance_unproven',
-                        acceptance === 'ambiguous'
-                    );
-                }
-                return acceptance;
+            if (acceptance === 'usage_limited') {
+                return this._finishVideoGoalFailureOnOrigin(
+                    claim,
+                    'provider_usage_limit',
+                    false,
+                    runToken
+                );
             }
+            if (acceptance === 'rejected') {
+                return this._finishVideoGoalFailureOnOrigin(
+                    claim,
+                    'provider_rejected',
+                    false,
+                    runToken
+                );
+            }
+            if (acceptance === 'cancelled') return 'cancelled';
+            if (acceptance !== 'accepted') {
+                return this._finishVideoGoalFailureOnOrigin(
+                    claim,
+                    'submission_outcome_unconfirmed',
+                    false,
+                    runToken
+                );
+            }
+
             const acceptedResponse = await this._reportGenerationAction(
                 claim,
                 'accepted',
                 '',
                 this._createVideoGoalReceipt(
                     claim,
-                    'provider_accepted',
+                    'submit_dispatched',
                     checkpoint,
-                    resultBaseline
+                    resultBaseline,
+                    receiptExtra()
                 )
             );
             if (!acceptedResponse || acceptedResponse.status === 'rejected') return 'stopped';
         }
 
-        if (!checkpoint || !resultBaseline) {
+        if (!checkpoint || !resultBaselineAvailable()) {
             await this._reportVideoGoalFailure(claim, 'goal_result_baseline_missing', true);
             return 'failed';
         }
@@ -5865,29 +7830,33 @@ class VideoRetryManager {
             `Video Goal: waiting for playable result ${this.goalCount + 1}/${this.goalTotal}`,
             'info'
         );
-        const result = await this._waitForGeneratedResult(
-            claim.descriptor,
-            resultBaseline,
-            runToken,
-            claim.options.resultTimeoutMs || GENERATION_RESULT_TIMEOUT_MS
-        );
-        if (result.status === 'ready') {
-            const completedResponse = await this._reportGenerationAction(
-                claim,
-                'completed',
-                '',
-                this._createGenerationReceipt(claim, 'playable_result', {
-                    resultAssetId: result.resultAssetId
-                })
+        const result = resultBaseline
+            ? await this._waitForVideoGoalInventoryResult(
+                claim.descriptor,
+                resultBaseline,
+                runToken,
+                claim.options.resultTimeoutMs || GENERATION_RESULT_TIMEOUT_MS
+            )
+            : await this._waitForVideoGoalDomResult(
+                claim.descriptor,
+                domResultBaseline,
+                checkpoint,
+                resultPostId,
+                runToken,
+                claim.options.resultTimeoutMs || GENERATION_RESULT_TIMEOUT_MS
             );
-            if (!completedResponse || completedResponse.status === 'rejected') return 'stopped';
-            return 'completed';
+        if (result.status === 'ready') {
+            return this._completeVideoGoalClaim(claim, result.resultAssetId);
         }
         if (result.status !== 'cancelled') {
-            await this._reportVideoGoalFailure(
+            return this._finishVideoGoalFailureOnOrigin(
                 claim,
-                result.status === 'failed' ? 'provider_result_failed' : `result_${result.status}`,
-                result.status === 'ambiguous'
+                result.failureCode
+                    || (result.status === 'failed'
+                        ? 'provider_result_failed'
+                        : `result_${result.status}`),
+                result.status === 'ambiguous',
+                runToken
             );
         }
         return result.status;
@@ -5898,7 +7867,7 @@ class VideoRetryManager {
         const maxSteps = Math.max(1, this.goalTotal * (retryBudget + 1));
         const maxIterations = maxSteps + Math.max(
             1,
-            Math.ceil((this.generationRun?.options?.capacityTimeoutMs || 120000) / GENERATION_ACCEPTANCE_POLL_MS)
+            Math.ceil((this.generationRun?.options?.capacityTimeoutMs || 120000) / GENERATION_CAPACITY_POLL_MS)
         );
         let steps = 0;
         let iterations = 0;
@@ -5907,7 +7876,7 @@ class VideoRetryManager {
             const waitingDescriptor = this.generationRun?.status === 'waiting_capacity'
                 ? this._getCapacityDescriptor()
                 : null;
-            if (waitingDescriptor) await this.sleep(GENERATION_ACCEPTANCE_POLL_MS);
+            if (waitingDescriptor) await this.sleep(GENERATION_CAPACITY_POLL_MS);
             const claimResponse = await this._claimGenerationAction(waitingDescriptor ? {
                 capacityAvailable: this._isGenerationActionAvailable(waitingDescriptor, 'goal_video')
             } : {});
@@ -5930,7 +7899,7 @@ class VideoRetryManager {
 
             const outcome = await this._executeVideoGoalClaim(claimResponse.claim, runToken);
             if (outcome !== 'capacity') steps += 1;
-            if (outcome === 'stopped' || outcome === 'cancelled') break;
+            if (outcome === 'stopped' || outcome === 'cancelled' || outcome === 'navigating') break;
         }
 
         const run = this.generationRun;
@@ -5942,7 +7911,7 @@ class VideoRetryManager {
             this.safeStatus(`Video Goal: Complete (${run.goalProgress}/${run.options.goalCount})`, 'success');
         } else if (run?.status === 'retryable_failed') {
             this.safeStatus(
-                `Video Goal: ${run.goalProgress}/${run.options.goalCount} complete. Retry Failed is available.`,
+                `Video Goal: ${run.goalProgress}/${run.options.goalCount} complete.${this._getGenerationFailureSummary(run)} Retry Failed is available.`,
                 'warning'
             );
         } else if (run?.status === 'failed') {
@@ -5953,12 +7922,12 @@ class VideoRetryManager {
         } else if (run?.status === 'cancelled' || this.batchAborted) {
             this.safeStatus(`Video Goal: Stopped (${run?.goalProgress || 0}/${run?.options?.goalCount || 0})`, 'neutral');
         }
+        await this.overlay?.refreshActiveWorkflowStatus?.();
     }
 
     async _startVideoGoalDurable(count) {
         if (!GrokImagineAdapter?.describeCurrentSource
-            || !GrokImagineAdapter?.captureGeneratedResultBaseline
-            || !GrokImagineAdapter?.inspectGeneratedResult) {
+            || !GrokImagineAdapter?.resolveMediaAction) {
             this.safeStatus('Video Goal: Grok adapter unavailable. Reload the extension.', 'error');
             return false;
         }
@@ -5967,16 +7936,25 @@ class VideoRetryManager {
             this.safeStatus('Video Goal: select one generated source in Agent or detail view', 'warning');
             return false;
         }
+        const sourcePostIdHint = getCurrentGrokSourcePostIdHint();
         const described = GrokImagineAdapter.describeCurrentSource({
             root: document,
             surface,
             location: {
                 pathname: window.location.pathname,
                 search: window.location.search
-            }
+            },
+            ...(sourcePostIdHint ? { sourcePostIdHint } : {})
         });
         if (described.status !== 'matched') {
             this.safeStatus(`Video Goal: ${described.reason || 'Select one generated source'}`, 'warning');
+            return false;
+        }
+        if (!described.descriptor.conversationId) {
+            this.safeStatus(
+                'Video Goal: this source has no conversation identity. Reopen it from results or Saved.',
+                'warning'
+            );
             return false;
         }
         const action = GrokImagineAdapter.resolveMediaAction({
@@ -6016,7 +7994,8 @@ class VideoRetryManager {
                 mediaKind: 'video',
                 acceptanceTimeoutMs: GENERATION_ACCEPTANCE_TIMEOUT_MS,
                 resultTimeoutMs: GENERATION_RESULT_TIMEOUT_MS,
-                capacityTimeoutMs: PROMPTED_RESULTS_CAPACITY_WAIT_MS
+                claimTimeoutMs: VIDEO_GOAL_HARD_RESULT_WAIT_MS + 60000,
+                capacityTimeoutMs: GENERATION_CAPACITY_WAIT_MS
             }
         );
         if (started?.status !== 'started') {
@@ -6024,7 +8003,7 @@ class VideoRetryManager {
             this.batchRunToken = null;
             this.safeStatus(
                 started?.activeWorkflow?.kind
-                    ? `Video Goal blocked by active ${started.activeWorkflow.kind}`
+                    ? `Video Goal blocked by ${getMutatingWorkflowLabel(started.activeWorkflow.kind)}.`
                     : `Video Goal: ${started?.error || 'Could not start'}`,
                 'warning'
             );
@@ -6059,8 +8038,7 @@ class VideoRetryManager {
 
         this.batchStartPending = true;
         try {
-            await this._startBatch(mode, prompt, options);
-            return true;
+            return await this._startBatch(mode, prompt, options);
         } finally {
             this.batchStartPending = false;
         }
@@ -6070,13 +8048,12 @@ class VideoRetryManager {
         const normalizedMode = mode === 'prompted' ? 'prompted' : 'quick';
 
         if (normalizedMode === 'prompted') {
-            await this._startPromptedBatchDurable(prompt, options);
-            return;
+            return this._startPromptedBatchDurable(prompt, options);
         }
 
         if (!GrokImagineAdapter) {
             this.safeStatus('Quick Batch: Grok adapter unavailable. Reload the extension.', 'error');
-            return;
+            return false;
         }
         const surface = GrokImagineAdapter.detectGrokSurface({
             root: document,
@@ -6087,29 +8064,29 @@ class VideoRetryManager {
         });
         if (surface !== 'results_gallery' && surface !== 'saved_gallery') {
             this.safeStatus('Quick Batch: Open generated results or Saved first', 'warning');
-            return;
+            return false;
         }
-        const listed = GrokImagineAdapter.listGalleryItems({ root: document, surface });
-        if (listed.status !== 'ok') {
-            this.safeStatus(`Quick Batch: ${listed.reason || 'Gallery identity is ambiguous'}`, 'error');
-            return;
+        const mounted = GrokImagineAdapter.listGalleryItems({ root: document, surface });
+        if (mounted.status !== 'ok') {
+            this.safeStatus(`Quick Batch: ${mounted.reason || 'Gallery identity is ambiguous'}`, 'error');
+            return false;
         }
         const galleryLimit = Math.max(
             1,
             parseInt(options.galleryLimit, 10)
                 || this.settingsManager.get('galleryBatchLimit')
-                || listed.items.length
+                || mounted.items.length
         );
-        const items = listed.items.filter((descriptor) => (
-            GrokImagineAdapter.resolveMediaAction({
-                root: document,
-                descriptor,
-                action: 'quick_video'
-            }).status === 'matched'
-        )).slice(0, galleryLimit);
+        const listed = await this._collectGenerationGalleryItems(surface, galleryLimit);
+        if (listed.status !== 'ok') {
+            this.safeStatus(`Quick Batch: ${listed.reason || 'Gallery identity is ambiguous'}`, 'error');
+            return false;
+        }
+        const items = listed.items.filter((descriptor) => descriptor.mediaKind === 'image')
+            .slice(0, galleryLimit);
         if (items.length === 0) {
             this.safeStatus('Quick Batch: No eligible image cards found', 'warning');
-            return;
+            return false;
         }
 
         this.batchRunning = true;
@@ -6126,8 +8103,11 @@ class VideoRetryManager {
         this.currentRetry = 0;
         this.generationRun = null;
 
+        const retryEnabled = this.settingsManager.settings.autoRetryEnabled === true;
         const started = await this._startGenerationRun('quick_batch', surface, items, '', {
-            maxRetries: Math.max(0, Number(this.settingsManager.settings.maxRetries) || 0),
+            maxRetries: retryEnabled
+                ? Math.max(0, Number(this.settingsManager.settings.maxRetries) || 0)
+                : 0,
             galleryLimit,
             action: 'quick_video',
             acceptanceTimeoutMs: GENERATION_ACCEPTANCE_TIMEOUT_MS
@@ -6137,16 +8117,19 @@ class VideoRetryManager {
             this.batchRunToken = null;
             const active = started?.activeWorkflow?.kind;
             this.safeStatus(
-                active ? `Quick Batch blocked by active ${active}` : `Quick Batch: ${started?.error || 'Could not start'}`,
+                active
+                    ? `Quick Batch blocked by ${getMutatingWorkflowLabel(active)}.`
+                    : `Quick Batch: ${started?.error || 'Could not start'}`,
                 'warning'
             );
-            return;
+            return false;
         }
 
         this.safeStatus(`Quick Batch: Starting ${items.length} sources`, 'info');
         this.updateCounters();
         this.updateBatchButtons(true);
         await this._runQuickBatch(this.batchRunToken);
+        return true;
     }
 
     async startPromptedBatchFromGallery(prompt, galleryLimit, runToken = this.createBatchRunToken()) {
@@ -6719,9 +8702,9 @@ class VideoRetryManager {
         this.targetContext = null;
         this.batchContext = null;
         this.batchProcessedSrcs = null;
-        this.safeStatus(`${label} Stopped`, 'neutral');
+        this.safeStatus(`${label}: Stopping...`, 'neutral');
         this.updateCounters();
-        this.updateBatchButtons(false);
+        this.updateBatchButtons(Boolean(activeRun));
         if (activeRun && !['completed', 'cancelled', 'failed'].includes(activeRun.status)) {
             const response = await this._sendGenerationMessage({
                 action: 'GENERATION_RUN_CANCEL',
@@ -6729,8 +8712,40 @@ class VideoRetryManager {
                 epoch: activeRun.epoch
             }, 'cancel generation run');
             this._rememberGenerationRun(response);
+            if (response?.status === 'cancelling') {
+                this.updateGenerationRunControls(this.generationRun);
+                const cleared = await this.waitForGenerationAuthorityClear(activeRun.runId);
+                if (!cleared) {
+                    this.safeStatus(
+                        `${label}: Still stopping. Refresh this Grok tab before starting another workflow.`,
+                        'warning'
+                    );
+                    return false;
+                }
+            } else if (response?.status !== 'cancelled') {
+                this.safeStatus(`${label}: ${response?.error || 'Stop was not acknowledged'}`, 'warning');
+                return false;
+            }
         }
+        this.updateBatchButtons(false);
         this.updateGenerationRunControls(this.generationRun);
+        this.safeStatus(`${label} Stopped`, 'neutral');
+        await this.overlay?.refreshActiveWorkflowStatus?.();
+        return true;
+    }
+
+    async waitForGenerationAuthorityClear(runId, timeoutMs = 15000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const response = await this._sendGenerationMessage({
+                action: 'GENERATION_RUN_STATUS'
+            }, 'check generation run status');
+            this._rememberGenerationRun(response);
+            if (!response || response.status === 'rejected') return false;
+            if (response.status !== 'active' || response.run?.runId !== runId) return true;
+            await this.sleep(250);
+        }
+        return false;
     }
 
     buildBatchQueue() {
@@ -7358,6 +9373,7 @@ class VideoRetryManager {
         const retryBtn = this.overlay.el.querySelector('#gptBatchRetryFailedBtn');
         const cancelBtn = this.overlay.el.querySelector('#gptBatchCancelRunBtn');
         const active = run && !['completed', 'cancelled', 'failed'].includes(run.status);
+        const cancelling = active && run.status === 'cancelling';
         const retryable = active && run.status === 'retryable_failed';
         const resumable = active && options.resume === true;
         const recovering = retryable || resumable;
@@ -7365,7 +9381,11 @@ class VideoRetryManager {
         if (quickBtn) quickBtn.style.display = active ? 'none' : '';
         if (promptedBtn) promptedBtn.style.display = active ? 'none' : '';
         if (goalBtn) goalBtn.style.display = active ? 'none' : '';
-        if (stopBtn) stopBtn.style.display = active && !recovering ? '' : 'none';
+        if (stopBtn) {
+            stopBtn.style.display = active && !recovering ? '' : 'none';
+            stopBtn.disabled = cancelling;
+            stopBtn.textContent = cancelling ? 'Stopping...' : 'Stop Batch';
+        }
         if (recoveryRow) recoveryRow.style.display = recovering ? 'flex' : 'none';
         if (resumeBtn) resumeBtn.style.display = resumable ? '' : 'none';
         if (retryBtn) retryBtn.style.display = retryable ? '' : 'none';
@@ -7529,30 +9549,99 @@ class VideoRetryManager {
 
     // --- Quality Repeat: auto-click "Generate More" N times ---
 
-    findGenerateMoreButton() {
-        return Array.from(document.querySelectorAll('button')).find(
-            b => b.textContent.trim() === 'Generate More'
-        );
+    isQualityRepeatButtonUsable(button) {
+        if (!button?.isConnected || button.hidden || button.disabled) return false;
+        if (button.getAttribute('aria-hidden') === 'true'
+            || button.getAttribute('aria-disabled') === 'true') return false;
+        const style = window.getComputedStyle(button);
+        return style.display !== 'none' && style.visibility !== 'hidden';
     }
 
-    async waitForGenerationComplete(timeout = 45000) {
-        const start = Date.now();
-        // Phase 1: wait for button to disappear (confirms click worked)
-        while (Date.now() - start < 5000) {
-            if (!this.qualityRepeatRunning) return false;
-            if (!this.findGenerateMoreButton()) break;
-            await this.sleep(200);
-        }
-        // Phase 2: wait for button to reappear (generation complete)
-        while (Date.now() - start < timeout) {
-            if (!this.qualityRepeatRunning) return false;
-            if (this.findGenerateMoreButton()) return true;
-            await this.sleep(500);
-        }
-        return false;
+    findGenerateMoreButtons(root = document) {
+        return Array.from(root.querySelectorAll('button')).filter((button) => (
+            button.textContent.trim() === 'Generate More'
+            && this.isQualityRepeatButtonUsable(button)
+        ));
     }
 
-    updateQualityRepeatUI(running) {
+    findGenerateMoreButton(root = document) {
+        const buttons = this.findGenerateMoreButtons(root);
+        return buttons.length === 1 ? buttons[0] : null;
+    }
+
+    getQualityRepeatScope(button) {
+        let node = button?.parentElement || null;
+        while (node && node !== document.body) {
+            const matchingButtons = this.findGenerateMoreButtons(node);
+            const hasMedia = Boolean(node.querySelector('img[src], video[src], video source[src]'));
+            if (matchingButtons.length === 1 && matchingButtons[0] === button && hasMedia) return node;
+            if (matchingButtons.length > 1) break;
+            node = node.parentElement;
+        }
+        return null;
+    }
+
+    captureQualityRepeatIdentities(scope) {
+        const identities = new Set();
+        for (const media of scope?.querySelectorAll?.('img[src], video[src], video source[src]') || []) {
+            const source = getBackupMediaElementSrc(media);
+            const identity = getGrokMediaIdentity(source);
+            if (identity) identities.add(identity);
+        }
+        return identities;
+    }
+
+    resolveQualityRepeatTarget(preferredButton = null) {
+        const buttons = this.findGenerateMoreButtons();
+        if (preferredButton && buttons.includes(preferredButton)) {
+            const scope = this.getQualityRepeatScope(preferredButton);
+            if (!scope) return null;
+            return { button: preferredButton, scope, buttons };
+        }
+        const matched = buttons.map((button) => {
+            const scope = this.getQualityRepeatScope(button);
+            if (!scope) return null;
+            const identities = this.captureQualityRepeatIdentities(scope);
+            const overlap = Array.from(identities).some((identity) => (
+                this.qualityRepeatKnownIdentities.has(identity)
+            ));
+            return { button, scope, identities, overlap };
+        }).filter((candidate) => candidate?.overlap);
+        if (matched.length === 1) return { ...matched[0], buttons };
+        return null;
+    }
+
+    async waitForGenerationComplete(baseline, timeout = 45000) {
+        const startedAt = Date.now();
+        let stableSignature = '';
+        let stableSince = 0;
+        while (Date.now() - startedAt < timeout) {
+            if (!this.qualityRepeatRunning || !isExtensionContextActive()) {
+                return { status: 'stopped', newIdentities: [] };
+            }
+            const target = this.resolveQualityRepeatTarget();
+            if (target) {
+                const current = this.captureQualityRepeatIdentities(target.scope);
+                const newIdentities = Array.from(current).filter((identity) => !baseline.has(identity));
+                if (newIdentities.length > 0 && this.isQualityRepeatButtonUsable(target.button)) {
+                    const signature = Array.from(current).sort().join('|');
+                    if (signature !== stableSignature) {
+                        stableSignature = signature;
+                        stableSince = Date.now();
+                    } else if (Date.now() - stableSince >= 1000) {
+                        return { status: 'accepted', newIdentities };
+                    }
+                } else {
+                    stableSignature = '';
+                    stableSince = 0;
+                }
+            }
+            await this.sleep(250);
+        }
+        return { status: 'timeout', newIdentities: [] };
+    }
+
+    updateQualityRepeatUI(running, finalStatus = '') {
         if (!this.overlay || !this.overlay.el) return;
         const startBtn = this.overlay.el.querySelector('#gptQualityRepeatBtn');
         const stopBtn = this.overlay.el.querySelector('#gptQualityRepeatStopBtn');
@@ -7561,72 +9650,161 @@ class VideoRetryManager {
         if (stopBtn) stopBtn.style.display = running ? '' : 'none';
         if (statusEl) {
             if (running) {
-                const images = this.qualityRepeatCompleted * 4;
-                const totalImages = this.qualityRepeatTotal * 4;
-                statusEl.textContent = 'Generating: ' + images + '/' + totalImages + ' images (' + this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal + ' repeats)';
+                statusEl.textContent = 'Generating: ' + this.qualityRepeatGeneratedImages + ' new images (' + this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal + ' repeats)';
+            } else if (finalStatus) {
+                statusEl.textContent = finalStatus;
             } else if (this.qualityRepeatCompleted > 0) {
-                statusEl.textContent = 'Done: ' + (this.qualityRepeatCompleted * 4) + ' images (' + this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal + ' repeats)';
+                statusEl.textContent = 'Done: ' + this.qualityRepeatGeneratedImages + ' new images (' + this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal + ' repeats)';
             } else {
                 statusEl.textContent = '';
             }
         }
     }
 
-    async startQualityRepeat(targetRepeats) {
-        if (this.qualityRepeatRunning) return;
+    async startQualityRepeat(targetRepeats, preferredButton = null) {
+        if (this.qualityRepeatRunning) return { status: 'already_running' };
+        const initialTarget = this.resolveQualityRepeatTarget(preferredButton);
+        if (!initialTarget) {
+            this.safeStatus('Quality Repeat: Select a result with one unambiguous Generate More button', 'warning');
+            return { status: 'target_ambiguous' };
+        }
+        const reservation = await startOwnedPageWorkflow('quality_repeat', {
+            accepted: 0,
+            failed: 0,
+            pending: targetRepeats
+        });
+        if (!reservation.authority) {
+            const blocker = reservation.activeWorkflow
+                ? getMutatingWorkflowLabel(reservation.activeWorkflow.kind)
+                : 'another workflow';
+            this.safeStatus(`Quality Repeat blocked by ${blocker}`, 'warning');
+            return { status: reservation.status, error: reservation.error };
+        }
+        this.qualityRepeatWorkflowAuthority = reservation.authority;
         this.qualityRepeatRunning = true;
         this.qualityRepeatTotal = targetRepeats;
         this.qualityRepeatCompleted = 0;
+        this.qualityRepeatGeneratedImages = 0;
+        this.qualityRepeatKnownIdentities = this.captureQualityRepeatIdentities(initialTarget.scope);
+        this.qualityRepeatInlineContainer = preferredButton?.parentElement?.querySelector('.gpt-quality-repeat-inline') || null;
+        this.qualityRepeatStopHeartbeat = startOwnedPageWorkflowHeartbeat(
+            this.qualityRepeatWorkflowAuthority,
+            () => ({
+                accepted: this.qualityRepeatCompleted,
+                failed: 0,
+                pending: Math.max(0, this.qualityRepeatTotal - this.qualityRepeatCompleted)
+            }),
+            () => {
+                this.qualityRepeatRunning = false;
+            }
+        );
+        if (this.qualityRepeatInlineContainer) this._showOnPageProgress(this.qualityRepeatInlineContainer);
         this.updateQualityRepeatUI(true);
         this.safeStatus('Quality Repeat: Starting 0/' + targetRepeats, 'info');
+        await this.overlay?.refreshActiveWorkflowStatus?.();
 
-        while (this.qualityRepeatCompleted < this.qualityRepeatTotal && this.qualityRepeatRunning) {
-            let btn = this.findGenerateMoreButton();
-            if (!btn) {
-                const waitStart = Date.now();
-                while (!btn && Date.now() - waitStart < 5000) {
-                    await this.sleep(500);
-                    btn = this.findGenerateMoreButton();
+        let failure = '';
+        try {
+            while (this.qualityRepeatCompleted < this.qualityRepeatTotal && this.qualityRepeatRunning) {
+                const authorized = await updateOwnedPageWorkflow(this.qualityRepeatWorkflowAuthority, {
+                    accepted: this.qualityRepeatCompleted,
+                    failed: failure ? 1 : 0,
+                    pending: Math.max(0, this.qualityRepeatTotal - this.qualityRepeatCompleted)
+                });
+                if (!authorized) {
+                    failure = 'workflow authority changed';
+                    break;
                 }
+                const target = this.resolveQualityRepeatTarget();
+                if (!target) {
+                    failure = 'target became ambiguous';
+                    break;
+                }
+                if (!location.href.includes('/imagine')) {
+                    failure = 'navigated away from Imagine';
+                    break;
+                }
+                const baseline = this.captureQualityRepeatIdentities(target.scope);
+                if (baseline.size === 0) {
+                    failure = 'result identity unavailable';
+                    break;
+                }
+                const clicked = dispatchFullPointerClick(target.button);
+                if (!clicked) {
+                    failure = 'Generate More did not accept the click';
+                    break;
+                }
+                const receipt = await this.waitForGenerationComplete(baseline);
+                if (!this.qualityRepeatRunning || receipt.status === 'stopped') break;
+                if (receipt.status !== 'accepted') {
+                    failure = 'new result set was not verified';
+                    break;
+                }
+                receipt.newIdentities.forEach((identity) => this.qualityRepeatKnownIdentities.add(identity));
+                this.qualityRepeatGeneratedImages += receipt.newIdentities.length;
+                this.qualityRepeatCompleted++;
+                this.updateQualityRepeatUI(true);
+                this.safeStatus('Quality Repeat: ' + this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal, 'info');
+                await this.sleep(1000);
             }
-            if (!btn) {
-                this.safeStatus('Quality Repeat: Generate More button not found', 'warning');
-                break;
+
+            const done = this.qualityRepeatCompleted >= this.qualityRepeatTotal;
+            const stopped = !this.qualityRepeatRunning;
+            this.qualityRepeatRunning = false;
+            this.qualityRepeatStopHeartbeat?.();
+            this.qualityRepeatStopHeartbeat = null;
+            const finalStatus = done
+                ? `Done: ${this.qualityRepeatGeneratedImages} new images (${this.qualityRepeatCompleted}/${this.qualityRepeatTotal} repeats)`
+                : (failure
+                    ? `Stopped: ${failure} (${this.qualityRepeatCompleted}/${this.qualityRepeatTotal} repeats)`
+                    : `Stopped: ${this.qualityRepeatGeneratedImages} new images (${this.qualityRepeatCompleted}/${this.qualityRepeatTotal} repeats)`);
+            this.updateQualityRepeatUI(false, finalStatus);
+            if (done) {
+                this.safeStatus(`Quality Repeat: Complete (${this.qualityRepeatGeneratedImages} new images)`, 'success');
+            } else if (failure) {
+                this.safeStatus(`Quality Repeat stopped: ${failure}`, 'error');
+            } else {
+                this.safeStatus(`Quality Repeat: Stopped (${this.qualityRepeatGeneratedImages} new images)`, 'neutral');
             }
-
-            if (!location.href.includes('/imagine')) {
-                this.safeStatus('Quality Repeat: Navigated away from Imagine', 'warning');
-                break;
+            if (this.qualityRepeatWorkflowAuthority) {
+                await finishOwnedPageWorkflow(
+                    this.qualityRepeatWorkflowAuthority,
+                    stopped || failure ? 'PAGE_WORKFLOW_STOP' : 'PAGE_WORKFLOW_COMPLETE'
+                );
+                this.qualityRepeatWorkflowAuthority = null;
             }
-
-            btn.click();
-
-            const appeared = await this.waitForGenerationComplete();
-            if (!this.qualityRepeatRunning) break;
-
-            this.qualityRepeatCompleted++;
-            this.updateQualityRepeatUI(true);
-            this.safeStatus('Quality Repeat: ' + this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal, 'info');
-
-            if (!appeared) {
-                console.warn('Quality Repeat: Timeout waiting for images on repeat ' + this.qualityRepeatCompleted);
+            return {
+                status: done ? 'completed' : (failure ? 'failed' : 'stopped'),
+                repeats: this.qualityRepeatCompleted,
+                images: this.qualityRepeatGeneratedImages,
+                error: failure
+            };
+        } finally {
+            this.qualityRepeatStopHeartbeat?.();
+            this.qualityRepeatStopHeartbeat = null;
+            if (this.qualityRepeatWorkflowAuthority) {
+                await finishOwnedPageWorkflow(this.qualityRepeatWorkflowAuthority, 'PAGE_WORKFLOW_STOP');
+                this.qualityRepeatWorkflowAuthority = null;
             }
-
-            await this.sleep(1000);
+            this.updateOnPageButtons(false);
+            await this.overlay?.refreshActiveWorkflowStatus?.();
         }
-
-        this.qualityRepeatRunning = false;
-        this.updateQualityRepeatUI(false);
-        const done = this.qualityRepeatCompleted >= this.qualityRepeatTotal;
-        const msg = done
-            ? 'Quality Repeat: Complete (' + (this.qualityRepeatCompleted * 4) + ' images)'
-            : 'Quality Repeat: Stopped (' + (this.qualityRepeatCompleted * 4) + ' images)';
-        this.safeStatus(msg, done ? 'success' : 'neutral');
-        this.updateOnPageButtons(false);
     }
 
-    stopQualityRepeat() {
+    async stopQualityRepeat() {
         this.qualityRepeatRunning = false;
+        this.qualityRepeatStopHeartbeat?.();
+        this.qualityRepeatStopHeartbeat = null;
+        if (this.qualityRepeatWorkflowAuthority) {
+            await finishOwnedPageWorkflow(this.qualityRepeatWorkflowAuthority, 'PAGE_WORKFLOW_STOP');
+            this.qualityRepeatWorkflowAuthority = null;
+        }
+        this.updateQualityRepeatUI(
+            false,
+            `Stopped: ${this.qualityRepeatGeneratedImages} new images (${this.qualityRepeatCompleted}/${this.qualityRepeatTotal} repeats)`
+        );
+        this.updateOnPageButtons(false);
+        await this.overlay?.refreshActiveWorkflowStatus?.();
     }
 
     // --- On-page quick buttons next to "Generate More" ---
@@ -7637,11 +9815,13 @@ class VideoRetryManager {
         const container = document.createElement('span');
         container.className = 'gpt-quality-repeat-inline';
         container.style.cssText = 'display:inline-flex; gap:4px; margin-left:8px; align-items:center;';
-        this._buildQuickButtons(container);
+        this.qualityRepeatInlineSources.set(container, generateMoreBtn);
+        this._buildQuickButtons(container, generateMoreBtn);
         generateMoreBtn.parentElement.appendChild(container);
     }
 
-    _buildQuickButtons(container) {
+    _buildQuickButtons(container, sourceButton = null) {
+        if (sourceButton) this.qualityRepeatInlineSources.set(container, sourceButton);
         while (container.firstChild) container.removeChild(container.firstChild);
         [2, 5, 10].forEach(count => {
             const btn = document.createElement('button');
@@ -7650,10 +9830,15 @@ class VideoRetryManager {
             btn.style.cssText = 'padding:4px 10px; font-size:11px; font-weight:600; border-radius:9999px; border:none; cursor:pointer; background:rgba(139,92,246,0.15); color:#a78bfa; transition:background 0.2s;';
             btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(139,92,246,0.3)'; });
             btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(139,92,246,0.15)'; });
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                this.startQualityRepeat(count);
-                this._showOnPageProgress(container);
+                const boundSource = this.qualityRepeatInlineSources.get(container);
+                const localButtons = this.findGenerateMoreButtons(container.parentElement);
+                const currentSource = this.isQualityRepeatButtonUsable(boundSource)
+                    ? boundSource
+                    : (localButtons.length === 1 ? localButtons[0] : null);
+                if (currentSource) this.qualityRepeatInlineSources.set(container, currentSource);
+                await this.startQualityRepeat(count, currentSource);
             });
             container.appendChild(btn);
         });
@@ -7672,16 +9857,16 @@ class VideoRetryManager {
         stopBtn.type = 'button';
         stopBtn.textContent = 'Stop';
         stopBtn.style.cssText = 'padding:2px 8px; font-size:11px; font-weight:600; border-radius:9999px; border:none; cursor:pointer; background:rgba(244,33,46,0.2); color:#f4212e; margin-left:6px;';
-        stopBtn.addEventListener('click', (e) => {
+        stopBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            this.stopQualityRepeat();
+            await this.stopQualityRepeat();
         });
         container.appendChild(stopBtn);
 
         const interval = setInterval(() => {
             if (!this.qualityRepeatRunning) {
                 clearInterval(interval);
-                this._buildQuickButtons(container);
+                this._buildQuickButtons(container, this.qualityRepeatInlineSources.get(container));
                 return;
             }
             status.textContent = this.qualityRepeatCompleted + '/' + this.qualityRepeatTotal + '...';
@@ -7691,60 +9876,204 @@ class VideoRetryManager {
     updateOnPageButtons(running) {
         const container = document.querySelector('.gpt-quality-repeat-inline');
         if (!container) return;
-        if (!running) this._buildQuickButtons(container);
+        if (!running) this._buildQuickButtons(container, this.qualityRepeatInlineSources.get(container));
     }
 
     sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 }
 
 class TemplateBatchManager {
-    constructor(toast) {
+    constructor(toast, overlay = null) {
         this.toast = toast;
+        this.overlay = overlay;
         this.running = false;
         this.aborted = false;
         this.count = 0;
         this.total = 0;
+        this.failed = 0;
+        this.workflowAuthority = null;
+        this.stopHeartbeat = null;
+        this.abortController = null;
+        this.releaseDelay = null;
+    }
+
+    async readSubmissionReceipt(response) {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (response.status === 201 || response.status === 202 || response.status === 204) {
+            return { status: response.status === 202 ? 'accepted' : 'created' };
+        }
+        const text = await response.text();
+        if (!text.trim()) throw new Error('template_submission_unconfirmed');
+        let payload;
+        try {
+            payload = JSON.parse(text);
+        } catch {
+            throw new Error('template_submission_invalid_response');
+        }
+        const records = [payload, payload?.data, payload?.result]
+            .filter((value) => value && typeof value === 'object' && !Array.isArray(value));
+        if (records.some((record) => record.success === false || record.error)) {
+            throw new Error('template_submission_rejected');
+        }
+        const acceptedStatuses = new Set([
+            'accepted', 'created', 'queued', 'running', 'processing', 'submitted', 'success'
+        ]);
+        const accepted = records.some((record) => (
+            record.success === true
+            || ['runId', 'jobId', 'responseId', 'id'].some((key) => (
+                typeof record[key] === 'string' && record[key].trim()
+            ))
+            || acceptedStatuses.has(String(record.status || '').toLowerCase())
+        ));
+        if (!accepted) throw new Error('template_submission_unconfirmed');
+        return { status: 'accepted' };
     }
 
     async start(templateId, imageUrl, count) {
+        if (this.running) return { status: 'already_running' };
+        const reservation = await startOwnedPageWorkflow('template_batch', {
+            accepted: 0,
+            failed: 0,
+            pending: count
+        });
+        if (!reservation.authority) {
+            const blocker = reservation.activeWorkflow
+                ? getMutatingWorkflowLabel(reservation.activeWorkflow.kind)
+                : 'another workflow';
+            this.updateStatus(`Blocked by ${blocker}`);
+            this.toast.show(`Template Batch blocked by ${blocker}`, 'error');
+            return { status: reservation.status, error: reservation.error };
+        }
+        this.workflowAuthority = reservation.authority;
         this.running = true;
         this.aborted = false;
         this.count = 0;
         this.total = count;
-        this.updateStatus(`Starting 0/${count}...`);
-
-        for (let i = 0; i < count && this.running && !this.aborted; i++) {
-            try {
-                const resp = await fetch('https://grok.com/rest/media/pipeline/run', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify({
-                        templateId,
-                        inputs: [{ name: 'photo', imageUrl }]
-                    })
-                });
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                this.count++;
-                this.updateStatus(`Submitted ${this.count}/${this.total}`);
-                console.log(`TemplateBatch: Submitted ${this.count}/${this.total}`);
-            } catch (e) {
-                console.error('TemplateBatch error:', e);
-                this.updateStatus(`Error at ${this.count + 1}/${this.total}: ${e.message}`);
+        this.failed = 0;
+        this.stopHeartbeat = startOwnedPageWorkflowHeartbeat(
+            this.workflowAuthority,
+            () => ({
+                accepted: this.count,
+                failed: this.failed,
+                pending: Math.max(0, this.total - this.count - this.failed)
+            }),
+            () => {
+                this.aborted = true;
+                this.running = false;
+                this.abortController?.abort();
+                this.releaseDelay?.();
             }
-            // Brief delay between submissions to avoid rate limiting
-            await new Promise(r => setTimeout(r, 2000));
-        }
+        );
+        this.updateStatus(`Starting 0/${count}...`);
+        await this.overlay?.refreshActiveWorkflowStatus?.();
 
-        this.running = false;
-        this.updateStatus(`Done: ${this.count}/${this.total} submitted`);
-        this.toast.show(`Template batch complete: ${this.count}/${this.total}`, 'success');
+        try {
+            for (let i = 0; i < count && this.running && !this.aborted; i++) {
+                const authorized = await updateOwnedPageWorkflow(this.workflowAuthority, {
+                    accepted: this.count,
+                    failed: this.failed,
+                    pending: Math.max(0, this.total - this.count - this.failed)
+                });
+                if (!authorized) {
+                    this.aborted = true;
+                    this.running = false;
+                    this.updateStatus('Stopped: workflow authority changed');
+                    break;
+                }
+                try {
+                    this.abortController = new AbortController();
+                    const resp = await fetch('https://grok.com/rest/media/pipeline/run', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        signal: this.abortController.signal,
+                        body: JSON.stringify({
+                            templateId,
+                            inputs: [{ name: 'photo', imageUrl }]
+                        })
+                    });
+                    this.abortController = null;
+                    if (!this.running || this.aborted) break;
+                    await this.readSubmissionReceipt(resp);
+                    this.count++;
+                    this.updateStatus(`Submitted ${this.count}/${this.total}`);
+                } catch (error) {
+                    this.abortController = null;
+                    if (this.aborted || error?.name === 'AbortError') break;
+                    this.failed++;
+                    this.updateStatus(`Failed ${this.failed}; submitted ${this.count}/${this.total}`);
+                }
+                if (i + 1 < count && this.running && !this.aborted) {
+                    await this.waitBetweenSubmissions(2000);
+                }
+            }
+
+            const stopped = this.aborted || !this.running;
+            this.running = false;
+            this.stopHeartbeat?.();
+            this.stopHeartbeat = null;
+            if (this.workflowAuthority) {
+                await finishOwnedPageWorkflow(
+                    this.workflowAuthority,
+                    stopped ? 'PAGE_WORKFLOW_STOP' : 'PAGE_WORKFLOW_COMPLETE'
+                );
+                this.workflowAuthority = null;
+            }
+            if (stopped) {
+                this.updateStatus(`Stopped: ${this.count}/${this.total} submitted`);
+                this.toast.show(`Template batch stopped: ${this.count}/${this.total}`, 'neutral');
+                return { status: 'stopped', submitted: this.count, failed: this.failed };
+            }
+            if (this.failed > 0 || this.count !== this.total) {
+                this.updateStatus(`Finished: ${this.count}/${this.total} submitted, ${this.failed} failed`);
+                this.toast.show(`Template batch finished with ${this.failed} failed`, 'error');
+                return { status: 'partial', submitted: this.count, failed: this.failed };
+            }
+            this.updateStatus(`Done: ${this.count}/${this.total} submitted`);
+            this.toast.show(`Template batch complete: ${this.count}/${this.total}`, 'success');
+            return { status: 'completed', submitted: this.count, failed: 0 };
+        } finally {
+            this.stopHeartbeat?.();
+            this.stopHeartbeat = null;
+            this.abortController = null;
+            this.releaseDelay?.();
+            this.releaseDelay = null;
+            if (this.workflowAuthority) {
+                await finishOwnedPageWorkflow(this.workflowAuthority, 'PAGE_WORKFLOW_STOP');
+                this.workflowAuthority = null;
+            }
+            await this.overlay?.refreshActiveWorkflowStatus?.();
+        }
     }
 
-    stop() {
+    waitBetweenSubmissions(ms) {
+        return new Promise((resolve) => {
+            const timer = setTimeout(() => {
+                this.releaseDelay = null;
+                resolve();
+            }, ms);
+            this.releaseDelay = () => {
+                clearTimeout(timer);
+                this.releaseDelay = null;
+                resolve();
+            };
+        });
+    }
+
+    async stop() {
         this.aborted = true;
         this.running = false;
+        this.stopHeartbeat?.();
+        this.stopHeartbeat = null;
+        this.abortController?.abort();
+        this.abortController = null;
+        this.releaseDelay?.();
         this.updateStatus(`Stopped at ${this.count}/${this.total}`);
+        if (this.workflowAuthority) {
+            await finishOwnedPageWorkflow(this.workflowAuthority, 'PAGE_WORKFLOW_STOP');
+            this.workflowAuthority = null;
+        }
+        await this.overlay?.refreshActiveWorkflowStatus?.();
     }
 
     updateStatus(text) {
@@ -7896,13 +10225,27 @@ class RecreateWorkflowContentBridge {
         return cancelled;
     }
 
+    cancelAllOperations() {
+        let cancelled = 0;
+        for (const operation of this.activeOperations.values()) {
+            if (!operation.controller.signal.aborted) {
+                operation.controller.abort();
+                cancelled++;
+            }
+        }
+        this.activeOperations.clear();
+        return cancelled;
+    }
+
     handleStatus(request) {
         const message = request.phase && request.phase !== 'done'
             ? `${request.phase}: ${request.message || request.error || ''}`
             : (request.message || request.error || '');
         const type = request.type || 'info';
 
-        if (this.overlay && typeof this.overlay.setRecreateStatus === 'function') {
+        if (this.overlay && typeof this.overlay.handleRecreateStatus === 'function') {
+            this.overlay.handleRecreateStatus(request);
+        } else if (this.overlay && typeof this.overlay.setRecreateStatus === 'function') {
             this.overlay.setRecreateStatus(message, type);
         } else if (this.overlay && typeof this.overlay.setStatus === 'function') {
             this.overlay.setStatus(message, type);
@@ -7967,36 +10310,56 @@ class RecreateWorkflowContentBridge {
 }
 
 
-class GrokScraper {
-    constructor() {
-        this.overlay = null;
-        this.processedIds = new Set();
-        this.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
-        this.backupMode = false;
-        this.backupOptions = { mode: 'full', limit: null, options: {} };
-        this.backupStats = {
+function initializeGrokScraperState(scraper) {
+    scraper.overlay = null;
+    scraper.processedIds = new Set();
+    scraper.processedLocalIds = new Set();
+    scraper.processedR2Ids = new Set();
+    scraper.legacyUnscopedProcessedIds = new Set();
+    scraper.requiredDestinations = [];
+    scraper.state = { isRunning: false, currentIndex: 0, mode: 'IDLE' };
+    scraper.backupMode = false;
+    scraper.backupOptions = { mode: 'full', limit: null, options: {} };
+    scraper.backupStats = {
             totalSeen: 0,
             uploaded: 0,
             alreadyPresent: 0,
             queued: 0,
             pendingTransfers: 0,
             errors: 0
-        };
-        this._backupVisited = new Set();
-        this._runVisited = new Set();
-        this._savedScanLedger = null;
-        this.runToken = null;
-        this.runEpoch = null;
-        this.pendingNavigation = null;
-        this._backupStartPending = false;
-        this._pendingInitLease = null;
-        this._runInvalidationVersion = 0;
-        this._listenersRegistered = false;
-        this._runStateWriteQueue = Promise.resolve();
-        this._returnToSavedInFlight = null;
-        this._activeStopReturn = null;
-        this._lastStoppedRun = null;
-        this.Config = { actionWait: 600, navWait: 800, surfaceWait: 10000, historyWait: 1500 };
+    };
+    scraper._backupVisited = new Set();
+    scraper._runVisited = new Set();
+    scraper.syncEntryLimit = null;
+    scraper._attemptedConversationIds = new Set();
+    scraper._completedConversationIds = new Set();
+    scraper._savedScanLedger = null;
+    scraper._savedScanPhase = 'process';
+    scraper._savedFirstPassOrder = [];
+    scraper._savedVerificationOrder = [];
+    scraper._savedVerificationVisited = new Set();
+    scraper._savedVerificationRestarts = 0;
+    scraper._savedScanNeedsRewind = true;
+    scraper._scrapeFailures = new Map();
+    scraper._listCoordinatorPromise = null;
+    scraper.runToken = null;
+    scraper.runEpoch = null;
+    scraper.pendingNavigation = null;
+    scraper._backupStartPending = false;
+    scraper._pendingInitLease = null;
+    scraper._runInvalidationVersion = 0;
+    scraper._listenersRegistered = false;
+    scraper._runStateWriteQueue = Promise.resolve();
+    scraper._returnToSavedInFlight = null;
+    scraper._activeStopReturn = null;
+    scraper._lastStoppedRun = null;
+    scraper.Config = { actionWait: 600, navWait: 800, surfaceWait: 10000, historyWait: 1500 };
+    return scraper;
+}
+
+class GrokScraper {
+    constructor() {
+        initializeGrokScraperState(this);
         this.setupListeners();
         this._initPromise = this.init();
     }
@@ -8009,6 +10372,7 @@ class GrokScraper {
         this.runToken = null;
         this.runEpoch = null;
         this.pendingNavigation = null;
+        this.invalidateRunMemory();
         showExtensionContextRefreshed(this.overlay);
         return true;
     }
@@ -8104,6 +10468,23 @@ class GrokScraper {
         return write;
     }
 
+    async queueCriticalRunStateWrite(values, operation, guard) {
+        let result = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            result = await this.queueRunStateWrite(values, operation, {
+                ...guard,
+                timeoutMs: SCRAPE_CRITICAL_RUN_STATE_WRITE_TIMEOUT_MS
+            });
+            if (
+                result.ok
+                || result.invalidated
+                || !this.matchesRunLease(guard.runToken, guard.runEpoch)
+            ) return result;
+            if (attempt === 0) await this.sleep(100);
+        }
+        return result;
+    }
+
     invalidateRunMemory() {
         this._runInvalidationVersion = this.getRunInvalidationVersion() + 1;
         this._backupStartPending = false;
@@ -8116,9 +10497,21 @@ class GrokScraper {
         this.runToken = null;
         this.runEpoch = null;
         this.pendingNavigation = null;
+        this.requiredDestinations = [];
         this._runVisited = new Set();
+        this.syncEntryLimit = null;
+        this._attemptedConversationIds = new Set();
+        this._completedConversationIds = new Set();
         this._backupVisited = new Set();
         this._savedScanLedger = null;
+        this._savedScanPhase = 'process';
+        this._savedFirstPassOrder = [];
+        this._savedVerificationOrder = [];
+        this._savedVerificationVisited = new Set();
+        this._savedVerificationRestarts = 0;
+        this._savedScanNeedsRewind = true;
+        this._scrapeFailures = new Map();
+        this._listCoordinatorPromise = null;
     }
 
     async clearStaleRunState(stopReason = 'stale_session') {
@@ -8132,12 +10525,17 @@ class GrokScraper {
             'scraperState',
             'currentIndex',
             'processedIds',
+            'processedLocalIds',
+            'processedR2Ids',
             'scrapeRunToken',
             'scrapeRunEpoch',
             'scrapeNavigation',
+            'scrapeFailures',
             'scrapeBackupOptions',
             'isR2Backup',
-            'r2BackupState'
+            'r2BackupState',
+            'scrapeDestinations',
+            'scrapeEntryLimitState'
         ], {}, 'load scraper state');
         if (storedResult.invalidated) {
             this.handleExtensionContextInvalidated();
@@ -8162,12 +10560,43 @@ class GrokScraper {
             this.processedIds = new Set(stored.processedIds);
             console.log(`Loaded ${this.processedIds.size} processed items.`);
         }
+        this.processedLocalIds = new Set(
+            Array.isArray(stored.processedLocalIds) ? stored.processedLocalIds : []
+        );
+        this.processedR2Ids = new Set(
+            Array.isArray(stored.processedR2Ids) ? stored.processedR2Ids : []
+        );
+        this.rebuildLegacyUnscopedProcessedIds();
         this.state.isRunning = stored.scraperState === 'running';
         this.state.currentIndex = stored.currentIndex || 0;
         this.runToken = stored.scrapeRunToken || null;
         this.runEpoch = Number.isInteger(stored.scrapeRunEpoch) ? stored.scrapeRunEpoch : null;
         this.pendingNavigation = stored.scrapeNavigation || null;
+        this._scrapeFailures = new Map(
+            (Array.isArray(stored.scrapeFailures) ? stored.scrapeFailures : [])
+                .filter((failure) => (
+                    failure
+                    && typeof failure.key === 'string'
+                    && failure.key.length > 0
+                    && failure.key.length <= 512
+                ))
+                .map((failure) => [failure.key, { ...failure }])
+        );
         this.backupMode = stored.isR2Backup === true;
+        const entryLimitState = this.backupMode
+            ? null
+            : normalizeSyncEntryLimitState(stored.scrapeEntryLimitState);
+        this.syncEntryLimit = entryLimitState?.entryLimit || null;
+        this._attemptedConversationIds = new Set(entryLimitState?.attemptedConversationIds || []);
+        this._completedConversationIds = new Set(entryLimitState?.completedConversationIds || []);
+        if (this.syncEntryLimit) {
+            this.state.currentIndex = this._attemptedConversationIds.size;
+            for (const conversationId of this._completedConversationIds) {
+                this._runVisited.add(`conversation:${conversationId}`);
+            }
+        }
+        this.requiredDestinations = normalizeScrapeDestinations(stored.scrapeDestinations);
+        if (this.backupMode && !this.requiredDestinations.length) this.requiredDestinations = ['r2'];
         if (this.backupMode) {
             this.backupOptions = stored.scrapeBackupOptions || this.backupOptions;
             this.backupStats = {
@@ -8299,6 +10728,9 @@ class GrokScraper {
                 return true;
             } else if (request.action === 'RESET_PROCESSED_IDS') {
                 this.processedIds = new Set();
+                this.processedLocalIds = new Set();
+                this.processedR2Ids = new Set();
+                this.legacyUnscopedProcessedIds = new Set();
                 console.log('Processed IDs cleared in-memory.');
                 sendResponse({ status: 'cleared', size: 0 });
             }
@@ -8313,6 +10745,15 @@ class GrokScraper {
             if (area !== 'local') return;
             if (Array.isArray(changes.processedIds?.newValue)) {
                 this.processedIds = new Set(changes.processedIds.newValue);
+            }
+            if (Array.isArray(changes.processedLocalIds?.newValue)) {
+                this.processedLocalIds = new Set(changes.processedLocalIds.newValue);
+            }
+            if (Array.isArray(changes.processedR2Ids?.newValue)) {
+                this.processedR2Ids = new Set(changes.processedR2Ids.newValue);
+            }
+            if (changes.processedIds || changes.processedLocalIds || changes.processedR2Ids) {
+                this.rebuildLegacyUnscopedProcessedIds();
             }
             const pendingBackup = this._backupStartPending || this._pendingInitLease?.kind === 'r2_backup';
             const stopSignal = shouldStopScraperForStorageChanges(changes, this.backupMode || pendingBackup);
@@ -8379,13 +10820,30 @@ class GrokScraper {
         } else if (action === 'INIT_R2_BACKUP') {
             console.warn('[GrokScraper] ignored page-origin R2 backup command without canary mode');
         } else if (action === 'ABORT_R2_BACKUP') {
-            safeChromeRuntimeSendMessageSoon({ action: 'STOP_R2_BACKUP' }, 'stop page-command R2 backup');
+            safeChromeRuntimeSendMessageSoon({
+                action: 'STOP_R2_BACKUP',
+                runToken: this.runToken || this._pendingInitLease?.runToken || null,
+                runEpoch: Number.isInteger(this.runEpoch)
+                    ? this.runEpoch
+                    : this._pendingInitLease?.runEpoch,
+                kind: 'r2_backup'
+            }, 'stop page-command R2 backup');
         } else if (action === 'INIT_SCRAPE') {
             safeChromeRuntimeSendMessageSoon({ action: 'START_SCRAPE' }, 'start page-command scrape');
         } else if (action === 'ABORT_SCRAPE') {
-            safeChromeRuntimeSendMessageSoon({ action: 'STOP_SCRAPE' }, 'stop page-command scrape');
+            safeChromeRuntimeSendMessageSoon({
+                action: 'STOP_SCRAPE',
+                runToken: this.runToken || this._pendingInitLease?.runToken || null,
+                runEpoch: Number.isInteger(this.runEpoch)
+                    ? this.runEpoch
+                    : this._pendingInitLease?.runEpoch,
+                kind: 'sync'
+            }, 'stop page-command scrape');
         } else if (action === 'RESET_PROCESSED_IDS') {
             this.processedIds = new Set();
+            this.processedLocalIds = new Set();
+            this.processedR2Ids = new Set();
+            this.legacyUnscopedProcessedIds = new Set();
             safeChromeRuntimeSendMessageSoon({ action: 'PROCESSED_IDS_RESET' }, 'reset processed IDs');
             console.log('[GrokScraper] processedIds cleared via custom event');
         }
@@ -8393,13 +10851,86 @@ class GrokScraper {
 
     getCleanId(url) { if (!url) return null; try { return url.split('?')[0]; } catch { return url; } }
 
-    isMediaProcessed(value) {
-        const cleanId = this.getCleanId(value);
+    getProcessedIdentityCandidates(value) {
         const stableId = getGrokMediaIdentity(value);
-        return Boolean(
-            (cleanId && this.processedIds.has(cleanId))
-            || (stableId && this.processedIds.has(stableId))
+        const canonicalAssetId = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(stableId)
+            ? `media_${stableId}`
+            : '';
+        return Array.from(new Set([
+            this.getCleanId(value),
+            stableId,
+            canonicalAssetId
+        ].filter(Boolean)));
+    }
+
+    isMediaProcessed(value) {
+        return this.getProcessedIdentityCandidates(value).some((id) => this.processedIds.has(id));
+    }
+
+    rebuildLegacyUnscopedProcessedIds() {
+        const scoped = new Set([
+            ...this.processedLocalIds,
+            ...this.processedR2Ids
+        ]);
+        this.legacyUnscopedProcessedIds = new Set(
+            Array.from(this.processedIds).filter((id) => !scoped.has(id))
         );
+    }
+
+    hasDestinationReceipt(value, destination) {
+        const candidates = this.getProcessedIdentityCandidates(value);
+        if (!candidates.length) return false;
+        const destinationSet = destination === 'r2'
+            ? this.processedR2Ids
+            : this.processedLocalIds;
+        return candidates.some((id) => (
+            destinationSet.has(id)
+            || (destination === 'local' && this.legacyUnscopedProcessedIds.has(id))
+        ));
+    }
+
+    isAssetDestinationSatisfied(value) {
+        return this.requiredDestinations.length > 0
+            && this.requiredDestinations.every((destination) => (
+                this.hasDestinationReceipt(value, destination)
+            ));
+    }
+
+    async loadCurrentSyncDestinations(runToken = this.runToken) {
+        const configResult = await safeChromeRuntimeSendMessage(
+            { action: 'GET_CLOUD_CONFIG' },
+            'load Sync destination mode'
+        );
+        if (configResult.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return null;
+        }
+        if (runToken && !this.isRunActive(runToken)) return null;
+        return getSyncDestinationsForCloudMode(configResult.value?.config?.mode);
+    }
+
+    async ensureRunDestinationContract(runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return false;
+        if (this.backupMode) {
+            if (!this.requiredDestinations.length) this.requiredDestinations = ['r2'];
+            return scrapeDestinationsMatch(this.requiredDestinations, ['r2']);
+        }
+        const currentDestinations = await this.loadCurrentSyncDestinations(runToken);
+        if (!currentDestinations || !this.isRunActive(runToken)) return false;
+        if (!this.requiredDestinations.length) {
+            this.requiredDestinations = currentDestinations;
+            const result = await this.queueRunStateWrite({
+                scrapeDestinations: this.requiredDestinations
+            }, 'bind resumed Sync destinations', { runToken, runEpoch: this.runEpoch });
+            if (result.invalidated) this.handleExtensionContextInvalidated();
+            return result.ok && this.isRunActive(runToken);
+        }
+        if (scrapeDestinationsMatch(this.requiredDestinations, currentDestinations)) return true;
+        await this.failRun(
+            'Backup Mode changed while Sync was running. Restore the original mode before restarting.',
+            'sync_destination_drift'
+        );
+        return false;
     }
 
     getCurrentSurface() {
@@ -8410,8 +10941,7 @@ class GrokScraper {
         return detectSavedGalleryScope(document);
     }
 
-    getSavedGalleryScopeDrift() {
-        const scope = this.getSavedGalleryScope();
+    getSavedGalleryScopeDrift(scope = this.getSavedGalleryScope()) {
         if (scope === SAVED_GALLERY_SCOPES.all) return null;
         return {
             scope,
@@ -8421,11 +10951,28 @@ class GrokScraper {
         };
     }
 
+    async waitForSavedGalleryScope(runToken = this.runToken, runEpoch = this.runEpoch) {
+        let scope = this.getSavedGalleryScope();
+        if (scope !== SAVED_GALLERY_SCOPES.unknown) return scope;
+
+        const startedAt = Date.now();
+        while (
+            this.isRunActive(runToken, runEpoch)
+            && Date.now() - startedAt < this.Config.surfaceWait
+        ) {
+            await this.sleep(100);
+            scope = this.getSavedGalleryScope();
+            if (scope !== SAVED_GALLERY_SCOPES.unknown) return scope;
+        }
+        return scope;
+    }
+
     async ensureSavedGalleryAllScope(runToken = this.runToken, runEpoch = this.runEpoch) {
         if (!this.isRunActive(runToken, runEpoch)) return false;
-        const drift = this.getSavedGalleryScopeDrift();
-        if (!drift) return true;
+        const scope = await this.waitForSavedGalleryScope(runToken, runEpoch);
         if (!this.isRunActive(runToken, runEpoch)) return false;
+        const drift = this.getSavedGalleryScopeDrift(scope);
+        if (!drift) return true;
         await this.failRun(drift.error, 'saved_scope_drift');
         return false;
     }
@@ -8442,7 +10989,7 @@ class GrokScraper {
     }
 
     isRunActive(runToken = this.runToken, runEpoch = this.runEpoch) {
-        return this.matchesRunLease(runToken, runEpoch);
+        return isExtensionContextActive() && this.matchesRunLease(runToken, runEpoch);
     }
 
     getGalleryScroller() {
@@ -8456,7 +11003,7 @@ class GrokScraper {
     getGalleryCardSignature() {
         const context = getSavedGalleryContext(document);
         return (context?.entries || [])
-            .map((entry) => this.getCleanId(entry.sourceUrl))
+            .map((entry) => entry.cardIdentity)
             .filter(Boolean)
             .join('|');
     }
@@ -8562,14 +11109,14 @@ class GrokScraper {
         if (!this.isRunActive(runToken, runEpoch)) return true;
         const expectedNextIdentity = currentContext?.entries?.[index + 1]?.cardIdentity || null;
         this.log(`new item: ...${cleanId.slice(-6)}`, 'success');
-        await this.processItem(
+        const outcome = await this.processItem(
             entry.image,
             cleanId,
             runToken,
             runEpoch,
             expectedNextIdentity
         );
-        return true;
+        return outcome?.status ? outcome : true;
     }
 
     async queryRunDurabilitySnapshot(runToken = this.runToken) {
@@ -8635,8 +11182,23 @@ class GrokScraper {
         this.runEpoch = runEpoch;
         this.pendingNavigation = null;
         this.backupMode = false;
+        this.syncEntryLimit = normalizeSyncEntryLimit(options.entryLimit);
+        this._attemptedConversationIds = new Set();
+        this._completedConversationIds = new Set();
+        this.requiredDestinations = await this.loadCurrentSyncDestinations(runToken);
+        if (!this.requiredDestinations || !this.isRunActive(runToken, runEpoch)) {
+            if (this.runToken === runToken && this.runEpoch === runEpoch) this.invalidateRunMemory();
+            return { status: 'error', surface, error: 'Could not bind Sync to its destination mode.' };
+        }
         this._runVisited = new Set();
         this._savedScanLedger = createSavedScanLedger();
+        this._savedScanPhase = 'process';
+        this._savedFirstPassOrder = [];
+        this._savedVerificationOrder = [];
+        this._savedVerificationVisited = new Set();
+        this._savedVerificationRestarts = 0;
+        this._savedScanNeedsRewind = true;
+        this._scrapeFailures = new Map();
         const result = await this.queueRunStateWrite({
             scraperState: 'running',
             currentIndex: 0,
@@ -8644,7 +11206,15 @@ class GrokScraper {
             scrapeRunEpoch: runEpoch,
             scrapeNavigation: null,
             currentItemId: null,
+            scrapeFailures: [],
             scrapeBackupOptions: null,
+            scrapeEntryLimitState: this.syncEntryLimit ? {
+                version: 2,
+                entryLimit: this.syncEntryLimit,
+                attemptedConversationIds: [],
+                completedConversationIds: []
+            } : null,
+            scrapeDestinations: this.requiredDestinations,
             isScraping: true,
             isR2Backup: false
         }, 'start scrape', { runToken, runEpoch });
@@ -8688,25 +11258,44 @@ class GrokScraper {
         Promise.resolve(this.determineModeAndExecute(runToken, runEpoch)).catch((error) => {
             if (this.isRunActive(runToken, runEpoch)) this.failRun(error.message || 'Sync failed to start.', 'start_failed');
         });
-        return { status: 'started', surface, runToken, runEpoch };
+        await this.overlay?.refreshActiveWorkflowStatus?.();
+        return {
+            status: 'started',
+            surface,
+            runToken,
+            runEpoch,
+            ...(this.syncEntryLimit ? { entryLimit: this.syncEntryLimit } : {})
+        };
     }
 
     async waitForRunDurability(runToken = this.runToken, {
         timeoutMs = 60000,
-        pollMs = 250
+        pollMs = 250,
+        hardTimeoutMs = Math.max(timeoutMs, 15 * 60 * 1000)
     } = {}) {
         const runEpoch = this.runEpoch;
         const invalidationVersion = this.getRunInvalidationVersion();
         const backupMode = this.backupMode;
         const kind = backupMode ? 'r2_backup' : 'sync';
-        const deadline = Date.now() + Math.max(0, timeoutMs);
+        const startedAt = Date.now();
+        const hardDeadline = startedAt + Math.max(timeoutMs, hardTimeoutMs);
+        let lastProgressAt = startedAt;
+        let lastProgressSignature = null;
         const isCurrentRun = () => (
             this.getRunInvalidationVersion() === invalidationVersion
             && this.isRunActive(runToken, runEpoch)
         );
         const ignored = () => ({ status: 'ignored', reason: 'stale_authority' });
-        const timedOut = () => ({ status: 'timeout', reason: 'deadline_exceeded' });
+        const getActiveDeadline = () => Math.min(
+            hardDeadline,
+            lastProgressAt + Math.max(0, timeoutMs)
+        );
+        const timedOut = () => ({
+            status: 'timeout',
+            reason: Date.now() >= hardDeadline ? 'hard_deadline_exceeded' : 'progress_stalled'
+        });
         const awaitBeforeDeadline = async (promise) => {
+            const deadline = getActiveDeadline();
             const remainingMs = deadline - Date.now();
             if (remainingMs <= 0) return { expired: true };
             let timeoutId = null;
@@ -8723,7 +11312,7 @@ class GrokScraper {
         };
 
         while (isCurrentRun()) {
-            if (Date.now() >= deadline) return timedOut();
+            if (Date.now() >= getActiveDeadline()) return timedOut();
             let query;
             try {
                 query = safeChromeRuntimeSendMessage({
@@ -8744,14 +11333,28 @@ class GrokScraper {
             const snapshot = result.value && typeof result.value === 'object'
                 ? result.value
                 : { status: 'failed', reason: 'missing_response' };
+            const progressSignature = JSON.stringify({
+                status: snapshot.status,
+                pendingDownloads: Number(snapshot.pendingDownloads || 0),
+                pendingOperations: Number(snapshot.pendingOperations || 0),
+                pendingQueueItems: Number(snapshot.pendingQueueItems || 0),
+                inFlightTasks: Number(snapshot.inFlightTasks || 0),
+                queueRevision: Number(snapshot.queueRevision || 0),
+                operationRevision: Number(snapshot.operationRevision || 0)
+            });
+            if (progressSignature !== lastProgressSignature) {
+                lastProgressSignature = progressSignature;
+                lastProgressAt = Date.now();
+            }
             if (backupMode) {
                 this.backupStats.pendingTransfers = Number(snapshot.pendingDownloads || 0)
                     + Number(snapshot.pendingOperations || 0)
                     + Number(snapshot.pendingQueueItems || 0)
                     + Number(snapshot.inFlightTasks || 0);
-                if (Date.now() >= deadline) return timedOut();
+                if (Date.now() >= getActiveDeadline()) return timedOut();
                 let progress;
                 try {
+                    const deadline = getActiveDeadline();
                     progress = this.persistBackupProgress(runToken, {
                         runEpoch,
                         invalidationVersion,
@@ -8770,10 +11373,13 @@ class GrokScraper {
                 }
             }
             if (snapshot.status !== 'pending') return snapshot;
-            if (Date.now() >= deadline) return timedOut();
+            if (Date.now() >= getActiveDeadline()) return timedOut();
             let sleep;
             try {
-                sleep = this.sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+                sleep = this.sleep(Math.min(
+                    pollMs,
+                    Math.max(0, getActiveDeadline() - Date.now())
+                ));
             } catch {
                 return { status: 'failed', reason: 'poll_sleep_failed' };
             }
@@ -8841,6 +11447,17 @@ class GrokScraper {
             previousEpoch,
             providedNavigation
         );
+        const finalStats = {
+            stopReason,
+            failureCount: this._scrapeFailures.size,
+            attemptedEntries: this.syncEntryLimit
+                ? this._attemptedConversationIds.size
+                : this.state.currentIndex,
+            completedEntries: this.syncEntryLimit
+                ? this._completedConversationIds.size
+                : this.state.currentIndex,
+            entryLimit: this.syncEntryLimit
+        };
         console.log('Stopping scrape run.');
         this.invalidateRunMemory();
         this.log('Scraping stopped.', 'neutral');
@@ -8853,8 +11470,13 @@ class GrokScraper {
                 runToken: previousToken,
                 runEpoch: previousEpoch,
                 kind: 'sync',
-                stats: { stopReason }
+                stats: finalStats
             }, 'complete scrape');
+        }
+        if (options.notifyBackground === false) {
+            setTimeout(() => this.overlay?.refreshActiveWorkflowStatus?.(), 250);
+        } else {
+            await this.overlay?.refreshActiveWorkflowStatus?.();
         }
         return { status: 'stopped' };
     }
@@ -8926,6 +11548,7 @@ class GrokScraper {
         }
 
         this.backupMode = true;
+        this.requiredDestinations = ['r2'];
         this.backupOptions = {
             mode: options.mode === 'canary' ? 'canary' : 'full',
             limit: Number.isFinite(options.limit) && options.limit > 0 ? options.limit : null,
@@ -8944,6 +11567,13 @@ class GrokScraper {
         this._backupVisited = new Set();
         this._runVisited = new Set();
         this._savedScanLedger = createSavedScanLedger();
+        this._savedScanPhase = 'process';
+        this._savedFirstPassOrder = [];
+        this._savedVerificationOrder = [];
+        this._savedVerificationVisited = new Set();
+        this._savedVerificationRestarts = 0;
+        this._savedScanNeedsRewind = true;
+        this._scrapeFailures = new Map();
         this.backupStats.scan = getSavedScanSummary(this._savedScanLedger);
         this.state.isRunning = true;
         this.state.currentIndex = 0;
@@ -8955,7 +11585,9 @@ class GrokScraper {
             scrapeRunEpoch: runEpoch,
             scrapeNavigation: null,
             currentItemId: null,
+            scrapeFailures: [],
             scrapeBackupOptions: this.backupOptions,
+            scrapeDestinations: this.requiredDestinations,
             isScraping: true,
             isR2Backup: true,
             r2BackupState: { ...this.backupStats, isRunning: true }
@@ -9001,6 +11633,7 @@ class GrokScraper {
         Promise.resolve(this.determineModeAndExecute(runToken, runEpoch)).catch((error) => {
             if (this.isRunActive(runToken, runEpoch)) this.failRun(error.message || 'R2 Backup failed to start.', 'start_failed');
         });
+        await this.overlay?.refreshActiveWorkflowStatus?.();
         return { status: 'started', surface, runToken, runEpoch };
     }
 
@@ -9039,7 +11672,11 @@ class GrokScraper {
         if (stopReason === 'complete' || stopReason === 'canary_complete') {
             stopReason = await this.getDurableCompletionStopReason(stopReason, previousToken);
         }
-        const finalStats = { ...this.backupStats, stopReason };
+        const finalStats = {
+            ...this.backupStats,
+            stopReason,
+            failureCount: this._scrapeFailures.size
+        };
         const stopNavigation = this.captureStopNavigation(
             previousToken,
             previousEpoch,
@@ -9059,32 +11696,71 @@ class GrokScraper {
                 stats: finalStats
             }, 'complete R2 backup');
         }
+        if (options.notifyBackground === false) {
+            setTimeout(() => this.overlay?.refreshActiveWorkflowStatus?.(), 250);
+        } else {
+            await this.overlay?.refreshActiveWorkflowStatus?.();
+        }
         return { status: 'stopped' };
     }
 
     async determineModeAndExecute(runToken = this.runToken) {
         if (!this.isRunActive(runToken)) return;
-
-        const surface = this.getCurrentSurface();
-        if (surface === SCRAPE_SURFACES.savedGallery) {
-            if (!await this.ensureSavedGalleryAllScope(runToken)) return;
-            this.state.mode = 'LIST';
-            const restored = await this.restorePendingGalleryContext(runToken);
-            if (restored && this.isRunActive(runToken)) await this.executeListView(runToken);
-            return;
-        }
-        if (surface === SCRAPE_SURFACES.agentMedia) {
-            this.state.mode = 'AGENT';
-            await this.executeAgentView(runToken);
-            return;
-        }
-        if (surface === SCRAPE_SURFACES.legacyDetail) {
-            this.state.mode = 'DETAIL';
-            await this.executeDetailView(runToken);
+        if (!await this.ensureRunDestinationContract(runToken)) {
+            if (this.isRunActive(runToken)) {
+                await this.failRun(
+                    'Could not confirm the active Sync destination after resume.',
+                    'resume_destination_unavailable',
+                    false
+                );
+            }
             return;
         }
 
-        await this.failRun('Sync left Grok Imagine Saved and did not reach supported media.', 'unsupported_surface');
+        while (this.isRunActive(runToken)) {
+            const surface = this.getCurrentSurface();
+            if (surface === SCRAPE_SURFACES.savedGallery) {
+                if (!await this.ensureSavedGalleryAllScope(runToken)) return;
+                this.state.mode = 'LIST';
+                const restored = await this.restorePendingGalleryContext(runToken);
+                if (!restored || !this.isRunActive(runToken)) {
+                    if (this.isRunActive(runToken)) {
+                        await this.failRun(
+                            'Could not restore the pending Saved entry after resume.',
+                            'resume_gallery_restore_failed',
+                            false
+                        );
+                    }
+                    return;
+                }
+                const outcome = await this.executeListView(runToken);
+                if (outcome?.status === 'surface_changed' || outcome?.status === 'navigating') continue;
+                if (this.isRunActive(runToken)) {
+                    await this.failRun(
+                        'Sync coordinator exited without a terminal result.',
+                        'coordinator_exited_without_terminal_state',
+                        false
+                    );
+                }
+                return;
+            }
+            if (surface === SCRAPE_SURFACES.agentMedia) {
+                this.state.mode = 'AGENT';
+                await this.executeAgentView(runToken);
+                continue;
+            }
+            if (surface === SCRAPE_SURFACES.legacyDetail) {
+                this.state.mode = 'DETAIL';
+                await this.executeDetailView(runToken);
+                continue;
+            }
+
+            await this.failRun(
+                'Sync left Grok Imagine Saved and did not reach supported media.',
+                'unsupported_surface'
+            );
+            return;
+        }
     }
 
     async failRun(message, stopReason = 'error', countBackupError = true) {
@@ -9150,9 +11826,17 @@ class GrokScraper {
         const pending = this.pendingNavigation;
         if (!pending) return true;
         if (pending.runToken !== runToken || pending.runEpoch !== this.runEpoch) return false;
+        let verifiedAllScope = false;
         const restored = await restoreSavedViewportReceipt(pending, {
             isActive: () => this.isRunActive(runToken),
-            isScopeValid: () => this.getSavedGalleryScope() === SAVED_GALLERY_SCOPES.all,
+            isScopeValid: () => {
+                const scope = this.getSavedGalleryScope();
+                if (scope === SAVED_GALLERY_SCOPES.all) {
+                    verifiedAllScope = true;
+                    return true;
+                }
+                return scope === SAVED_GALLERY_SCOPES.unknown && !verifiedAllScope;
+            },
             sleep: (delay) => this.sleep(delay),
             timeoutMs: 10000
         });
@@ -9177,8 +11861,9 @@ class GrokScraper {
         if (!this.isRunActive(runToken)) return false;
         if (!await this.ensureSavedGalleryAllScope(runToken)) return false;
         if (pending.conversationId && pending.inventoryComplete !== true) {
-            await this.processPendingConversationInventory(runToken);
-            return false;
+            const outcome = await this.processPendingConversationInventory(runToken);
+            if (outcome?.status !== 'completed' || !this.isRunActive(runToken)) return false;
+            if (!this.pendingNavigation) return true;
         }
         const result = await this.queueRunStateWrite({
             scrapeNavigation: null,
@@ -9193,21 +11878,386 @@ class GrokScraper {
         return true;
     }
 
-    async executeListView(runToken = this.runToken) {
-        if (!this.isRunActive(runToken)) return;
-        if (this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) {
-            await this.determineModeAndExecute(runToken);
-            return;
-        }
-        if (!await this.ensureSavedGalleryAllScope(runToken)) return;
+    getSavedEntryRunKey(entry) {
+        const conversationId = entry?.conversationId || getSavedCardConversationId(entry?.card);
+        if (conversationId) return `conversation:${conversationId}`;
+        const cardIdentity = entry?.cardIdentity
+            || entry?.sourceIdentity
+            || getGrokMediaIdentity(entry?.sourceUrl);
+        return cardIdentity ? `card:${cardIdentity}` : '';
+    }
 
-        let missingContextRetries = 0;
-        let scrollAttempts = 0;
+    getScrapeFailureKey(pending = this.pendingNavigation) {
+        if (!pending || typeof pending !== 'object') return '';
+        return [
+            pending.entryRunKey,
+            pending.sourceEntryRunKey,
+            pending.conversationId ? `conversation:${pending.conversationId}` : '',
+            pending.sourceCardIdentity ? `card:${pending.sourceCardIdentity}` : '',
+            pending.expectedIdentity ? `asset:${pending.expectedIdentity}` : ''
+        ].find((value) => typeof value === 'string' && value.length > 0) || '';
+    }
+
+    serializeScrapeFailures(failures = this._scrapeFailures) {
+        return Array.from(failures.values()).map((failure) => ({ ...failure }));
+    }
+
+    markSavedEntryVisited(pending, fallbackKey = '') {
+        const keys = new Set([
+            fallbackKey,
+            pending?.entryRunKey,
+            pending?.sourceEntryRunKey,
+            pending?.conversationId ? `conversation:${pending.conversationId}` : ''
+        ].filter(Boolean));
+        for (const key of keys) {
+            this._runVisited.add(key);
+            if (this._savedScanPhase === 'verify') this._savedVerificationVisited.add(key);
+        }
+    }
+
+    getBoundedSyncEntryLimitState(
+        attemptedConversationIds = this._attemptedConversationIds,
+        completedConversationIds = this._completedConversationIds
+    ) {
+        if (!this.syncEntryLimit || this.backupMode) return null;
+        return {
+            version: 2,
+            entryLimit: this.syncEntryLimit,
+            attemptedConversationIds: Array.from(attemptedConversationIds),
+            completedConversationIds: Array.from(completedConversationIds)
+        };
+    }
+
+    async stopIfBoundedSyncEntryLimitReached(runToken = this.runToken) {
+        if (
+            !this.syncEntryLimit
+            || this.backupMode
+            || this._attemptedConversationIds.size < this.syncEntryLimit
+            || !this.isRunActive(runToken)
+        ) return false;
+        this.log(
+            `Bounded Sync reached ${this._attemptedConversationIds.size} attempted Saved entries (${this._completedConversationIds.size} durable).`,
+            this._scrapeFailures.size > 0 ? 'warning' : 'success'
+        );
+        await this.stop('entry_limit');
+        return true;
+    }
+
+    async recordBoundedConversationAttempt(conversationId, runToken = this.runToken) {
+        if (!this.syncEntryLimit || this.backupMode) {
+            return {
+                status: 'ok',
+                count: this.state.currentIndex,
+                limitReached: false
+            };
+        }
+        const normalizedConversationId = getGrokConversationId(
+            `https://grok.com/?conversation=${conversationId}`
+        );
+        if (!normalizedConversationId || !this.isRunActive(runToken)) {
+            if (this.isRunActive(runToken)) {
+                await this.failRun(
+                    'Bounded Sync found a Saved entry without a stable conversation UUID.',
+                    'entry_limit_identity_missing',
+                    false
+                );
+            }
+            return { status: 'stopped', count: this._attemptedConversationIds.size, limitReached: false };
+        }
+        if (this._attemptedConversationIds.has(normalizedConversationId)) {
+            return {
+                status: 'ok',
+                count: this._attemptedConversationIds.size,
+                limitReached: this._attemptedConversationIds.size >= this.syncEntryLimit
+            };
+        }
+        if (this._attemptedConversationIds.size >= this.syncEntryLimit) {
+            await this.stopIfBoundedSyncEntryLimitReached(runToken);
+            return { status: 'stopped', count: this._attemptedConversationIds.size, limitReached: true };
+        }
+
+        const attemptedConversationIds = new Set(this._attemptedConversationIds);
+        attemptedConversationIds.add(normalizedConversationId);
+        const count = attemptedConversationIds.size;
+        const result = await this.queueRunStateWrite({
+            currentIndex: count,
+            scrapeEntryLimitState: this.getBoundedSyncEntryLimitState(
+                attemptedConversationIds,
+                this._completedConversationIds
+            )
+        }, 'record bounded Sync conversation attempt', {
+            runToken,
+            runEpoch: this.runEpoch
+        });
+        if (result.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return { status: 'stopped', count: this.state.currentIndex, limitReached: false };
+        }
+        if (!result.ok || !this.isRunActive(runToken)) {
+            if (this.isRunActive(runToken)) {
+                await this.failRun(
+                    'Bounded Sync could not persist its attempted-entry receipt.',
+                    'entry_limit_progress_persist_failed',
+                    false
+                );
+            }
+            return { status: 'stopped', count: this.state.currentIndex, limitReached: false };
+        }
+        this._attemptedConversationIds = attemptedConversationIds;
+        this.state.currentIndex = count;
+        this.log(
+            `Bounded Sync: ${count}/${this.syncEntryLimit} attempted Saved entries (${this._completedConversationIds.size} durable).`,
+            'neutral'
+        );
+        return {
+            status: 'ok',
+            count,
+            limitReached: count >= this.syncEntryLimit
+        };
+    }
+
+    async recordRecoverableSavedEntryFailure(
+        pending,
+        code,
+        message,
+        runToken = this.runToken
+    ) {
+        const runEpoch = pending?.runEpoch;
+        if (!pending || !this.isRunActive(runToken, runEpoch)) return { status: 'stopped' };
+        const key = this.getScrapeFailureKey(pending);
+        if (!key) {
+            await this.failRun(
+                'A failed Saved entry did not retain a stable identity.',
+                'scrape_failure_identity_missing'
+            );
+            return { status: 'stopped' };
+        }
+
+        const now = Date.now();
+        const prior = this._scrapeFailures.get(key);
+        const nextFailures = new Map(this._scrapeFailures);
+        nextFailures.set(key, {
+            key,
+            code: String(code || 'entry_failed').slice(0, 128),
+            message: String(message || 'Saved entry failed.').slice(0, 500),
+            sourceCardIdentity: pending.sourceCardIdentity || '',
+            conversationId: pending.conversationId || '',
+            expectedIdentity: pending.expectedIdentity || '',
+            attempts: Math.max(0, Number(prior?.attempts || 0)) + 1,
+            firstFailedAt: Number(prior?.firstFailedAt || now),
+            lastFailedAt: now,
+            phase: this._savedScanPhase
+        });
+
+        const currentSurface = this.getCurrentSurface();
+        const onSaved = currentSurface === SCRAPE_SURFACES.savedGallery;
+        const resumablePending = onSaved ? null : {
+            ...pending,
+            inventoryComplete: true,
+            failureRecorded: true
+        };
+        const nextBackupStats = this.backupMode && !prior
+            ? { ...this.backupStats, errors: Number(this.backupStats.errors || 0) + 1 }
+            : null;
+        const values = {
+            scrapeFailures: this.serializeScrapeFailures(nextFailures),
+            scrapeNavigation: resumablePending,
+            currentItemId: resumablePending?.currentItemId || null,
+            ...(nextBackupStats
+                ? { r2BackupState: { ...nextBackupStats, isRunning: true } }
+                : {})
+        };
+        const result = await this.queueRunStateWrite(
+            values,
+            'record recoverable Saved entry failure',
+            { runToken, runEpoch }
+        );
+        if (result.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return { status: 'stopped' };
+        }
+        if (!result.ok || !this.isRunActive(runToken, runEpoch)) {
+            if (this.isRunActive(runToken, runEpoch)) {
+                await this.failRun(
+                    'Could not preserve the failed Saved entry for retry.',
+                    'scrape_failure_persist_failed',
+                    false
+                );
+            }
+            return { status: 'stopped' };
+        }
+
+        this._scrapeFailures = nextFailures;
+        if (nextBackupStats) this.backupStats = nextBackupStats;
+        this.pendingNavigation = resumablePending;
+        this.markSavedEntryVisited(pending, key);
+        const safeDetail = getSafeSavedEntryFailureDetail(message);
+        this.log(
+            `Saved entry deferred for verification (${code || 'entry_failed'})${safeDetail ? `: ${safeDetail}` : ''}.`,
+            'warning'
+        );
+
+        if (await this.stopIfBoundedSyncEntryLimitReached(runToken)) {
+            return { status: 'stopped', failed: true, entryLimitReached: true };
+        }
+
+        if (onSaved) return { status: 'completed', failed: true };
+        await this.returnToSavedGallery(runToken);
+        return this.isRunActive(runToken, runEpoch)
+            ? { status: 'surface_changed', failed: true }
+            : { status: 'stopped' };
+    }
+
+    async clearRecoverableSavedEntryFailure(pending, runToken = this.runToken) {
+        const key = this.getScrapeFailureKey(pending);
+        if (!key || !this._scrapeFailures.has(key)) return true;
+        if (!this.isRunActive(runToken, pending?.runEpoch)) return false;
+        const nextFailures = new Map(this._scrapeFailures);
+        nextFailures.delete(key);
+        const result = await this.queueRunStateWrite({
+            scrapeFailures: this.serializeScrapeFailures(nextFailures)
+        }, 'clear recovered Saved entry failure', {
+            runToken,
+            runEpoch: pending.runEpoch
+        });
+        if (result.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return false;
+        }
+        if (!result.ok || !this.isRunActive(runToken, pending.runEpoch)) return false;
+        this._scrapeFailures = nextFailures;
+        return true;
+    }
+
+    async recordDurableConversationCompletion(conversationId, runToken = this.runToken) {
+        if (!this.syncEntryLimit || this.backupMode) {
+            return { status: 'ok', count: this.state.currentIndex, limitReached: false };
+        }
+        const normalizedConversationId = getGrokConversationId(
+            `https://grok.com/?conversation=${conversationId}`
+        );
+        if (!normalizedConversationId || !this.isRunActive(runToken)) {
+            if (this.isRunActive(runToken)) {
+                await this.failRun(
+                    'Bounded Sync could not persist a stable conversation identity.',
+                    'entry_limit_identity_missing',
+                    false
+                );
+            }
+            return { status: 'stopped', count: this.state.currentIndex, limitReached: false };
+        }
+        if (this._completedConversationIds.has(normalizedConversationId)) {
+            return {
+                status: 'ok',
+                count: this._completedConversationIds.size,
+                attemptedCount: this._attemptedConversationIds.size,
+                limitReached: this._attemptedConversationIds.size >= this.syncEntryLimit
+            };
+        }
+
+        const completedConversationIds = new Set(this._completedConversationIds);
+        completedConversationIds.add(normalizedConversationId);
+        const count = completedConversationIds.size;
+        const result = await this.queueRunStateWrite({
+            currentIndex: this._attemptedConversationIds.size,
+            scrapeEntryLimitState: this.getBoundedSyncEntryLimitState(
+                this._attemptedConversationIds,
+                completedConversationIds
+            )
+        }, 'record bounded Sync conversation completion', {
+            runToken,
+            runEpoch: this.runEpoch
+        });
+        if (result.invalidated) {
+            this.handleExtensionContextInvalidated();
+            return { status: 'stopped', count: this.state.currentIndex, limitReached: false };
+        }
+        if (!result.ok || !this.isRunActive(runToken)) {
+            if (this.isRunActive(runToken)) {
+                await this.failRun(
+                    'Bounded Sync could not persist its completed-entry receipt.',
+                    'entry_limit_progress_persist_failed',
+                    false
+                );
+            }
+            return { status: 'stopped', count: this.state.currentIndex, limitReached: false };
+        }
+        this._completedConversationIds = completedConversationIds;
+        this.state.currentIndex = this._attemptedConversationIds.size;
+        this.log(
+            `Bounded Sync: ${this._attemptedConversationIds.size}/${this.syncEntryLimit} attempted Saved entries (${count} durable).`,
+            'neutral'
+        );
+        return {
+            status: 'ok',
+            count,
+            attemptedCount: this._attemptedConversationIds.size,
+            limitReached: this._attemptedConversationIds.size >= this.syncEntryLimit
+        };
+    }
+
+    async rewindSavedScanPass(runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return false;
+        if (!await this.ensureSavedGalleryAllScope(runToken)) return false;
+        let context = null;
+        for (let attempt = 0; attempt < 20 && this.isRunActive(runToken); attempt++) {
+            context = getSavedGalleryContext(document);
+            if (!context) {
+                await this.sleep(150);
+                continue;
+            }
+            setSavedGalleryScrollTop(context.scroller, 0);
+            await this.sleep(150);
+            const refreshed = getSavedGalleryContext(document);
+            if (!refreshed) continue;
+            const snapshot = this.getScrollerSnapshot(refreshed.scroller);
+            if (snapshot.scrollTop <= 2) {
+                this._savedScanLedger = createSavedScanLedger();
+                this._savedScanNeedsRewind = false;
+                return true;
+            }
+            setSavedGalleryScrollTop(refreshed.scroller, 0);
+        }
+        if (this.isRunActive(runToken)) {
+            await this.failRun(
+                'Could not rewind Grok Saved to the beginning for a complete scan.',
+                'gallery_rewind_failed'
+            );
+        }
+        return false;
+    }
+
+    recordSavedPassOrder(entries) {
+        const order = this._savedScanPhase === 'verify'
+            ? this._savedVerificationOrder
+            : this._savedFirstPassOrder;
+        for (const entry of entries) appendUniqueIdentity(order, this.getSavedEntryRunKey(entry));
+    }
+
+    async executeListView(runToken = this.runToken) {
+        if (this._listCoordinatorPromise) return this._listCoordinatorPromise;
+        const coordinator = this.runSavedGalleryCoordinator(runToken);
+        this._listCoordinatorPromise = coordinator;
+        try {
+            return await coordinator;
+        } finally {
+            if (this._listCoordinatorPromise === coordinator) this._listCoordinatorPromise = null;
+        }
+    }
+
+    async runSavedGalleryCoordinator(runToken = this.runToken) {
+        if (!this.isRunActive(runToken)) return { status: 'stopped' };
+        if (this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) {
+            return { status: 'surface_changed' };
+        }
+        if (!await this.ensureSavedGalleryAllScope(runToken)) return { status: 'stopped' };
+        if (!await this.ensureRunDestinationContract(runToken)) return { status: 'stopped' };
+        if (this._savedScanNeedsRewind && !await this.rewindSavedScanPass(runToken)) {
+            return { status: 'stopped' };
+        }
+
         const MAX_MISSING_CONTEXT_RETRIES = this.backupMode ? 30 : 15;
-        const MAX_SCROLL_ATTEMPTS = this.backupMode
-            ? BACKUP_MAX_SCROLL_ATTEMPTS
-            : SYNC_MAX_SCROLL_ATTEMPTS;
-        const scanLedger = this.getSavedScanLedger();
+        const MAX_SCROLL_ATTEMPTS = SAVED_SCAN_MAX_SCROLL_ATTEMPTS;
         const canaryOptions = this.backupMode && this.backupOptions?.mode === 'canary'
             ? this.backupOptions.options || {}
             : {};
@@ -9219,208 +12269,281 @@ class GrokScraper {
         const canaryTargetLabel = canaryTargetIdentity
             ? `...${canaryTargetIdentity.slice(-8)}`
             : '';
-        let exhausted = false;
-        let scanLimitReached = false;
 
-        await this.sleep(300);
+        while (this.isRunActive(runToken)) {
+            let missingContextRetries = 0;
+            let scrollAttempts = 0;
+            let exhausted = false;
+            let scanLimitReached = false;
+            const scanLedger = this.getSavedScanLedger();
+            await this.sleep(300);
 
-        while (this.isRunActive(runToken) && scrollAttempts < MAX_SCROLL_ATTEMPTS) {
-            if (this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) {
-                await this.determineModeAndExecute(runToken);
-                return;
-            }
-            if (!await this.ensureSavedGalleryAllScope(runToken)) return;
-            const galleryContext = getSavedGalleryContext(document);
-            if (!galleryContext) {
-                missingContextRetries++;
-                if (missingContextRetries >= MAX_MISSING_CONTEXT_RETRIES) {
-                    await this.failRun(
-                        'Could not identify one semantic Saved gallery. Refresh Saved before restarting.',
-                        'gallery_context_missing'
-                    );
-                    return;
+            while (this.isRunActive(runToken) && scrollAttempts < MAX_SCROLL_ATTEMPTS) {
+                if (await this.stopIfBoundedSyncEntryLimitReached(runToken)) {
+                    return { status: 'stopped', entryLimitReached: true };
                 }
-                await this.sleep(400);
-                continue;
-            }
-            missingContextRetries = 0;
-            const semanticItems = galleryContext.entries;
-            const scan = recordSavedScan(scanLedger, {
-                identities: semanticItems.map((entry) => entry.sourceIdentity || entry.sourceUrl),
-                windowPosition: this.getScrollerSnapshot(galleryContext.scroller).scrollTop
-            });
-
-            if (canaryTargetIdentity) {
-                const handled = await this.processUniqueCanaryTarget({
-                    runToken,
-                    targetIdentity: canaryTargetIdentity,
-                    targetMediaType: canaryTargetMediaType,
-                    targetLabel: canaryTargetLabel,
-                    galleryContext
-                });
-                if (handled) return;
-            }
-
-            console.log(`Scanning ${semanticItems.length} items...`);
-            if (scrollAttempts % 5 === 0) this.log(`Scanning... (${semanticItems.length} items visible)`);
-
-            // Find Unprocessed
-            let targetItem = null;
-            let expectedNextIdentity = null;
-            let targetCleanId = null;
-            if (!canaryTargetIdentity) {
-                for (let i = 0; i < semanticItems.length; i++) {
-                    const entry = semanticItems[i];
-                    const cleanId = this.getCleanId(entry.sourceUrl);
-                    const conversationId = getSavedCardConversationId(entry.card);
-                    const entryRunKey = conversationId
-                        ? `conversation:${conversationId}`
-                        : `card:${entry.cardIdentity}`;
-                    const alreadyDone = this._runVisited.has(entryRunKey);
-                    if (cleanId && !alreadyDone) {
-                        targetCleanId = cleanId;
-                        targetItem = entry.image;
-                        expectedNextIdentity = semanticItems[i + 1]?.cardIdentity || null;
-                        break;
-                    }
+                if (this.getCurrentSurface() !== SCRAPE_SURFACES.savedGallery) {
+                    return { status: 'surface_changed' };
                 }
-            }
-            if (targetItem && targetCleanId) {
-                this.log(`new item: ...${targetCleanId.slice(-6)}`, 'success');
-                await this.processItem(
-                    targetItem,
-                    targetCleanId,
-                    runToken,
-                    this.runEpoch,
-                    expectedNextIdentity
-                );
-                return; // Action Taken
-            }
-
-            // Scroll if no action
-            if (!await this.ensureSavedGalleryAllScope(runToken)) return;
-            console.log('No new items visible. Scrolling...');
-            const durability = await this.queryRunDurabilitySnapshot(runToken);
-            if (!this.isRunActive(runToken)) return;
-            const transferPending = durability.status !== 'durable';
-            if (!transferPending) {
-                for (const identity of scanLedger.seenIdentities) {
-                    scanLedger.durableIdentities.add(identity);
-                }
-            }
-            if (this.backupMode) {
-                this.backupStats.scan = getSavedScanSummary(scanLedger);
-                if (!await this.persistBackupProgress(runToken)) {
-                    if (this.isRunActive(runToken)) {
+                if (!await this.ensureSavedGalleryAllScope(runToken)) return { status: 'stopped' };
+                if (!await this.ensureRunDestinationContract(runToken)) return { status: 'stopped' };
+                const galleryContext = getSavedGalleryContext(document);
+                if (!galleryContext) {
+                    missingContextRetries++;
+                    if (missingContextRetries >= MAX_MISSING_CONTEXT_RETRIES) {
                         await this.failRun(
-                            'Could not persist Saved scan progress.',
-                            'scan_progress_persist_failed'
+                            'Could not identify one semantic Saved gallery. Refresh Saved before restarting.',
+                            'gallery_context_missing'
                         );
+                        return { status: 'stopped' };
                     }
-                    return;
+                    await this.sleep(400);
+                    continue;
                 }
-            }
-            const scroller = galleryContext.scroller;
-            const before = this.getScrollerSnapshot(scroller);
-            const beforeSignature = this.getGalleryCardSignature();
-            const scrollAmount = before.clientHeight || window.innerHeight || 800;
-            if (scroller === window) {
-                window.scrollBy(0, scrollAmount);
-            } else if (typeof scroller.scrollBy === 'function') {
-                scroller.scrollBy(0, scrollAmount);
-            } else {
-                scroller.scrollTop = Number(scroller.scrollTop || 0) + scrollAmount;
-                scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
-            }
-            await this.sleep(SAVED_BOTTOM_PROBE_WAIT_MS);
-            if (!this.isRunActive(runToken)) return;
-            if (!await this.ensureSavedGalleryAllScope(runToken)) return;
-            const after = this.getScrollerSnapshot(scroller);
-            const afterSignature = this.getGalleryCardSignature();
-            const afterContext = getSavedGalleryContext(document);
-            const afterScan = recordSavedScan(scanLedger, {
-                identities: (afterContext?.entries || []).map((entry) => entry.sourceIdentity || entry.sourceUrl),
-                windowPosition: after.scrollTop
-            });
-            if (canaryTargetIdentity) {
-                const handled = await this.processUniqueCanaryTarget({
-                    runToken,
-                    targetIdentity: canaryTargetIdentity,
-                    targetMediaType: canaryTargetMediaType,
-                    targetLabel: canaryTargetLabel,
-                    galleryContext: afterContext
+                missingContextRetries = 0;
+                const semanticItems = galleryContext.entries;
+                const identitylessEntry = semanticItems.find((entry) => !this.getSavedEntryRunKey(entry));
+                if (identitylessEntry) {
+                    await this.failRun(
+                        'A Saved entry did not expose any stable card, conversation, or media identity.',
+                        'gallery_identity_missing'
+                    );
+                    return { status: 'stopped' };
+                }
+                const completedSet = this._savedScanPhase === 'verify'
+                    ? this._savedVerificationVisited
+                    : this._runVisited;
+                const malformedEntries = semanticItems.filter((entry) => (
+                    !this.getCleanId(entry.sourceUrl)
+                    && !completedSet.has(this.getSavedEntryRunKey(entry))
+                ));
+                for (const malformedEntry of malformedEntries) {
+                    if (this.syncEntryLimit) {
+                        const boundedAttempt = await this.recordBoundedConversationAttempt(
+                            malformedEntry.conversationId,
+                            runToken
+                        );
+                        if (boundedAttempt.status !== 'ok') return { status: 'stopped' };
+                    }
+                    const entryRunKey = this.getSavedEntryRunKey(malformedEntry);
+                    const outcome = await this.recordRecoverableSavedEntryFailure({
+                        runToken,
+                        runEpoch: this.runEpoch,
+                        currentItemId: null,
+                        expectedIdentity: malformedEntry.sourceIdentity || '',
+                        sourceCardIdentity: malformedEntry.cardIdentity || '',
+                        conversationId: malformedEntry.conversationId || '',
+                        entryRunKey,
+                        sourceEntryRunKey: entryRunKey,
+                        galleryUrl: window.location.href,
+                        savedViewportReceipt: null
+                    }, 'gallery_media_identity_missing',
+                    'Saved exposed a card without a stable media identity.', runToken);
+                    if (outcome.status === 'stopped') return outcome;
+                }
+                this.recordSavedPassOrder(semanticItems);
+                const scan = recordSavedScan(scanLedger, {
+                    identities: semanticItems.map((entry) => entry.cardIdentity),
+                    windowPosition: this.getScrollerSnapshot(galleryContext.scroller).scrollTop
                 });
-                if (handled) return;
-            }
-            const savedSurfaceRoot = afterContext?.savedSurfaceRoot || null;
-            scrollAttempts++;
-            const outcome = resolveBackupScrollAttempt({
-                before,
-                after,
-                beforeSignature,
-                afterSignature,
-                newIdentityCount: scan.newIdentityCount + afterScan.newIdentityCount,
-                loading: savedSurfaceRoot ? isSavedGalleryLoading(savedSurfaceRoot) : false,
-                contextStable: Boolean(savedSurfaceRoot),
-                transferPending,
-                stableBottomRounds: scanLedger.stableBottomRounds,
-                lastNewIdentityAt: scanLedger.lastNewIdentityAt,
-                now: Date.now(),
-                scanAttempts: scrollAttempts,
-                maxScrollAttempts: MAX_SCROLL_ATTEMPTS,
-                requiredStableBottomRounds: REQUIRED_STABLE_BOTTOM_ROUNDS,
-                minimumStableBottomMs: MINIMUM_STABLE_BOTTOM_MS
-            });
-            scanLedger.stableBottomRounds = outcome.stableBottomRounds;
-            if (this.backupMode) this.backupStats.scan = getSavedScanSummary(scanLedger);
-            if (outcome.reason === 'scan_limit') {
-                scanLimitReached = true;
-                break;
-            }
-            if (outcome.exhausted) {
-                exhausted = true;
-                break;
-            }
-        }
 
-        if (exhausted || scanLimitReached || scrollAttempts >= MAX_SCROLL_ATTEMPTS) {
-            if (!this.isRunActive(runToken)) return;
-            if (!await this.ensureSavedGalleryAllScope(runToken)) return;
-            if (canaryTargetIdentity) {
-                if (!exhausted) {
-                    await this.failRun(
-                        `Canary target ${canaryTargetLabel} was not found before the Saved scan safety limit.`,
-                        'canary_target_scan_limit'
-                    );
-                } else {
-                    await this.failRun(
-                        `Canary target ${canaryTargetLabel} was not found before Saved was exhausted.`,
-                        'canary_target_not_found'
-                    );
+                if (canaryTargetIdentity) {
+                    const handled = await this.processUniqueCanaryTarget({
+                        runToken,
+                        targetIdentity: canaryTargetIdentity,
+                        targetMediaType: canaryTargetMediaType,
+                        targetLabel: canaryTargetLabel,
+                        galleryContext
+                    });
+                    if (handled?.status === 'surface_changed' || handled?.status === 'navigating') {
+                        return handled;
+                    }
+                    if (handled) return { status: 'canary_terminal' };
                 }
-                return;
+
+                if (scrollAttempts % 5 === 0) {
+                    this.log(`Scanning Saved... (${semanticItems.length} entries visible)`);
+                }
+
+                let targetEntry = null;
+                let targetIndex = -1;
+                if (!canaryTargetIdentity) {
+                    targetIndex = semanticItems.findIndex((entry) => {
+                        const cleanId = this.getCleanId(entry.sourceUrl);
+                        return cleanId && !completedSet.has(this.getSavedEntryRunKey(entry));
+                    });
+                    targetEntry = targetIndex >= 0 ? semanticItems[targetIndex] : null;
+                }
+                if (targetEntry) {
+                    const targetCleanId = this.getCleanId(targetEntry.sourceUrl);
+                    this.log(`Processing Saved entry ...${targetCleanId.slice(-6)}`, 'success');
+                    const outcome = await this.processItem(
+                        targetEntry.image,
+                        targetCleanId,
+                        runToken,
+                        this.runEpoch,
+                        semanticItems[targetIndex + 1]?.cardIdentity || null
+                    );
+                    if (!this.isRunActive(runToken)) return { status: 'stopped' };
+                    if (outcome?.status === 'navigating' || outcome?.status === 'surface_changed') {
+                        return outcome;
+                    }
+                    if (outcome?.status !== 'completed') return outcome || { status: 'stopped' };
+                    continue;
+                }
+
+                const durability = await this.queryRunDurabilitySnapshot(runToken);
+                if (!this.isRunActive(runToken)) return { status: 'stopped' };
+                const transferPending = durability.status !== 'durable';
+                if (this.backupMode) {
+                    this.backupStats.scan = getSavedScanSummary(scanLedger);
+                    if (!await this.persistBackupProgress(runToken)) {
+                        if (this.isRunActive(runToken)) {
+                            await this.failRun(
+                                'Could not persist Saved scan progress.',
+                                'scan_progress_persist_failed'
+                            );
+                        }
+                        return { status: 'stopped' };
+                    }
+                }
+
+                const scroller = galleryContext.scroller;
+                const before = this.getScrollerSnapshot(scroller);
+                const beforeSignature = this.getGalleryCardSignature();
+                const scrollAmount = before.clientHeight || window.innerHeight || 800;
+                if (scroller === window) window.scrollBy(0, scrollAmount);
+                else if (typeof scroller.scrollBy === 'function') scroller.scrollBy(0, scrollAmount);
+                else {
+                    scroller.scrollTop = Number(scroller.scrollTop || 0) + scrollAmount;
+                    scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+                }
+                await this.sleep(SAVED_BOTTOM_PROBE_WAIT_MS);
+                if (!this.isRunActive(runToken)) return { status: 'stopped' };
+                if (!await this.ensureSavedGalleryAllScope(runToken)) return { status: 'stopped' };
+                const after = this.getScrollerSnapshot(scroller);
+                const afterSignature = this.getGalleryCardSignature();
+                const afterContext = getSavedGalleryContext(document);
+                this.recordSavedPassOrder(afterContext?.entries || []);
+                const afterScan = recordSavedScan(scanLedger, {
+                    identities: (afterContext?.entries || []).map((entry) => entry.cardIdentity),
+                    windowPosition: after.scrollTop
+                });
+                scrollAttempts++;
+                const outcome = resolveBackupScrollAttempt({
+                    before,
+                    after,
+                    beforeSignature,
+                    afterSignature,
+                    newIdentityCount: scan.newIdentityCount + afterScan.newIdentityCount,
+                    loading: afterContext?.savedSurfaceRoot
+                        ? isSavedGalleryLoading(afterContext.savedSurfaceRoot)
+                        : false,
+                    contextStable: Boolean(afterContext?.savedSurfaceRoot),
+                    transferPending,
+                    stableBottomRounds: scanLedger.stableBottomRounds,
+                    lastNewIdentityAt: scanLedger.lastNewIdentityAt,
+                    now: Date.now(),
+                    scanAttempts: scrollAttempts,
+                    maxScrollAttempts: MAX_SCROLL_ATTEMPTS,
+                    requiredStableBottomRounds: REQUIRED_STABLE_BOTTOM_ROUNDS,
+                    minimumStableBottomMs: MINIMUM_STABLE_BOTTOM_MS
+                });
+                scanLedger.stableBottomRounds = outcome.stableBottomRounds;
+                if (this.backupMode) this.backupStats.scan = getSavedScanSummary(scanLedger);
+                if (outcome.reason === 'scan_limit') {
+                    scanLimitReached = true;
+                    break;
+                }
+                if (outcome.exhausted) {
+                    exhausted = true;
+                    break;
+                }
             }
-            if (!exhausted) {
+
+            if (!this.isRunActive(runToken)) return { status: 'stopped' };
+            if (canaryTargetIdentity) {
+                await this.failRun(
+                    exhausted
+                        ? `Canary target ${canaryTargetLabel} was not found before Saved was exhausted.`
+                        : `Canary target ${canaryTargetLabel} was not found before the Saved scan safety limit.`,
+                    exhausted ? 'canary_target_not_found' : 'canary_target_scan_limit'
+                );
+                return { status: 'stopped' };
+            }
+            if (!exhausted || scanLimitReached || scrollAttempts >= MAX_SCROLL_ATTEMPTS) {
                 this.log('Saved scan paused: safety limit reached before confirming the gallery end.', 'warning');
                 if (this.backupMode) await this.stopBackupMode('scan_limit');
                 else await this.stop('scan_limit');
-                return;
+                return { status: 'stopped' };
             }
 
-            const durability = await this.waitForRunDurability(runToken);
-            if (!this.isRunActive(runToken)) return;
-            if (durability.status === 'durable') {
-                this.log('Saved scan exhausted. Waiting for pending transfers...', 'neutral');
-                if (this.backupMode) await this.stopBackupMode('complete');
-                else await this.stop('complete');
-                return;
+            const durability = await this.waitForRunDurability(runToken, {
+                timeoutMs: this.backupMode ? 300000 : 180000
+            });
+            if (!this.isRunActive(runToken)) return { status: 'stopped' };
+            if (durability.status !== 'durable') {
+                const stopReason = durability.status === 'timeout'
+                    ? 'durability_timeout'
+                    : (durability.status === 'ignored' ? 'stale_authority' : 'durability_failed');
+                if (this.backupMode) await this.stopBackupMode(stopReason);
+                else await this.stop(stopReason);
+                return { status: 'stopped' };
             }
-            const stopReason = durability.status === 'timeout'
-                ? 'durability_timeout'
-                : (durability.status === 'ignored' ? 'stale_authority' : 'durability_failed');
-            if (this.backupMode) await this.stopBackupMode(stopReason);
-            else await this.stop(stopReason);
+            if (!await this.refreshProcessedIds(runToken)) return { status: 'stopped' };
+
+            if (this._savedScanPhase === 'process') {
+                this._savedScanPhase = 'verify';
+                this._savedVerificationOrder = [];
+                this._savedVerificationVisited = new Set();
+                this._savedScanNeedsRewind = true;
+                this.log('Verifying the complete Saved scan from the beginning...', 'neutral');
+                if (!await this.rewindSavedScanPass(runToken)) return { status: 'stopped' };
+                continue;
+            }
+
+            const sameOrder = this._savedFirstPassOrder.length === this._savedVerificationOrder.length
+                && this._savedFirstPassOrder.every((value, index) => (
+                    value === this._savedVerificationOrder[index]
+                ));
+            const allVerified = this._savedVerificationOrder.every((value) => (
+                this._savedVerificationVisited.has(value)
+            ));
+            if (!sameOrder || !allVerified) {
+                this._savedVerificationRestarts++;
+                if (this._savedVerificationRestarts > SAVED_SCAN_MAX_VERIFICATION_RESTARTS) {
+                    await this.failRun(
+                        'Grok Saved changed during repeated verification passes. Restart when the gallery is stable.',
+                        'gallery_changed_during_verification'
+                    );
+                    return { status: 'stopped' };
+                }
+                this._savedScanPhase = 'process';
+                this._savedFirstPassOrder = [];
+                this._savedVerificationOrder = [];
+                this._savedVerificationVisited = new Set();
+                this._savedScanNeedsRewind = true;
+                this.log('Saved changed during verification. Rechecking the full gallery...', 'warning');
+                if (!await this.rewindSavedScanPass(runToken)) return { status: 'stopped' };
+                continue;
+            }
+
+            this.log(`Verified ${this._savedVerificationOrder.length} Saved entries.`, 'success');
+            if (this._scrapeFailures.size > 0) {
+                const failureCount = this._scrapeFailures.size;
+                this.log(
+                    `${failureCount} Saved entr${failureCount === 1 ? 'y needs' : 'ies need'} retry; completed assets remain preserved.`,
+                    'error'
+                );
+                if (this.backupMode) await this.stopBackupMode('partial_failure');
+                else await this.stop('partial_failure');
+                return { status: 'partial_failure', failureCount };
+            }
+            if (this.backupMode) await this.stopBackupMode('complete');
+            else await this.stop('complete');
+            return { status: 'complete' };
         }
+        return { status: 'stopped' };
     }
 
     async processItem(
@@ -9430,19 +12553,19 @@ class GrokScraper {
         runEpoch = this.runEpoch,
         expectedNextIdentity = null
     ) {
-        if (!this.isRunActive(runToken, runEpoch)) return;
-        if (!await this.ensureSavedGalleryAllScope(runToken)) return;
+        if (!this.isRunActive(runToken, runEpoch)) return { status: 'stopped' };
+        if (!await this.ensureSavedGalleryAllScope(runToken)) return { status: 'stopped' };
         const sourceUrl = targetItem.currentSrc || targetItem.src || '';
         const expectedIdentity = getGrokMediaIdentity(sourceUrl);
         if (!expectedIdentity) {
             await this.failRun('Could not identify the selected Saved media.', 'gallery_identity_missing');
-            return;
+            return { status: 'stopped' };
         }
         const sourceCard = findMediaCardRoot(targetItem);
         const sourceCardIdentity = getSavedCardIdentity(sourceCard, expectedIdentity);
         if (!sourceCardIdentity) {
             await this.failRun('Could not identify the selected Saved card.', 'gallery_identity_missing');
-            return;
+            return { status: 'stopped' };
         }
         const conversationId = getSavedCardConversationId(sourceCard);
         const expectedMediaType = getSavedGalleryEntryMediaType({
@@ -9462,7 +12585,11 @@ class GrokScraper {
         });
         if (!savedViewportReceipt) {
             await this.failRun('Could not capture the selected Saved media neighborhood.', 'gallery_context_missing');
-            return;
+            return { status: 'stopped' };
+        }
+        if (this.syncEntryLimit) {
+            const boundedAttempt = await this.recordBoundedConversationAttempt(conversationId, runToken);
+            if (boundedAttempt.status !== 'ok') return { status: 'stopped' };
         }
         const pendingNavigation = {
             runToken,
@@ -9473,6 +12600,9 @@ class GrokScraper {
             sourceCardIdentity,
             conversationId,
             entryRunKey: conversationId
+                ? `conversation:${conversationId}`
+                : `card:${sourceCardIdentity}`,
+            sourceEntryRunKey: conversationId
                 ? `conversation:${conversationId}`
                 : `card:${sourceCardIdentity}`,
             sourceUrl,
@@ -9490,14 +12620,13 @@ class GrokScraper {
         }, 'save scrape navigation', { runToken, runEpoch });
         if (result.invalidated) {
             this.handleExtensionContextInvalidated();
-            return;
+            return { status: 'stopped' };
         }
-        if (!this.isRunActive(runToken, runEpoch)) return;
-        if (!await this.ensureSavedGalleryAllScope(runToken)) return;
+        if (!this.isRunActive(runToken, runEpoch)) return { status: 'stopped' };
+        if (!await this.ensureSavedGalleryAllScope(runToken)) return { status: 'stopped' };
         this.pendingNavigation = pendingNavigation;
         if (conversationId) {
-            await this.processPendingConversationInventory(runToken);
-            return;
+            return this.processPendingConversationInventory(runToken);
         }
 
         dispatchFullPointerClick(targetItem);
@@ -9505,20 +12634,21 @@ class GrokScraper {
             (surface) => surface !== SCRAPE_SURFACES.savedGallery,
             runToken
         );
-        if (!this.isRunActive(runToken, runEpoch)) return;
+        if (!this.isRunActive(runToken, runEpoch)) return { status: 'stopped' };
         if (!nextSurface) {
-            await this.failRun(
+            return this.recordRecoverableSavedEntryFailure(
+                pendingNavigation,
+                'surface_transition_timeout',
                 'The selected Saved card did not expose a conversation inventory surface.',
-                'surface_transition_timeout'
+                runToken
             );
-            return;
         }
-        await this.determineModeAndExecute(runToken);
+        return { status: 'surface_changed', surface: nextSurface };
     }
 
     async persistPendingConversationProgress(pending, operation, runToken = this.runToken) {
         if (!pending || !this.isRunActive(runToken, pending.runEpoch)) return false;
-        const result = await this.queueRunStateWrite({
+        const result = await this.queueCriticalRunStateWrite({
             currentItemId: pending.currentItemId,
             scrapeNavigation: pending
         }, operation, { runToken, runEpoch: pending.runEpoch });
@@ -9526,13 +12656,26 @@ class GrokScraper {
             this.handleExtensionContextInvalidated();
             return false;
         }
-        if (!result.ok || !this.isRunActive(runToken, pending.runEpoch)) return false;
+        if (!result.ok || !this.isRunActive(runToken, pending.runEpoch)) {
+            if (this.isRunActive(runToken, pending.runEpoch)) {
+                await this.failRun(
+                    'Could not persist conversation inventory progress after resume.',
+                    'conversation_progress_persist_failed',
+                    false
+                );
+            }
+            return false;
+        }
         this.pendingNavigation = pending;
         return true;
     }
 
     async refreshProcessedIds(runToken = this.runToken) {
-        const storedResult = await safeChromeStorageGet('local', ['processedIds'], {}, 'refresh processed IDs');
+        const storedResult = await safeChromeStorageGet('local', [
+            'processedIds',
+            'processedLocalIds',
+            'processedR2Ids'
+        ], {}, 'refresh processed destination receipts');
         if (storedResult.invalidated) {
             this.handleExtensionContextInvalidated();
             return false;
@@ -9541,7 +12684,46 @@ class GrokScraper {
         this.processedIds = new Set(Array.isArray(storedResult.value.processedIds)
             ? storedResult.value.processedIds
             : []);
+        this.processedLocalIds = new Set(Array.isArray(storedResult.value.processedLocalIds)
+            ? storedResult.value.processedLocalIds
+            : []);
+        this.processedR2Ids = new Set(Array.isArray(storedResult.value.processedR2Ids)
+            ? storedResult.value.processedR2Ids
+            : []);
+        this.rebuildLegacyUnscopedProcessedIds();
         return true;
+    }
+
+    async fetchTerminalConversationInventory(conversationId, runToken = this.runToken) {
+        const runEpoch = this.runEpoch;
+        const startedAt = Date.now();
+        let lastProgressAt = startedAt;
+        let priorSignature = '';
+        while (this.isRunActive(runToken, runEpoch)) {
+            const inventory = await fetchGrokConversationAssetInventoryViaBridge(conversationId);
+            if (!this.isRunActive(runToken, runEpoch)) return null;
+            const inflightIds = Array.isArray(inventory.inflightResponses)
+                ? inventory.inflightResponses.map((response) => response.responseId).filter(Boolean)
+                : [];
+            const inflightCount = Math.max(
+                Number(inventory.inflightResponseCount || 0),
+                inflightIds.length
+            );
+            if (inflightCount === 0) return inventory;
+            const signature = `${inflightCount}:${inflightIds.join('|')}`;
+            if (signature !== priorSignature) {
+                priorSignature = signature;
+                lastProgressAt = Date.now();
+            }
+            if (Date.now() - startedAt >= 10 * 60 * 1000
+                || Date.now() - lastProgressAt >= 2 * 60 * 1000) {
+                const error = new Error('conversation_inventory_inflight_timeout');
+                error.code = 'conversation_inventory_inflight_timeout';
+                throw error;
+            }
+            await this.sleep(500);
+        }
+        return null;
     }
 
     async processPendingConversationInventory(runToken = this.runToken) {
@@ -9581,19 +12763,33 @@ class GrokScraper {
             );
             return;
         }
+        if (!await this.ensureRunDestinationContract(runToken)) return { status: 'stopped' };
+        const boundedAttempt = await this.recordBoundedConversationAttempt(conversationId, runToken);
+        if (boundedAttempt.status !== 'ok') return { status: 'stopped' };
 
         let inventory;
         try {
-            inventory = await fetchGrokConversationAssetInventoryViaBridge(conversationId);
+            inventory = await this.fetchTerminalConversationInventory(conversationId, runToken);
         } catch (error) {
             if (!this.isRunActive(runToken, pending.runEpoch)) return;
-            await this.failRun(
-                `Could not inventory every asset in the selected Saved entry (${error?.message || 'inventory_failed'}).`,
-                'conversation_inventory_failed'
+            const detail = error?.code || error?.message || 'inventory_failed';
+            if (detail === 'conversation_asset_unrecognized_media_shape') {
+                await this.failRun(
+                    'Grok returned a media shape Sync cannot inventory safely.',
+                    'conversation_inventory_shape_unsupported'
+                );
+                return { status: 'stopped' };
+            }
+            return this.recordRecoverableSavedEntryFailure(
+                pending,
+                detail === 'conversation_inventory_inflight_timeout'
+                    ? 'conversation_inventory_inflight_timeout'
+                    : 'conversation_inventory_failed',
+                `Could not inventory every asset in the selected Saved entry (${detail}).`,
+                runToken
             );
-            return;
         }
-        if (!this.isRunActive(runToken, pending.runEpoch)) return;
+        if (!inventory || !this.isRunActive(runToken, pending.runEpoch)) return { status: 'stopped' };
         if (startingSurface === SCRAPE_SURFACES.savedGallery
             && !await this.ensureSavedGalleryAllScope(runToken)) return;
 
@@ -9627,17 +12823,54 @@ class GrokScraper {
                 );
                 return;
             }
+            const existingDurability = await this.queryRunDurabilitySnapshot(runToken);
+            if (!this.isRunActive(runToken, pending.runEpoch)) return;
+            if (existingDurability.status === 'pending') {
+                const settled = await this.waitForRunDurability(runToken, {
+                    timeoutMs: this.backupMode ? 300000 : 180000
+                });
+                if (!this.isRunActive(runToken, pending.runEpoch)) return;
+                if (settled.status !== 'durable') {
+                    if (settled.status === 'ignored') {
+                        await this.failRun(
+                            'Resumed conversation transfer authority was lost.',
+                            'stale_authority',
+                            false
+                        );
+                        return { status: 'stopped' };
+                    }
+                    return this.recordRecoverableSavedEntryFailure(
+                        pending,
+                        settled.status === 'timeout' ? 'durability_timeout' : 'durability_failed',
+                        'Resumed conversation transfers did not settle before retry.',
+                        runToken
+                    );
+                }
+            } else if (existingDurability.status !== 'durable') {
+                if (existingDurability.status === 'ignored') {
+                    await this.failRun(
+                        'Resumed conversation transfer authority was lost.',
+                        'stale_authority',
+                        false
+                    );
+                    return { status: 'stopped' };
+                }
+                return this.recordRecoverableSavedEntryFailure(
+                    pending,
+                    'durability_failed',
+                    'Resumed conversation transfers are not in a retry-safe state.',
+                    runToken
+                );
+            }
         }
 
         if (!await this.refreshProcessedIds(runToken)) return;
-        const firstMissingProcessedIndex = assetIds.findIndex((assetId) => !this.isMediaProcessed(assetId));
+        const firstMissingProcessedIndex = assetIds.findIndex((assetId) => (
+            !this.isAssetDestinationSatisfied(assetId)
+        ));
         const firstUnconfirmedIndex = firstMissingProcessedIndex < 0
             ? assetIds.length
             : firstMissingProcessedIndex;
-        const trustedBackupCursor = pending.inventoryProgressVersion === 2
-            && Number.isInteger(pending.nextAssetIndex)
-            ? Math.max(0, Math.min(pending.nextAssetIndex, assetIds.length))
-            : 0;
         let activePending = {
             ...pending,
             conversationId: inventory.conversationId,
@@ -9645,7 +12878,7 @@ class GrokScraper {
             inventoryHash,
             assetIds,
             inventoryProgressVersion: 2,
-            nextAssetIndex: this.backupMode ? trustedBackupCursor : firstUnconfirmedIndex
+            nextAssetIndex: firstUnconfirmedIndex
         };
         if (!await this.persistPendingConversationProgress(
             activePending,
@@ -9660,8 +12893,6 @@ class GrokScraper {
             ? [selectedAssetIndex]
             : inventory.assets.map((_asset, index) => index)
                 .filter((index) => index >= activePending.nextAssetIndex);
-        const confirmedBackupIndexes = new Set();
-
         for (const index of indexes) {
             if (!this.isRunActive(runToken, activePending.runEpoch)) return;
             if (this.getCurrentSurface() !== startingSurface) {
@@ -9674,7 +12905,7 @@ class GrokScraper {
             if (startingSurface === SCRAPE_SURFACES.savedGallery
                 && !await this.ensureSavedGalleryAllScope(runToken)) return;
             const asset = inventory.assets[index];
-            const alreadyTerminal = !this.backupMode && this.isMediaProcessed(asset.assetId);
+            const alreadyTerminal = this.isAssetDestinationSatisfied(asset.assetId);
             if (!alreadyTerminal && !this._runVisited.has(`asset:${asset.assetId}`)) {
                 if (this.backupMode && !this._backupVisited.has(asset.assetId)) {
                     this._backupVisited.add(asset.assetId);
@@ -9690,38 +12921,24 @@ class GrokScraper {
                 );
                 if (!this.isRunActive(runToken, activePending.runEpoch)) return;
                 if (!isSuccessfulMediaTransferStatus(response?.status)) {
-                    await this.failRun(
-                        response?.error || 'A conversation asset could not be transferred.',
+                    return this.recordRecoverableSavedEntryFailure(
+                        activePending,
                         'media_transfer_failed',
-                        false
+                        response?.error || 'A conversation asset could not be transferred.',
+                        runToken
                     );
-                    return;
                 }
                 this._runVisited.add(`asset:${asset.assetId}`);
-                if (!this.backupMode && shouldPersistBackupProcessedId(response.status)) {
-                    if (!await this.persistProcessedId(asset.assetId, runToken)) {
-                        if (this.isRunActive(runToken, activePending.runEpoch)) {
-                            await this.failRun(
-                                'Could not persist the completed conversation asset receipt.',
-                                'processed_ids_mutation_failed'
-                            );
-                        }
-                        return;
-                    }
-                }
-                if (this.backupMode && shouldPersistBackupProcessedId(response.status)) {
-                    confirmedBackupIndexes.add(index);
+                if (shouldPersistBackupProcessedId(response.status)) {
+                    if (!await this.refreshProcessedIds(runToken)) return { status: 'stopped' };
                 }
             }
 
             if (!isTargetedCanary) {
-                let nextConfirmedIndex = activePending.nextAssetIndex;
-                if (this.backupMode) {
-                    while (confirmedBackupIndexes.has(nextConfirmedIndex)) nextConfirmedIndex++;
-                } else {
-                    const nextMissingIndex = assetIds.findIndex((assetId) => !this.isMediaProcessed(assetId));
-                    nextConfirmedIndex = nextMissingIndex < 0 ? assetIds.length : nextMissingIndex;
-                }
+                const nextMissingIndex = assetIds.findIndex((assetId) => (
+                    !this.isAssetDestinationSatisfied(assetId)
+                ));
+                const nextConfirmedIndex = nextMissingIndex < 0 ? assetIds.length : nextMissingIndex;
                 if (nextConfirmedIndex !== activePending.nextAssetIndex) {
                     activePending = { ...activePending, nextAssetIndex: nextConfirmedIndex };
                     if (!await this.persistPendingConversationProgress(
@@ -9747,14 +12964,28 @@ class GrokScraper {
             const reason = durability.status === 'timeout'
                 ? 'durability_timeout'
                 : (durability.status === 'ignored' ? 'stale_authority' : 'durability_failed');
-            await this.failRun('Conversation asset transfers did not become durable.', reason, false);
-            return;
+            if (reason === 'stale_authority') {
+                await this.failRun(
+                    'Conversation transfer authority was lost.',
+                    reason,
+                    false
+                );
+                return { status: 'stopped' };
+            }
+            return this.recordRecoverableSavedEntryFailure(
+                activePending,
+                reason,
+                'Conversation asset transfers did not become durable.',
+                runToken
+            );
         }
         if (!await this.refreshProcessedIds(runToken)) return;
         const requiredAssetIds = isTargetedCanary
             ? [inventory.assets[selectedAssetIndex].assetId]
             : assetIds;
-        const missingReceipt = requiredAssetIds.find((assetId) => !this.isMediaProcessed(assetId));
+        const missingReceipt = requiredAssetIds.find((assetId) => (
+            !this.isAssetDestinationSatisfied(assetId)
+        ));
         if (missingReceipt) {
             const missingIndex = assetIds.indexOf(missingReceipt);
             activePending = {
@@ -9766,15 +12997,51 @@ class GrokScraper {
                 'rewind conversation inventory to missing receipt',
                 runToken
             )) return;
-            await this.failRun(
-                'A conversation asset completed without a durable processed-ID receipt.',
+            return this.recordRecoverableSavedEntryFailure(
+                activePending,
                 'conversation_asset_receipt_missing',
-                false
+                'A conversation asset completed without a durable processed-ID receipt.',
+                runToken
             );
-            return;
         }
 
-        this._runVisited.add(activePending.entryRunKey || `conversation:${inventory.conversationId}`);
+        const completedKeys = new Set([
+            activePending.entryRunKey,
+            activePending.sourceEntryRunKey,
+            `conversation:${inventory.conversationId}`
+        ].filter(Boolean));
+        if (!await this.clearRecoverableSavedEntryFailure(activePending, runToken)) {
+            if (this.isRunActive(runToken, activePending.runEpoch)) {
+                await this.failRun(
+                    'Could not clear the recovered Saved entry failure receipt.',
+                    'scrape_failure_persist_failed',
+                    false
+                );
+            }
+            return { status: 'stopped' };
+        }
+        for (const key of completedKeys) {
+            this._runVisited.add(key);
+            if (this._savedScanPhase === 'verify') this._savedVerificationVisited.add(key);
+        }
+        if (activePending.sourceCardIdentity) {
+            this.getSavedScanLedger().durableIdentities.add(activePending.sourceCardIdentity);
+        }
+        const completion = await this.recordDurableConversationCompletion(
+            inventory.conversationId,
+            runToken
+        );
+        if (completion.status !== 'ok' || !this.isRunActive(runToken, activePending.runEpoch)) {
+            return { status: 'stopped' };
+        }
+        if (completion.limitReached) {
+            this.log(
+                `Bounded Sync reached ${completion.attemptedCount} attempted Saved entries (${completion.count} durable).`,
+                this._scrapeFailures.size > 0 ? 'warning' : 'success'
+            );
+            await this.stop('entry_limit');
+            return { status: 'stopped', entryLimitReached: true };
+        }
         activePending = { ...activePending, nextAssetIndex: assetIds.length };
         if (startingSurface !== SCRAPE_SURFACES.savedGallery) {
             activePending = { ...activePending, inventoryComplete: true };
@@ -9784,7 +13051,9 @@ class GrokScraper {
                 runToken
             )) return;
             await this.returnToSavedGallery(runToken);
-            return;
+            return this.isRunActive(runToken)
+                ? { status: 'surface_changed' }
+                : { status: 'stopped' };
         }
         const clearResult = await this.queueRunStateWrite({
             scrapeNavigation: null,
@@ -9796,7 +13065,7 @@ class GrokScraper {
         }
         if (!clearResult.ok || !this.isRunActive(runToken, activePending.runEpoch)) return;
         this.pendingNavigation = null;
-        await this.executeListView(runToken);
+        return { status: 'completed' };
     }
 
     async waitForMatchingAgentMedia(expectedIdentity, runToken = this.runToken) {
@@ -9828,27 +13097,6 @@ class GrokScraper {
             await this.sleep(200);
         }
         return null;
-    }
-
-    async persistProcessedId(currentItemId, runToken = this.runToken) {
-        if (!currentItemId || !this.isRunActive(runToken)) return false;
-        const mutationResult = await safeChromeRuntimeSendMessage({
-            action: 'SCRAPE_PROCESSED_IDS_ADD',
-            ids: [currentItemId],
-            runToken,
-            runEpoch: this.runEpoch,
-            kind: this.backupMode ? 'r2_backup' : 'sync'
-        }, 'save scrape processed ID');
-        if (mutationResult.invalidated) {
-            this.handleExtensionContextInvalidated();
-            return false;
-        }
-        if (!this.isRunActive(runToken)) return false;
-        if (mutationResult.value?.status !== 'ok') return false;
-        if (Array.isArray(mutationResult.value.processedIds)) {
-            this.processedIds = new Set(mutationResult.value.processedIds);
-        }
-        return true;
     }
 
     async executeAgentView(runToken = this.runToken) {
@@ -9916,19 +13164,9 @@ class GrokScraper {
                 const restored = await this.restorePendingGalleryContext(runToken);
                 if (!restored || !this.isRunActive(runToken)) return;
                 if (!stopBackupReason) {
-                    await this.executeListView(runToken);
-                    return;
+                    return { status: 'returned' };
                 }
                 await this.stopBackupMode(stopBackupReason);
-                return;
-            }
-            if (stopBackupReason) {
-                await this.failRun('Could not return to Grok Imagine Saved.', 'gallery_return_failed');
-                if (galleryUrl) {
-                    try {
-                        this.navigateToGalleryUrl(galleryUrl);
-                    } catch { }
-                }
                 return;
             }
             if (!galleryUrl) {
@@ -9939,7 +13177,24 @@ class GrokScraper {
                 this.navigateToGalleryUrl(galleryUrl);
             } catch {
                 await this.failRun('Could not return to Grok Imagine Saved.', 'gallery_return_failed');
+                return;
             }
+            const fallbackSurface = await this.waitForSurface(
+                (surface) => surface === SCRAPE_SURFACES.savedGallery,
+                runToken,
+                this.Config.surfaceWait
+            );
+            if (!this.isRunActive(runToken)) return;
+            if (!fallbackSurface) {
+                await this.failRun('Could not return to Grok Imagine Saved.', 'gallery_return_failed');
+                return;
+            }
+            if (!await this.ensureSavedGalleryAllScope(runToken)) return;
+            this.state.mode = 'LIST';
+            const restored = await this.restorePendingGalleryContext(runToken);
+            if (!restored || !this.isRunActive(runToken)) return;
+            if (stopBackupReason) await this.stopBackupMode(stopBackupReason);
+            else return { status: 'returned' };
         } finally {
             if (this._returnToSavedInFlight === returnContext) this._returnToSavedInFlight = null;
         }
@@ -9978,15 +13233,14 @@ class GrokScraper {
         const activeReturn = { key: cleanupKey, promise: null };
         this._activeStopReturn = activeReturn;
         activeReturn.promise = (async () => {
-            const startedAt = Date.now();
             const timeoutMs = this.Config.historyWait || 1500;
             const isCurrent = () => (
                 this._activeStopReturn === activeReturn
                 && !this.state.isRunning
             );
-            const remainingTime = () => Math.max(0, timeoutMs - (Date.now() - startedAt));
-            const waitForSaved = async () => {
-                while (isCurrent() && remainingTime() > 0) {
+            const waitForSaved = async (waitMs = timeoutMs) => {
+                const deadline = Date.now() + waitMs;
+                while (isCurrent() && Date.now() < deadline) {
                     if (this.getCurrentSurface() === SCRAPE_SURFACES.savedGallery) return true;
                     await this.sleep(100);
                 }
@@ -10005,11 +13259,12 @@ class GrokScraper {
             ) window.history.back();
 
             const returned = surface === SCRAPE_SURFACES.savedGallery
-                || await waitForSaved();
+                || await waitForSaved(timeoutMs);
             if (!isCurrent()) return false;
             if (!returned) {
                 this.navigateToGalleryUrl(stopNavigation.galleryUrl);
-                return false;
+                if (!await waitForSaved(this.Config.surfaceWait || 5000)) return false;
+                if (!isCurrent()) return false;
             }
 
             const receipt = normalizeSavedViewportReceipt(stopNavigation.savedViewportReceipt || {});
@@ -10060,9 +13315,11 @@ class GrokScraper {
         }
         if (this.pendingNavigation?.expectedIdentity) {
             if (!this.isRunActive(runToken)) return;
-            await this.failRun(
+            await this.recordRecoverableSavedEntryFailure(
+                this.pendingNavigation,
+                'conversation_identity_missing',
                 'Detail view did not expose the Saved conversation identity needed to inventory every asset.',
-                'conversation_identity_missing'
+                runToken
             );
             return;
         }
@@ -10091,15 +13348,17 @@ class GrokScraper {
             if (!this.isRunActive(runToken)) return;
         }
 
-        let normalTransferSucceeded = !this.backupMode;
-        let normalTransferDurable = !this.backupMode;
-
         this.log('Processing selected Saved media...');
         const matchedMediaEl = await this.waitForMatchingLegacyDetailMedia(expectedIdentity, runToken);
         if (!this.isRunActive(runToken)) return;
         const mediaEl = matchedMediaEl || createVerifiedSavedMediaFallback(this.pendingNavigation);
         if (!mediaEl) {
-            await this.failRun('Legacy detail view did not expose the selected Saved media.', 'legacy_media_missing');
+            await this.recordRecoverableSavedEntryFailure(
+                this.pendingNavigation,
+                'legacy_media_missing',
+                'Legacy detail view did not expose the selected Saved media.',
+                runToken
+            );
             return;
         }
         if (!matchedMediaEl) {
@@ -10111,16 +13370,13 @@ class GrokScraper {
         const response = await this.performDownload(mediaEl, currentId, runToken);
         if (!this.isRunActive(runToken)) return;
         if (!isSuccessfulMediaTransferStatus(response?.status)) {
-            normalTransferSucceeded = false;
-            await this.failRun(
-                response?.error || 'Legacy media download failed.',
+            await this.recordRecoverableSavedEntryFailure(
+                this.pendingNavigation,
                 'media_transfer_failed',
-                false
+                response?.error || 'Legacy media download failed.',
+                runToken
             );
             return;
-        }
-        if (!this.backupMode && !shouldPersistBackupProcessedId(response?.status)) {
-            normalTransferDurable = false;
         }
         const canaryStopReason = getR2BackupCanaryStopReason(this.backupOptions, this.backupStats);
         if (this.backupMode && canaryStopReason) {
@@ -10128,10 +13384,54 @@ class GrokScraper {
             return;
         }
 
-        if (!this.isRunActive(runToken)) return;
-        if (normalTransferSucceeded && currentId) this._runVisited.add(currentId);
-        if (normalTransferSucceeded && normalTransferDurable && currentId) {
-            await this.persistProcessedId(currentId, runToken);
+        if (!this.backupMode) {
+            const durability = await this.waitForRunDurability(runToken, { timeoutMs: 180000 });
+            if (!this.isRunActive(runToken)) return;
+            if (durability.status !== 'durable' || !await this.refreshProcessedIds(runToken)) {
+                if (durability.status === 'ignored') {
+                    await this.failRun(
+                        'Legacy media transfer authority was lost.',
+                        'stale_authority',
+                        false
+                    );
+                    return;
+                }
+                await this.recordRecoverableSavedEntryFailure(
+                    this.pendingNavigation,
+                    durability.status === 'timeout' ? 'durability_timeout' : 'durability_failed',
+                    'Legacy media transfer did not become durable.',
+                    runToken
+                );
+                return;
+            }
+            if (!this.isAssetDestinationSatisfied(expectedIdentity || currentId)) {
+                await this.recordRecoverableSavedEntryFailure(
+                    this.pendingNavigation,
+                    'conversation_asset_receipt_missing',
+                    'Legacy media transfer completed without its destination receipt.',
+                    runToken
+                );
+                return;
+            }
+        }
+        if (!await this.clearRecoverableSavedEntryFailure(this.pendingNavigation, runToken)) {
+            if (this.isRunActive(runToken)) {
+                await this.failRun(
+                    'Could not clear the recovered Saved entry failure receipt.',
+                    'scrape_failure_persist_failed',
+                    false
+                );
+            }
+            return;
+        }
+        const completedKeys = [
+            this.pendingNavigation?.entryRunKey,
+            this.pendingNavigation?.sourceEntryRunKey,
+            currentId
+        ].filter(Boolean);
+        for (const key of completedKeys) {
+            this._runVisited.add(key);
+            if (this._savedScanPhase === 'verify') this._savedVerificationVisited.add(key);
         }
         if (!this.isRunActive(runToken)) return;
         await this.returnToSavedGallery(runToken);
@@ -10219,14 +13519,24 @@ class GrokScraper {
                 }, src, currentItemId, runToken);
             }
 
-            const alreadyLocal = this.isMediaProcessed(src) || this.isMediaProcessed(currentItemId);
+            const alreadyLocal = this.hasDestinationReceipt(src, 'local')
+                || this.hasDestinationReceipt(currentItemId, 'local');
             let blobData = null;
             try {
+                if (isVideo) throw new Error('stage_video_download');
                 const result = await fetchMediaDataUrlViaBridge(src);
-                blobData = result.dataUrl;
-                console.log('[BackupUpload]', formatBackupMediaLog('bridge_fetched', src, { bytes: result.size }));
-            } catch {
+                blobData = result.tooLarge ? null : result.dataUrl;
+                console.log('[BackupUpload]', formatBackupMediaLog(
+                    result.tooLarge ? 'staging_download' : 'bridge_fetched',
+                    src,
+                    { bytes: result.size }
+                ));
+            } catch (error) {
+                if (error?.message === 'stage_video_download') {
+                    console.log('[BackupUpload]', formatBackupMediaLog('staging_download', src));
+                } else {
                 console.warn('[BackupUpload]', formatBackupMediaLog('bridge_retry', src));
+                }
             }
 
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Backup stopped.' };
@@ -10279,8 +13589,8 @@ class GrokScraper {
                     response.assetId
                 ].filter(Boolean);
                 const mutationResult = await safeChromeRuntimeSendMessage({
-                    action: 'SCRAPE_PROCESSED_IDS_ADD',
-                    ids,
+                    action: 'SCRAPE_DESTINATION_RECEIPTS_ADD',
+                    r2Ids: ids,
                     runToken,
                     runEpoch: this.runEpoch,
                     kind: 'r2_backup'
@@ -10293,8 +13603,8 @@ class GrokScraper {
                 if (mutationResult.value?.status !== 'ok') {
                     return { status: 'error', error: 'processed_ids_mutation_failed' };
                 }
-                if (Array.isArray(mutationResult.value.processedIds)) {
-                    this.processedIds = new Set(mutationResult.value.processedIds);
+                if (!await this.refreshProcessedIds(runToken)) {
+                    return { status: 'error', error: 'processed_receipts_refresh_failed' };
                 }
             }
         } else {
@@ -10326,6 +13636,7 @@ class GrokScraper {
         if (mediaEl) {
             const src = getBackupMediaElementSrc(mediaEl);
             if (!src) return { status: 'error', error: 'Agent media URL is missing.' };
+            const isVideo = mediaEl.tagName?.toLowerCase() === 'video';
             const configResult = await safeChromeRuntimeSendMessage({ action: 'GET_CLOUD_CONFIG' }, 'load media transfer mode');
             if (configResult.invalidated) {
                 this.handleExtensionContextInvalidated();
@@ -10334,6 +13645,13 @@ class GrokScraper {
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
 
             const cloudMode = configResult.value?.config?.mode;
+            const currentDestinations = getSyncDestinationsForCloudMode(cloudMode);
+            if (!scrapeDestinationsMatch(this.requiredDestinations, currentDestinations)) {
+                return {
+                    status: 'error',
+                    error: 'Backup Mode changed while Sync was running.'
+                };
+            }
             const cloudOnly = cloudMode === 'cloud_only';
             const cloudEnabled = cloudOnly || cloudMode === 'dual_write';
             let captureMetadata = null;
@@ -10352,13 +13670,12 @@ class GrokScraper {
             let blobDataUrl = null;
             if (cloudOnly) {
                 try {
-                    const bridgeResult = await fetchMediaDataUrlViaBridge(src);
-                    blobDataUrl = bridgeResult.dataUrl;
+                    if (!isVideo) {
+                        const bridgeResult = await fetchMediaDataUrlViaBridge(src);
+                        blobDataUrl = bridgeResult.tooLarge ? null : bridgeResult.dataUrl;
+                    }
                 } catch {
-                    return {
-                        status: 'error',
-                        error: formatBackupMediaError('bridge_fetch', 'authenticated_media_fetch_failed', src)
-                    };
+                    blobDataUrl = null;
                 }
             }
             if (!this.isRunActive(runToken)) return { status: 'error', error: 'Sync stopped.' };
@@ -10369,8 +13686,9 @@ class GrokScraper {
                 runEpoch: this.runEpoch,
                 kind: 'sync',
                 url: src,
-                isVideo: mediaEl.tagName?.toLowerCase() === 'video',
+                isVideo,
                 promptText,
+                destinations: this.requiredDestinations,
                 ...(captureMetadata ? { captureMetadata } : {}),
                 blobDataUrl
             }, 'transfer Agent media');
@@ -10436,46 +13754,108 @@ class GrokScraper {
 
 if (typeof module === 'undefined') {
     const runtimeKey = '__gptPowerToolsRuntime';
-    if (!globalThis[runtimeKey]) {
-        // Always initialize the Overlay and Managers on supported sites (defined in manifest)
-        const provider = detectCurrentProvider();
+    const createChatGptRuntime = (provider) => {
         const settings = new SettingsManager();
         const history = new PromptHistoryManager(settings);
-        if (isChatGptImagesProvider(provider)) {
-            const noopScraper = {
-                start: () => { },
-                stop: () => { },
-                setOverlay: () => { }
-            };
-            const noopRetry = {
-                overlay: null,
-                goalRunning: false,
-                batchRunning: false,
-                startGoal: () => { },
-                startBatch: async () => { },
-                startQualityRepeat: () => { },
-                stopBatch: () => { },
-                stopQualityRepeat: () => { }
-            };
-            const overlay = new GrokOverlay(noopScraper, noopRetry, settings, history, { provider });
-            noopRetry.overlay = overlay;
-            globalThis[runtimeKey] = { provider, settings, history, scraper: noopScraper, retry: noopRetry, overlay };
-        } else {
-            const scraper = new GrokScraper();
-            const retry = new VideoRetryManager(null, settings, history);
-            const overlay = new GrokOverlay(scraper, retry, settings, history, { provider });
-            const recreateBridge = new RecreateWorkflowContentBridge(overlay, history);
-            recreateBridge.setupListeners();
-            retry.overlay = overlay;
-            retry.setupGenerationCancellationListener();
-            scraper.setOverlay(overlay);
-            globalThis[runtimeKey] = { provider, settings, history, scraper, retry, overlay, recreateBridge };
-            setTimeout(() => {
-                retry.resumeGenerationRunIfNeeded().catch(() => {
-                    retry.safeStatus('Generation run status unavailable. Reload the page.', 'warning');
-                });
-            }, 0);
-        }
+        const noopScraper = {
+            start: () => { },
+            stop: () => { },
+            setOverlay: () => { }
+        };
+        const noopRetry = {
+            overlay: null,
+            goalRunning: false,
+            batchRunning: false,
+            startGoal: () => { },
+            startBatch: async () => { },
+            startQualityRepeat: () => { },
+            stopBatch: () => { },
+            stopQualityRepeat: () => { }
+        };
+        const overlay = new GrokOverlay(noopScraper, noopRetry, settings, history, { provider });
+        noopRetry.overlay = overlay;
+        const runtime = {
+            provider,
+            settings,
+            history,
+            scraper: noopScraper,
+            retry: noopRetry,
+            overlay,
+            chatGptRuntime: true
+        };
+        globalThis[runtimeKey] = runtime;
+        registerExtensionContextInvalidationHandler(() => {
+            history.setCaptureEnabled(false);
+            overlay.handleExtensionContextInvalidated();
+        });
+        return runtime;
+    };
+
+    const createGrokRuntime = (provider) => {
+        setupCurrentGrokSourceHintCapture();
+        const settings = new SettingsManager();
+        const history = new PromptHistoryManager(settings);
+        const scraper = new GrokScraper();
+        const retry = new VideoRetryManager(null, settings, history);
+        const overlay = new GrokOverlay(scraper, retry, settings, history, { provider });
+        const recreateBridge = new RecreateWorkflowContentBridge(overlay, history);
+        recreateBridge.setupListeners();
+        retry.overlay = overlay;
+        retry.setupGenerationCancellationListener();
+        scraper.setOverlay(overlay);
+        globalThis[runtimeKey] = { provider, settings, history, scraper, retry, overlay, recreateBridge };
+        registerExtensionContextInvalidationHandler(() => {
+            recreateBridge.cancelAllOperations();
+            retry.handleExtensionContextInvalidated();
+            scraper.handleExtensionContextInvalidated();
+            overlay.handleExtensionContextInvalidated();
+        });
+        setTimeout(async () => {
+            await overlay.refreshActiveWorkflowStatus();
+            retry.resumeGenerationRunIfNeeded().catch(() => {
+                retry.safeStatus('Generation run status unavailable. Reload the page.', 'warning');
+            });
+        }, 0);
+        return globalThis[runtimeKey];
+    };
+
+    if (location.hostname === 'chatgpt.com') {
+        let lastUrl = '';
+        const reconcileChatGptRoute = () => {
+            if (!isExtensionContextActive()) return;
+            if (location.href === lastUrl) return;
+            lastUrl = location.href;
+            const provider = detectCurrentProvider();
+            let runtime = globalThis[runtimeKey];
+            if (isChatGptImagesProvider(provider)) {
+                runtime = runtime?.chatGptRuntime ? runtime : createChatGptRuntime(provider);
+                runtime.provider = provider;
+                runtime.overlay.provider = provider;
+                runtime.overlay.applyProviderUi();
+                runtime.history.setCaptureEnabled(true);
+                runtime.overlay.el.style.display = '';
+                return;
+            }
+            if (runtime?.chatGptRuntime) {
+                runtime.provider = provider;
+                runtime.overlay.provider = provider;
+                runtime.history.setCaptureEnabled(false);
+                runtime.overlay.el.style.display = 'none';
+            }
+        };
+        reconcileChatGptRoute();
+        window.addEventListener('popstate', reconcileChatGptRoute);
+        window.addEventListener('hashchange', reconcileChatGptRoute);
+        const routeInterval = setInterval(() => {
+            if (!isExtensionContextActive()) {
+                clearInterval(routeInterval);
+                return;
+            }
+            reconcileChatGptRoute();
+        }, 500);
+    } else if (!globalThis[runtimeKey]) {
+        const provider = detectCurrentProvider();
+        if (isGrokProvider(provider)) createGrokRuntime(provider);
     }
 } else {
     module.exports = {
@@ -10483,6 +13863,7 @@ if (typeof module === 'undefined') {
         GrokOverlay,
         VideoRetryManager,
         GrokScraper,
+        initializeGrokScraperState,
         PromptHistoryManager,
         RecreateWorkflowContentBridge,
         SAVED_PROMPT_TYPES,

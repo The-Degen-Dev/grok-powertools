@@ -18,15 +18,25 @@
     const CHAT_URL = 'https://grok.com/';
     const IMAGINE_URL = 'https://grok.com/imagine';
     const DEFAULT_MESSAGE_TIMEOUT_MS = 15000;
+    const DEFAULT_CHAT_MESSAGE_TIMEOUT_MS = 135000;
     const DEFAULT_STATUS_MESSAGE_TIMEOUT_MS = 1000;
     const DEFAULT_RECEIVER_RETRY_ATTEMPTS = 6;
     const DEFAULT_RECEIVER_RETRY_DELAY_MS = 250;
     const DEFAULT_TAB_READY_TIMEOUT_MS = 30000;
     const DEFAULT_TAB_READY_POLL_MS = 250;
     const RECREATE_RUN_SESSION_KEY = 'gptRecreateRunLease';
-    const RECREATE_RUN_LEASE_VERSION = 1;
+    const RECREATE_RUN_LEASE_VERSION = 2;
     const MAX_RESULT_BASELINE_ITEMS = 200;
     const MAX_RESULT_BASELINE_SIGNATURE_LENGTH = 8192;
+    const SUBMISSION_STATES = Object.freeze({
+        notDispatched: 'not_dispatched',
+        dispatching: 'dispatching',
+        clickSent: 'click_sent',
+        providerAccepted: 'provider_accepted',
+        resultClaimed: 'result_claimed',
+        dispatched: 'dispatched',
+        unknown: 'unknown'
+    });
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const RESULT_SOURCE_KINDS = new Set([
         'trusted-grok-media',
@@ -62,30 +72,55 @@
         throw createError('chrome_api_missing');
     }
 
-    function isGrokImagineUrl(value) {
+    function isGrokImagineResultUrl(value) {
         try {
             const url = new URL(String(value || ''));
             return (
                 url.protocol === 'https:' &&
                 url.hostname === 'grok.com' &&
-                url.pathname === '/imagine'
+                (url.pathname === '/imagine' || url.pathname.startsWith('/imagine/'))
             );
         } catch {
             return false;
         }
     }
 
-    function isGrokImaginePostUrl(value) {
-        try {
-            const url = new URL(String(value || ''));
-            return (
-                url.protocol === 'https:' &&
-                url.hostname === 'grok.com' &&
-                url.pathname.includes('/imagine/post/')
-            );
-        } catch {
-            return false;
+    function normalizeSubmissionState(value, phase = '') {
+        if (Object.values(SUBMISSION_STATES).includes(value)) return value;
+        if (/^imagine(?:$|_)/.test(String(phase || ''))) return SUBMISSION_STATES.unknown;
+        return SUBMISSION_STATES.notDispatched;
+    }
+
+    function isRetrySafeSubmissionState(value) {
+        return normalizeSubmissionState(value) === SUBMISSION_STATES.notDispatched;
+    }
+
+    function canTransitionSubmissionState(currentValue, nextValue) {
+        const current = normalizeSubmissionState(currentValue);
+        const next = normalizeSubmissionState(nextValue);
+        if (current === next) return true;
+        if (next === SUBMISSION_STATES.dispatching) return current === SUBMISSION_STATES.notDispatched;
+        if (next === SUBMISSION_STATES.notDispatched) return current === SUBMISSION_STATES.dispatching;
+        if (next === SUBMISSION_STATES.clickSent) return current === SUBMISSION_STATES.dispatching;
+        if (next === SUBMISSION_STATES.unknown) {
+            return current === SUBMISSION_STATES.dispatching || current === SUBMISSION_STATES.clickSent;
         }
+        if (next === SUBMISSION_STATES.providerAccepted) {
+            return current === SUBMISSION_STATES.dispatching
+                || current === SUBMISSION_STATES.clickSent
+                || current === SUBMISSION_STATES.dispatched
+                || current === SUBMISSION_STATES.unknown;
+        }
+        if (next === SUBMISSION_STATES.resultClaimed) {
+            return current === SUBMISSION_STATES.providerAccepted
+                || current === SUBMISSION_STATES.clickSent
+                || current === SUBMISSION_STATES.dispatched
+                || current === SUBMISSION_STATES.unknown;
+        }
+        if (next === SUBMISSION_STATES.dispatched) {
+            return current === SUBMISSION_STATES.dispatching || current === SUBMISSION_STATES.clickSent;
+        }
+        return false;
     }
 
     function normalizeErrorCode(error) {
@@ -101,7 +136,13 @@
 
     function isMessageChannelClosedError(error) {
         const message = String((error && error.diagnostics && error.diagnostics.chromeLastError) || error.message || '');
-        return /message channel closed|asynchronous response|extension context invalidated/i.test(message);
+        return /message (?:channel|port) closed|asynchronous response|extension context invalidated/i.test(message);
+    }
+
+    function isContentDocumentUnavailableError(error) {
+        const message = String((error && error.diagnostics && error.diagnostics.chromeLastError) || error.message || '');
+        return isReceiverNotReadyError(error)
+            || /no (?:frame|document|tab) with id|frame with id .* was removed|extension context invalidated/i.test(message);
     }
 
     function wait(ms, signal = null) {
@@ -142,6 +183,9 @@
         const messageTimeoutMs = Number.isFinite(options.messageTimeoutMs)
             ? options.messageTimeoutMs
             : DEFAULT_MESSAGE_TIMEOUT_MS;
+        const chatMessageTimeoutMs = Number.isFinite(options.chatMessageTimeoutMs)
+            ? options.chatMessageTimeoutMs
+            : DEFAULT_CHAT_MESSAGE_TIMEOUT_MS;
         const statusMessageTimeoutMs = Number.isFinite(options.statusMessageTimeoutMs)
             ? options.statusMessageTimeoutMs
             : DEFAULT_STATUS_MESSAGE_TIMEOUT_MS;
@@ -318,7 +362,10 @@
                 sourceTabId: Number.isInteger(run?.sourceTabId) ? run.sourceTabId : null,
                 sourceDocumentId: String(run?.sourceDocumentId || ''),
                 chatTabId: Number.isInteger(run?.chatTabId) ? run.chatTabId : null,
+                chatDocumentId: String(run?.chatDocumentId || ''),
                 imagineTabId: Number.isInteger(run?.imagineTabId) ? run.imagineTabId : null,
+                imagineDocumentId: String(run?.imagineDocumentId || ''),
+                submissionState: normalizeSubmissionState(run?.submissionState, run?.phase),
                 resultBaselineAssetIds: Array.isArray(run?.resultBaselineAssetIds)
                     ? run.resultBaselineAssetIds.slice(0, MAX_RESULT_BASELINE_ITEMS)
                     : [],
@@ -360,27 +407,6 @@
             });
         }
 
-        function tabsUpdate(tabId, updateOptions, errorCode, phase) {
-            return new Promise((resolve, reject) => {
-                if (!chromeApi.tabs.update) {
-                    resolve({ id: tabId, ...updateOptions });
-                    return;
-                }
-
-                chromeApi.tabs.update(tabId, updateOptions, (tab) => {
-                    if (chromeApi.runtime && chromeApi.runtime.lastError) {
-                        reject(
-                            createPhaseError(errorCode, phase, {
-                                chromeLastError: chromeApi.runtime.lastError.message
-                            })
-                        );
-                        return;
-                    }
-                    resolve(tab || { id: tabId, ...updateOptions });
-                });
-            });
-        }
-
         function tabsGet(tabId, errorCode, phase) {
             return new Promise((resolve, reject) => {
                 if (!chromeApi.tabs.get) {
@@ -418,20 +444,57 @@
             });
         }
 
-        async function waitForImaginePostReady(tabId, errorCode, phase, options = {}) {
+        async function waitForImagineResultSurfaceReady(tabId, initialUrl, errorCode, phase, options = {}) {
             const startedAt = now();
             const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : tabReadyTimeoutMs;
+            const signal = options.signal || null;
+            const normalizedInitialUrl = String(initialUrl || '');
+            let navigationObserved = false;
+            const onUpdated = (updatedTabId, changeInfo) => {
+                if (updatedTabId !== tabId) return;
+                if (changeInfo?.status === 'loading' || typeof changeInfo?.url === 'string') {
+                    navigationObserved = true;
+                }
+            };
+            if (chromeApi.tabs?.onUpdated?.addListener) chromeApi.tabs.onUpdated.addListener(onUpdated);
+
+            try {
+                while (now() - startedAt <= timeoutMs) {
+                    if (signal?.aborted) throw createError('workflow_aborted');
+                    const tab = await tabsGet(tabId, errorCode, phase);
+                    const currentUrl = String(tab?.url || '');
+                    const routeChanged = currentUrl !== normalizedInitialUrl;
+                    if (tab?.status === 'complete'
+                        && isGrokImagineResultUrl(currentUrl)
+                        && (routeChanged || navigationObserved)) {
+                        return tab;
+                    }
+                    await wait(tabReadyPollMs, signal);
+                }
+            } finally {
+                if (chromeApi.tabs?.onUpdated?.removeListener) chromeApi.tabs.onUpdated.removeListener(onUpdated);
+            }
+
+            throw createPhaseError(errorCode, phase, {
+                reason: 'result_surface_navigation_timeout',
+                timeoutMs
+            });
+        }
+
+        async function waitForSubmissionDispatch(run, options = {}) {
+            const startedAt = now();
+            const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : messageTimeoutMs;
             const signal = options.signal || null;
 
             while (now() - startedAt <= timeoutMs) {
                 if (signal?.aborted) throw createError('workflow_aborted');
-                const tab = await tabsGet(tabId, errorCode, phase);
-                if (tab && tab.status === 'complete' && isGrokImaginePostUrl(tab.url)) return tab;
+                ensureActive(run);
+                if (!isRetrySafeSubmissionState(run.submissionState)) return;
                 await wait(tabReadyPollMs, signal);
             }
 
-            throw createPhaseError(errorCode, phase, {
-                reason: 'post_navigation_timeout',
+            throw createPhaseError('imagine_submit_failed', 'imagine', {
+                reason: 'submission_not_dispatched',
                 timeoutMs
             });
         }
@@ -607,49 +670,73 @@
 
         async function sendCancellationToTab(tabId, lease, reason, documentId = '') {
             if (!Number.isInteger(tabId)) return false;
-            try {
-                const response = await tabsSendMessageOnce(tabId, {
-                    action: 'GPT_RECREATE_CANCEL',
-                    runId: lease.runId,
-                    epoch: lease.epoch,
-                    reason
-                }, 'cancel_delivery_failed', 'cancelled', statusMessageTimeoutMs, null, documentId);
+            const message = {
+                action: 'GPT_RECREATE_CANCEL',
+                runId: lease.runId,
+                epoch: lease.epoch,
+                reason
+            };
+            const send = async (targetDocumentId = '', requireActiveCancellation = false) => {
+                const response = await tabsSendMessageOnce(
+                    tabId,
+                    message,
+                    'cancel_delivery_failed',
+                    'cancelled',
+                    statusMessageTimeoutMs,
+                    null,
+                    targetDocumentId
+                );
                 return response?.ok === true
                     && response?.acknowledged === true
-                    && String(response?.runId || '') === String(lease.runId || '');
-            } catch {
-                return false;
+                    && String(response?.runId || '') === String(lease.runId || '')
+                    && (!requireActiveCancellation || Number(response?.cancelled || 0) > 0);
+            };
+
+            if (documentId) {
+                try {
+                    if (await send(documentId)) return true;
+                } catch (error) {
+                    if (!isContentDocumentUnavailableError(error)) return false;
+                    try {
+                        await send('', true);
+                    } catch {
+                        // The replacement document may not have mounted the content script yet.
+                    }
+                    return true;
+                }
+            }
+
+            try {
+                return await send('', true);
+            } catch (error) {
+                // A missing current document means navigation already ended the old operation.
+                return isContentDocumentUnavailableError(error);
             }
         }
 
         function getCancellationTargets(lease) {
-            const documentsByTab = new Map();
-            const addTab = (tabId) => {
-                if (Number.isInteger(tabId) && !documentsByTab.has(tabId)) documentsByTab.set(tabId, new Set());
+            const targets = new Map();
+            const addTab = (tabId, documentId = '') => {
+                if (!Number.isInteger(tabId)) return;
+                const existing = targets.get(tabId);
+                if (!existing || (!existing.documentId && documentId)) {
+                    targets.set(tabId, { tabId, documentId: String(documentId || '') });
+                }
             };
-            addTab(lease?.sourceTabId);
-            addTab(lease?.chatTabId);
-            addTab(lease?.imagineTabId);
-            if (Number.isInteger(lease?.sourceTabId) && lease?.sourceDocumentId) {
-                documentsByTab.get(lease.sourceTabId).add(String(lease.sourceDocumentId));
-            }
-            if (Number.isInteger(lease?.operationTabId) && lease?.operationDocumentId) {
-                addTab(lease.operationTabId);
-                documentsByTab.get(lease.operationTabId).add(String(lease.operationDocumentId));
-            }
-
-            return Array.from(documentsByTab.entries()).flatMap(([tabId, documentIds]) => (
-                documentIds.size > 0
-                    ? Array.from(documentIds, (documentId) => ({ tabId, documentId }))
-                    : [{ tabId, documentId: '' }]
-            ));
+            addTab(lease?.operationTabId, lease?.operationDocumentId);
+            addTab(lease?.sourceTabId, lease?.sourceDocumentId);
+            addTab(lease?.chatTabId, lease?.chatDocumentId);
+            addTab(lease?.imagineTabId, lease?.imagineDocumentId);
+            return Array.from(targets.values());
         }
 
-        async function deliverCancellation(lease, reason) {
+        async function deliverCancellation(lease, reason, confirmedAbsentTargets = new Set()) {
             const targets = getCancellationTargets(lease);
             if (targets.length === 0) return true;
             const results = await Promise.all(targets.map(({ tabId, documentId }) => (
-                sendCancellationToTab(tabId, lease, reason, documentId)
+                confirmedAbsentTargets.has(`${tabId}:${documentId}`)
+                    ? true
+                    : sendCancellationToTab(tabId, lease, reason, documentId)
             )));
             return results.every(Boolean);
         }
@@ -664,19 +751,23 @@
                 abortController,
                 cancellationAcknowledged: false,
                 recoveryPending: true,
-                submissionMayHaveOccurred: true,
+                submissionState: normalizeSubmissionState(lease?.submissionState, lease?.phase),
                 operationSequence: 0
             };
         }
 
-        async function finalizePersistedCancellation(run, reason) {
+        async function finalizePersistedCancellation(run, reason, confirmedAbsentTargets = new Set()) {
             if (!run) return true;
             const cancellationLease = sanitizeRunLease(run, { status: 'cancelling', reason });
             const persisted = await storageAreaSet(sessionStorage, {
                 [RECREATE_RUN_SESSION_KEY]: cancellationLease
             });
             if (!persisted) return false;
-            const acknowledged = await deliverCancellation(cancellationLease, reason);
+            const acknowledged = await deliverCancellation(
+                cancellationLease,
+                reason,
+                confirmedAbsentTargets
+            );
             if (!acknowledged) return false;
 
             run.cancellationAcknowledged = true;
@@ -698,7 +789,7 @@
                 initializationPromise = (async () => {
                     const stored = await storageAreaGet(sessionStorage, [RECREATE_RUN_SESSION_KEY]);
                     const lease = stored?.[RECREATE_RUN_SESSION_KEY];
-                    if (lease?.schemaVersion === RECREATE_RUN_LEASE_VERSION
+                    if ((lease?.schemaVersion === 1 || lease?.schemaVersion === RECREATE_RUN_LEASE_VERSION)
                         && lease.runId
                         && (lease.status === 'running' || lease.status === 'cancelling')) {
                         activeRun = hydrateCancellingRun(lease, 'worker_restarted');
@@ -753,6 +844,8 @@
             const authority = request?.authority || request || {};
             const senderTabId = Number.isInteger(sender?.tab?.id) ? sender.tab.id : null;
             const senderDocumentId = String(sender?.documentId || '');
+            const marksSubmissionDispatch = request?.action === 'GPT_RECREATE_NATIVE_CLICK'
+                && request?.submissionState === SUBMISSION_STATES.dispatching;
             return await enqueueAuthorityMutation(async () => {
                 if (!activeRun
                     || activeRun.aborted
@@ -768,8 +861,27 @@
                 if (activeRun.operationDocumentId && senderDocumentId !== activeRun.operationDocumentId) {
                     throw createError('workflow_aborted');
                 }
+                let leaseChanged = false;
                 if (!activeRun.operationDocumentId) {
                     activeRun.operationDocumentId = senderDocumentId;
+                    leaseChanged = true;
+                }
+                if (senderTabId === activeRun.chatTabId && activeRun.chatDocumentId !== senderDocumentId) {
+                    activeRun.chatDocumentId = senderDocumentId;
+                    leaseChanged = true;
+                }
+                if (senderTabId === activeRun.imagineTabId && activeRun.imagineDocumentId !== senderDocumentId) {
+                    activeRun.imagineDocumentId = senderDocumentId;
+                    leaseChanged = true;
+                }
+                if (marksSubmissionDispatch) {
+                    if (!isRetrySafeSubmissionState(activeRun.submissionState)) {
+                        throw createError('recreate_submission_state_invalid');
+                    }
+                    activeRun.submissionState = SUBMISSION_STATES.dispatching;
+                    leaseChanged = true;
+                }
+                if (leaseChanged) {
                     const persisted = await persistRunLease(activeRun);
                     if (!persisted) throw createError('recreate_authority_persist_failed');
                 }
@@ -782,27 +894,29 @@
                     tabId: senderTabId,
                     documentId: senderDocumentId
                 };
+                const assertCurrentAuthority = () => {
+                    if (!activeRun
+                        || activeRun.runId !== captured.runId
+                        || activeRun.epoch !== captured.epoch
+                        || activeRun.aborted
+                        || activeRun.abortController?.signal?.aborted
+                        || captured.operationId !== activeRun.operationId
+                        || captured.phase !== activeRun.phase
+                        || captured.tabId !== activeRun.operationTabId
+                        || captured.documentId !== activeRun.operationDocumentId) {
+                        throw createError('workflow_aborted');
+                    }
+                };
                 return {
                     signal: activeRun.abortController.signal,
-                    assertAuthorized() {
-                        if (!activeRun
-                            || activeRun.runId !== captured.runId
-                            || activeRun.epoch !== captured.epoch
-                            || activeRun.aborted
-                            || activeRun.abortController?.signal?.aborted
-                            || captured.operationId !== activeRun.operationId
-                            || captured.phase !== activeRun.phase
-                            || captured.tabId !== activeRun.operationTabId
-                            || captured.documentId !== activeRun.operationDocumentId) {
-                            throw createError('workflow_aborted');
-                        }
-                    }
+                    assertAuthorized: assertCurrentAuthority
                 };
             });
         }
 
         async function recordResultBaseline(request, sender = {}) {
             const operation = await authorizeContentOperation(request, sender);
+            const hasBaseline = Array.isArray(request?.assetIds) || Array.isArray(request?.signatures);
             const assetIds = Array.isArray(request?.assetIds)
                 ? Array.from(new Set(request.assetIds.map((value) => String(value || '').toLowerCase())))
                 : [];
@@ -811,20 +925,34 @@
             }
             const signatures = sanitizeResultBaselineSignatures(request?.signatures);
             const mediaKind = request?.mediaKind === 'video' ? 'video' : 'image';
+            const requestedSubmissionState = request?.submissionState;
+            if (requestedSubmissionState
+                && !Object.values(SUBMISSION_STATES).includes(requestedSubmissionState)) {
+                throw createError('recreate_submission_state_invalid');
+            }
 
             return await enqueueAuthorityMutation(async () => {
                 operation.assertAuthorized();
-                activeRun.resultBaselineAssetIds = assetIds;
-                activeRun.resultBaselineSignatures = signatures;
-                activeRun.resultBaselineMediaKind = mediaKind;
+                if (hasBaseline) {
+                    activeRun.resultBaselineAssetIds = assetIds;
+                    activeRun.resultBaselineSignatures = signatures;
+                    activeRun.resultBaselineMediaKind = mediaKind;
+                }
+                if (requestedSubmissionState) {
+                    if (!canTransitionSubmissionState(activeRun.submissionState, requestedSubmissionState)) {
+                        throw createError('recreate_submission_state_invalid');
+                    }
+                    activeRun.submissionState = requestedSubmissionState;
+                }
                 const persisted = await persistRunLease(activeRun);
                 if (!persisted) throw createError('recreate_authority_persist_failed');
                 operation.assertAuthorized();
                 return {
                     ok: true,
-                    recorded: assetIds.length,
-                    recordedSignatures: signatures.length,
-                    mediaKind
+                    recorded: hasBaseline ? assetIds.length : 0,
+                    recordedSignatures: hasBaseline ? signatures.length : 0,
+                    mediaKind,
+                    submissionState: activeRun.submissionState
                 };
             });
         }
@@ -842,7 +970,36 @@
             });
         }
 
-        async function sendStatus(run, phase, message, type = 'info') {
+        async function markProviderAccepted(run) {
+            return await enqueueAuthorityMutation(async () => {
+                ensureActive(run);
+                if (!canTransitionSubmissionState(run.submissionState, SUBMISSION_STATES.providerAccepted)) {
+                    if (run.submissionState === SUBMISSION_STATES.providerAccepted
+                        || run.submissionState === SUBMISSION_STATES.resultClaimed) return;
+                    throw createError('recreate_submission_state_invalid');
+                }
+                run.submissionState = SUBMISSION_STATES.providerAccepted;
+                const persisted = await persistRunLease(run);
+                if (!persisted) throw createError('recreate_authority_persist_failed');
+                ensureActive(run);
+            });
+        }
+
+        async function markResultClaimed(run) {
+            return await enqueueAuthorityMutation(async () => {
+                ensureActive(run);
+                if (!canTransitionSubmissionState(run.submissionState, SUBMISSION_STATES.resultClaimed)) {
+                    if (run.submissionState === SUBMISSION_STATES.resultClaimed) return;
+                    throw createError('recreate_submission_state_invalid');
+                }
+                run.submissionState = SUBMISSION_STATES.resultClaimed;
+                const persisted = await persistRunLease(run);
+                if (!persisted) throw createError('recreate_authority_persist_failed');
+                ensureActive(run);
+            });
+        }
+
+        async function sendStatus(run, phase, message, type = 'info', details = {}) {
             if (!run || !run.sourceTabId) return;
 
             try {
@@ -851,14 +1008,18 @@
                     runId: run.runId,
                     phase,
                     message,
-                    type
+                    type,
+                    terminal: details.terminal === true,
+                    outcome: String(details.outcome || ''),
+                    retrySafe: details.retrySafe === true,
+                    referenceKind: details.referenceKind === 'video' ? 'video' : 'image'
                 }, 'status_delivery_failed', phase, {
                     documentId: run.sourceDocumentId || '',
                     retryReceiverNotReady: false,
                     timeoutMs: statusMessageTimeoutMs
                 });
-            } catch (error) {
-                console.warn('Recreate status delivery failed:', error.message);
+            } catch {
+                // Status delivery is best-effort. Workflow authority owns the outcome.
             }
         }
 
@@ -874,7 +1035,7 @@
             });
             return {
                 ...failure,
-                retrySafe: !!run && run.submissionMayHaveOccurred !== true
+                retrySafe: !!run && isRetrySafeSubmissionState(run.submissionState)
             };
         }
 
@@ -957,21 +1118,35 @@
         }
 
         async function getImagineTabId(run) {
-            if (isGrokImagineUrl(run.sourceTabUrl)) {
-                await tabsUpdate(run.sourceTabId, { active: true }, 'imagine_tab_unavailable', 'imagine');
-                await waitForTabReady(run.sourceTabId, 'imagine_tab_unavailable', 'imagine', run.abortController.signal);
-                return run.sourceTabId;
-            }
-
             const imagineTab = await tabsCreate({ url: IMAGINE_URL, active: true }, 'imagine_tab_unavailable', 'imagine');
             await waitForTabReady(imagineTab.id, 'imagine_tab_unavailable', 'imagine', run.abortController.signal);
             return imagineTab.id;
         }
 
-        async function validateOpenedImaginePost(run, referenceKind, generatedPrompt) {
-            await waitForImaginePostReady(run.imagineTabId, 'imagine_tab_unavailable', 'imagine', {
-                signal: run.abortController.signal
+        async function recoverChatPromptAfterNavigation(run, referenceKind) {
+            ensureActive(run);
+            await waitForTabReady(
+                run.chatTabId,
+                'chat_tab_unavailable',
+                'chat',
+                run.abortController.signal
+            );
+            await injectRecreateContentScripts(
+                run.chatTabId,
+                'chat_tab_unavailable',
+                'chat',
+                run.abortController.signal
+            );
+            ensureActive(run);
+            return await sendRunOperation(run, run.chatTabId, 'GPT_RECREATE_CHAT_STEP', {
+                recoverOnly: true,
+                referenceKind
+            }, 'chat_tab_unavailable', 'chat_recovery', {
+                timeoutMs: chatMessageTimeoutMs
             });
+        }
+
+        async function validateOpenedImagineResult(run, referenceKind, generatedPrompt) {
             ensureActive(run);
             await injectRecreateContentScripts(
                 run.imagineTabId,
@@ -996,17 +1171,28 @@
             });
         }
 
-        async function recoverFromOpenedImaginePost(run, referenceKind, generatedPrompt, generatedMediaLabel) {
-            await waitForImaginePostReady(run.imagineTabId, 'imagine_tab_unavailable', 'imagine', {
+        async function recoverFromOpenedImagineResult(run, referenceKind, generatedPrompt, generatedMediaLabel) {
+            await waitForImagineResultSurfaceReady(
+                run.imagineTabId,
+                run.imagineStartUrl,
+                'imagine_tab_unavailable',
+                'imagine',
+                {
+                timeoutMs: messageTimeoutMs,
+                signal: run.abortController.signal
+                }
+            );
+            await waitForSubmissionDispatch(run, {
                 timeoutMs: messageTimeoutMs,
                 signal: run.abortController.signal
             });
-            await sendStatus(run, 'imagine', `Validating opened Grok post ${generatedMediaLabel}...`, 'info');
+            await markProviderAccepted(run);
+            await sendStatus(run, 'imagine', `Validating Grok result ${generatedMediaLabel}...`, 'info');
             ensureActive(run);
-            return await validateOpenedImaginePost(run, referenceKind, generatedPrompt);
+            return await validateOpenedImagineResult(run, referenceKind, generatedPrompt);
         }
 
-        function ignoreFailedPostRecovery(promise) {
+        function ignoreFailedResultRecovery(promise) {
             return promise.catch(() => new Promise(() => {}));
         }
 
@@ -1035,13 +1221,15 @@
                 aborted: false,
                 abortController: new AbortController(),
                 chatTabId: null,
+                chatDocumentId: '',
                 imagineTabId: null,
+                imagineDocumentId: '',
                 phase: 'workflow',
                 operationId: '',
                 operationTabId: null,
                 operationDocumentId: '',
                 operationSequence: 0,
-                submissionMayHaveOccurred: false,
+                submissionState: SUBMISSION_STATES.notDispatched,
                 startedAt: now()
             };
             activeRun = run;
@@ -1070,6 +1258,17 @@
                     sourceUrl: reference.url || ''
                 };
 
+                if (typeof context.onStarted === 'function') {
+                    context.onStarted({
+                        ok: true,
+                        started: true,
+                        status: 'running',
+                        runId: run.runId,
+                        epoch: run.epoch,
+                        referenceKind
+                    });
+                }
+
                 await sendStatus(run, 'chat', 'Opening Grok chat tab...', 'info');
                 ensureActive(run);
                 await setRunPhase(run, 'chat_opening');
@@ -1082,11 +1281,19 @@
                 await waitForTabReady(run.chatTabId, 'chat_tab_unavailable', 'chat', run.abortController.signal);
                 ensureActive(run);
 
-                const chatResponse = await sendRunOperation(run, run.chatTabId, 'GPT_RECREATE_CHAT_STEP', {
-                    reference,
-                    referenceKind,
-                    bestPracticesEnabled: !!request.bestPracticesEnabled
-                }, 'chat_tab_unavailable', 'chat');
+                let chatResponse;
+                try {
+                    chatResponse = await sendRunOperation(run, run.chatTabId, 'GPT_RECREATE_CHAT_STEP', {
+                        reference,
+                        referenceKind,
+                        bestPracticesEnabled: !!request.bestPracticesEnabled
+                    }, 'chat_tab_unavailable', 'chat', {
+                        timeoutMs: chatMessageTimeoutMs
+                    });
+                } catch (error) {
+                    if (!isMessageChannelClosedError(error)) throw error;
+                    chatResponse = await recoverChatPromptAfterNavigation(run, referenceKind);
+                }
                 ensureActive(run);
 
                 if (!chatResponse || !chatResponse.ok) {
@@ -1097,8 +1304,13 @@
                         phase: failed.phase,
                         error: failed.error
                     });
-                    await sendStatus(run, failed.phase, failed.error, 'error');
                     await clearActiveRun(run, 'failed', failed.error);
+                    await sendStatus(run, failed.phase, failed.error, 'error', {
+                        terminal: true,
+                        outcome: 'failed',
+                        retrySafe: isRetrySafeSubmissionState(run.submissionState),
+                        referenceKind
+                    });
                     return failed;
                 }
 
@@ -1120,8 +1332,13 @@
                         phase: failed.phase,
                         error: failed.error
                     });
-                    await sendStatus(run, failed.phase, failed.error, 'error');
                     await clearActiveRun(run, 'failed', failed.error);
+                    await sendStatus(run, failed.phase, failed.error, 'error', {
+                        terminal: true,
+                        outcome: 'failed',
+                        retrySafe: isRetrySafeSubmissionState(run.submissionState),
+                        referenceKind
+                    });
                     return failed;
                 }
 
@@ -1130,10 +1347,15 @@
 
                 await setRunPhase(run, 'imagine_opening');
                 run.imagineTabId = await getImagineTabId(run);
+                const initialImagineTab = await tabsGet(
+                    run.imagineTabId,
+                    'imagine_tab_unavailable',
+                    'imagine'
+                );
+                run.imagineStartUrl = String(initialImagineTab?.url || IMAGINE_URL);
                 ensureActive(run);
 
                 let imagineResponse;
-                run.submissionMayHaveOccurred = true;
                 const imagineSubmitPromise = sendRunOperation(
                     run,
                     run.imagineTabId,
@@ -1147,17 +1369,19 @@
                     'imagine_tab_unavailable',
                     'imagine'
                 );
-                const openedPostRecoveryPromise = ignoreFailedPostRecovery(
-                    recoverFromOpenedImaginePost(run, referenceKind, generatedPrompt, generatedMediaLabel)
+                const openedResultRecovery = recoverFromOpenedImagineResult(
+                    run,
+                    referenceKind,
+                    generatedPrompt,
+                    generatedMediaLabel
                 );
+                const openedResultRecoveryPromise = ignoreFailedResultRecovery(openedResultRecovery);
 
                 try {
-                    imagineResponse = await Promise.race([imagineSubmitPromise, openedPostRecoveryPromise]);
+                    imagineResponse = await Promise.race([imagineSubmitPromise, openedResultRecoveryPromise]);
                 } catch (error) {
                     if (!isMessageChannelClosedError(error)) throw error;
-                    await sendStatus(run, 'imagine', `Validating opened Grok post ${generatedMediaLabel}...`, 'info');
-                    ensureActive(run);
-                    imagineResponse = await validateOpenedImaginePost(run, referenceKind, generatedPrompt);
+                    imagineResponse = await openedResultRecovery;
                 }
                 ensureActive(run);
 
@@ -1170,8 +1394,13 @@
                         error: failed.error,
                         generatedPrompt
                     });
-                    await sendStatus(run, failed.phase, failed.error, 'error');
                     await clearActiveRun(run, 'failed', failed.error);
+                    await sendStatus(run, failed.phase, failed.error, 'error', {
+                        terminal: true,
+                        outcome: 'failed',
+                        retrySafe: isRetrySafeSubmissionState(run.submissionState),
+                        referenceKind
+                    });
                     return failed;
                 }
 
@@ -1184,8 +1413,13 @@
                         error: failed.error,
                         generatedPrompt
                     });
-                    await sendStatus(run, failed.phase, failed.error, 'error');
                     await clearActiveRun(run, 'failed', failed.error);
+                    await sendStatus(run, failed.phase, failed.error, 'error', {
+                        terminal: true,
+                        outcome: 'failed',
+                        retrySafe: isRetrySafeSubmissionState(run.submissionState),
+                        referenceKind
+                    });
                     return failed;
                 }
 
@@ -1198,10 +1432,17 @@
                         error: failed.error,
                         generatedPrompt
                     });
-                    await sendStatus(run, failed.phase, failed.error, 'error');
                     await clearActiveRun(run, 'failed', failed.error);
+                    await sendStatus(run, failed.phase, failed.error, 'error', {
+                        terminal: true,
+                        outcome: 'failed',
+                        retrySafe: isRetrySafeSubmissionState(run.submissionState),
+                        referenceKind
+                    });
                     return failed;
                 }
+
+                await markResultClaimed(run);
 
                 const outputUrl =
                     imagineResponse.result && (
@@ -1222,8 +1463,12 @@
                         : null,
                     subjectiveNotes: ''
                 });
-                await sendStatus(run, 'done', `Generated ${generatedMediaLabel} ready.`, 'success');
                 await clearActiveRun(run, 'completed');
+                await sendStatus(run, 'done', `Generated ${generatedMediaLabel} ready.`, 'success', {
+                    terminal: true,
+                    outcome: 'completed',
+                    referenceKind
+                });
 
                 return {
                     ok: true,
@@ -1251,8 +1496,13 @@
                         phase: result.phase,
                         error: result.error
                     });
-                    await sendStatus(run, result.phase, result.error, 'error');
                     await clearActiveRun(run, 'failed', result.error);
+                    await sendStatus(run, result.phase, result.error, 'error', {
+                        terminal: true,
+                        outcome: 'failed',
+                        retrySafe: isRetrySafeSubmissionState(run.submissionState),
+                        referenceKind: ledgerBase?.referenceKind
+                    });
                     return result;
                 }
                 const cleared = await clearActiveRun(run, 'cancelled', result.error);
@@ -1296,8 +1546,8 @@
                     aborted: true,
                     reason,
                     status: cleared ? 'stopped' : 'stopping',
-                    retrySafe: false,
-                    retrySafeWhenStopped: false
+                    retrySafe: cleared && isRetrySafeSubmissionState(run.submissionState),
+                    retrySafeWhenStopped: isRetrySafeSubmissionState(run.submissionState)
                 };
             }
             run.aborted = true;
@@ -1324,8 +1574,13 @@
                         action: 'GPT_RECREATE_STATUS',
                         runId: run.runId,
                         phase: stillStopping ? 'cancelling' : 'cancelled',
-                        message: stillStopping ? 'Stopping...' : 'Cancelled.',
-                        type: 'neutral'
+                        message: stillStopping
+                            ? 'Stopping...'
+                            : (reason === 'user' ? 'Cancelled.' : `Recreate stopped: ${reason}`),
+                        type: stillStopping || reason === 'user' ? 'neutral' : 'error',
+                        terminal: !stillStopping,
+                        outcome: stillStopping ? '' : 'cancelled',
+                        retrySafe: !stillStopping && isRetrySafeSubmissionState(run.submissionState)
                     }, 'status_delivery_failed', 'cancelled', statusMessageTimeoutMs, null, run.sourceDocumentId || '');
                 } catch {
                     // The start response still resolves with workflow_aborted.
@@ -1338,34 +1593,87 @@
                 aborted: true,
                 reason,
                 status: stillStopping ? 'stopping' : 'stopped',
-                retrySafe: !stillStopping && run.submissionMayHaveOccurred !== true,
-                retrySafeWhenStopped: run.submissionMayHaveOccurred !== true
+                retrySafe: !stillStopping && isRetrySafeSubmissionState(run.submissionState),
+                retrySafeWhenStopped: isRetrySafeSubmissionState(run.submissionState)
             };
         }
 
-        async function getRunStatus() {
+        async function getRunStatus(options = {}) {
             if (!initialized) await initialize();
             if (activeRun?.recoveryPending) {
+                const confirmedAbsentTargets = new Set();
+                if (Number.isInteger(options.viewerTabId)
+                    && options.viewerTabId === activeRun.sourceTabId
+                    && options.viewerDocumentId
+                    && options.viewerDocumentId !== activeRun.sourceDocumentId) {
+                    confirmedAbsentTargets.add(`${activeRun.sourceTabId}:${activeRun.sourceDocumentId}`);
+                }
                 await finalizePersistedCancellation(
                     activeRun,
-                    activeRun.abortReason || 'worker_restarted'
+                    activeRun.abortReason || 'worker_restarted',
+                    confirmedAbsentTargets
                 );
             }
-            return getActiveRunStatus();
+            return getActiveRunStatus(options);
+        }
+
+        async function handleOwnedTabRemoved(tabId) {
+            if (!initialized) await initialize();
+            if (!activeRun || activeRun.aborted || activeRun.recoveryPending) return false;
+            const reason = tabId === activeRun.chatTabId
+                ? 'chat_work_tab_closed'
+                : (tabId === activeRun.imagineTabId ? 'imagine_work_tab_closed' : '');
+            if (!reason) return false;
+            await abort(reason);
+            return true;
+        }
+
+        async function handleOwnedTabUpdated(tabId, url) {
+            if (!url) return false;
+            if (!initialized) await initialize();
+            if (!activeRun || activeRun.aborted || activeRun.recoveryPending) return false;
+            let allowed = true;
+            let reason = '';
+            try {
+                const parsed = new URL(String(url));
+                if (tabId === activeRun.chatTabId) {
+                    allowed = parsed.protocol === 'https:' && parsed.hostname === 'grok.com';
+                    reason = 'chat_work_tab_left_grok';
+                } else if (tabId === activeRun.imagineTabId) {
+                    allowed = isGrokImagineResultUrl(parsed.toString());
+                    reason = 'imagine_work_tab_left_grok';
+                } else {
+                    return false;
+                }
+            } catch {
+                allowed = false;
+                reason = tabId === activeRun.chatTabId
+                    ? 'chat_work_tab_left_grok'
+                    : 'imagine_work_tab_left_grok';
+            }
+            if (allowed) return false;
+            await abort(reason);
+            return true;
         }
 
         function getActiveRunForTest() {
             return activeRun ? { ...activeRun } : null;
         }
 
-        function getActiveRunStatus() {
+        function getActiveRunStatus(options = {}) {
             if (!activeRun) return null;
-            return {
+            const status = {
                 kind: 'recreate',
                 status: activeRun.aborted ? 'stopping' : 'running',
                 runId: activeRun.runId,
+                epoch: activeRun.epoch,
                 phase: activeRun.phase || 'workflow'
             };
+            if (options.includeOwner === true && Number.isInteger(activeRun.sourceTabId)) {
+                status.ownerTabId = activeRun.sourceTabId;
+                status.ownerDocumentId = String(activeRun.sourceDocumentId || '');
+            }
+            return status;
         }
 
         return {
@@ -1374,6 +1682,8 @@
             getActiveRunStatus,
             getRunStatus,
             getActiveRunForTest,
+            handleOwnedTabRemoved,
+            handleOwnedTabUpdated,
             initialize,
             recordResultBaseline,
             start

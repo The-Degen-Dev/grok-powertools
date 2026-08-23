@@ -16,6 +16,11 @@ if (typeof importScripts === 'function') {
     } catch (e) {
         generationRunHelperLoadError = e || new Error('GENERATION_HELPERS_LOAD_FAILED');
     }
+    try {
+        importScripts('providerRunLedger.js');
+    } catch (e) {
+        console.warn('Provider run ledger helper failed to load.', e);
+    }
 }
 
 function extractGrokMediaIdFallback(value) {
@@ -246,6 +251,9 @@ const GenerationRunController = generationRunHelperLoadError
     : (typeof self !== 'undefined' && self.GrokPowerToolsGenerationRunController)
         ? self.GrokPowerToolsGenerationRunController
         : (typeof require === 'function' ? require('./generationRunController.js') : null);
+const ProviderRunLedger = (typeof self !== 'undefined' && self.GrokPowerToolsProviderRunLedger)
+    ? self.GrokPowerToolsProviderRunLedger
+    : (typeof require === 'function' ? require('./providerRunLedger.js') : null);
 
 const API_KEY_HEADER = ['x-gpt', 'api', 'key'].join('-');
 
@@ -272,6 +280,14 @@ let scrapeLeaseMutationQueue = Promise.resolve();
 let scrapeStopPending = false;
 let generationRunController = null;
 let mutatingWorkflowStartQueue = Promise.resolve();
+const ACTIVE_PAGE_WORKFLOW_KEY = 'activePageWorkflowLease';
+const PAGE_WORKFLOW_LEASE_VERSION = 1;
+const PAGE_WORKFLOW_KINDS = new Set(['template_batch', 'quality_repeat']);
+const PAGE_WORKFLOW_HEARTBEAT_TIMEOUT_MS = 45000;
+const PAGE_WORKFLOW_PING_TIMEOUT_MS = 1500;
+let activePageWorkflowLease = null;
+let pageWorkflowLeaseHydrationPromise = null;
+let pageWorkflowLeaseMutationQueue = Promise.resolve();
 const activeScrapeTransferTasks = new Map();
 const activeScrapeTransferKinds = new Map();
 const activeScrapeTransferAbortControllers = new Map();
@@ -281,7 +297,12 @@ const MAX_LOGS = 100;
 const CLOUD_ALARM_NAME = 'gptCloudRetry';
 const CLOUD_METADATA_DEBOUNCE_MS = 2000;
 const CLOUD_SCHEMA_VERSION = 1;
+const MAX_SYNC_ENTRY_LIMIT = 100;
 const PROCESSED_IDS_KEY = 'processedIds';
+const PROCESSED_LOCAL_IDS_KEY = 'processedLocalIds';
+const PROCESSED_R2_IDS_KEY = 'processedR2Ids';
+const PROMPT_HISTORY_KEY = 'promptHistory';
+const SAVED_PROMPTS_KEY = 'savedPrompts';
 const PENDING_DOWNLOAD_OPERATIONS_KEY = 'pendingDownloadOperations';
 const SCRAPE_COMPLETION_TXN_KEY = 'scrapeCompletionTxn';
 const SCRAPE_COMPLETION_JOURNAL_PREFIX = 'scrapeCompletionJournal:';
@@ -290,7 +311,15 @@ const SCRAPE_PERSISTENCE_WRITER_PREFIX = 'scrapePersistenceWriter:';
 
 // Global History Set
 let processedUUIDs = new Set();
+let processedLocalUUIDs = new Set();
+let processedR2UUIDs = new Set();
 let processedIdsMutationQueue = Promise.resolve();
+let promptHistoryMutationQueue = Promise.resolve();
+let savedPromptsMutationQueue = Promise.resolve();
+let globalSettingsMutationQueue = Promise.resolve();
+let cloudConfigMutationQueue = Promise.resolve();
+let activityLogMutationQueue = Promise.resolve();
+let providerRunLedgerMutationQueue = Promise.resolve();
 let pendingDownloadOperations = new Map();
 let pendingDownloadOperationsMutationQueue = Promise.resolve();
 let pendingDownloadOperationsRevision = 0;
@@ -343,6 +372,7 @@ let cloudSyncState = {
     r2MetadataSnapshotsSkippedUnchanged: 0
 };
 let cloudMetadataTimer = null;
+let cloudMetadataFlushPromise = null;
 let pendingMetadataKinds = new Set();
 
 const METADATA_WATCHED_KEYS = ['savedPrompts', 'promptHistory', 'processedIds'];
@@ -352,22 +382,114 @@ const METADATA_KIND_MAP = {
     processedIds: 'processedIds'
 };
 
+function mutateActivityLogs(mutator) {
+    const mutation = activityLogMutationQueue.then(async () => {
+        const result = await chrome.storage.local.get(['activityLogs']);
+        const current = Array.isArray(result.activityLogs) ? result.activityLogs : [];
+        const next = mutator([...current]);
+        const logs = Array.isArray(next) ? next.slice(0, MAX_LOGS) : current.slice(0, MAX_LOGS);
+        await chrome.storage.local.set({ activityLogs: logs });
+        chrome.runtime.sendMessage({ action: 'UPDATE_LOGS', logs }).catch(() => { });
+        return logs;
+    });
+    activityLogMutationQueue = mutation.catch(() => {});
+    return mutation;
+}
+
 function log(msg, type = 'info') {
     const timestamp = new Date().toLocaleTimeString();
     const logEntry = `[${timestamp}] ${msg}`;
     console.log(logEntry);
+    const write = mutateActivityLogs((logs) => [{ text: logEntry, type }, ...logs]);
+    write.catch(() => {});
+    return write;
+}
 
-    chrome.storage.local.get(['activityLogs'], (result) => {
-        const logs = result.activityLogs || [];
-        logs.unshift({ text: logEntry, type: type });
-        if (logs.length > MAX_LOGS) logs.pop();
-        chrome.storage.local.set({ activityLogs: logs });
-        chrome.runtime.sendMessage({ action: 'UPDATE_LOGS', logs: logs }).catch(() => { });
+const GLOBAL_SETTINGS_KEYS = new Set([
+    'maxRetries',
+    'videoGoal',
+    'galleryBatchLimit',
+    'autoRetryEnabled',
+    'retryCooldown',
+    'generationDelay',
+    'historyLimit',
+    'devMode'
+]);
+const CLOUD_CONFIG_KEYS = new Set(['enabled', 'mode', 'workerUrl', 'apiKey', 'keyPrefix']);
+
+function filterStoragePatch(updates, allowedKeys) {
+    if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+        throw new Error('settings_patch_invalid');
+    }
+    const patch = {};
+    for (const [key, value] of Object.entries(updates)) {
+        if (allowedKeys.has(key)) patch[key] = value;
+    }
+    if (Object.keys(patch).length === 0) throw new Error('settings_patch_empty');
+    return patch;
+}
+
+function patchGlobalSettings(updates) {
+    const patch = filterStoragePatch(updates, GLOBAL_SETTINGS_KEYS);
+    const mutation = globalSettingsMutationQueue.then(async () => {
+        const stored = await chrome.storage.sync.get(['gptGlobalSettings']);
+        const current = stored.gptGlobalSettings && typeof stored.gptGlobalSettings === 'object'
+            ? stored.gptGlobalSettings
+            : {};
+        const settings = { ...current, ...patch };
+        await chrome.storage.sync.set({ gptGlobalSettings: settings });
+        return settings;
     });
+    globalSettingsMutationQueue = mutation.catch(() => {});
+    return mutation;
+}
+
+function patchCloudConfig(updates) {
+    const patch = filterStoragePatch(updates, CLOUD_CONFIG_KEYS);
+    const mutation = cloudConfigMutationQueue.then(async () => {
+        const stored = await chrome.storage.local.get([CloudSync.STORAGE_KEYS.cloudConfig]);
+        const current = CloudSync.normalizeCloudConfig(stored[CloudSync.STORAGE_KEYS.cloudConfig]);
+        const config = CloudSync.normalizeCloudConfig({ ...current, ...patch });
+        if (config.workerUrl && !CloudSync.validateWorkersDevUrl(config.workerUrl)) {
+            throw new Error('cloud_worker_url_invalid');
+        }
+        await chrome.storage.local.set({ [CloudSync.STORAGE_KEYS.cloudConfig]: config });
+        return config;
+    });
+    cloudConfigMutationQueue = mutation.catch(() => {});
+    return mutation;
+}
+
+function appendProviderRunLedger(entry) {
+    if (!ProviderRunLedger || typeof ProviderRunLedger.appendProviderRunLedgerEntry !== 'function') {
+        return Promise.reject(new Error('provider_run_ledger_unavailable'));
+    }
+    const mutation = providerRunLedgerMutationQueue.then(() => (
+        ProviderRunLedger.appendProviderRunLedgerEntry(entry, { storage: chrome.storage.local })
+    ));
+    providerRunLedgerMutationQueue = mutation.catch(() => {});
+    return mutation;
 }
 
 function shouldPersistBackupProcessedId(status) {
     return status === 'uploaded' || status === 'already_present' || status === 'conflict_uploaded';
+}
+
+function getScrapeDestinationsForCloudConfig(config) {
+    const destinations = [];
+    if (CloudSync.isLocalDownloadEnabled(config)) destinations.push('local');
+    if (CloudSync.isCloudEnabled(config)) destinations.push('r2');
+    return destinations.sort();
+}
+
+function scrapeDestinationContractMatches(expected, config) {
+    const normalizedExpected = Array.from(new Set(
+        (Array.isArray(expected) ? expected : [])
+            .filter((value) => value === 'local' || value === 'r2')
+    )).sort();
+    const actual = getScrapeDestinationsForCloudConfig(config);
+    return normalizedExpected.length === actual.length
+        && normalizedExpected.every((value, index) => value === actual[index]);
 }
 
 function formatRedactedMediaLog(status, identityValue, details = {}) {
@@ -415,32 +537,188 @@ function normalizeProcessedIds(values) {
     ));
 }
 
-function writeProcessedIds(values) {
-    return chrome.storage.local.set({ [PROCESSED_IDS_KEY]: values });
+function writeProcessedState(processedIds, localIds, r2Ids) {
+    return chrome.storage.local.set({
+        [PROCESSED_IDS_KEY]: processedIds,
+        [PROCESSED_LOCAL_IDS_KEY]: localIds,
+        [PROCESSED_R2_IDS_KEY]: r2Ids
+    });
 }
 
-function mutateProcessedIds({ reset = false, ids = [] } = {}, assertAuthorized = null) {
+function mutateProcessedState({ reset = false, ids = [], localIds = [], r2Ids = [] } = {}, assertAuthorized = null) {
     const mutation = processedIdsMutationQueue.then(async () => {
-        const stored = await chrome.storage.local.get([PROCESSED_IDS_KEY]);
+        const stored = await chrome.storage.local.get([
+            PROCESSED_IDS_KEY,
+            PROCESSED_LOCAL_IDS_KEY,
+            PROCESSED_R2_IDS_KEY
+        ]);
         if (assertAuthorized) await assertAuthorized();
         const previousValues = normalizeProcessedIds(stored[PROCESSED_IDS_KEY]);
+        const previousLocalValues = normalizeProcessedIds(stored[PROCESSED_LOCAL_IDS_KEY]);
+        const previousR2Values = normalizeProcessedIds(stored[PROCESSED_R2_IDS_KEY]);
         const next = reset ? new Set() : new Set(previousValues);
-        if (!reset) normalizeProcessedIds(ids).forEach((id) => next.add(id));
+        const nextLocal = reset ? new Set() : new Set(previousLocalValues);
+        const nextR2 = reset ? new Set() : new Set(previousR2Values);
+        if (!reset) {
+            normalizeProcessedIds(ids).forEach((id) => next.add(id));
+            normalizeProcessedIds(localIds).forEach((id) => {
+                next.add(id);
+                nextLocal.add(id);
+            });
+            normalizeProcessedIds(r2Ids).forEach((id) => {
+                next.add(id);
+                nextR2.add(id);
+            });
+        }
         const values = Array.from(next);
-        await writeProcessedIds(values);
+        const localValues = Array.from(nextLocal);
+        const r2Values = Array.from(nextR2);
+        await writeProcessedState(values, localValues, r2Values);
         processedUUIDs = next;
+        processedLocalUUIDs = nextLocal;
+        processedR2UUIDs = nextR2;
         try {
             if (assertAuthorized) await assertAuthorized();
         } catch (error) {
             if (isScrapeAuthorityRevokedError(error)) {
                 processedUUIDs = new Set(previousValues);
-                await writeProcessedIds(previousValues);
+                processedLocalUUIDs = new Set(previousLocalValues);
+                processedR2UUIDs = new Set(previousR2Values);
+                await writeProcessedState(
+                    previousValues,
+                    previousLocalValues,
+                    previousR2Values
+                );
             }
             throw error;
         }
-        return values;
+        return { processedIds: values, localIds: localValues, r2Ids: r2Values };
     });
     processedIdsMutationQueue = mutation.catch(() => {});
+    return mutation;
+}
+
+function mutateProcessedIds(options = {}, assertAuthorized = null) {
+    return mutateProcessedState(options, assertAuthorized).then((state) => state.processedIds);
+}
+
+function mutateProcessedReceipts({ localIds = [], r2Ids = [] } = {}, assertAuthorized = null) {
+    return mutateProcessedState({ localIds, r2Ids }, assertAuthorized);
+}
+
+function normalizePromptHistoryEntries(values) {
+    const now = Date.now();
+    return (Array.isArray(values) ? values : []).flatMap((entry, index) => {
+        if (!entry || typeof entry !== 'object') return [];
+        const text = String(entry.text || '').replace(/\s+/g, ' ').trim();
+        if (!text) return [];
+        const timestamp = Number.isFinite(entry.timestamp) && entry.timestamp > 0
+            ? entry.timestamp
+            : now;
+        const id = typeof entry.id === 'string' && entry.id.trim()
+            ? entry.id.trim()
+            : `history_${timestamp}_${index}`;
+        return [{
+            id,
+            text,
+            type: entry.type === 'video' ? 'video' : 'image',
+            timestamp
+        }];
+    });
+}
+
+function mutatePromptHistory({ operation, entry = null, limit = 50 } = {}) {
+    const mutation = promptHistoryMutationQueue.then(async () => {
+        const stored = await chrome.storage.local.get([PROMPT_HISTORY_KEY]);
+        let history = normalizePromptHistoryEntries(stored[PROMPT_HISTORY_KEY]);
+        if (operation === 'clear') {
+            history = [];
+        } else if (operation === 'add') {
+            const normalizedEntry = normalizePromptHistoryEntries([entry])[0];
+            if (!normalizedEntry) throw new Error('prompt_history_entry_invalid');
+            history = history.filter((item) => (
+                item.text !== normalizedEntry.text || item.type !== normalizedEntry.type
+            ));
+            history.unshift(normalizedEntry);
+            const boundedLimit = Math.max(1, Math.min(500, Number.parseInt(limit, 10) || 50));
+            history = history.slice(0, boundedLimit);
+        } else {
+            throw new Error('prompt_history_operation_invalid');
+        }
+        await chrome.storage.local.set({ [PROMPT_HISTORY_KEY]: history });
+        return history;
+    });
+    promptHistoryMutationQueue = mutation.catch(() => {});
+    return mutation;
+}
+
+function normalizeSavedPromptEntries(values) {
+    const now = Date.now();
+    return (Array.isArray(values) ? values : []).flatMap((entry, index) => {
+        const source = entry && typeof entry === 'object'
+            ? entry
+            : { text: typeof entry === 'string' ? entry : '' };
+        const text = String(source.text || '').replace(/\s+/g, ' ').trim();
+        if (!text) return [];
+        const createdAt = Number.isFinite(source.createdAt) && source.createdAt > 0
+            ? source.createdAt
+            : now;
+        const updatedAt = Number.isFinite(source.updatedAt) && source.updatedAt > 0
+            ? source.updatedAt
+            : createdAt;
+        const id = typeof source.id === 'string' && source.id.trim()
+            ? source.id.trim()
+            : `saved_${now}_${index}`;
+        const requestedName = String(source.name || '').trim();
+        return [{
+            id,
+            name: (requestedName || text.slice(0, 40) || 'Untitled Prompt').slice(0, 80),
+            text,
+            type: source.type === 'partial' ? 'partial' : 'full',
+            createdAt,
+            updatedAt
+        }];
+    });
+}
+
+function mutateSavedPrompts({ operation, item = null, items = [], itemId = '' } = {}) {
+    const mutation = savedPromptsMutationQueue.then(async () => {
+        const stored = await chrome.storage.local.get([SAVED_PROMPTS_KEY]);
+        let prompts = normalizeSavedPromptEntries(stored[SAVED_PROMPTS_KEY]);
+        if (operation === 'normalize') {
+            // Normalization is intentionally based on the latest stored value.
+        } else if (operation === 'add') {
+            const normalizedItem = normalizeSavedPromptEntries([item])[0];
+            if (!normalizedItem) throw new Error('saved_prompt_invalid');
+            if (prompts.some((prompt) => prompt.id === normalizedItem.id)) {
+                throw new Error('saved_prompt_id_conflict');
+            }
+            prompts.push(normalizedItem);
+        } else if (operation === 'update') {
+            const targetId = String(itemId || item?.id || '').trim();
+            const normalizedItem = normalizeSavedPromptEntries([{ ...item, id: targetId }])[0];
+            const index = prompts.findIndex((prompt) => prompt.id === targetId);
+            if (!targetId || !normalizedItem || index === -1) throw new Error('saved_prompt_not_found');
+            prompts[index] = normalizedItem;
+        } else if (operation === 'delete') {
+            const targetId = String(itemId || '').trim();
+            if (!targetId) throw new Error('saved_prompt_not_found');
+            prompts = prompts.filter((prompt) => prompt.id !== targetId);
+        } else if (operation === 'merge') {
+            const additions = normalizeSavedPromptEntries(items);
+            const knownIds = new Set(prompts.map((prompt) => prompt.id));
+            for (const addition of additions) {
+                if (knownIds.has(addition.id)) continue;
+                knownIds.add(addition.id);
+                prompts.push(addition);
+            }
+        } else {
+            throw new Error('saved_prompts_operation_invalid');
+        }
+        await chrome.storage.local.set({ [SAVED_PROMPTS_KEY]: prompts });
+        return prompts;
+    });
+    savedPromptsMutationQueue = mutation.catch(() => {});
     return mutation;
 }
 
@@ -470,7 +748,8 @@ async function persistQueuedBackupProcessedIdAfterSuccess(item, result, assertAu
     }
 
     if (!id) return false;
-    await mutateProcessedIds({ ids: [id] }, assertAuthorized);
+    await mutateProcessedReceipts({ r2Ids: [id] }, assertAuthorized);
+    if (item.scrapeLease) clearR2BackupInventoryCache(item.scrapeLease);
     return true;
 }
 
@@ -817,8 +1096,7 @@ async function clearCloudUiStatus() {
     cloudSyncState.lastTestResult = null;
     cloudSyncState.lastTestMessage = null;
 
-    await chrome.storage.local.set({ activityLogs: [] });
-    chrome.runtime.sendMessage({ action: 'UPDATE_LOGS', logs: [] }).catch(() => { });
+    await mutateActivityLogs(() => []);
     await persistCloudState();
 }
 
@@ -1279,6 +1557,7 @@ async function dispatchNativeClick(tabId, click = {}, assertAuthorized = null) {
     const y = getNativeClickCoordinate(click.y);
     const target = { tabId };
     let attached = false;
+    let clickState = 'not_dispatched';
 
     try {
         if (assertAuthorized) await assertAuthorized();
@@ -1301,6 +1580,7 @@ async function dispatchNativeClick(tabId, click = {}, assertAuthorized = null) {
             buttons: 1,
             clickCount: 1
         });
+        clickState = 'unknown';
         if (assertAuthorized) await assertAuthorized();
         await debuggerSendCommand(target, 'Input.dispatchMouseEvent', {
             type: 'mouseReleased',
@@ -1310,10 +1590,13 @@ async function dispatchNativeClick(tabId, click = {}, assertAuthorized = null) {
             buttons: 0,
             clickCount: 1
         });
+        clickState = 'click_sent';
 
-        return { ok: true };
+        return { ok: true, clickState };
     } catch (error) {
-        throw new Error(error.message || 'native_click_unavailable');
+        const failure = new Error(error.message || 'native_click_unavailable');
+        failure.clickState = clickState;
+        throw failure;
     } finally {
         if (attached) await debuggerDetach(target);
     }
@@ -1652,8 +1935,23 @@ function validateCaptureMetadata(captureMetadata, assetId) {
     if (!captureMetadata.conversationId || !captureMetadata.assetMetadata) {
         throw new Error('asset_metadata_incomplete');
     }
-    if (typeof captureMetadata.promptText !== 'string' || !captureMetadata.promptText.trim()) {
+    if (typeof captureMetadata.promptText !== 'string') {
+        throw new Error('asset_metadata_prompt_invalid');
+    }
+    const promptEvidenceSource = String(captureMetadata.promptEvidenceSource || '');
+    const hasPrompt = Boolean(captureMetadata.promptText.trim());
+    if (!hasPrompt && promptEvidenceSource !== 'unavailable') {
         throw new Error('asset_metadata_prompt_missing');
+    }
+    if (hasPrompt && promptEvidenceSource === 'unavailable') {
+        throw new Error('asset_metadata_prompt_evidence_invalid');
+    }
+    if (promptEvidenceSource && ![
+        'response_media_gen_input',
+        'asset_media_gen_input',
+        'unavailable'
+    ].includes(promptEvidenceSource)) {
+        throw new Error('asset_metadata_prompt_evidence_invalid');
     }
     return sortJsonValue(captureMetadata);
 }
@@ -1739,7 +2037,13 @@ async function ensureCaptureMetadataDurable(config, descriptor, assertAuthorized
         if (descriptor.requireCaptureMetadata) throw new Error('asset_metadata_required');
         return null;
     }
-    return uploadAssetMetadataSidecar(config, descriptor, assertAuthorized);
+    try {
+        return await uploadAssetMetadataSidecar(config, descriptor, assertAuthorized);
+    } catch (error) {
+        if (isCloudQueueAuthorityRevokedError(error)) throw error;
+        if (String(error?.message || '').startsWith('[asset-metadata]')) throw error;
+        throw new Error(`[asset-metadata] ${error?.message || 'asset_metadata_failed'}`);
+    }
 }
 
 async function uploadBlobWithR2Dedupe(config, uploadCandidate, blob, assertAuthorized = null) {
@@ -1879,28 +2183,10 @@ async function uploadMediaQueueItem(config, queueItem, assertAuthorized = null) 
 
     try {
         console.log('[CloudQueue]', formatRedactedMediaLog('fetching', queueItem.backupProcessedId || queueItem.assetId));
-        const fetchOpts = { method: 'GET' };
-
-        if (queueItem.sourceUrl.includes('assets.grok.com')) {
-            try {
-                const cookies = await chrome.cookies.getAll({ domain: '.grok.com' });
-                if (assertAuthorized) await assertAuthorized();
-                if (cookies.length > 0) {
-                    const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-                    fetchOpts.headers = { 'Cookie': cookieHeader };
-                    console.log('[CloudQueue]', formatRedactedMediaLog(
-                        'cookies_attached',
-                        queueItem.backupProcessedId || queueItem.assetId,
-                        { count: cookies.length }
-                    ));
-                }
-            } catch {
-                console.warn('[CloudQueue]', formatRedactedMediaLog(
-                    'cookies_unavailable',
-                    queueItem.backupProcessedId || queueItem.assetId
-                ));
-            }
-        }
+        const fetchOpts = {
+            method: 'GET',
+            credentials: 'include'
+        };
 
         const mediaResponse = await fetchWithScrapeAuthority(queueItem.sourceUrl, fetchOpts, assertAuthorized);
         if (assertAuthorized) await assertAuthorized();
@@ -2112,6 +2398,18 @@ async function drainCloudQueue(reason = 'auto', options = {}, drainContext = nul
                         lastError: redactedError,
                         lastAttemptAt: Date.now()
                     }, itemConfigGuard);
+                    if (item.type === 'media' && Number.isInteger(item.cleanupDownloadId)) {
+                        const operation = await getDownloadOperation(item.cleanupDownloadId);
+                        const publicQueueOwnsRetry = operation?.strategy === 'public_queue';
+                        await recordDownloadOperationError(
+                            item.cleanupDownloadId,
+                            e,
+                            publicQueueOwnsRetry
+                                ? 'public_queue_failed'
+                                : 'auth_upload_failed',
+                            { incrementAttempts: !publicQueueOwnsRetry }
+                        );
+                    }
                 } catch (updateError) {
                     if (isCloudConfigRevokedError(updateError)) {
                         configRevoked = true;
@@ -2249,11 +2547,43 @@ function scheduleMetadataSyncForChanges(changes) {
 
     if (cloudMetadataTimer) clearTimeout(cloudMetadataTimer);
     cloudMetadataTimer = setTimeout(() => {
-        flushMetadataSync().catch((e) => {
+        cloudMetadataTimer = null;
+        runMetadataSyncFlush().catch((e) => {
             updateCloudError(e.message);
             persistCloudState().catch(() => { });
         });
     }, CLOUD_METADATA_DEBOUNCE_MS);
+}
+
+function runMetadataSyncFlush() {
+    if (cloudMetadataFlushPromise) return cloudMetadataFlushPromise;
+    const flush = (async () => {
+        do {
+            await flushMetadataSync();
+        } while (pendingMetadataKinds.size > 0);
+    })();
+    cloudMetadataFlushPromise = flush;
+    flush.finally(() => {
+        if (cloudMetadataFlushPromise === flush) cloudMetadataFlushPromise = null;
+    }).catch(() => {});
+    return flush;
+}
+
+async function drainPendingMetadataSync() {
+    while (cloudMetadataTimer || cloudMetadataFlushPromise || pendingMetadataKinds.size > 0) {
+        if (cloudMetadataTimer) {
+            clearTimeout(cloudMetadataTimer);
+            cloudMetadataTimer = null;
+        }
+        if (cloudMetadataFlushPromise) await cloudMetadataFlushPromise;
+        else if (pendingMetadataKinds.size > 0) await runMetadataSyncFlush();
+    }
+}
+
+function cancelPendingMetadataSyncForTest() {
+    if (cloudMetadataTimer) clearTimeout(cloudMetadataTimer);
+    cloudMetadataTimer = null;
+    pendingMetadataKinds.clear();
 }
 
 async function flushMetadataSync() {
@@ -2391,6 +2721,7 @@ function assertBackgroundInitializationCurrent(context) {
 async function getGenerationBlockingWorkflow() {
     const scrapeActive = activeScrapeLease?.status === 'starting'
         || activeScrapeLease?.status === 'active'
+        || activeScrapeLease?.status === 'stopping'
         || scrapeStartPending
         || scrapeStopPending
         || isScraping
@@ -2399,7 +2730,7 @@ async function getGenerationBlockingWorkflow() {
         const kind = activeScrapeLease?.kind || (isR2Backup ? 'r2_backup' : 'sync');
         return {
             kind,
-            status: scrapeStopPending ? 'stopping' : 'running',
+            status: activeScrapeLease?.status === 'stopping' || scrapeStopPending ? 'stopping' : 'running',
             runId: activeScrapeLease?.token || ''
         };
     }
@@ -2414,41 +2745,404 @@ function enqueueMutatingWorkflowStart(operation) {
     return result;
 }
 
-async function listActiveMutatingWorkflows() {
+function createIdlePageWorkflowLease(epoch = 0) {
+    return {
+        version: PAGE_WORKFLOW_LEASE_VERSION,
+        status: 'idle',
+        kind: null,
+        runId: null,
+        epoch: Math.max(0, Number.isInteger(epoch) ? epoch : 0),
+        ownerTabId: null,
+        ownerDocumentId: '',
+        startedAt: 0,
+        updatedAt: 0,
+        counts: null
+    };
+}
+
+function normalizePageWorkflowLease(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    if (value.version !== PAGE_WORKFLOW_LEASE_VERSION) return null;
+    const epoch = Number.isInteger(value.epoch) && value.epoch >= 0 ? value.epoch : null;
+    if (epoch === null) return null;
+    if (value.status === 'idle') return createIdlePageWorkflowLease(epoch);
+    if (value.status !== 'running'
+        || !PAGE_WORKFLOW_KINDS.has(value.kind)
+        || typeof value.runId !== 'string'
+        || !value.runId
+        || !Number.isInteger(value.ownerTabId)
+        || typeof value.ownerDocumentId !== 'string'
+        || !value.ownerDocumentId) {
+        return null;
+    }
+    return {
+        version: PAGE_WORKFLOW_LEASE_VERSION,
+        status: 'running',
+        kind: value.kind,
+        runId: value.runId,
+        epoch,
+        ownerTabId: value.ownerTabId,
+        ownerDocumentId: value.ownerDocumentId,
+        startedAt: Number.isFinite(value.startedAt) ? value.startedAt : Date.now(),
+        updatedAt: Number.isFinite(value.updatedAt)
+            ? value.updatedAt
+            : (Number.isFinite(value.startedAt) ? value.startedAt : Date.now()),
+        counts: sanitizeMutatingWorkflowCounts(value.counts)
+    };
+}
+
+function pageWorkflowLeaseMatches(left, right) {
+    return Boolean(
+        left?.status === 'running'
+        && right?.status === 'running'
+        && left.version === right.version
+        && left.kind === right.kind
+        && left.runId === right.runId
+        && left.epoch === right.epoch
+        && left.ownerTabId === right.ownerTabId
+        && left.ownerDocumentId === right.ownerDocumentId
+    );
+}
+
+async function persistPageWorkflowLease(lease) {
+    if (!chrome.storage?.session?.set) throw new Error('Session storage is unavailable.');
+    await chrome.storage.session.set({ [ACTIVE_PAGE_WORKFLOW_KEY]: lease });
+    activePageWorkflowLease = lease;
+    return lease;
+}
+
+async function hydratePageWorkflowLease() {
+    if (!chrome.storage?.session?.get || !chrome.storage?.session?.set) {
+        throw new Error('Session storage is unavailable.');
+    }
+    const stored = await chrome.storage.session.get([ACTIVE_PAGE_WORKFLOW_KEY]);
+    const lease = normalizePageWorkflowLease(stored?.[ACTIVE_PAGE_WORKFLOW_KEY]);
+    if (lease) {
+        activePageWorkflowLease = lease;
+        return lease;
+    }
+    return persistPageWorkflowLease(createIdlePageWorkflowLease());
+}
+
+function ensurePageWorkflowLeaseHydrated() {
+    if (!pageWorkflowLeaseHydrationPromise) {
+        pageWorkflowLeaseHydrationPromise = hydratePageWorkflowLease().catch((error) => {
+            pageWorkflowLeaseHydrationPromise = null;
+            throw error;
+        });
+    }
+    return pageWorkflowLeaseHydrationPromise;
+}
+
+function enqueuePageWorkflowLeaseOperation(operation) {
+    const execute = async () => {
+        await ensurePageWorkflowLeaseHydrated();
+        return operation();
+    };
+    const result = pageWorkflowLeaseMutationQueue.then(execute, execute);
+    pageWorkflowLeaseMutationQueue = result.catch(() => {});
+    return result;
+}
+
+function getPageWorkflowAuthority(request, sender) {
+    const kind = String(request?.kind || '');
+    const runId = String(request?.runId || '');
+    const epoch = request?.epoch;
+    const ownerTabId = sender?.tab?.id;
+    const ownerDocumentId = String(sender?.documentId || '');
+    if (!PAGE_WORKFLOW_KINDS.has(kind)
+        || !runId
+        || !Number.isInteger(epoch)
+        || !Number.isInteger(ownerTabId)
+        || !ownerDocumentId) {
+        return null;
+    }
+    return normalizePageWorkflowLease({
+        version: PAGE_WORKFLOW_LEASE_VERSION,
+        status: 'running',
+        kind,
+        runId,
+        epoch,
+        ownerTabId,
+        ownerDocumentId,
+        startedAt: Date.now(),
+        updatedAt: Date.now(),
+        counts: null
+    });
+}
+
+async function clearReplacedPageWorkflowOwner(sender = {}) {
+    const viewerTabId = sender?.tab?.id;
+    const viewerDocumentId = String(sender?.documentId || '');
+    if (!Number.isInteger(viewerTabId) || !viewerDocumentId) return false;
+    return enqueuePageWorkflowLeaseOperation(async () => {
+        const lease = activePageWorkflowLease;
+        if (lease?.status !== 'running'
+            || lease.ownerTabId !== viewerTabId
+            || lease.ownerDocumentId === viewerDocumentId) {
+            return false;
+        }
+        await persistPageWorkflowLease(createIdlePageWorkflowLease(lease.epoch + 1));
+        return true;
+    });
+}
+
+function pingPageWorkflowOwner(lease) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (response = null) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            const error = chrome.runtime.lastError;
+            resolve(error ? null : response);
+        };
+        const timeoutId = setTimeout(() => finish(null), PAGE_WORKFLOW_PING_TIMEOUT_MS);
+        try {
+            const result = chrome.tabs.sendMessage(
+                lease.ownerTabId,
+                {
+                    action: 'PAGE_WORKFLOW_PING',
+                    kind: lease.kind,
+                    runId: lease.runId,
+                    epoch: lease.epoch
+                },
+                { documentId: lease.ownerDocumentId },
+                (response) => finish(response)
+            );
+            if (result && typeof result.then === 'function') {
+                result.then((response) => finish(response), () => finish(null));
+            }
+        } catch {
+            finish(null);
+        }
+    });
+}
+
+async function reconcileStalePageWorkflowLease() {
+    const candidate = await enqueuePageWorkflowLeaseOperation(() => (
+        activePageWorkflowLease?.status === 'running'
+            && Date.now() - activePageWorkflowLease.updatedAt >= PAGE_WORKFLOW_HEARTBEAT_TIMEOUT_MS
+            ? { ...activePageWorkflowLease }
+            : null
+    ));
+    if (!candidate) return;
+    const response = await pingPageWorkflowOwner(candidate);
+    await enqueuePageWorkflowLeaseOperation(async () => {
+        if (!pageWorkflowLeaseMatches(activePageWorkflowLease, candidate)) return;
+        if (response?.alive === true
+            && response.runId === candidate.runId
+            && response.epoch === candidate.epoch) {
+            await persistPageWorkflowLease({
+                ...activePageWorkflowLease,
+                updatedAt: Date.now()
+            });
+            return;
+        }
+        await persistPageWorkflowLease(createIdlePageWorkflowLease(candidate.epoch + 1));
+    });
+}
+
+async function listActiveMutatingWorkflows(sender = {}) {
+    await clearReplacedPageWorkflowOwner(sender);
+    await reconcileStalePageWorkflowLease();
     const workflows = [];
     const scrapeActive = activeScrapeLease?.status === 'starting'
         || activeScrapeLease?.status === 'active'
+        || activeScrapeLease?.status === 'stopping'
         || scrapeStartPending
         || scrapeStopPending
         || isScraping
         || isR2Backup;
     if (scrapeActive) {
+        const kind = activeScrapeLease?.kind || (isR2Backup ? 'r2_backup' : 'sync');
+        const mirror = getActiveScrapeRunMirror(activeScrapeLease);
+        const backupStats = mirror?.r2BackupState && typeof mirror.r2BackupState === 'object'
+            ? mirror.r2BackupState
+            : null;
         workflows.push({
-            kind: activeScrapeLease?.kind || (isR2Backup ? 'r2_backup' : 'sync'),
-            status: scrapeStopPending ? 'stopping' : 'running',
-            runId: activeScrapeLease?.token || ''
+            kind,
+            status: activeScrapeLease?.status === 'stopping' || scrapeStopPending ? 'stopping' : 'running',
+            runId: activeScrapeLease?.token || '',
+            epoch: Number.isInteger(activeScrapeLease?.epoch) ? activeScrapeLease.epoch : null,
+            ownerTabId: Number.isInteger(activeScrapeLease?.tabId) ? activeScrapeLease.tabId : null,
+            counts: kind === 'r2_backup' && backupStats ? {
+                seen: Number(backupStats.totalSeen) || 0,
+                uploaded: Number(backupStats.uploaded) || 0,
+                alreadyPresent: Number(backupStats.alreadyPresent) || 0,
+                queued: Number(backupStats.queued) || 0,
+                pending: Number(backupStats.pendingTransfers) || 0,
+                failed: Number(backupStats.errors) || 0
+            } : {
+                currentIndex: Math.max(0, Number(mirror?.currentIndex) || 0)
+            }
         });
     }
 
-    const recreateWorkflow = recreateWorkflowController?.getActiveRunStatus?.() || null;
+    const recreateWorkflow = recreateWorkflowController?.getRunStatus
+        ? await recreateWorkflowController.getRunStatus({
+            includeOwner: true,
+            viewerTabId: Number.isInteger(sender?.tab?.id) ? sender.tab.id : null,
+            viewerDocumentId: String(sender?.documentId || '')
+        })
+        : recreateWorkflowController?.getActiveRunStatus?.({ includeOwner: true }) || null;
     if (recreateWorkflow) workflows.push(recreateWorkflow);
 
     if (generationRunController) {
-        const generationStatus = await generationRunController.getGenerationRunStatus();
+        const generationStatus = await generationRunController.getGenerationRunStatus({}, sender);
         if (generationStatus?.status === 'active' && generationStatus.run) {
             workflows.push({
                 kind: generationStatus.run.kind,
                 status: generationStatus.run.status,
-                runId: generationStatus.run.runId
+                runId: generationStatus.run.runId,
+                epoch: generationStatus.run.epoch,
+                ownerTabId: Number.isInteger(generationStatus.run.ownerTabId)
+                    ? generationStatus.run.ownerTabId
+                    : null,
+                ownerDocumentId: String(generationStatus.run.ownerDocumentId || ''),
+                counts: generationStatus.run.counts && typeof generationStatus.run.counts === 'object'
+                    ? { ...generationStatus.run.counts }
+                    : null
             });
         }
     }
+    const pageWorkflow = await enqueuePageWorkflowLeaseOperation(() => (
+        activePageWorkflowLease?.status === 'running'
+            ? { ...activePageWorkflowLease }
+            : null
+    ));
+    if (pageWorkflow) workflows.push(pageWorkflow);
     return workflows;
+}
+
+const GENERATION_MUTATING_WORKFLOW_KINDS = new Set([
+    'quick_batch',
+    'prompted_batch',
+    'video_goal'
+]);
+
+function sanitizeMutatingWorkflowCounts(counts) {
+    if (!counts || typeof counts !== 'object') return null;
+    const allowed = [
+        'accepted',
+        'failed',
+        'skipped',
+        'pending',
+        'currentIndex',
+        'seen',
+        'uploaded',
+        'alreadyPresent',
+        'queued'
+    ];
+    return allowed.reduce((result, key) => {
+        if (!Number.isFinite(Number(counts[key]))) return result;
+        result[key] = Math.max(0, Number(counts[key]));
+        return result;
+    }, {});
+}
+
+function getMutatingWorkflowRecoveryActions(workflow, isOwner) {
+    if (!isOwner || !workflow) return [];
+    if (workflow.status === 'stopping'
+        && (workflow.kind === 'sync' || workflow.kind === 'r2_backup')) {
+        return ['retry_stop', 'refresh_owner'];
+    }
+    if (workflow.kind === 'recreate' && workflow.status === 'stopping') {
+        return ['retry_cancel', 'refresh_owner'];
+    }
+    if (workflow.kind === 'sync' || workflow.kind === 'r2_backup' || workflow.kind === 'recreate') {
+        return ['stop'];
+    }
+    if (PAGE_WORKFLOW_KINDS.has(workflow.kind)) return ['stop'];
+    if (!GENERATION_MUTATING_WORKFLOW_KINDS.has(workflow.kind)) return [];
+    if (workflow.status === 'retryable_failed') return ['retry_failed', 'cancel'];
+    return ['resume', 'stop'];
+}
+
+function buildPublicMutatingWorkflow(workflow, viewerTabId = null, viewerDocumentId = '') {
+    if (!workflow) return null;
+    const ownsTab = Number.isInteger(viewerTabId)
+        && Number.isInteger(workflow.ownerTabId)
+        && viewerTabId === workflow.ownerTabId;
+    const requiresDocument = (GENERATION_MUTATING_WORKFLOW_KINDS.has(workflow.kind)
+        || PAGE_WORKFLOW_KINDS.has(workflow.kind)
+        || workflow.kind === 'recreate')
+        && Boolean(workflow.ownerDocumentId);
+    const isOwner = ownsTab && (!requiresDocument || viewerDocumentId === workflow.ownerDocumentId);
+    const authority = isOwner && (workflow.kind === 'sync' || workflow.kind === 'r2_backup')
+        ? {
+            runToken: workflow.runId,
+            runEpoch: workflow.epoch,
+            tabId: workflow.ownerTabId,
+            kind: workflow.kind
+        }
+        : (isOwner && workflow.runId && Number.isInteger(workflow.epoch)
+            ? { runId: workflow.runId, epoch: workflow.epoch, kind: workflow.kind }
+            : null);
+    return {
+        kind: workflow.kind,
+        status: workflow.status,
+        phase: typeof workflow.phase === 'string' ? workflow.phase : null,
+        counts: sanitizeMutatingWorkflowCounts(workflow.counts),
+        isOwner,
+        recoveryActions: getMutatingWorkflowRecoveryActions(workflow, isOwner),
+        authority
+    };
+}
+
+async function getAuthoritativeMutatingWorkflowStatus(sender = {}) {
+    let viewerTabId = Number.isInteger(sender?.tab?.id) ? sender.tab.id : null;
+    const viewerDocumentId = String(sender?.documentId || '');
+    if (!Number.isInteger(viewerTabId)) {
+        const activeTab = await queryActiveTab().catch(() => null);
+        viewerTabId = Number.isInteger(activeTab?.id) ? activeTab.id : null;
+    }
+    const stoppingLease = await enqueueScrapeLeaseOperation(() => (
+        activeScrapeLease?.status === 'stopping'
+            && activeScrapeLease.tabId === viewerTabId
+            ? { ...activeScrapeLease }
+            : null
+    ));
+    if (stoppingLease) {
+        await stopScrapeRun(
+            stoppingLease.kind,
+            'stopped',
+            getRequestedLease(stoppingLease, stoppingLease.tabId)
+        ).catch(() => {});
+    }
+    const effectiveSender = Number.isInteger(sender?.tab?.id)
+        ? sender
+        : { ...sender, tab: Number.isInteger(viewerTabId) ? { id: viewerTabId } : null };
+    const workflows = await listActiveMutatingWorkflows(effectiveSender);
+    if (workflows.length === 0) {
+        return { status: 'idle', activeWorkflow: null };
+    }
+    if (workflows.length > 1) {
+        return {
+            status: 'conflict',
+            error: 'MUTATING_WORKFLOW_AUTHORITY_CONFLICT',
+            activeWorkflow: {
+                kind: 'authority_conflict',
+                status: 'blocked',
+                phase: null,
+                counts: null,
+                isOwner: false,
+                recoveryActions: [],
+                workflows: workflows.map((workflow) => (
+                    buildPublicMutatingWorkflow(workflow, viewerTabId, viewerDocumentId)
+                ))
+            }
+        };
+    }
+    return {
+        status: 'active',
+        activeWorkflow: buildPublicMutatingWorkflow(workflows[0], viewerTabId, viewerDocumentId)
+    };
 }
 
 function buildMutatingWorkflowConflict(workflows) {
     if (workflows.length === 1) {
-        return { status: 'conflict', activeWorkflow: workflows[0] };
+        return { status: 'conflict', activeWorkflow: buildPublicMutatingWorkflow(workflows[0]) };
     }
     return {
         status: 'conflict',
@@ -2456,14 +3150,14 @@ function buildMutatingWorkflowConflict(workflows) {
         activeWorkflow: {
             kind: 'authority_conflict',
             status: 'blocked',
-            workflows
+            workflows: workflows.map((workflow) => buildPublicMutatingWorkflow(workflow))
         }
     };
 }
 
 async function startGenerationWithGlobalAuthority(request, sender) {
     return enqueueMutatingWorkflowStart(async () => {
-        const activeWorkflows = await listActiveMutatingWorkflows();
+        const activeWorkflows = await listActiveMutatingWorkflows(sender);
         if (activeWorkflows.length > 0) return buildMutatingWorkflowConflict(activeWorkflows);
         return generationRunController.startGenerationRun(request, sender);
     });
@@ -2480,24 +3174,118 @@ async function reserveScrapeWithGlobalAuthority(kind) {
 }
 
 async function startRecreateWithGlobalAuthority(request, context) {
-    const reservation = await enqueueMutatingWorkflowStart(async () => {
-        const activeWorkflows = await listActiveMutatingWorkflows();
+    return await enqueueMutatingWorkflowStart(async () => {
+        const activeWorkflows = await listActiveMutatingWorkflows({
+            tab: Number.isInteger(context?.sourceTabId) ? { id: context.sourceTabId } : null,
+            documentId: String(context?.sourceDocumentId || '')
+        });
         if (activeWorkflows.length > 0) {
-            return { conflict: buildMutatingWorkflowConflict(activeWorkflows), completion: null };
+            return {
+                ok: false,
+                error: 'workflow_active',
+                ...buildMutatingWorkflowConflict(activeWorkflows)
+            };
         }
+        let acknowledgeStart;
+        let acknowledged = false;
+        const started = new Promise((resolve) => {
+            acknowledgeStart = (response) => {
+                if (acknowledged) return;
+                acknowledged = true;
+                resolve(response);
+            };
+        });
+        const completion = recreateWorkflowController.start(request, {
+            ...context,
+            onStarted: acknowledgeStart
+        });
+        completion.then(
+            (response) => acknowledgeStart(response),
+            (error) => acknowledgeStart({
+                ok: false,
+                error: error?.message || 'workflow_failed'
+            })
+        );
+        return await started;
+    });
+}
+
+function makePageWorkflowRunId(kind) {
+    const suffix = typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    return `${kind}_${suffix}`;
+}
+
+async function startPageWorkflowWithGlobalAuthority(request, sender) {
+    const kind = String(request?.kind || '');
+    const ownerTabId = sender?.tab?.id;
+    const ownerDocumentId = String(sender?.documentId || '');
+    if (!PAGE_WORKFLOW_KINDS.has(kind)
+        || !Number.isInteger(ownerTabId)
+        || !ownerDocumentId) {
+        return { status: 'rejected', error: 'PAGE_WORKFLOW_CONTEXT_INVALID' };
+    }
+    return enqueueMutatingWorkflowStart(async () => {
+        const activeWorkflows = await listActiveMutatingWorkflows(sender);
+        if (activeWorkflows.length > 0) return buildMutatingWorkflowConflict(activeWorkflows);
+        const lease = await enqueuePageWorkflowLeaseOperation(async () => {
+            if (activePageWorkflowLease?.status === 'running') return null;
+            return persistPageWorkflowLease({
+                version: PAGE_WORKFLOW_LEASE_VERSION,
+                status: 'running',
+                kind,
+                runId: makePageWorkflowRunId(kind),
+                epoch: (activePageWorkflowLease?.epoch || 0) + 1,
+                ownerTabId,
+                ownerDocumentId,
+                startedAt: Date.now(),
+                updatedAt: Date.now(),
+                counts: sanitizeMutatingWorkflowCounts(request?.counts)
+            });
+        });
+        if (!lease) return { status: 'rejected', error: 'PAGE_WORKFLOW_ACTIVE' };
         return {
-            conflict: null,
-            completion: recreateWorkflowController.start(request, context)
+            status: 'started',
+            activeWorkflow: buildPublicMutatingWorkflow(lease, ownerTabId, ownerDocumentId)
         };
     });
-    if (reservation.conflict) {
-        return {
-            ok: false,
-            error: 'workflow_active',
-            ...reservation.conflict
+}
+
+async function updatePageWorkflow(request, sender) {
+    const requested = getPageWorkflowAuthority(request, sender);
+    if (!requested) return { status: 'ignored', reason: 'stale_authority' };
+    return enqueuePageWorkflowLeaseOperation(async () => {
+        if (!pageWorkflowLeaseMatches(activePageWorkflowLease, requested)) {
+            return { status: 'ignored', reason: 'stale_authority' };
+        }
+        const lease = {
+            ...activePageWorkflowLease,
+            updatedAt: Date.now(),
+            counts: sanitizeMutatingWorkflowCounts(request?.counts)
         };
-    }
-    return reservation.completion;
+        await persistPageWorkflowLease(lease);
+        return {
+            status: 'updated',
+            activeWorkflow: buildPublicMutatingWorkflow(
+                lease,
+                lease.ownerTabId,
+                lease.ownerDocumentId
+            )
+        };
+    });
+}
+
+async function finishPageWorkflow(request, sender, terminalStatus) {
+    const requested = getPageWorkflowAuthority(request, sender);
+    if (!requested) return { status: 'ignored', reason: 'stale_authority' };
+    return enqueuePageWorkflowLeaseOperation(async () => {
+        if (!pageWorkflowLeaseMatches(activePageWorkflowLease, requested)) {
+            return { status: 'ignored', reason: 'stale_authority' };
+        }
+        await persistPageWorkflowLease(createIdlePageWorkflowLease(activePageWorkflowLease.epoch + 1));
+        return { status: terminalStatus };
+    });
 }
 
 function notifyGenerationCancellation(details) {
@@ -2514,18 +3302,26 @@ function notifyGenerationCancellation(details) {
         };
 
         try {
-            const pending = chrome.tabs.sendMessage(details.ownerTabId, {
+            const message = {
                 action: 'GENERATION_RUN_CANCELLED',
                 runId: details.runId,
                 epoch: details.epoch,
                 ownerDocumentId: details.ownerDocumentId
-            }, (response) => {
+            };
+            const sendOptions = details.ownerDocumentId ? { documentId: details.ownerDocumentId } : {};
+            const callback = (response) => {
                 if (chrome.runtime?.lastError) {
                     finish(false);
                     return;
                 }
                 finish(response?.acknowledged === true);
-            });
+            };
+            const pending = chrome.tabs.sendMessage(
+                details.ownerTabId,
+                message,
+                sendOptions,
+                callback
+            );
             if (pending && typeof pending.then === 'function') {
                 pending.then(
                     (response) => finish(response?.acknowledged === true),
@@ -2565,6 +3361,8 @@ async function initializeBackgroundState(context = null, storedSnapshot = null) 
         processedUUIDs = new Set(normalizeProcessedIds(stored[PROCESSED_IDS_KEY]));
         console.log(`Loaded ${processedUUIDs.size} processed UUIDs.`);
     }
+    processedLocalUUIDs = new Set(normalizeProcessedIds(stored[PROCESSED_LOCAL_IDS_KEY]));
+    processedR2UUIDs = new Set(normalizeProcessedIds(stored[PROCESSED_R2_IDS_KEY]));
 
     pendingDownloadOperations = deserializeDownloadOperations(stored[PENDING_DOWNLOAD_OPERATIONS_KEY]);
     pendingDownloadOperationRevision = Array.from(pendingDownloadOperations.values()).reduce(
@@ -2605,6 +3403,8 @@ async function initializeBackgroundState(context = null, storedSnapshot = null) 
         assertBackgroundInitializationCurrent(context);
     }
     await initializeGenerationRunController();
+    assertBackgroundInitializationCurrent(context);
+    await ensurePageWorkflowLeaseHydrated();
     assertBackgroundInitializationCurrent(context);
     const startupDownloadOperations = Array.from(pendingDownloadOperations.values())
         .map((operation) => ({ ...operation }));
@@ -2713,6 +3513,16 @@ function applyLocalStorageChanges(changes) {
     if (changes[PROCESSED_IDS_KEY]) {
         processedUUIDs = new Set(normalizeProcessedIds(changes[PROCESSED_IDS_KEY].newValue));
     }
+    if (changes[PROCESSED_LOCAL_IDS_KEY]) {
+        processedLocalUUIDs = new Set(
+            normalizeProcessedIds(changes[PROCESSED_LOCAL_IDS_KEY].newValue)
+        );
+    }
+    if (changes[PROCESSED_R2_IDS_KEY]) {
+        processedR2UUIDs = new Set(
+            normalizeProcessedIds(changes[PROCESSED_R2_IDS_KEY].newValue)
+        );
+    }
 
     if (changes[CloudSync.STORAGE_KEYS.cloudConfig]) {
         const oldNormalized = CloudSync.normalizeCloudConfig(changes[CloudSync.STORAGE_KEYS.cloudConfig].oldValue);
@@ -2801,6 +3611,49 @@ function sendMessageToTab(tabId, message) {
     });
 }
 
+function getTabById(tabId) {
+    return new Promise((resolve, reject) => {
+        if (!Number.isInteger(tabId) || typeof chrome.tabs?.get !== 'function') {
+            resolve(null);
+            return;
+        }
+        let settled = false;
+        const finish = (tab) => {
+            if (settled) return;
+            settled = true;
+            const error = chrome.runtime.lastError;
+            if (error) reject(new Error(error.message));
+            else resolve(tab || null);
+        };
+        try {
+            const result = chrome.tabs.get(tabId, (tab) => finish(tab));
+            if (result && typeof result.then === 'function') result.then((tab) => finish(tab), reject);
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+function isGrokTabUrl(value) {
+    try {
+        const url = new URL(String(value || ''));
+        return url.protocol === 'https:'
+            && (url.hostname === 'grok.com' || url.hostname.endsWith('.grok.com'));
+    } catch {
+        return false;
+    }
+}
+
+async function isScrapeOwnerPositivelyAbsent(tabId) {
+    if (!Number.isInteger(tabId) || typeof chrome.tabs?.get !== 'function') return false;
+    try {
+        const tab = await getTabById(tabId);
+        return !tab || !isGrokTabUrl(tab.url);
+    } catch (error) {
+        return /no tab with id|tab not found|invalid tab/i.test(String(error?.message || ''));
+    }
+}
+
 function injectContentScripts(tabId) {
     const files = [
         'providerRegistry.js',
@@ -2879,7 +3732,7 @@ function queueChromeDownload(options, scrapeLease = null, transferContext = null
 
 function normalizeScrapeLease(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    const status = ['starting', 'active', 'idle'].includes(value.status) ? value.status : null;
+    const status = ['starting', 'active', 'stopping', 'idle'].includes(value.status) ? value.status : null;
     const kind = value.kind === 'sync' || value.kind === 'r2_backup' ? value.kind : null;
     const epoch = Number.isInteger(value.epoch) && value.epoch >= 0 ? value.epoch : null;
     const writerEpoch = Number.isInteger(value.writerEpoch) && value.writerEpoch >= 0
@@ -2892,7 +3745,7 @@ function normalizeScrapeLease(value) {
     if (!status || epoch === null || value.version !== SCRAPE_LEASE_VERSION) return null;
     if (status !== 'idle') {
         if (!kind || typeof value.token !== 'string' || !value.token) return null;
-        if (status === 'active' && !Number.isInteger(value.tabId)) return null;
+        if ((status === 'active' || status === 'stopping') && !Number.isInteger(value.tabId)) return null;
     }
     return {
         version: SCRAPE_LEASE_VERSION,
@@ -2900,7 +3753,7 @@ function normalizeScrapeLease(value) {
         writerId,
         epoch,
         token: status !== 'idle' ? value.token : null,
-        tabId: status === 'active' ? value.tabId : null,
+        tabId: status === 'active' || status === 'stopping' ? value.tabId : null,
         kind: status !== 'idle' ? kind : null,
         status,
         startedAt: status !== 'idle' && Number.isFinite(value.startedAt) ? value.startedAt : null
@@ -2948,6 +3801,7 @@ function scrapeLeaseIdentityMatches(left, right) {
         && (left.writerId || '') === (right.writerId || '')
         && left.epoch === right.epoch
         && left.token === right.token
+        && left.tabId === right.tabId
         && left.kind === right.kind
     );
 }
@@ -2986,7 +3840,10 @@ function buildAuthoritativeIdleLocalState(
         scrapeRunEpoch: null,
         scrapeNavigation: null,
         currentItemId: null,
+        scrapeFailures: null,
         scrapeBackupOptions: null,
+        scrapeEntryLimitState: null,
+        scrapeDestinations: null,
         isScraping: false,
         isR2Backup: false,
         scrapeStopReason: stopReason
@@ -3384,6 +4241,23 @@ async function hydrateScrapeLeaseAuthority() {
         return storedLease;
     }
 
+    if (storedLease?.status === 'stopping') {
+        activeScrapeLease = storedLease;
+        isScraping = false;
+        isR2Backup = false;
+        scrapeStartPending = false;
+        scrapeStopPending = true;
+        await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, 'stopping'));
+        setTimeout(() => {
+            stopScrapeRun(
+                storedLease.kind,
+                'stopped',
+                getRequestedLease(storedLease, storedLease.tabId)
+            ).catch(() => {});
+        }, 0);
+        return storedLease;
+    }
+
     const nextEpoch = storedLease?.status === 'active' || storedLease?.status === 'starting'
         ? storedLease.epoch + 1
         : (storedLease?.epoch || 0);
@@ -3428,12 +4302,20 @@ function makeScrapeRunToken() {
     return `scrape_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeSyncEntryLimit(value) {
+    const limit = Number(value);
+    return Number.isInteger(limit) && limit > 0 && limit <= MAX_SYNC_ENTRY_LIMIT
+        ? limit
+        : null;
+}
+
 function getRequestedLease(value, senderTabId = null) {
     if (value && typeof value === 'object') {
         const token = value.token ?? value.runToken;
         const epoch = value.epoch ?? value.runEpoch;
         const kind = value.kind || (value.isR2Backup ? 'r2_backup' : 'sync');
-        const writerEpoch = activeScrapeLease?.status === 'active'
+        const writerEpoch = activeScrapeLease
+            && activeScrapeLease.status !== 'idle'
             && activeScrapeLease.token === token
             && activeScrapeLease.epoch === epoch
             && activeScrapeLease.kind === kind
@@ -3499,8 +4381,11 @@ const SCRAPE_RUN_MIRROR_KEYS = [
     'currentIndex',
     'scrapeNavigation',
     'currentItemId',
+    'scrapeFailures',
     'scrapeBackupOptions',
-    'r2BackupState'
+    'scrapeEntryLimitState',
+    'r2BackupState',
+    'scrapeDestinations'
 ];
 
 function buildAuthorizedRunningMirror(lease, values = {}) {
@@ -3962,7 +4847,13 @@ async function sendScrapeAbort(lease, stopNavigation = null) {
 
 async function reserveScrapeStartIntent(kind) {
     return enqueueScrapeLeaseOperation(async () => {
-        if (activeScrapeLease?.status === 'active' || activeScrapeLease?.status === 'starting' || scrapeStartPending || scrapeStopPending) {
+        if (
+            activeScrapeLease?.status === 'active'
+            || activeScrapeLease?.status === 'starting'
+            || activeScrapeLease?.status === 'stopping'
+            || scrapeStartPending
+            || scrapeStopPending
+        ) {
             return null;
         }
         const lease = {
@@ -4106,7 +4997,7 @@ async function initializeScrapeInActiveTab(initMessage, { backup = false, source
 async function getAuthoritativeScrapeStatus() {
     return enqueueScrapeLeaseOperation(() => {
         const lease = activeScrapeLease;
-        if (scrapeStopPending) {
+        if (lease?.status === 'stopping' || scrapeStopPending) {
             return {
                 status: 'stopping',
                 isScraping: true,
@@ -4147,15 +5038,43 @@ async function getAuthoritativeScrapeStatus() {
     });
 }
 
+async function releaseFailedScrapeStopAuthority(stopReason, expectedLease = null) {
+    try {
+        return await enqueueScrapeLeaseOperation(async () => {
+            const stoppingLease = activeScrapeLease?.status === 'stopping'
+                ? { ...activeScrapeLease }
+                : null;
+            if (!stoppingLease) return false;
+            if (expectedLease && !scrapeLeaseIdentityMatches(stoppingLease, expectedLease)) return false;
+            await persistScrapeLease(createIdleScrapeLease(stoppingLease.epoch + 1));
+            scrapeStartPending = false;
+            scrapeStopPending = false;
+            isScraping = false;
+            isR2Backup = false;
+            const stored = await chrome.storage.local.get(['r2BackupState']);
+            await chrome.storage.local.set(buildAuthoritativeIdleLocalState(
+                stored,
+                `${stopReason}_cleanup_failed`
+            ));
+            return true;
+        });
+    } catch {
+        scrapeStopPending = true;
+        return false;
+    }
+}
+
 async function stopScrapeRun(requestedKind = null, stopReason = 'stopped', expectedAuthority = null) {
     await ensureScrapePersistenceWriterForRevocation();
     let prepared;
     try {
         prepared = await enqueueScrapeLeaseOperation(async () => {
-            const lease = activeScrapeLease?.status === 'active' || activeScrapeLease?.status === 'starting'
+            const lease = activeScrapeLease?.status === 'active'
+                || activeScrapeLease?.status === 'starting'
+                || activeScrapeLease?.status === 'stopping'
                 ? { ...activeScrapeLease }
                 : null;
-            if (expectedAuthority && !scrapeLeaseMatches(lease, expectedAuthority)) {
+            if (expectedAuthority && !scrapeLeaseIdentityMatches(lease, expectedAuthority)) {
                 return { response: { status: 'ignored', reason: 'stale_authority' } };
             }
             if (!lease) {
@@ -4180,43 +5099,87 @@ async function stopScrapeRun(requestedKind = null, stopReason = 'stopped', expec
                 return { response: { status: 'error', error: `The active run is ${lease.kind}.` } };
             }
 
+            if (lease.status === 'starting') {
+                const tombstone = await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
+                scrapeStartPending = false;
+                scrapeStopPending = false;
+                isScraping = false;
+                isR2Backup = false;
+                const stored = await chrome.storage.local.get(['r2BackupState']);
+                await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
+                return {
+                    response: {
+                        status: 'stopped',
+                        abortAcknowledged: true,
+                        ownerAbsent: true,
+                        transferDrained: true,
+                        runEpoch: tombstone.epoch
+                    }
+                };
+            }
+
             scrapeStopPending = true;
-            markScrapeCompletionTransitionRevoked(lease);
-            const tombstone = await persistScrapeLease(createIdleScrapeLease(lease.epoch + 1));
-            clearR2BackupInventoryCache(lease);
-            abortScrapeTransferControllers(lease);
-            scrapeStartPending = false;
-            isScraping = false;
-            isR2Backup = false;
-            const stored = await readEffectiveScrapeRunState(lease, ['r2BackupState', 'scrapeNavigation']);
+            const abortLease = { ...lease, status: 'active' };
+            const stored = lease.status === 'active'
+                ? await readEffectiveScrapeRunState(lease, ['r2BackupState', 'scrapeNavigation'])
+                : await chrome.storage.local.get(['r2BackupState', 'scrapeNavigation']);
             const stopNavigation = stored.scrapeNavigation || null;
-            await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
-            await revokeScrapeDownloadAuthority(lease);
-            return { lease, tombstone, stopNavigation };
+            if (lease.status === 'active') {
+                markScrapeCompletionTransitionRevoked(lease);
+                await persistScrapeLease({ ...lease, status: 'stopping' });
+                clearR2BackupInventoryCache(lease);
+                abortScrapeTransferControllers(lease);
+                scrapeStartPending = false;
+                isScraping = false;
+                isR2Backup = false;
+                await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, 'stopping'));
+                await revokeScrapeDownloadAuthority(lease);
+            }
+            return {
+                abortLease,
+                stoppingLease: { ...lease, status: 'stopping' },
+                stopNavigation
+            };
         });
     } catch (error) {
-        scrapeStopPending = false;
+        await releaseFailedScrapeStopAuthority(stopReason);
         throw error;
     }
 
     if (prepared.response) return prepared.response;
-    const { lease, tombstone, stopNavigation } = prepared;
+    const { abortLease, stoppingLease, stopNavigation } = prepared;
     try {
         const [abortAcknowledged, transferDrained] = await Promise.all([
-            lease.status === 'active' ? sendScrapeAbort(lease, stopNavigation) : false,
-            waitForScrapeTransferTasks(lease)
+            sendScrapeAbort(abortLease, stopNavigation),
+            waitForScrapeTransferTasks(abortLease)
         ]);
+        await drainPendingMetadataSync();
+        const ownerAbsent = abortAcknowledged
+            ? false
+            : await isScrapeOwnerPositivelyAbsent(abortLease.tabId);
         return await enqueueScrapeLeaseOperation(async () => {
-            scrapeStopPending = false;
-            if (activeScrapeLease?.status !== 'idle' || activeScrapeLease.epoch !== tombstone.epoch) {
-                return { status: 'stopped', abortAcknowledged, transferDrained };
+            if (!scrapeLeaseIdentityMatches(activeScrapeLease, stoppingLease)) {
+                return {
+                    status: activeScrapeLease?.status === 'idle' ? 'stopped' : 'ignored',
+                    abortAcknowledged,
+                    transferDrained
+                };
             }
-            return { status: 'stopped', abortAcknowledged, transferDrained };
+            await persistScrapeLease(createIdleScrapeLease(stoppingLease.epoch + 1));
+            scrapeStopPending = false;
+            const stored = await chrome.storage.local.get(['r2BackupState']);
+            await chrome.storage.local.set(buildAuthoritativeIdleLocalState(stored, stopReason));
+            return {
+                status: 'stopped',
+                abortAcknowledged,
+                transferDrained,
+                ...(!abortAcknowledged && !ownerAbsent
+                    ? { refreshOwnerRecommended: true }
+                    : {})
+            };
         });
     } catch (error) {
-        await enqueueScrapeLeaseOperation(async () => {
-            scrapeStopPending = false;
-        }).catch(() => {});
+        await releaseFailedScrapeStopAuthority(stopReason, stoppingLease);
         throw error;
     }
 }
@@ -4261,6 +5224,8 @@ async function completeScrapeRun(request, sender, kind) {
     if (!prepared) return { status: 'ignored' };
 
     const { lease } = prepared;
+    await processedIdsMutationQueue;
+    await drainPendingMetadataSync();
     const completionTransfer = await prepareScrapeCompletionTransfer(lease);
     return enqueueScrapeLeaseOperation(async () => {
         if (!scrapeLeaseMatches(activeScrapeLease, lease)) return { status: 'ignored' };
@@ -4281,7 +5246,10 @@ async function completeScrapeRun(request, sender, kind) {
             log(`R2 Backup ${statusLabel}. Uploaded: ${stats.uploaded || 0}, Already present: ${stats.alreadyPresent || 0}, Queued total: ${stats.queued || 0}, Pending: ${stats.pendingTransfers ?? 'unknown'}, Errors: ${stats.errors || 0}`, completed ? 'success' : 'warning');
             chrome.runtime.sendMessage({ action: 'R2_BACKUP_DONE', stats }).catch(() => {});
         } else {
-            chrome.runtime.sendMessage({ action: 'SCRAPE_COMPLETE' }).catch(() => {});
+            chrome.runtime.sendMessage({
+                action: 'SCRAPE_COMPLETE',
+                stats: request.stats || {}
+            }).catch(() => {});
         }
         return { status: 'ok' };
     });
@@ -4317,6 +5285,16 @@ async function uploadDirectMediaData(request, finalPath, acceptanceSource = 'dir
     if (assertAuthorized) await assertAuthorized();
 
     return buildDirectBackupUploadResponse(result, request.url);
+}
+
+function getDirectUploadReceiptIds(request, response, finalPath) {
+    const mediaId = CloudSync.extractGrokMediaId(request.url);
+    const canonicalAssetId = response.assetId || CloudSync.resolveMediaAssetIdentity({
+        sourceUrl: request.url,
+        finalPath,
+        mediaType: request.isVideo ? 'video' : 'image'
+    }).assetId;
+    return Array.from(new Set([mediaId, canonicalAssetId].filter(Boolean)));
 }
 
 async function checkR2BackupPresence(request, sender) {
@@ -4364,6 +5342,9 @@ async function checkR2BackupPresence(request, sender) {
                 acceptance: request.acceptance || null
             }, assertAuthorized);
             await assertAuthorized();
+            await mutateProcessedReceipts({
+                r2Ids: [result.assetId || identity.assetId]
+            }, assertAuthorized);
             return {
                 ...result,
                 metadataStatus: metadataResult.status,
@@ -4439,10 +5420,56 @@ function handleRuntimeMessage(request, sender, sendResponse) {
     }
 
     if (request.action === 'PROCESSED_IDS_RESET') {
-        mutateProcessedIds({ reset: true }).then((processedIds) => {
-            sendResponse({ status: 'ok', processedIds });
-        }).catch(() => {
-            sendResponse({ status: 'error', error: 'processed_ids_mutation_failed' });
+        const resetLockedNow = activeScrapeLease?.status === 'starting'
+            || activeScrapeLease?.status === 'active'
+            || activeScrapeLease?.status === 'stopping'
+            || scrapeStartPending
+            || scrapeStopPending
+            || isScraping
+            || isR2Backup;
+        if (resetLockedNow) {
+            sendResponse({ status: 'error', error: 'processed_ids_locked_by_active_sync' });
+            return true;
+        }
+        const assertResetAllowed = async () => {
+            const locked = await enqueueScrapeLeaseOperation(() => (
+                activeScrapeLease?.status === 'starting'
+                || activeScrapeLease?.status === 'active'
+                || activeScrapeLease?.status === 'stopping'
+                || scrapeStartPending
+                || scrapeStopPending
+                || isScraping
+                || isR2Backup
+            ));
+            if (locked) throw createScrapeAuthorityRevokedError();
+        };
+        mutateProcessedIds({ reset: true }, assertResetAllowed).then((processedIds) => {
+                sendResponse({ status: 'ok', processedIds });
+        }).catch((error) => {
+            sendResponse({
+                status: 'error',
+                error: isScrapeAuthorityRevokedError(error)
+                    ? 'processed_ids_locked_by_active_sync'
+                    : 'processed_ids_mutation_failed'
+            });
+        });
+        return true;
+    }
+
+    if (request.action === 'PROMPT_HISTORY_MUTATE') {
+        mutatePromptHistory(request).then((promptHistory) => {
+            sendResponse({ status: 'ok', promptHistory });
+        }).catch((error) => {
+            sendResponse({ status: 'error', error: error.message || 'prompt_history_mutation_failed' });
+        });
+        return true;
+    }
+
+    if (request.action === 'SAVED_PROMPTS_MUTATE') {
+        mutateSavedPrompts(request).then((savedPrompts) => {
+            sendResponse({ status: 'ok', savedPrompts });
+        }).catch((error) => {
+            sendResponse({ status: 'error', error: error.message || 'saved_prompts_mutation_failed' });
         });
         return true;
     }
@@ -4465,6 +5492,38 @@ function handleRuntimeMessage(request, sender, sendResponse) {
     if (request.action === 'GET_SCRAPE_STATUS') {
         getAuthoritativeScrapeStatus().then(sendResponse).catch(() => {
             sendResponse({ status: 'error', error: 'scrape_status_unavailable' });
+        });
+        return true;
+    }
+
+    if (request.action === 'GET_ACTIVE_WORKFLOW_STATUS') {
+        getAuthoritativeMutatingWorkflowStatus(sender).then(sendResponse).catch(() => {
+            sendResponse({ status: 'error', error: 'active_workflow_status_unavailable' });
+        });
+        return true;
+    }
+
+    if (request.action === 'PAGE_WORKFLOW_START') {
+        startPageWorkflowWithGlobalAuthority(request, sender).then(sendResponse).catch((error) => {
+            sendResponse({ status: 'rejected', error: error.message || 'PAGE_WORKFLOW_START_FAILED' });
+        });
+        return true;
+    }
+
+    if (request.action === 'PAGE_WORKFLOW_UPDATE') {
+        updatePageWorkflow(request, sender).then(sendResponse).catch((error) => {
+            sendResponse({ status: 'error', error: error.message || 'PAGE_WORKFLOW_UPDATE_FAILED' });
+        });
+        return true;
+    }
+
+    if (request.action === 'PAGE_WORKFLOW_STOP' || request.action === 'PAGE_WORKFLOW_COMPLETE') {
+        finishPageWorkflow(
+            request,
+            sender,
+            request.action === 'PAGE_WORKFLOW_STOP' ? 'stopped' : 'completed'
+        ).then(sendResponse).catch((error) => {
+            sendResponse({ status: 'error', error: error.message || 'PAGE_WORKFLOW_FINISH_FAILED' });
         });
         return true;
     }
@@ -4493,10 +5552,43 @@ function handleRuntimeMessage(request, sender, sendResponse) {
         return true;
     }
 
+    if (request.action === 'SCRAPE_DESTINATION_RECEIPTS_ADD') {
+        (async () => {
+            const lease = await getAuthorizedScrapeTransferLease(request, sender);
+            if (!lease) return { status: 'ignored', reason: 'stale_authority' };
+            return trackScrapeTransferTask(lease, async (signal) => {
+                const assertAuthorized = createScrapeTransferAuthorityGuard(lease, signal);
+                await assertAuthorized();
+                const receipts = await mutateProcessedReceipts({
+                    localIds: request.localIds,
+                    r2Ids: request.r2Ids
+                }, assertAuthorized);
+                await assertAuthorized();
+                return {
+                    status: 'ok',
+                    processedIds: receipts.processedIds,
+                    localIds: receipts.localIds,
+                    r2Ids: receipts.r2Ids
+                };
+            }, 'processed_receipts');
+        })().then(sendResponse).catch((error) => {
+            if (isScrapeAuthorityRevokedError(error)) {
+                sendResponse({ status: 'ignored', reason: 'stale_authority' });
+                return;
+            }
+            sendResponse({ status: 'error', error: 'processed_receipts_mutation_failed' });
+        });
+        return true;
+    }
+
     if (request.action === 'START_SCRAPE') {
         log('Background: Received START_SCRAPE.');
+        const entryLimit = normalizeSyncEntryLimit(request.entryLimit);
         initializeScrapeInActiveTab(
-            { action: 'INIT_SCRAPE' },
+            {
+                action: 'INIT_SCRAPE',
+                ...(entryLimit ? { entryLimit } : {})
+            },
             { sourceTab: sender?.tab || null }
         ).then(sendResponse);
         return true;
@@ -4560,6 +5652,11 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                         assertAuthorized
                     );
                     await assertAuthorized();
+                    const receiptIds = getDirectUploadReceiptIds(request, response, finalPath);
+                    if (receiptIds.length && shouldPersistBackupProcessedId(response.status)) {
+                        await mutateProcessedReceipts({ r2Ids: receiptIds }, assertAuthorized);
+                        clearR2BackupInventoryCache(lease);
+                    }
                     return response;
                 } catch (e) {
                     if (isScrapeAuthorityRevokedError(e)) throw e;
@@ -4575,7 +5672,21 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                 }
             }
 
-            // No blob data — fall back to service worker fetch (works for public URLs)
+            if (request.url?.includes('assets.grok.com')) {
+                await queueChromeDownload(
+                    { url: request.url, filename: finalPath, conflictAction: 'overwrite' },
+                    lease,
+                    {
+                        promptText: request.promptText || '',
+                        captureMetadata: request.captureMetadata || null,
+                        requireCaptureMetadata: true
+                    }
+                );
+                await assertAuthorized();
+                return { status: 'queued' };
+            }
+
+            // Public media can be fetched directly by the service worker.
             const queued = await enqueueCloudMediaUpload(
                 request.url,
                 finalPath,
@@ -4704,6 +5815,33 @@ function handleRuntimeMessage(request, sender, sendResponse) {
         return true;
     }
 
+    if (request.action === 'GLOBAL_SETTINGS_PATCH') {
+        patchGlobalSettings(request.updates).then((settings) => {
+            sendResponse({ status: 'ok', settings });
+        }).catch((error) => {
+            sendResponse({ status: 'error', error: error.message || 'settings_patch_failed' });
+        });
+        return true;
+    }
+
+    if (request.action === 'CLOUD_CONFIG_PATCH') {
+        patchCloudConfig(request.updates).then((config) => {
+            sendResponse({ status: 'ok', config });
+        }).catch((error) => {
+            sendResponse({ status: 'error', error: error.message || 'cloud_config_patch_failed' });
+        });
+        return true;
+    }
+
+    if (request.action === 'PROVIDER_RUN_LEDGER_APPEND') {
+        appendProviderRunLedger(request.entry).then((entry) => {
+            sendResponse({ status: 'ok', entry });
+        }).catch((error) => {
+            sendResponse({ status: 'error', error: error.message || 'provider_run_ledger_failed' });
+        });
+        return true;
+    }
+
     if (request.action === 'DOWNLOAD_MEDIA') {
         (async () => {
             const lease = await getAuthorizedScrapeTransferLease(request, sender);
@@ -4712,6 +5850,9 @@ function handleRuntimeMessage(request, sender, sendResponse) {
             const assertAuthorized = createScrapeTransferAuthorityGuard(lease, signal);
             const config = await getCloudConfig();
             await assertAuthorized();
+            if (!scrapeDestinationContractMatches(request.destinations, config)) {
+                return { status: 'error', error: 'sync_destination_drift' };
+            }
             const allowLocalDownload = CloudSync.isLocalDownloadEnabled(config);
 
             if (allowLocalDownload) {
@@ -4730,13 +5871,28 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                 return { status: 'queued' };
             }
 
-            if (!request.blobDataUrl) {
-                return { status: 'error', error: 'Authenticated media data is required in Cloud only mode.' };
-            }
-
             const extHint = request.isVideo ? 'mp4' : null;
             const finalPath = await generateFilenameForBackup(request.url, extHint);
             await assertAuthorized();
+            if (!request.blobDataUrl) {
+                const queued = await enqueueCloudMediaUpload(
+                    request.url,
+                    finalPath,
+                    request.promptText || '',
+                    null,
+                    {
+                        scrapeLease: lease,
+                        assertAuthorized,
+                        captureMetadata: request.captureMetadata || null,
+                        requireCaptureMetadata: true
+                    }
+                );
+                await assertAuthorized();
+                return queued
+                    ? { status: 'queued' }
+                    : { status: 'error', error: 'cloud_media_queue_rejected' };
+            }
+
             const response = await uploadDirectMediaData(
                 request,
                 finalPath,
@@ -4744,6 +5900,10 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                 assertAuthorized
             );
             await assertAuthorized();
+            const receiptIds = getDirectUploadReceiptIds(request, response, finalPath);
+            if (receiptIds.length && shouldPersistBackupProcessedId(response.status)) {
+                await mutateProcessedReceipts({ r2Ids: receiptIds }, assertAuthorized);
+            }
             return response;
             }, 'media_transfer');
         })().catch((e) => {
@@ -4762,9 +5922,12 @@ function handleRuntimeMessage(request, sender, sendResponse) {
     }
 
     if (request.action === 'ADD_LOG') {
-        log(request.text, request.type);
-        sendResponse({ status: 'ok' });
-        return false;
+        log(request.text, request.type).then((logs) => {
+            sendResponse({ status: 'ok', logs });
+        }).catch(() => {
+            sendResponse({ status: 'error', error: 'activity_log_write_failed' });
+        });
+        return true;
     }
 
     if (request.action === 'CLOUD_TEST_CONNECTION') {
@@ -4906,6 +6069,23 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                 if (request.action === 'GPT_RECREATE_NATIVE_CLICK' && !operation) {
                     throw new Error('workflow_aborted');
                 }
+                if (request.action === 'GPT_PROMPTED_VIDEO_NATIVE_CLICK'
+                    && request.generationDispatch) {
+                    const generation = await generationRunController?.dispatchGenerationAction?.(
+                        request.generationDispatch,
+                        sender,
+                        (assertAuthorized) => dispatchNativeClick(
+                            tabId,
+                            request.click || {},
+                            assertAuthorized
+                        )
+                    );
+                    if (generation?.status !== 'submitted') {
+                        throw new Error(generation?.error || 'generation_dispatch_rejected');
+                    }
+                    sendResponse({ ok: true, generation });
+                    return;
+                }
                 const result = await dispatchNativeClick(
                     tabId,
                     request.click || {},
@@ -4913,7 +6093,11 @@ function handleRuntimeMessage(request, sender, sendResponse) {
                 );
                 sendResponse(result);
             } catch (e) {
-                sendResponse({ ok: false, error: e.message || 'native_click_unavailable' });
+                sendResponse({
+                    ok: false,
+                    error: e.message || 'native_click_unavailable',
+                    clickState: e.clickState || 'unknown'
+                });
             }
         })();
         return true;
@@ -4944,6 +6128,15 @@ function handleRuntimeMessage(request, sender, sendResponse) {
         }
 
         (async () => {
+            const activeRun = await recreateWorkflowController.getRunStatus({ includeOwner: true });
+            if (!activeRun
+                || request?.runId !== activeRun.runId
+                || request?.epoch !== activeRun.epoch
+                || sender?.tab?.id !== activeRun.ownerTabId
+                || String(sender?.documentId || '') !== String(activeRun.ownerDocumentId || '')) {
+                sendResponse({ ok: false, error: 'stale_authority', status: 'ignored' });
+                return;
+            }
             const result = await recreateWorkflowController.abort('user');
             sendResponse(result);
         })();
@@ -4977,10 +6170,18 @@ const BACKGROUND_READY_MESSAGE_ACTIONS = new Set([
     'GENERATION_RUN_STATUS',
     'PROCESSED_IDS_ADD',
     'PROCESSED_IDS_RESET',
+    'PROMPT_HISTORY_MUTATE',
+    'SAVED_PROMPTS_MUTATE',
     'SCRAPE_RUN_STATE_WRITE',
     'GET_ACTIVE_SCRAPE_RUN_STATE',
     'GET_SCRAPE_STATUS',
+    'GET_ACTIVE_WORKFLOW_STATUS',
+    'PAGE_WORKFLOW_START',
+    'PAGE_WORKFLOW_UPDATE',
+    'PAGE_WORKFLOW_STOP',
+    'PAGE_WORKFLOW_COMPLETE',
     'SCRAPE_PROCESSED_IDS_ADD',
+    'SCRAPE_DESTINATION_RECEIPTS_ADD',
     'GET_SCRAPE_DURABILITY',
     'START_SCRAPE',
     'START_R2_BACKUP',
@@ -5035,6 +6236,10 @@ async function getActiveLeaseForTabEvent(tabId, tab = {}) {
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     try {
         await waitForBackgroundInitialization();
+        if (changeInfo.url && recreateWorkflowController?.handleOwnedTabUpdated) {
+            const handled = await recreateWorkflowController.handleOwnedTabUpdated(tabId, changeInfo.url);
+            if (handled) return;
+        }
         const lease = await getActiveLeaseForTabEvent(tabId, tab);
         if (!lease) return;
 
@@ -5102,6 +6307,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
             if (generationRunController?.cancelGenerationRunForOwnerTab) {
                 operations.push(generationRunController.cancelGenerationRunForOwnerTab(tabId));
             }
+            if (recreateWorkflowController?.handleOwnedTabRemoved) {
+                operations.push(recreateWorkflowController.handleOwnedTabRemoved(tabId));
+            }
+            operations.push(enqueuePageWorkflowLeaseOperation(async () => {
+                if (activePageWorkflowLease?.status !== 'running'
+                    || activePageWorkflowLease.ownerTabId !== tabId) {
+                    return false;
+                }
+                await persistPageWorkflowLease(
+                    createIdlePageWorkflowLease(activePageWorkflowLease.epoch + 1)
+                );
+                return true;
+            }));
             await Promise.all(operations);
         })
         .catch(() => {});
@@ -5188,7 +6406,13 @@ async function getDownloadOperation(downloadId) {
 
 function reserveDownloadOperation(operation) {
     return mutatePendingDownloadOperations((operations) => {
-        if (operation.mediaId && processedUUIDs.has(operation.mediaId)) return false;
+        if (operation.mediaId) {
+            const localSatisfied = !operation.allowLocal
+                || processedLocalUUIDs.has(operation.mediaId);
+            const r2Satisfied = !operation.cloudRequired
+                || processedR2UUIDs.has(operation.mediaId);
+            if (localSatisfied && r2Satisfied) return false;
+        }
         if (operation.reservationKey) {
             const duplicate = Array.from(operations.values()).some((existing) => (
                 existing.reservationKey === operation.reservationKey
@@ -6222,14 +7446,23 @@ async function finalizeDownloadOperation(downloadId, { historyMissing = false, a
         const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
         if (authorityGuard) await authorityGuard();
 
-        if (operation.mediaId
-            && !operation.finalIdentityPersisted
-            && (!operation.allowLocal || !operation.localIdentityPersisted)) {
-            if (!processedUUIDs.has(operation.mediaId)) {
-                await mutateProcessedIds({ ids: [operation.mediaId] }, authorityGuard);
-            }
+        const localReceiptRequired = operation.allowLocal && !operation.localIdentityPersisted;
+        const r2ReceiptRequired = operation.cloudRequired
+            && operation.r2State === 'present'
+            && !operation.r2IdentityPersisted;
+        const receiptIds = Array.from(new Set([
+            operation.mediaId,
+            operation.reservationKey
+        ].filter(Boolean)));
+        if (receiptIds.length && (localReceiptRequired || r2ReceiptRequired)) {
+            await mutateProcessedReceipts({
+                localIds: localReceiptRequired ? receiptIds : [],
+                r2Ids: r2ReceiptRequired ? receiptIds : []
+            }, authorityGuard);
             operation = await updateDownloadOperationRevision(downloadId, operationRevision, {
-                finalIdentityPersisted: true
+                finalIdentityPersisted: true,
+                ...(localReceiptRequired ? { localIdentityPersisted: true } : {}),
+                ...(r2ReceiptRequired ? { r2IdentityPersisted: true } : {})
             });
             if (!operation) return false;
             if (authorityGuard) await authorityGuard();
@@ -6274,6 +7507,8 @@ async function markDownloadOperationR2Present(downloadId, result, assertAuthoriz
     if (!operation) return false;
     const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
     if (authorityGuard) await authorityGuard();
+    const scrapeLease = getDownloadOperationScrapeLease(operation);
+    if (scrapeLease?.kind === 'r2_backup') clearR2BackupInventoryCache(scrapeLease);
 
     if (operation.downloadState === 'complete') {
         return finalizeDownloadOperation(downloadId, { assertAuthorized: authorityGuard });
@@ -6281,13 +7516,13 @@ async function markDownloadOperationR2Present(downloadId, result, assertAuthoriz
     return true;
 }
 
-async function recordDownloadOperationError(downloadId, error, code) {
+async function recordDownloadOperationError(downloadId, error, code, { incrementAttempts = true } = {}) {
     const operation = await getDownloadOperation(downloadId);
     if (!operation) return null;
     const lastError = formatRedactedMediaError(error, operation.mediaId, code);
     await updateDownloadOperation(downloadId, (existing) => ({
         ...existing,
-        attempts: (existing.attempts || 0) + 1,
+        attempts: (existing.attempts || 0) + (incrementAttempts ? 1 : 0),
         lastAttemptAt: Date.now(),
         lastError
     }));
@@ -6371,63 +7606,72 @@ async function ensurePublicDownloadQueued(operation, downloadItem, assertAuthori
     }
 }
 
+async function readDownloadedFileForUpload(downloadItem, assertAuthorized = null) {
+    if (!downloadItem?.filename) throw new Error('[download-search] item unavailable');
+    if (assertAuthorized) await assertAuthorized();
+    try {
+        const hasDocument = typeof chrome.offscreen?.hasDocument === 'function'
+            ? await chrome.offscreen.hasDocument()
+            : false;
+        if (!hasDocument) {
+            await chrome.offscreen.createDocument({
+                url: 'offscreen.html',
+                reasons: ['BLOBS'],
+                justification: 'Read a completed Grok media download for its configured R2 backup'
+            });
+        }
+    } catch (error) {
+        const message = String(error?.message || '');
+        if (!message.includes('already exists') && !message.includes('Only a single offscreen')) {
+            throw error;
+        }
+    }
+    if (assertAuthorized) await assertAuthorized();
+    const fileData = await chrome.runtime.sendMessage({
+        action: 'READ_FILE_FOR_UPLOAD',
+        filePath: downloadItem.filename,
+        contentType: downloadItem.mime || 'application/octet-stream'
+    });
+    if (assertAuthorized) await assertAuthorized();
+    if (!fileData?.ok || typeof fileData.base64 !== 'string') {
+        throw new Error(`[download-read] ${fileData?.error || 'file read failed'}`);
+    }
+    const binary = atob(fileData.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    return new Blob([bytes], {
+        type: fileData.type || downloadItem.mime || 'application/octet-stream'
+    });
+}
+
 async function uploadAuthenticatedDownload(operation, downloadItem, assertAuthorized = null) {
     if (activeDownloadOperations.has(operation.downloadId)) return;
     const authorityGuard = assertAuthorized || getDownloadOperationAuthorityGuard(operation);
     if (authorityGuard) await authorityGuard();
     activeDownloadOperations.add(operation.downloadId);
     try {
-        if (!downloadItem?.filename) throw new Error('[download-search] file unavailable');
+        if (!downloadItem) throw new Error('[download-search] item unavailable');
         const sourceUrl = downloadItem.finalUrl || downloadItem.url;
         if (!sourceUrl) throw new Error('[download-search] source unavailable');
 
         console.log('[CloudQueue]', formatRedactedMediaLog('download_complete', operation.mediaId));
-        try {
-            await chrome.offscreen.createDocument({
-                url: 'offscreen.html',
-                reasons: ['BLOBS'],
-                justification: 'Read downloaded file for R2 cloud backup upload'
-            });
-            if (authorityGuard) await authorityGuard();
-        } catch (error) {
-            if (!error.message.includes('already exists') && !error.message.includes('Only a single offscreen')) {
-                throw error;
-            }
-        }
-
-        const fileData = await chrome.runtime.sendMessage({
-            action: 'READ_FILE_FOR_UPLOAD',
-            filePath: downloadItem.filename,
-            contentType: downloadItem.mime || 'application/octet-stream'
-        });
-        if (authorityGuard) await authorityGuard();
-        if (!fileData || !fileData.ok) throw new Error('[file-read] unavailable');
-        console.log('[CloudQueue]', formatRedactedMediaLog('file_read', operation.mediaId, { bytes: fileData.size }));
-
+        const blob = await readDownloadedFileForUpload(downloadItem, authorityGuard);
         const config = await getCloudConfig();
         if (authorityGuard) await authorityGuard();
+        if (!CloudSync.isCloudEnabled(config)) throw new Error('[config] cloud sync disabled');
         const userInfo = await chrome.storage.local.get(['activeGrokUserId']);
         if (authorityGuard) await authorityGuard();
-        const binaryStr = atob(fileData.base64);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let index = 0; index < binaryStr.length; index++) bytes[index] = binaryStr.charCodeAt(index);
-        const blob = new Blob([bytes], { type: fileData.type });
         const result = await uploadBlobWithR2Dedupe(config, {
             sourceUrl,
             finalPath: operation.finalPath,
             userId: userInfo.activeGrokUserId || 'Shared_Account',
-            contentType: fileData.type,
+            contentType: blob.type || downloadItem.mime || 'application/octet-stream',
             promptText: operation.promptText || '',
             captureMetadata: operation.captureMetadata || null,
             requireCaptureMetadata: operation.requireCaptureMetadata === true,
             acceptance: buildAcceptanceContextFromCloudConfig(config, 'download-upload')
         }, blob, authorityGuard);
         if (authorityGuard) await authorityGuard();
-
-        log(
-            `Cloud upload ${formatRedactedMediaLog(result.status, operation.mediaId, { bytes: result.bytes })}`,
-            result.status === 'conflict_uploaded' ? 'warning' : 'success'
-        );
         await markDownloadOperationR2Present(operation.downloadId, result, authorityGuard);
     } catch (error) {
         if (isScrapeAuthorityRevokedError(error)) throw error;
@@ -6452,8 +7696,12 @@ async function processCompletedDownloadOperation(downloadId, downloadItem = null
     if (authorityGuard) await authorityGuard();
 
     const localOnly = operation.allowLocal && !operation.cloudRequired;
-    if (localOnly && operation.mediaId && !operation.localIdentityPersisted) {
-        await mutateProcessedIds({ ids: [operation.mediaId] }, authorityGuard);
+    const receiptIds = Array.from(new Set([
+        operation.mediaId,
+        operation.reservationKey
+    ].filter(Boolean)));
+    if (localOnly && receiptIds.length && !operation.localIdentityPersisted) {
+        await mutateProcessedReceipts({ localIds: receiptIds }, authorityGuard);
         operation = await updateDownloadOperation(downloadId, { localIdentityPersisted: true });
         if (!operation) return;
         if (authorityGuard) await authorityGuard();
@@ -6488,8 +7736,12 @@ async function reconcileMissingDownloadOperation(operation, assertAuthorized = n
         return;
     }
     if (operation.downloadState === 'complete' && operation.allowLocal && !operation.cloudRequired) {
-        if (operation.mediaId && !operation.localIdentityPersisted) {
-            await mutateProcessedIds({ ids: [operation.mediaId] }, assertAuthorized);
+        const receiptIds = Array.from(new Set([
+            operation.mediaId,
+            operation.reservationKey
+        ].filter(Boolean)));
+        if (receiptIds.length && !operation.localIdentityPersisted) {
+            await mutateProcessedReceipts({ localIds: receiptIds }, assertAuthorized);
         }
         await removeDownloadOperation(operation.downloadId);
         return;
@@ -6788,6 +8040,7 @@ if (typeof module !== 'undefined') {
         buildDirectBackupUploadResponse,
         buildR2BackupInitMessage,
         buildR2BackupInitMessageForConfig,
+        cancelPendingMetadataSyncForTest,
         dispatchNativeClick,
         enqueueCloudItemForTest: enqueueCloudItem,
         enqueueCloudMediaUpload,
@@ -6817,6 +8070,7 @@ if (typeof module !== 'undefined') {
         queueChromeDownload,
         stopScrapeRun,
         validateScrapeResume,
+        waitForBackgroundInitialization,
         withTimeout,
         persistQueuedBackupProcessedId,
         persistQueuedBackupProcessedIdAfterSuccess,

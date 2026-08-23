@@ -79,7 +79,8 @@ function insertContentEditableText(editor, text) {
 }
 
 document.addEventListener('__gpt_set_editor_content', function(e) {
-    var ce = findGrokContentEditable();
+    var marker = String((e.detail && e.detail.marker) || '');
+    var ce = findMarkedPromptedVideoEditor(marker) || (!marker ? findGrokContentEditable() : null);
     var text = String((e.detail && e.detail.text) || '');
     if (!ce) return;
 
@@ -93,7 +94,8 @@ document.addEventListener('__gpt_set_editor_content', function(e) {
 });
 
 document.addEventListener('__gpt_append_editor_content', function(e) {
-    var ce = findGrokContentEditable();
+    var marker = String((e.detail && e.detail.marker) || '');
+    var ce = findMarkedPromptedVideoEditor(marker) || (!marker ? findGrokContentEditable() : null);
     var text = String((e.detail && e.detail.text) || '');
     if (!ce) return;
 
@@ -295,6 +297,29 @@ function readPromptText(mediaGenInput) {
     return uniqueCandidates.length === 1 ? uniqueCandidates[0] : '';
 }
 
+function readAssetPromptEvidence(response, assetMetadata) {
+    var responsePrompt = readPromptText(response && response.mediaGenInput);
+    if (responsePrompt) {
+        return {
+            promptText: responsePrompt,
+            promptEvidenceSource: 'response_media_gen_input'
+        };
+    }
+
+    var assetPrompt = readPromptText(assetMetadata && assetMetadata.mediaGenInput);
+    if (assetPrompt) {
+        return {
+            promptText: assetPrompt,
+            promptEvidenceSource: 'asset_media_gen_input'
+        };
+    }
+
+    return {
+        promptText: '',
+        promptEvidenceSource: 'unavailable'
+    };
+}
+
 function buildAssetCaptureMetadata(payload, conversationId, assetId) {
     var responses = Array.isArray(payload && payload.responses)
         ? payload.responses
@@ -320,6 +345,7 @@ function buildAssetCaptureMetadata(payload, conversationId, assetId) {
     var mediaGenInput = response.mediaGenInput !== undefined
         ? response.mediaGenInput
         : match.assetMetadata.mediaGenInput;
+    var promptEvidence = readAssetPromptEvidence(response, match.assetMetadata);
     var metadata = {
         schemaVersion: 2,
         evidenceSource: 'grok_conversation_response',
@@ -328,7 +354,8 @@ function buildAssetCaptureMetadata(payload, conversationId, assetId) {
         responseId: String(response.responseId || response.id || ''),
         parentResponseId: String(response.parentResponseId || ''),
         rootResponseId: String(response.rootResponseId || ''),
-        promptText: readPromptText(mediaGenInput),
+        promptText: promptEvidence.promptText,
+        promptEvidenceSource: promptEvidence.promptEvidenceSource,
         assetMetadata: sanitizeAssetMetadataValue(match.assetMetadata, 0),
         mediaGenInput: sanitizeAssetMetadataValue(mediaGenInput === undefined ? null : mediaGenInput, 0)
     };
@@ -415,16 +442,68 @@ function buildConversationAssetDescriptor(response, assetMetadata) {
     var mediaGenInput = response && response.mediaGenInput !== undefined
         ? response.mediaGenInput
         : assetMetadata.mediaGenInput;
+    var promptEvidence = readAssetPromptEvidence(response, assetMetadata);
     return {
         assetId: assetId,
         responseId: String(response && (response.responseId || response.id) || ''),
         parentResponseId: String(response && response.parentResponseId || ''),
         mediaKind: getConversationAssetMediaKind(assetMetadata, sourceUrl),
         sourceUrl: sourceUrl,
-        promptText: readPromptText(mediaGenInput),
+        promptText: promptEvidence.promptText,
+        promptEvidenceSource: promptEvidence.promptEvidenceSource,
         assetMetadata: sanitizeAssetMetadataValue(assetMetadata, 0),
         mediaGenInput: sanitizeAssetMetadataValue(mediaGenInput === undefined ? null : mediaGenInput, 0)
     };
+}
+
+function collectConversationMirrorAssetIds(value, depth) {
+    if (depth === undefined) depth = 0;
+    if (depth > 5 || value === null || value === undefined) return [];
+    if (typeof value === 'string') {
+        var direct = value.match(conversationInventoryUuidPattern);
+        var generated = value.match(/\/generated\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i);
+        return generated ? [generated[1].toLowerCase()] : (direct ? [direct[0].toLowerCase()] : []);
+    }
+    if (Array.isArray(value)) {
+        return value.reduce(function(ids, item) {
+            return ids.concat(collectConversationMirrorAssetIds(item, depth + 1));
+        }, []);
+    }
+    if (typeof value !== 'object') return [];
+
+    var ids = [];
+    ['assetId', 'fileMetadataId'].forEach(function(key) {
+        var candidate = String(value[key] || '').toLowerCase();
+        if (conversationInventoryUuidPattern.test(candidate)) ids.push(candidate);
+    });
+    ['url', 'sourceUrl', 'downloadUrl', 'imageUrl', 'videoUrl', 'fileUri', 'parsedFileUri', 'key']
+        .forEach(function(key) {
+            ids = ids.concat(collectConversationMirrorAssetIds(value[key], depth + 1));
+        });
+    return ids;
+}
+
+function verifyConversationAssetMirrors(response, attachmentAssets) {
+    var authoritativeIds = new Set(attachmentAssets.map(function(asset) {
+        return String(asset && asset.assetId || '').toLowerCase();
+    }).filter(Boolean));
+    var mirrorFields = [
+        'fileAttachments',
+        'fileAttachmentsMetadata',
+        'fileUris',
+        'generatedImageUrls',
+        'imageAttachments',
+        'imageEditUris'
+    ];
+    mirrorFields.forEach(function(field) {
+        var values = Array.isArray(response && response[field]) ? response[field] : [];
+        values.forEach(function(value) {
+            var ids = Array.from(new Set(collectConversationMirrorAssetIds(value)));
+            if (ids.length === 0 || ids.some(function(assetId) { return !authoritativeIds.has(assetId); })) {
+                throw new Error('conversation_asset_unrecognized_media_shape');
+            }
+        });
+    });
 }
 
 function buildConversationAssetInventory(payload, conversationId) {
@@ -436,11 +515,45 @@ function buildConversationAssetInventory(payload, conversationId) {
         : (Array.isArray(payload && payload.data && payload.data.responses) ? payload.data.responses : []);
     var descriptorsByAssetId = new Map();
     var assets = [];
+    var failureCount = responses.reduce(function(count, response) {
+        return count + (Array.isArray(response && response.streamErrors)
+            && response.streamErrors.length > 0 ? 1 : 0);
+    }, 0);
+    var inflightResponsesRaw = Array.isArray(payload && payload.inflightResponses)
+        ? payload.inflightResponses
+        : (Array.isArray(payload && payload.data && payload.data.inflightResponses)
+            ? payload.data.inflightResponses
+            : []);
+    var responseIdentity = function(response) {
+        var responseId = String(response && (response.responseId || response.id) || '').toLowerCase();
+        var parentResponseId = String(response && response.parentResponseId || '').toLowerCase();
+        if (!conversationInventoryUuidPattern.test(responseId)) return null;
+        if (parentResponseId && !conversationInventoryUuidPattern.test(parentResponseId)) return null;
+        return { responseId: responseId, parentResponseId: parentResponseId };
+    };
+    var failedResponses = responses
+        .filter(function(response) {
+            return Array.isArray(response && response.streamErrors)
+                && response.streamErrors.length > 0;
+        })
+        .map(responseIdentity)
+        .filter(Boolean);
+    var inflightResponses = inflightResponsesRaw
+        .map(responseIdentity)
+        .filter(Boolean);
+    var videoGenerationResponses = responses
+        .filter(function(response) {
+            return String(response && response.model || '').trim().toLowerCase() === 'imagine-video-gen'
+                && String(response && response.queryType || '').trim().toLowerCase() === 'imagine';
+        })
+        .map(responseIdentity)
+        .filter(function(identity) { return !!(identity && identity.parentResponseId); });
 
     responses.forEach(function(response) {
         var attachmentAssets = Array.isArray(response && response.fileAttachmentAssetMetadata)
             ? response.fileAttachmentAssetMetadata
             : [];
+        verifyConversationAssetMirrors(response, attachmentAssets);
         attachmentAssets.forEach(function(assetMetadata) {
             var descriptor = buildConversationAssetDescriptor(response, assetMetadata);
             var canonical = JSON.stringify({
@@ -464,6 +577,11 @@ function buildConversationAssetInventory(payload, conversationId) {
     var inventory = {
         schemaVersion: 1,
         conversationId: String(conversationId).toLowerCase(),
+        failureCount: failureCount,
+        inflightResponseCount: inflightResponsesRaw.length,
+        failedResponses: failedResponses,
+        inflightResponses: inflightResponses,
+        videoGenerationResponses: videoGenerationResponses,
         assets: assets
     };
     if (getSerializedByteLength(JSON.stringify(inventory)) > conversationInventoryMaxBytes) {
@@ -542,6 +660,7 @@ document.addEventListener('__gpt_fetch_conversation_asset_inventory', function(e
 document.addEventListener('__gpt_fetch_media_data_url', function(e) {
     var url = e.detail && e.detail.url;
     var requestId = e.detail && e.detail.requestId;
+    var maxInlineBytes = Number(e.detail && e.detail.maxInlineBytes) || 0;
     if (!url || !requestId) return;
 
     fetch(url, { credentials: 'include' })
@@ -550,6 +669,14 @@ document.addEventListener('__gpt_fetch_media_data_url', function(e) {
             return resp.blob();
         })
         .then(function(blob) {
+            if (maxInlineBytes > 0 && blob.size > maxInlineBytes) {
+                return {
+                    dataUrl: '',
+                    size: blob.size,
+                    type: blob.type,
+                    tooLarge: true
+                };
+            }
             return new Promise(function(resolve, reject) {
                 var reader = new FileReader();
                 reader.onload = function() {
@@ -571,7 +698,8 @@ document.addEventListener('__gpt_fetch_media_data_url', function(e) {
                     requestId: requestId,
                     dataUrl: result.dataUrl,
                     size: result.size,
-                    type: result.type
+                    type: result.type,
+                    tooLarge: result.tooLarge === true
                 }
             }));
         })

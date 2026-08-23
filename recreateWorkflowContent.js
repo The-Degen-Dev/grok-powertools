@@ -502,20 +502,35 @@
         return true;
     }
 
-    async function recordResultBaseline(previousSnapshot, mediaKind, options = {}) {
+    async function recordRunReceipt(payload, options = {}) {
         if (!options.authority) return;
         const runtime = getChromeRuntime(options);
         if (!runtime || typeof runtime.sendMessage !== 'function') throw fail('workflow_unavailable');
         const response = await withAbort(runtime.sendMessage({
             action: 'GPT_RECREATE_RESULT_BASELINE',
             authority: options.authority,
-            mediaKind,
-            assetIds: Array.from(previousSnapshot?.assetIds || []),
-            signatures: Array.from(previousSnapshot?.persistedSignatures || [])
+            ...payload
         }), options.signal);
         if (!response || response.ok !== true) {
             throw fail((response && response.error) || 'recreate_authority_persist_failed');
         }
+        return response;
+    }
+
+    async function confirmOperationDocument(options = {}) {
+        return await recordRunReceipt({ documentReceipt: true }, options);
+    }
+
+    async function recordSubmissionState(submissionState, options = {}) {
+        return await recordRunReceipt({ submissionState }, options);
+    }
+
+    async function recordResultBaseline(previousSnapshot, mediaKind, options = {}) {
+        return await recordRunReceipt({
+            mediaKind,
+            assetIds: Array.from(previousSnapshot?.assetIds || []),
+            signatures: Array.from(previousSnapshot?.persistedSignatures || [])
+        }, options);
     }
 
     function getGeneratedResultSourceKind(src, mediaKind = 'image') {
@@ -632,39 +647,10 @@
         return view.location || {};
     }
 
-    function pageLooksLikeImaginePost(documentRef = document) {
+    function pageLooksLikeImagineResultSurface(documentRef = document) {
         const location = getDocumentLocation(documentRef);
-        return String(location.pathname || '').includes('/imagine/post/');
-    }
-
-    function findTrustedOpenedPostMediaCandidate(documentRef = document, mediaKind = 'image') {
-        const candidates = mediaKind === 'video'
-            ? collectGeneratedVideoCandidates(documentRef)
-            : collectGeneratedImageCandidates(documentRef);
-
-        return candidates.find((candidate) => {
-            const sourceKind = getGeneratedResultSourceKind(candidate.src, mediaKind);
-            const rect = candidate.rect || {};
-            const renderedMin = Math.min(Number(rect.width || 0), Number(rect.height || 0));
-            const naturalWidth = Number(candidate.naturalWidth || 0);
-            const naturalHeight = Number(candidate.naturalHeight || 0);
-            const videoMax = Math.max(Number(candidate.videoWidth || 0), Number(candidate.videoHeight || 0));
-            const mediaLooksReady = mediaKind === 'video'
-                ? (Number(candidate.readyState || 0) >= 1 || videoMax >= 256)
-                : (
-                    candidate.complete !== false &&
-                    Math.max(naturalWidth, naturalHeight) >= 768 &&
-                    Math.min(naturalWidth, naturalHeight) >= 512
-                );
-
-            return (
-                (sourceKind === 'trusted-grok-media' || sourceKind === 'trusted-grok-video') &&
-                trustedResultUrlLooksOpenable(candidate.src) &&
-                mediaLooksReady &&
-                renderedMin >= 120 &&
-                !isInsidePowerToolsOverlay(candidate.element)
-            );
-        });
+        const pathname = String(location.pathname || '');
+        return pathname === '/imagine' || pathname.startsWith('/imagine/');
     }
 
     async function verifyTrustedMediaCandidate(candidate, options = {}) {
@@ -719,40 +705,6 @@
         };
     }
 
-    async function verifyOpenedPostMedia(originalCandidate, options = {}) {
-        const documentRef = getDocumentRef(options);
-        const mediaKind = options.mediaKind === 'video' ? 'video' : 'image';
-        const timeoutMs = Number.isFinite(options.openedPostTimeoutMs) ? options.openedPostTimeoutMs : 20000;
-        const intervalMs = Number.isFinite(options.intervalMs) ? options.intervalMs : 500;
-
-        const openedCandidate = await waitForCondition(
-            () => findTrustedOpenedPostMediaCandidate(documentRef, mediaKind),
-            {
-                timeoutMs,
-                intervalMs,
-                timeoutError: 'result_post_open_failed',
-                signal: options.signal
-            }
-        );
-        const mediaVerification = await verifyTrustedMediaCandidate(openedCandidate, options);
-        if (!mediaVerification.ok) return mediaVerification;
-
-        const location = getDocumentLocation(documentRef);
-        return {
-            ok: true,
-            summary: {
-                ...summarizeGeneratedResultCandidate(originalCandidate, mediaKind),
-                openedSourceKind: getGeneratedResultSourceKind(openedCandidate.src, mediaKind),
-                openedUrl: openedCandidate.src,
-                postUrl: String(location.href || ''),
-                byteLength: mediaVerification.byteLength,
-                outputMediaHash: mediaVerification.mediaHash || null,
-                openable: true,
-                openableSurface: 'opened-post'
-            }
-        };
-    }
-
     function normalizeResultOpenabilityError(error) {
         const code = String((error && (error.code || error.message)) || '');
         if (code.startsWith('native_click_') || code.startsWith('result_post_')) return code;
@@ -769,36 +721,19 @@
         try {
             const sourceKind = getGeneratedResultSourceKind(candidate.src, mediaKind);
             if (sourceKind === 'data-url' || sourceKind === 'blob-url') {
-                if (mediaKind === 'video' && pageLooksLikeImaginePost(getDocumentRef(options))) {
-                    const mediaVerification = await verifyInlineMediaCandidate(candidate, options);
-                    if (!mediaVerification.ok) return mediaVerification;
+                const mediaVerification = await verifyInlineMediaCandidate(candidate, options);
+                if (!mediaVerification.ok) return mediaVerification;
 
-                    return {
-                        ok: true,
-                        summary: {
-                            ...summarizeGeneratedResultCandidate(candidate, mediaKind),
-                            byteLength: mediaVerification.byteLength,
-                            outputMediaHash: mediaVerification.mediaHash || null,
-                            openable: true,
-                            openableSurface: sourceKind === 'blob-url' ? 'opened-post-blob-video' : 'opened-post-data-video'
-                        }
-                    };
-                }
-
-                await clickElementNatively(candidate.element, {
-                    ...options,
-                    clickPointStrategy: 'upper-visible'
-                });
-                if (!pageLooksLikeImaginePost(getDocumentRef(options))) {
-                    // Grok can route after a short delay even though the click has already landed.
-                    await waitForCondition(() => pageLooksLikeImaginePost(getDocumentRef(options)), {
-                        timeoutMs: Number.isFinite(options.openedPostTimeoutMs) ? options.openedPostTimeoutMs : 20000,
-                        intervalMs: Number.isFinite(options.intervalMs) ? options.intervalMs : 500,
-                        timeoutError: 'result_post_open_failed',
-                        signal: options.signal
-                    });
-                }
-                return await verifyOpenedPostMedia(candidate, options);
+                return {
+                    ok: true,
+                    summary: {
+                        ...summarizeGeneratedResultCandidate(candidate, mediaKind),
+                        byteLength: mediaVerification.byteLength,
+                        outputMediaHash: mediaVerification.mediaHash || null,
+                        openable: true,
+                        openableSurface: sourceKind === 'blob-url' ? 'inline-blob-media' : 'inline-data-media'
+                    }
+                };
             }
 
             const mediaVerification = await verifyTrustedMediaCandidate(candidate, options);
@@ -1633,52 +1568,6 @@
         return await selectCurrentGeneratedMedia(options);
     }
 
-    function findUniqueFallbackCurrentMedia(documentRef, workflowUtils) {
-        const view = documentRef.defaultView || root || {};
-        const documentElement = documentRef.documentElement || {};
-        const viewport = {
-            width: Number(view.innerWidth || documentElement.clientWidth || 0),
-            height: Number(view.innerHeight || documentElement.clientHeight || 0)
-        };
-        const intersectsViewport = (candidate) => {
-            const rect = candidate.rect || {};
-            const left = Number(rect.left || 0);
-            const top = Number(rect.top || 0);
-            const right = left + Number(rect.width || 0);
-            const bottom = top + Number(rect.height || 0);
-            if (viewport.width <= 0 || viewport.height <= 0) return right > left && bottom > top;
-            return right > 0 && bottom > 0 && left < viewport.width && top < viewport.height;
-        };
-        const imageCandidates = collectGeneratedImageCandidates(documentRef).filter((candidate) => (
-            !isInsidePowerToolsOverlay(candidate.element) &&
-            intersectsViewport(candidate) &&
-            Math.max(Number(candidate.naturalWidth || 0), Number(candidate.naturalHeight || 0)) >= 256 &&
-            workflowUtils.isLikelyGeneratedImageCandidate?.(candidate) === true &&
-            (
-                workflowUtils.isSupportedCurrentImageSrc?.(candidate.src) === true ||
-                getGeneratedResultSourceKind(candidate.src, 'image') === 'data-url' ||
-                getGeneratedResultSourceKind(candidate.src, 'image') === 'blob-url'
-            )
-        ));
-        const videoCandidates = collectGeneratedVideoCandidates(documentRef).filter((candidate) => (
-            !isInsidePowerToolsOverlay(candidate.element) &&
-            intersectsViewport(candidate) &&
-            Math.max(Number(candidate.videoWidth || 0), Number(candidate.videoHeight || 0)) >= 256 &&
-            (
-                workflowUtils.isSupportedCurrentVideoSrc?.(candidate.src) === true ||
-                getGeneratedResultSourceKind(candidate.src, 'video') === 'data-url' ||
-                getGeneratedResultSourceKind(candidate.src, 'video') === 'blob-url'
-            )
-        ));
-        const candidates = [
-            ...imageCandidates.map((candidate) => ({ ...candidate, mediaKind: 'image' })),
-            ...videoCandidates.map((candidate) => ({ ...candidate, mediaKind: 'video' }))
-        ];
-
-        if (candidates.length > 1) throw fail('reference_ambiguous');
-        return candidates[0] || null;
-    }
-
     async function selectCurrentGeneratedMedia(options = {}) {
         const workflowUtils = getUtils(options);
         const documentRef = getDocumentRef(options);
@@ -1701,22 +1590,10 @@
             throw fail('reference_missing');
         }
 
-        const fallback = resolved.status === 'matched'
-            ? null
-            : findUniqueFallbackCurrentMedia(documentRef, workflowUtils);
-        if (resolved.status !== 'matched' && !fallback) throw fail('reference_missing');
-        const mediaKind = resolved.status === 'matched'
-            ? (resolved.descriptor.mediaKind === 'video' ? 'video' : 'image')
-            : fallback.mediaKind;
-        const sourceUrl = resolved.status === 'matched' ? resolved.sourceUrl : fallback.src;
-        const descriptor = resolved.status === 'matched'
-            ? resolved.descriptor
-            : {
-                sourceAssetId: getGeneratedAssetId(sourceUrl),
-                sourcePostId: '',
-                conversationId: '',
-                surface: 'visible_fallback'
-            };
+        if (resolved.status !== 'matched') throw fail('reference_source_unproven');
+        const mediaKind = resolved.descriptor.mediaKind === 'video' ? 'video' : 'image';
+        const sourceUrl = resolved.sourceUrl;
+        const descriptor = resolved.descriptor;
         const dataUrl = await sourceToDataUrl(sourceUrl, {
             ...options,
             utils: workflowUtils,
@@ -1837,9 +1714,12 @@
         return score;
     }
 
-    function findEditor(documentRef = document) {
+    function findEditor(documentRef = document, scopeRoot = null) {
+        const queryRoot = scopeRoot && typeof scopeRoot.querySelectorAll === 'function'
+            ? scopeRoot
+            : documentRef;
         const editors = Array.from(
-            documentRef.querySelectorAll(
+            queryRoot.querySelectorAll(
                 'textarea, [contenteditable], [role="textbox"], div[aria-label], div[data-placeholder]'
             )
         ).filter((element) => isUsableEditor(element) && matchesGrokEditorContract(element));
@@ -1950,18 +1830,24 @@
         return normalizeEditorText(prompt).slice(0, 96);
     }
 
-    function chatEditorStillContainsInstruction(documentRef, workflowUtils) {
-        const editor = findEditor(documentRef);
-        return (
-            editor &&
-            editorTextIncludesAll(editor, [
+    function chatEditorStillContainsInstruction(documentRef, workflowUtils, mediaKind = 'image', composerRoot = null) {
+        const editor = findEditor(documentRef, composerRoot);
+        const expectedTexts = mediaKind === 'video'
+            ? [
+                'You are creating one ready-to-paste Grok Imagine Video prompt',
+                workflowUtils.FINAL_VIDEO_PROMPT_MARKER
+            ]
+            : [
                 'You are creating a Grok Imagine prompt from the attached reference image.',
                 workflowUtils.FINAL_PROMPT_MARKER
-            ])
+            ];
+        return (
+            editor &&
+            editorTextIncludesAll(editor, expectedTexts)
         );
     }
 
-    async function waitForChatSubmitAccepted(documentRef, workflowUtils, options = {}) {
+    async function waitForChatSubmitAccepted(documentRef, workflowUtils, mediaKind = 'image', composerRoot = null, options = {}) {
         const timeoutMs = Number.isFinite(options.chatSubmitAcceptedTimeoutMs)
             ? options.chatSubmitAcceptedTimeoutMs
             : 1500;
@@ -1969,10 +1855,10 @@
 
         await waitForCondition(
             () => {
-                if (!chatEditorStillContainsInstruction(documentRef, workflowUtils)) return true;
+                if (!chatEditorStillContainsInstruction(documentRef, workflowUtils, mediaKind, composerRoot)) return true;
 
                 try {
-                    return !!extractAssistantPromptFromPage(documentRef);
+                    return !!extractAssistantPromptFromPage(documentRef, mediaKind);
                 } catch (error) {
                     if (error && error.message === 'chat_prompt_marker_missing') return null;
                     throw error;
@@ -1987,8 +1873,8 @@
         );
     }
 
-    function injectEditorText(text, documentRef = document) {
-        const editor = findEditor(documentRef);
+    function injectEditorText(text, documentRef = document, editorOverride = null) {
+        const editor = editorOverride || findEditor(documentRef);
         if (!editor) return false;
         const nextText = String(text || '');
 
@@ -2021,8 +1907,11 @@
         return !button.disabled && button.getAttribute('aria-disabled') !== 'true';
     }
 
-    function findVisibleButtonByLabels(labels, documentRef = document) {
-        return Array.from(documentRef.querySelectorAll('button[aria-label]')).find(
+    function findVisibleButtonByLabels(labels, documentRef = document, scopeRoot = null) {
+        const queryRoot = scopeRoot && typeof scopeRoot.querySelectorAll === 'function'
+            ? scopeRoot
+            : documentRef;
+        return Array.from(queryRoot.querySelectorAll('button[aria-label]')).find(
             (button) => buttonMatchesLabel(button, labels) && isVisibleElement(button) && isEnabledButton(button)
         );
     }
@@ -2114,10 +2003,13 @@
             click
         };
         if (options.authority) message.authority = options.authority;
+        if (options.submissionState) message.submissionState = options.submissionState;
         const response = await withAbort(runtime.sendMessage(message), options.signal);
 
         if (!response || response.ok !== true) {
-            throw fail((response && response.error) || 'native_click_unavailable');
+            const error = fail((response && response.error) || 'native_click_unavailable');
+            error.clickState = response?.clickState || 'unknown';
+            throw error;
         }
 
         return response;
@@ -2169,7 +2061,14 @@
         });
     }
 
-    async function clickChatSubmitButton(submitButton, documentRef, workflowUtils, options = {}) {
+    async function clickChatSubmitButton(
+        submitButton,
+        documentRef,
+        workflowUtils,
+        mediaKind = 'image',
+        composerRoot = null,
+        options = {}
+    ) {
         throwIfAborted(options.signal);
         try {
             await clickElementNatively(submitButton, { ...options, documentRef });
@@ -2180,7 +2079,7 @@
         }
 
         try {
-            await waitForChatSubmitAccepted(documentRef, workflowUtils, options);
+            await waitForChatSubmitAccepted(documentRef, workflowUtils, mediaKind, composerRoot, options);
             return;
         } catch (error) {
             if (!error || error.code !== 'chat_submit_not_sent') throw error;
@@ -2193,7 +2092,7 @@
             submitButton.click();
         }
 
-        await waitForChatSubmitAccepted(documentRef, workflowUtils, options);
+        await waitForChatSubmitAccepted(documentRef, workflowUtils, mediaKind, composerRoot, options);
     }
 
     function safelyClickElement(element, coordinates = null) {
@@ -2261,15 +2160,43 @@
         return findComposerRootByButtonLabels(editor, ['Search'], documentRef);
     }
 
+    const CHAT_ATTACHMENT_LABELS = [
+        'Attach',
+        'Upload',
+        'Attach files',
+        'Upload file',
+        'Add files',
+        'Add attachment'
+    ];
+
+    function controlMatchesAnyLabel(element, labels) {
+        const text = normalizeAriaLabel([
+            element?.getAttribute?.('aria-label'),
+            element?.getAttribute?.('title'),
+            element?.textContent
+        ].filter(Boolean).join(' '));
+        return labels.some((label) => {
+            const expected = normalizeAriaLabel(label);
+            return text === expected || text.startsWith(`${expected} `);
+        });
+    }
+
+    function findScopedControlByLabels(scopeRoot, labels) {
+        if (!scopeRoot || typeof scopeRoot.querySelectorAll !== 'function') return null;
+        return Array.from(scopeRoot.querySelectorAll('button, [role="button"]')).find((element) => (
+            controlMatchesAnyLabel(element, labels) &&
+            isVisibleElement(element) &&
+            isEnabledButton(element)
+        )) || null;
+    }
+
     function findComposerRootByButtonLabels(editor, labels, documentRef = document) {
         let current = editor && editor.parentElement;
 
         while (current && current !== documentRef.body && current !== documentRef.documentElement) {
             if (
                 isComposerRootCandidate(current, editor, documentRef) &&
-                Array.from(current.querySelectorAll('button[aria-label]')).some(
-                    (button) => buttonMatchesLabel(button, labels) && isVisibleElement(button) && isEnabledButton(button)
-                )
+                !!findScopedControlByLabels(current, labels)
             ) {
                 return current;
             }
@@ -2282,16 +2209,28 @@
 
     function findUploadComposerRoot(documentRef = document) {
         const editor = findEditor(documentRef);
-        if (!editor) return documentRef.body || documentRef;
-
-        return findComposerRootByButtonLabels(editor, ['Attach', 'Upload'], documentRef) || editor.parentElement || documentRef.body || documentRef;
-    }
-
-    function findComposerSearchButton(documentRef = document) {
-        const editor = findEditor(documentRef);
         if (!editor) return null;
 
-        const composerRoot = findComposerRoot(editor, documentRef);
+        const buttonRoot = findComposerRootByButtonLabels(editor, CHAT_ATTACHMENT_LABELS, documentRef);
+        if (buttonRoot) return buttonRoot;
+
+        let current = editor.parentElement;
+        while (current && current !== documentRef.body && current !== documentRef.documentElement) {
+            if (isComposerRootCandidate(current, editor, documentRef)
+                && current.querySelector('input[type="file"]')) {
+                return current;
+            }
+            current = current.parentElement;
+        }
+
+        return null;
+    }
+
+    function findComposerSearchButton(documentRef = document, composerRootOverride = null) {
+        const editor = findEditor(documentRef, composerRootOverride);
+        if (!editor) return null;
+
+        const composerRoot = composerRootOverride || findComposerRoot(editor, documentRef);
         if (!composerRoot) return null;
 
         return (
@@ -2301,8 +2240,8 @@
         );
     }
 
-    function ensureGrokSearchEnabled(documentRef = document) {
-        const button = findComposerSearchButton(documentRef);
+    function ensureGrokSearchEnabled(documentRef = document, composerRoot = null) {
+        const button = findComposerSearchButton(documentRef, composerRoot);
         if (!button) throw fail('chat_search_unavailable');
 
         if (!buttonStateLooksActive(button)) {
@@ -2339,9 +2278,10 @@
         return score;
     }
 
-    function findUploadInput(documentRef = document, reference = null) {
-        const composerRoot = findUploadComposerRoot(documentRef);
-        const candidates = Array.from(documentRef.querySelectorAll('input[type="file"]'))
+    function findUploadInput(documentRef = document, reference = null, composerRootOverride = null) {
+        const composerRoot = composerRootOverride || findUploadComposerRoot(documentRef);
+        if (!composerRoot) return null;
+        const candidates = Array.from(composerRoot.querySelectorAll('input[type="file"]'))
             .map((input) => ({ input, score: uploadInputScore(input, composerRoot, reference) }))
             .filter((candidate) => candidate.score >= 0)
             .sort((left, right) => right.score - left.score);
@@ -2349,12 +2289,31 @@
         return candidates.length ? candidates[0].input : null;
     }
 
-    function uploadReferenceFile(reference, documentRef = document) {
-        const input = findUploadInput(documentRef, reference);
+    function uploadReferenceFile(reference, documentRef = document, composerRoot = null) {
+        const input = findUploadInput(documentRef, reference, composerRoot);
         if (!input) throw fail('chat_upload_input_missing');
 
         setFileInputFiles(input, dataUrlToFile(reference));
         return true;
+    }
+
+    async function ensureChatUploadInput(reference, documentRef, composerRoot, options = {}) {
+        let input = findUploadInput(documentRef, reference, composerRoot);
+        if (input) return input;
+
+        const attachmentControl = findScopedControlByLabels(composerRoot, CHAT_ATTACHMENT_LABELS);
+        if (!attachmentControl) throw fail('chat_upload_control_missing');
+        await clickElementNatively(attachmentControl, { ...options, documentRef });
+        input = await waitForCondition(
+            () => findUploadInput(documentRef, reference, composerRoot),
+            {
+                timeoutMs: Number.isFinite(options.uploadInputTimeoutMs) ? options.uploadInputTimeoutMs : 15000,
+                intervalMs: Number.isFinite(options.intervalMs) ? options.intervalMs : 250,
+                timeoutError: 'chat_upload_input_missing',
+                signal: options.signal
+            }
+        );
+        return input;
     }
 
     function getUploadPreviewSignature(element) {
@@ -2388,9 +2347,10 @@
         return Math.abs(leftCenterX - rightCenterX) <= maxDistance && Math.abs(leftCenterY - rightCenterY) <= maxDistance;
     }
 
-    function getVisibleUploadButtons(documentRef = document) {
-        return Array.from(documentRef.querySelectorAll('button[aria-label]')).filter(
-            (button) => buttonMatchesLabel(button, ['Attach', 'Upload']) && isVisibleElement(button) && isEnabledButton(button)
+    function getVisibleUploadButtons(documentRef = document, composerRoot = null) {
+        const queryRoot = composerRoot || documentRef;
+        return Array.from(queryRoot.querySelectorAll('button, [role="button"]')).filter(
+            (button) => controlMatchesAnyLabel(button, CHAT_ATTACHMENT_LABELS) && isVisibleElement(button) && isEnabledButton(button)
         );
     }
 
@@ -2399,11 +2359,12 @@
         return uploadButtons.some((button) => rectsAreNear(rect, button.getBoundingClientRect()));
     }
 
-    function collectUploadPreviewCandidates(documentRef = document, reference = null) {
-        const composerRoot = findUploadComposerRoot(documentRef);
-        const uploadButtons = getVisibleUploadButtons(documentRef);
+    function collectUploadPreviewCandidates(documentRef = document, reference = null, composerRootOverride = null) {
+        const composerRoot = composerRootOverride || findUploadComposerRoot(documentRef);
+        if (!composerRoot) return [];
+        const uploadButtons = getVisibleUploadButtons(documentRef, composerRoot);
         const mediaKind = getReferenceKind(reference);
-        const mediaElements = Array.from(documentRef.querySelectorAll('img, video')).filter((element) => {
+        const mediaElements = Array.from(composerRoot.querySelectorAll('img, video')).filter((element) => {
             const src = String(element.currentSrc || element.src || element.getAttribute('poster') || '');
             const rect = element.getBoundingClientRect();
             const maxVisibleSize = Math.max(
@@ -2433,7 +2394,7 @@
 
         const fileName = String(reference && reference.name || '').trim().toLowerCase();
         const textChips = fileName
-            ? Array.from(documentRef.querySelectorAll('button, [role="button"], [data-testid], [class*="file"], [class*="upload"]')).filter((element) => {
+            ? Array.from(composerRoot.querySelectorAll('button, [role="button"], [data-testid], [class*="file"], [class*="upload"]')).filter((element) => {
                 if (isInsidePowerToolsOverlay(element) || !isVisibleElement(element)) return false;
                 if (!(composerRoot.contains(element) || isNearUploadButton(element, uploadButtons))) return false;
                 return String(element.textContent || '').toLowerCase().includes(fileName);
@@ -2445,8 +2406,8 @@
             : mediaElements;
     }
 
-    function createUploadPreviewSnapshot(documentRef = document, reference = null) {
-        const candidates = collectUploadPreviewCandidates(documentRef, reference);
+    function createUploadPreviewSnapshot(documentRef = document, reference = null, composerRoot = null) {
+        const candidates = collectUploadPreviewCandidates(documentRef, reference, composerRoot);
         const elementSignatures = new WeakMap();
         candidates.forEach((candidate) => {
             elementSignatures.set(candidate, getUploadPreviewSignature(candidate));
@@ -2459,8 +2420,8 @@
         };
     }
 
-    function hasUploadPreview(documentRef = document, previousSnapshot = null, reference = null) {
-        return collectUploadPreviewCandidates(documentRef, reference).some((img) => {
+    function hasUploadPreview(documentRef = document, previousSnapshot = null, reference = null, composerRoot = null) {
+        return collectUploadPreviewCandidates(documentRef, reference, composerRoot).some((img) => {
             if (!previousSnapshot) return true;
             const signature = getUploadPreviewSignature(img);
             if (previousSnapshot.elementSignatures && previousSnapshot.elementSignatures.has(img)) {
@@ -2510,6 +2471,25 @@
         return workflowUtils.extractFinalImaginePrompt(texts[texts.length - 1]);
     }
 
+    async function waitForGeneratedChatPrompt(documentRef, mediaKind, options = {}) {
+        return await waitForCondition(
+            () => {
+                try {
+                    return extractAssistantPromptFromPage(documentRef, mediaKind);
+                } catch (error) {
+                    if (error && error.message === 'chat_prompt_marker_missing') return null;
+                    throw error;
+                }
+            },
+            {
+                timeoutMs: Number.isFinite(options.timeoutMs) ? options.timeoutMs : 120000,
+                intervalMs: Number.isFinite(options.intervalMs) ? options.intervalMs : 750,
+                timeoutError: 'chat_answer_timeout',
+                signal: options.signal
+            }
+        );
+    }
+
     async function runChatPromptStep(request, options = {}) {
         const workflowUtils = getUtils(options);
         const documentRef = getDocumentRef(options);
@@ -2528,6 +2508,19 @@
         const editorInjectionTimeoutMs = Number.isFinite(options.editorInjectionTimeoutMs)
             ? options.editorInjectionTimeoutMs
             : Math.min(submitTimeoutMs, 10000);
+        await confirmOperationDocument(options);
+        if (request.recoverOnly === true) {
+            const mediaKind = request.referenceKind === 'video' ? 'video' : 'image';
+            return {
+                ok: true,
+                runId: request.runId,
+                generatedPrompt: await waitForGeneratedChatPrompt(documentRef, mediaKind, {
+                    ...options,
+                    timeoutMs,
+                    intervalMs
+                })
+            };
+        }
         let reference = workflowUtils.normalizeRecreateReference(request.reference);
         const mediaKind = getReferenceKind(reference);
         throwIfAborted(options.signal);
@@ -2548,28 +2541,33 @@
         const editorVerificationText = mediaKind === 'video'
             ? ['You are creating one ready-to-paste Grok Imagine Video prompt', workflowUtils.FINAL_VIDEO_PROMPT_MARKER]
             : ['You are creating a Grok Imagine prompt from the attached reference image.', workflowUtils.FINAL_PROMPT_MARKER];
+        const composerRoot = await waitForCondition(() => findUploadComposerRoot(documentRef), {
+            timeoutMs: editorTimeoutMs,
+            intervalMs,
+            timeoutError: 'chat_composer_missing',
+            signal: options.signal
+        });
 
         if (request.bestPracticesEnabled) {
             throwIfAborted(options.signal);
-            ensureGrokSearchEnabled(documentRef);
+            ensureGrokSearchEnabled(documentRef, composerRoot);
         }
 
-        const previewSnapshot = createUploadPreviewSnapshot(documentRef, reference);
-        await waitForCondition(() => findUploadInput(documentRef, reference), {
-            timeoutMs: uploadInputTimeoutMs,
-            intervalMs,
-            timeoutError: 'chat_upload_input_missing',
-            signal: options.signal
+        const previewSnapshot = createUploadPreviewSnapshot(documentRef, reference, composerRoot);
+        await ensureChatUploadInput(reference, documentRef, composerRoot, {
+            ...options,
+            uploadInputTimeoutMs,
+            intervalMs
         });
         throwIfAborted(options.signal);
-        uploadReferenceFile(reference, documentRef);
-        await waitForCondition(() => hasUploadPreview(documentRef, previewSnapshot, reference), {
+        uploadReferenceFile(reference, documentRef, composerRoot);
+        await waitForCondition(() => hasUploadPreview(documentRef, previewSnapshot, reference, composerRoot), {
             timeoutMs: uploadPreviewTimeoutMs,
             intervalMs,
             timeoutError: 'chat_upload_preview_missing',
             signal: options.signal
         });
-        await waitForCondition(() => findEditor(documentRef), {
+        await waitForCondition(() => findEditor(documentRef, composerRoot), {
             timeoutMs: editorTimeoutMs,
             intervalMs,
             timeoutError: 'chat_editor_missing',
@@ -2577,13 +2575,14 @@
         });
 
         throwIfAborted(options.signal);
-        if (!injectEditorText(instruction, documentRef)) {
+        const chatEditor = findEditor(documentRef, composerRoot);
+        if (!injectEditorText(instruction, documentRef, chatEditor)) {
             throw fail('chat_editor_missing');
         }
 
         await waitForCondition(
             () => {
-                const editor = findEditor(documentRef);
+                const editor = findEditor(documentRef, composerRoot);
                 return (
                     editor &&
                     editorTextIncludesAll(editor, editorVerificationText)
@@ -2597,31 +2596,29 @@
             }
         );
 
-        const submitButton = await waitForCondition(() => findVisibleButtonByLabels(['Submit', 'Send'], documentRef), {
+        const submitButton = await waitForCondition(
+            () => findVisibleButtonByLabels(['Submit', 'Send'], documentRef, composerRoot), {
             timeoutMs: submitTimeoutMs,
             intervalMs,
             timeoutError: 'chat_submit_missing',
             signal: options.signal
-        });
-        throwIfAborted(options.signal);
-        await clickChatSubmitButton(submitButton, documentRef, workflowUtils, options);
-
-        const generatedPrompt = await waitForCondition(
-            () => {
-                try {
-                    return extractAssistantPromptFromPage(documentRef, mediaKind);
-                } catch (error) {
-                    if (error && error.message === 'chat_prompt_marker_missing') return null;
-                    throw error;
-                }
-            },
-            {
-                timeoutMs,
-                intervalMs,
-                timeoutError: 'chat_answer_timeout',
-                signal: options.signal
             }
         );
+        throwIfAborted(options.signal);
+        await clickChatSubmitButton(
+            submitButton,
+            documentRef,
+            workflowUtils,
+            mediaKind,
+            composerRoot,
+            options
+        );
+
+        const generatedPrompt = await waitForGeneratedChatPrompt(documentRef, mediaKind, {
+            ...options,
+            timeoutMs,
+            intervalMs
+        });
 
         return {
             ok: true,
@@ -2672,10 +2669,13 @@
         return ariaChecked === 'true' || dataState === 'checked' || dataState === 'active' || ariaPressed === 'true';
     }
 
-    function findImagineModeControl(label, documentRef = document) {
+    function findImagineModeControl(label, documentRef = document, scopeRoot = null) {
         const expected = String(label || '').trim().toLowerCase();
+        const queryRoot = scopeRoot && typeof scopeRoot.querySelectorAll === 'function'
+            ? scopeRoot
+            : documentRef;
         const controls = Array.from(
-            documentRef.querySelectorAll('button, [role="radio"], [role="tab"], label, input[type="radio"]')
+            queryRoot.querySelectorAll('button, [role="radio"], [role="tab"], label, input[type="radio"]')
         ).filter((element) => {
             if (isInsidePowerToolsOverlay(element)) return false;
             if (element.matches && element.matches('input[type="radio"]')) {
@@ -2689,24 +2689,51 @@
         return controls[0] || null;
     }
 
-    function selectImagineMode(mediaKind, documentRef = document) {
-        const label = mediaKind === 'video' ? 'Video' : 'Image';
-        const control = findImagineModeControl(label, documentRef);
-        if (!control) {
-            if (mediaKind === 'video') throw fail('imagine_video_mode_missing');
-            return false;
-        }
+    function findImagineComposerRoot(editor, documentRef = document) {
+        if (!editor) return null;
+        const hasImagineControls = (candidate) => {
+            if (!candidate || !isVisibleElement(candidate)) return false;
+            const submit = findVisibleButtonByLabels(['Submit', 'Send'], documentRef, candidate);
+            const imageMode = findImagineModeControl('Image', documentRef, candidate);
+            const videoMode = findImagineModeControl('Video', documentRef, candidate);
+            return !!(submit && imageMode && videoMode);
+        };
+        const queryBar = editor.closest?.('.query-bar');
+        if (hasImagineControls(queryBar)) return queryBar;
 
-        if (control.matches && control.matches('input[type="radio"]')) {
-            if (!control.checked) {
-                control.checked = true;
-                control.dispatchEvent(createDomEvent(documentRef, 'input'));
-                control.dispatchEvent(createDomEvent(documentRef, 'change'));
+        let current = editor.parentElement;
+        while (current && current !== documentRef.body && current !== documentRef.documentElement) {
+            if (isComposerRootCandidate(current, editor, documentRef) && hasImagineControls(current)) {
+                return current;
             }
-            return true;
+            current = current.parentElement;
+        }
+        return null;
+    }
+
+    async function selectImagineMode(mediaKind, documentRef = document, composerRoot = null, options = {}) {
+        const label = mediaKind === 'video' ? 'Video' : 'Image';
+        const control = findImagineModeControl(label, documentRef, composerRoot);
+        if (!control) {
+            throw fail(mediaKind === 'video' ? 'imagine_video_mode_missing' : 'imagine_image_mode_missing');
         }
 
-        if (!controlLooksSelected(control)) safelyClickButton(control);
+        if (!controlLooksSelected(control)) {
+            const clickTarget = control.matches?.('input[type="radio"]')
+                ? (control.id && composerRoot?.querySelector?.(`label[for="${control.id}"]`)) || control
+                : control;
+            await clickElementNatively(clickTarget, { ...options, documentRef });
+        }
+
+        await waitForCondition(() => {
+            const current = findImagineModeControl(label, documentRef, composerRoot);
+            return current && controlLooksSelected(current);
+        }, {
+            timeoutMs: Number.isFinite(options.modeSelectionTimeoutMs) ? options.modeSelectionTimeoutMs : 5000,
+            intervalMs: Number.isFinite(options.intervalMs) ? options.intervalMs : 100,
+            timeoutError: 'imagine_mode_selection_failed',
+            signal: options.signal
+        });
         return true;
     }
 
@@ -2744,15 +2771,26 @@
             ? 'video'
             : 'image';
         const promptVerificationText = getGeneratedPromptVerificationText(request.generatedPrompt);
+        const startingUrl = String(getDocumentLocation(documentRef).href || '');
 
+        await confirmOperationDocument(options);
         throwIfAborted(options.signal);
-        selectImagineMode(mediaKind, documentRef);
+        const imagineEditor = await waitForCondition(() => findEditor(documentRef), {
+            timeoutMs,
+            intervalMs,
+            timeoutError: 'imagine_editor_missing',
+            signal: options.signal
+        });
+        const composerRoot = findImagineComposerRoot(imagineEditor, documentRef);
+        if (!composerRoot) throw fail('imagine_composer_missing');
+        await selectImagineMode(mediaKind, documentRef, composerRoot, options);
         throwIfAborted(options.signal);
-        if (!injectEditorText(request.generatedPrompt, documentRef)) throw fail('imagine_editor_missing');
+        const activeImagineEditor = findEditor(documentRef, composerRoot);
+        if (!injectEditorText(request.generatedPrompt, documentRef, activeImagineEditor)) throw fail('imagine_editor_missing');
 
         await waitForCondition(
             () => {
-                const editor = findEditor(documentRef);
+                const editor = findEditor(documentRef, composerRoot);
                 return editor && editorTextIncludes(editor, promptVerificationText);
             },
             {
@@ -2763,7 +2801,7 @@
             }
         );
 
-        await waitForCondition(() => findVisibleButtonByLabels(['Submit'], documentRef), {
+        await waitForCondition(() => findVisibleButtonByLabels(['Submit', 'Send'], documentRef, composerRoot), {
             timeoutMs,
             intervalMs,
             timeoutError: 'imagine_submit_disabled',
@@ -2774,18 +2812,54 @@
         const previousResultSnapshot = createGeneratedResultSnapshot(documentRef, mediaKind);
         await recordResultBaseline(previousResultSnapshot, mediaKind, options);
         throwIfAborted(options.signal);
-        const submitButton = findVisibleButtonByLabels(['Submit'], documentRef);
+        const submitButton = findVisibleButtonByLabels(['Submit', 'Send'], documentRef, composerRoot);
         setPromptCaptureHint(documentRef, mediaKind);
         try {
-            await clickElementNatively(submitButton, { ...options, documentRef });
+            if (typeof options.nativeClick === 'function') {
+                await recordSubmissionState('dispatching', options);
+            }
+            await clickElementNatively(submitButton, {
+                ...options,
+                documentRef,
+                submissionState: 'dispatching'
+            });
+            await recordSubmissionState('click_sent', options);
+            await waitForCondition(() => {
+                const currentUrl = String(getDocumentLocation(documentRef).href || '');
+                if (currentUrl && startingUrl && currentUrl !== startingUrl) return true;
+                const currentEditor = findEditor(documentRef, composerRoot);
+                if (!currentEditor || !editorTextIncludes(currentEditor, promptVerificationText)) return true;
+                return collectGeneratedResultCandidates(documentRef, mediaKind)
+                    .some((candidate) => resultCandidateIsNew(candidate, previousResultSnapshot));
+            }, {
+                timeoutMs: Math.max(timeoutMs, 30000),
+                intervalMs,
+                timeoutError: 'imagine_submission_unverified',
+                signal: options.signal
+            });
+            await recordSubmissionState('provider_accepted', options);
         } catch (error) {
             if (isAbortFailure(error, options.signal)) throw abortError();
+            if (error?.clickState === 'not_dispatched') {
+                await recordSubmissionState('not_dispatched', options).catch(() => {});
+            } else if (error?.clickState === 'click_sent') {
+                await recordSubmissionState('click_sent', options).catch(() => {});
+            } else if (error?.clickState === 'unknown') {
+                await recordSubmissionState('unknown', options).catch(() => {});
+            }
             const code = String((error && error.code) || '');
-            throw fail(code.startsWith('native_click_') ? code : 'imagine_submit_failed');
+            throw fail(
+                code.startsWith('native_click_') || code.startsWith('recreate_')
+                    ? code
+                    : 'imagine_submit_failed'
+            );
         } finally {
             clearPromptCaptureHint(documentRef);
         }
-        const result = await waitForImagineResult(documentRef, previousResultSnapshot, {
+        const result = await waitForImagineResult(
+            documentRef,
+            previousResultSnapshot,
+            {
             resultTimeoutMs,
             placeholderTimeoutMs,
             resultMediaFetchTimeoutMs,
@@ -2797,7 +2871,9 @@
             now: options.now,
             signal: options.signal,
             authority: options.authority
-        });
+            }
+        );
+        await recordSubmissionState('result_claimed', options);
 
         return {
             ok: true,
@@ -2831,8 +2907,9 @@
             ? 'video'
             : 'image';
 
+        await confirmOperationDocument(options);
         throwIfAborted(options.signal);
-        if (!pageLooksLikeImaginePost(documentRef)) throw fail('imagine_post_missing');
+        if (!pageLooksLikeImagineResultSurface(documentRef)) throw fail('imagine_result_surface_missing');
 
         const previousSnapshot = {
             elements: new WeakSet(),
@@ -2841,7 +2918,10 @@
             persistedSignatures: new Set(Array.isArray(request.baselineSignatures) ? request.baselineSignatures : []),
             assetIds: new Set(Array.isArray(request.baselineAssetIds) ? request.baselineAssetIds : [])
         };
-        const result = await waitForImagineResult(documentRef, previousSnapshot, {
+        const result = await waitForImagineResult(
+            documentRef,
+            previousSnapshot,
+            {
             ...options,
             resultTimeoutMs,
             placeholderTimeoutMs,
@@ -2853,7 +2933,8 @@
             now: options.now,
             signal: options.signal,
             authority: options.authority
-        });
+            }
+        );
 
         return {
             ok: true,

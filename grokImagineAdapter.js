@@ -72,7 +72,9 @@
     }
 
     function getOwnedPostLinks(card) {
-        return Array.from(card?.querySelectorAll?.('a[href*="/imagine/post/"]') || [])
+        const links = Array.from(card?.querySelectorAll?.('a[href*="/imagine/post/"]') || []);
+        if (card?.matches?.('a[href*="/imagine/post/"]')) links.unshift(card);
+        return Array.from(new Set(links))
             .filter((link) => closestGalleryCard(link) === card);
     }
 
@@ -86,6 +88,33 @@
         return Array.from(cards).filter((card) => (
             getGallerySourceMedia(card, getOwnedPostLinks(card)).length > 0
         ));
+    }
+
+    function resolveGallerySurface({ root, surface } = {}) {
+        if (surface !== 'results_gallery' && surface !== 'saved_gallery') {
+            return { status: 'unsupported', reason: 'gallery_surface_unsupported' };
+        }
+        const cards = getGalleryCards(root);
+        if (cards.length === 0) {
+            return { status: 'missing', reason: 'gallery_items_missing' };
+        }
+        const roleLists = new Set(cards.map((card) => card.closest('[role="list"]')).filter(Boolean));
+        if (roleLists.size > 1) {
+            return { status: 'ambiguous', reason: 'gallery_root_ambiguous' };
+        }
+        const parentRoots = roleLists.size === 0
+            ? new Set(cards.map((card) => card.parentElement).filter(Boolean))
+            : null;
+        if (parentRoots && parentRoots.size !== 1) {
+            return { status: 'ambiguous', reason: 'gallery_root_ambiguous' };
+        }
+        const galleryRoot = roleLists.size === 1
+            ? Array.from(roleLists)[0]
+            : Array.from(parentRoots)[0];
+        if (!galleryRoot || cards.some((card) => !galleryRoot.contains(card))) {
+            return { status: 'ambiguous', reason: 'gallery_root_ambiguous' };
+        }
+        return { status: 'matched', galleryRoot, cards };
     }
 
     function getPostSourceMedia(postLinks) {
@@ -138,9 +167,18 @@
             || card.querySelector('[data-media-type]')?.getAttribute('data-media-type')
             || ''
         ).trim().toLowerCase();
+        const hasOwnedMakeVideoAction = Array.from(card.querySelectorAll('button[aria-label]'))
+            .some((button) => closestGalleryCard(button) === card
+                && String(button.getAttribute('aria-label') || '').trim().toLowerCase()
+                    === 'make video');
+        const hasVideoPreview = mediaElements.some((media) => {
+            const url = toUrl(getMediaSource(media));
+            return url?.pathname.toLowerCase().endsWith('/preview_image.jpg');
+        });
         const mediaKind = explicitMediaKind === 'image' || explicitMediaKind === 'video'
             ? explicitMediaKind
             : mediaElements.some((media) => media.tagName?.toLowerCase() === 'video')
+                || (!hasOwnedMakeVideoAction && hasVideoPreview)
                 ? 'video'
                 : 'image';
 
@@ -169,12 +207,11 @@
     }
 
     function listGalleryItems({ root, surface } = {}) {
-        if (surface !== 'results_gallery' && surface !== 'saved_gallery') {
-            return { status: 'unsupported', reason: 'gallery_surface_unsupported', items: [] };
-        }
+        const gallery = resolveGallerySurface({ root, surface });
+        if (gallery.status !== 'matched') return { ...gallery, items: [] };
 
         const parsed = [];
-        for (const card of getGalleryCards(root)) {
+        for (const card of gallery.cards) {
             const result = parseGalleryCard(card);
             if (result.status !== 'ok') {
                 return { status: 'ambiguous', reason: result.reason, items: [] };
@@ -188,7 +225,7 @@
         if (new Set(identityKeys).size !== identityKeys.length) {
             return { status: 'ambiguous', reason: 'duplicate_gallery_identity', items: [] };
         }
-        if (new Set(assetIds).size !== assetIds.length) {
+        if (surface !== 'saved_gallery' && new Set(assetIds).size !== assetIds.length) {
             return { status: 'ambiguous', reason: 'duplicate_asset_identity', items: [] };
         }
         if (new Set(postIds).size !== postIds.length) {
@@ -300,7 +337,21 @@
             if (closestGalleryCard(frame)) continue;
             containers.add(frame.closest('article') || frame.parentElement || frame);
         }
+        for (const article of root.querySelectorAll('article')) {
+            if (closestGalleryCard(article)) continue;
+            if (getDirectDetailSourceMedia(article).length > 0) containers.add(article);
+        }
         return Array.from(containers);
+    }
+
+    function getDirectDetailSourceMedia(container) {
+        return Array.from(container?.querySelectorAll?.(SOURCE_MEDIA_SELECTOR) || [])
+            .filter((media) => media.closest('article') === container
+                && !media.closest(
+                    '.query-bar, aside[aria-label="Post details"], [role="dialog"], '
+                    + '[data-radix-popper-content-wrapper], nav'
+                )
+                && !!getAssetId(getMediaSource(media)));
     }
 
     function getLegacyDetailSourceMedia(container, postLinks) {
@@ -310,10 +361,20 @@
         const frames = Array.from(container.querySelectorAll('[data-media-frame]'));
         if (container.matches?.('[data-media-frame]')) frames.unshift(container);
         const uniqueFrames = Array.from(new Set(frames));
-        if (uniqueFrames.length !== 1) return [];
-        return Array.from(uniqueFrames[0].querySelectorAll('img, video'))
-            .filter((media) => media.closest('[data-media-frame]') === uniqueFrames[0]
-                && !!getAssetId(getMediaSource(media)));
+        if (uniqueFrames.length === 1) {
+            return Array.from(uniqueFrames[0].querySelectorAll('img, video'))
+                .filter((media) => media.closest('[data-media-frame]') === uniqueFrames[0]
+                    && !!getAssetId(getMediaSource(media)));
+        }
+        if (uniqueFrames.length > 1) return [];
+
+        const directMedia = getDirectDetailSourceMedia(container);
+        const directAssetIds = new Set(
+            directMedia.map((media) => getAssetId(getMediaSource(media))).filter(Boolean)
+        );
+        if (directAssetIds.size !== 1) return [];
+        const sourceAssetId = Array.from(directAssetIds)[0];
+        return directMedia.filter((media) => getAssetId(getMediaSource(media)) === sourceAssetId);
     }
 
     function parseLegacyDetailSource(container, fallbackPostId = '') {
@@ -402,7 +463,8 @@
             if (parsed.status !== 'ok' || conversationIds.size > 1) {
                 const hasDetailEvidence = postLinks.length > 0
                     || container.matches?.('[data-media-frame]')
-                    || !!container.querySelector('[data-media-frame]');
+                    || !!container.querySelector('[data-media-frame]')
+                    || getDirectDetailSourceMedia(container).length > 0;
                 if (!hasDetailEvidence) continue;
                 sourceAmbiguous = true;
                 continue;
@@ -499,8 +561,18 @@
         if (hintSupplied && !normalizedSourcePostIdHint) {
             return { status: 'missing', reason: 'agent_source_post_hint_invalid' };
         }
-        const agentDomHasNoPostIdContext = normalizedSourcePostIdHint || conversationId;
-        if (!agentDomHasNoPostIdContext) {
+        const linkedPostIds = new Set(Array.from(selectedNode.querySelectorAll('a[href*="/imagine/post/"]'))
+            .map((link) => getPostId(link.href))
+            .filter(Boolean));
+        if (linkedPostIds.size > 1) {
+            return { status: 'ambiguous', reason: 'agent_source_post_context_ambiguous' };
+        }
+        const linkedPostId = Array.from(linkedPostIds)[0] || '';
+        if (normalizedSourcePostIdHint && linkedPostId && normalizedSourcePostIdHint !== linkedPostId) {
+            return { status: 'ambiguous', reason: 'agent_source_post_hint_mismatch' };
+        }
+        const sourcePostId = normalizedSourcePostIdHint || linkedPostId;
+        if (!sourcePostId) {
             return { status: 'missing', reason: 'agent_source_post_context_missing' };
         }
 
@@ -512,7 +584,7 @@
             descriptor: createCurrentSourceDescriptor({
                 surface: 'agent_media',
                 sourceAssetId,
-                sourcePostId: agentDomHasNoPostIdContext,
+                sourcePostId,
                 conversationId,
                 mediaKind: getDescriptorMediaKind(selectedNode, sourceMedia),
                 hrefPath: url.pathname,
@@ -552,10 +624,55 @@
         const preferredMedia = matchingMedia.filter(
             (media) => media.tagName?.toLowerCase() === preferredTag
         );
-        if (preferredMedia.length !== 1) {
+        if (preferredMedia.length === 0) {
             return {
-                status: preferredMedia.length > 1 ? 'ambiguous' : 'missing',
-                reason: preferredMedia.length > 1
+                status: 'missing',
+                reason: 'current_source_media_missing'
+            };
+        }
+
+        const scoredMedia = preferredMedia.map((media, index) => {
+            const sourceUrl = getMediaSource(media);
+            const url = toUrl(sourceUrl);
+            const pathname = String(url?.pathname || '').toLowerCase();
+            const isVideo = preferredTag === 'video';
+            const playableVideo = isVideo
+                && Number(media.readyState) >= 1
+                && Number.isFinite(Number(media.duration))
+                && Number(media.duration) > 0
+                && Number(media.videoWidth) > 0
+                && Number(media.videoHeight) > 0;
+            const concreteVideoSource = isVideo
+                && !pathname.endsWith('/preview_image.jpg')
+                && !pathname.endsWith('/poster.jpg')
+                && !pathname.endsWith('/thumbnail.jpg');
+            const loadedImage = !isVideo
+                && media.complete !== false
+                && Number(media.naturalWidth) > 0
+                && Number(media.naturalHeight) > 0;
+            const area = isVideo
+                ? Number(media.videoWidth || 0) * Number(media.videoHeight || 0)
+                : Number(media.naturalWidth || 0) * Number(media.naturalHeight || 0);
+            return {
+                media,
+                sourceUrl,
+                index,
+                score: (playableVideo ? 1000000000 : 0)
+                    + (concreteVideoSource ? 100000000 : 0)
+                    + (loadedImage ? 100000000 : 0)
+                    + Math.max(0, area)
+            };
+        }).sort((left, right) => right.score - left.score || left.index - right.index);
+        const selected = scoredMedia[0];
+        const equallyPreferredSources = new Set(
+            scoredMedia
+                .filter((candidate) => candidate.score === selected.score)
+                .map((candidate) => candidate.sourceUrl)
+        );
+        if (!selected.sourceUrl || equallyPreferredSources.size > 1) {
+            return {
+                status: equallyPreferredSources.size > 1 ? 'ambiguous' : 'missing',
+                reason: equallyPreferredSources.size > 1
                     ? 'current_source_media_ambiguous'
                     : 'current_source_media_missing'
             };
@@ -564,8 +681,8 @@
         return {
             status: 'matched',
             descriptor,
-            media: preferredMedia[0],
-            sourceUrl: getMediaSource(preferredMedia[0])
+            media: selected.media,
+            sourceUrl: selected.sourceUrl
         };
     }
 
@@ -639,16 +756,44 @@
         return { status: 'matched', card: resolved.element, descriptor };
     }
 
+    function ariaLabelMatches(element, expected) {
+        return String(element?.getAttribute?.('aria-label') || '').trim().toLowerCase()
+            === String(expected || '').trim().toLowerCase();
+    }
+
     function ownedButtons(card, ariaLabel) {
         return Array.from(card.querySelectorAll('button[aria-label]'))
             .filter((button) => closestGalleryCard(button) === card
-                && button.getAttribute('aria-label') === ariaLabel);
+                && ariaLabelMatches(button, ariaLabel));
     }
 
-    function getPromptedTriggers(root) {
+    function isResolvedSourceBoundToCurrentPage(root, resolved, descriptor) {
+        const pageUrl = toUrl(root?.defaultView?.location);
+        if (!pageUrl) return false;
+        const sourceAssetId = normalizeUuid(descriptor?.sourceAssetId);
+        const sourcePostId = normalizeUuid(descriptor?.sourcePostId);
+        if (!sourceAssetId || !sourcePostId) return false;
+
+        if (resolved.kind === 'agent_media') {
+            const conversationId = normalizeUuid(descriptor?.conversationId);
+            return resolved.selected === true
+                && !!resolved.sourceNodeId
+                && pageUrl.pathname.startsWith('/imagine/agent/')
+                && (!conversationId || getConversationId(pageUrl) === conversationId);
+        }
+        if (resolved.kind !== 'legacy_detail') return false;
+        const routeId = getPostId(pageUrl);
+        if (routeId !== sourceAssetId && routeId !== sourcePostId) return false;
+        const sourceMedia = Array.from(resolved.element?.querySelectorAll?.('img, video') || [])
+            .filter((media) => getAssetId(getMediaSource(media)) === sourceAssetId);
+        return sourceMedia.length > 0;
+    }
+
+    function getPromptedTriggers(root, resolved, descriptor) {
+        if (!isResolvedSourceBoundToCurrentPage(root, resolved, descriptor)) return [];
         if (!root?.querySelectorAll) return [];
         return Array.from(root.querySelectorAll('button[aria-label][aria-haspopup="menu"]'))
-            .filter((button) => button.getAttribute('aria-label') === 'Make Video'
+            .filter((button) => ariaLabelMatches(button, 'Make Video')
                 && !closestGalleryCard(button)
                 && !button.closest('.react-flow, .react-flow__node-asset, .react-flow__node-toolbar'));
     }
@@ -657,8 +802,9 @@
         if (resolved.kind !== 'agent_media' || !resolved.sourceNodeId) return [];
         return Array.from(root.querySelectorAll('.react-flow__node-toolbar[data-id]'))
             .filter((toolbar) => toolbar.getAttribute('data-id') === resolved.sourceNodeId)
-            .flatMap((toolbar) => Array.from(toolbar.querySelectorAll('button[aria-label="Make Video"]'))
-                .filter((button) => button.closest('.react-flow__node-toolbar') === toolbar));
+            .flatMap((toolbar) => Array.from(toolbar.querySelectorAll('button[aria-label]'))
+                .filter((button) => button.closest('.react-flow__node-toolbar') === toolbar
+                    && ariaLabelMatches(button, 'Make Video')));
     }
 
     function getLinkedOpenMenus(root, trigger) {
@@ -687,6 +833,47 @@
         ));
     }
 
+    function resolvePromptedMenuAction(root, trigger, action) {
+        const menus = getLinkedOpenMenus(root, trigger);
+        if (menus.length > 1) {
+            return { status: 'ambiguous', reason: 'media_action_ambiguous' };
+        }
+        if (menus.length === 1) {
+            const items = action === 'goal_video'
+                ? getExactQuickAnimateItems(menus[0])
+                : getExactAddPromptItems(menus[0]);
+            if (items.length > 1) {
+                return {
+                    status: 'ambiguous',
+                    reason: action === 'goal_video'
+                        ? 'quick_animate_ambiguous'
+                        : 'add_prompt_ambiguous'
+                };
+            }
+            if (items.length === 0) {
+                return {
+                    status: 'missing',
+                    reason: action === 'goal_video'
+                        ? 'quick_animate_missing'
+                        : 'add_prompt_missing'
+                };
+            }
+            return {
+                status: 'matched',
+                stage: action === 'goal_video'
+                    ? 'select_quick_animate'
+                    : 'select_add_prompt',
+                control: items[0]
+            };
+        }
+
+        return {
+            status: 'matched',
+            stage: action === 'goal_video' ? 'open_goal_menu' : 'open_prompt_menu',
+            control: trigger
+        };
+    }
+
     function resolveMediaAction({ root, descriptor, action } = {}) {
         const resolved = resolvePersistedSource(root, descriptor);
         if (resolved.status === 'ambiguous') return resolved;
@@ -712,18 +899,23 @@
         }
 
         if (action === 'goal_video' && resolved.kind === 'agent_media') {
-            const controls = getBoundAgentGoalControls(root, resolved);
+            const boundControls = getBoundAgentGoalControls(root, resolved);
+            const controls = boundControls;
             if (controls.length > 1) {
                 return { status: 'ambiguous', reason: 'media_action_ambiguous' };
             }
             if (controls.length === 0) {
                 return { status: 'missing', reason: 'media_action_missing' };
             }
-            return { status: 'matched', stage: 'submit_direct', control: controls[0] };
+            const control = controls[0];
+            if (control.getAttribute('aria-haspopup') === 'menu') {
+                return resolvePromptedMenuAction(root, control, action);
+            }
+            return { status: 'matched', stage: 'submit_direct', control };
         }
 
         if (action === 'prompted_video' || action === 'goal_video') {
-            const triggers = getPromptedTriggers(root);
+            const triggers = getPromptedTriggers(root, resolved, descriptor);
             if (triggers.length > 1) {
                 return { status: 'ambiguous', reason: 'media_action_ambiguous' };
             }
@@ -731,45 +923,7 @@
                 return { status: 'missing', reason: 'media_action_missing' };
             }
 
-            const trigger = triggers[0];
-            const menus = getLinkedOpenMenus(root, trigger);
-            if (menus.length > 1) {
-                return { status: 'ambiguous', reason: 'media_action_ambiguous' };
-            }
-            if (menus.length === 1) {
-                const items = action === 'goal_video'
-                    ? getExactQuickAnimateItems(menus[0])
-                    : getExactAddPromptItems(menus[0]);
-                if (items.length > 1) {
-                    return {
-                        status: 'ambiguous',
-                        reason: action === 'goal_video'
-                            ? 'quick_animate_ambiguous'
-                            : 'add_prompt_ambiguous'
-                    };
-                }
-                if (items.length === 0) {
-                    return {
-                        status: 'missing',
-                        reason: action === 'goal_video'
-                            ? 'quick_animate_missing'
-                            : 'add_prompt_missing'
-                    };
-                }
-                return {
-                    status: 'matched',
-                    stage: action === 'goal_video'
-                        ? 'select_quick_animate'
-                        : 'select_add_prompt',
-                    control: items[0]
-                };
-            }
-
-            return {
-                status: 'matched',
-                stage: action === 'goal_video' ? 'open_goal_menu' : 'open_prompt_menu',
-                control: trigger
-            };
+            return resolvePromptedMenuAction(root, triggers[0], action);
         }
 
         return { status: 'unsupported', reason: 'media_action_unsupported' };
@@ -798,6 +952,25 @@
         return Array.from(elements);
     }
 
+    function getElementText(element) {
+        return String(element?.innerText || element?.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function isUsageLimitText(text) {
+        return /\busage limit reached\b/i.test(String(text || ''));
+    }
+
+    function isGenerationRejectionText(text) {
+        return /\b(?:usage limit reached|video generation failed|generation failed|generation rejected|request rejected|generation blocked)\b/i
+            .test(String(text || ''));
+    }
+
+    function countUsageLimitSignals(roots) {
+        return roots.filter((root) => isUsageLimitText(getElementText(root))).length;
+    }
+
     function countAcceptedSignals(roots) {
         return collectScopedElements(roots, 'button[aria-label], [role="status"], [role="progressbar"]')
             .filter((element) => {
@@ -813,10 +986,49 @@
     }
 
     function countRejectedSignals(roots) {
-        return collectScopedElements(roots, '[role="alert"]').filter((alert) => {
-            const text = `${alert.getAttribute('aria-label') || ''} ${alert.textContent || ''}`;
-            return /video generation failed|generation failed|rejected|blocked/i.test(text);
-        }).length;
+        const explicitSignals = new Set(
+            collectScopedElements(roots, '[role="alert"], [data-generation-state]')
+                .filter((element) => {
+                    const text = `${element.getAttribute('aria-label') || ''} ${getElementText(element)}`;
+                    return isGenerationRejectionText(text);
+                })
+        );
+        const signals = new Set(explicitSignals);
+        roots.forEach((root) => {
+            const ownsExplicitSignal = Array.from(explicitSignals).some((element) => (
+                element === root || root.contains?.(element)
+            ));
+            if (!ownsExplicitSignal && isGenerationRejectionText(getElementText(root))) {
+                signals.add(root);
+            }
+        });
+        return signals.size;
+    }
+
+    function resolveBoundSubmissionChild(root, receipt) {
+        const pageUrl = toUrl(root?.defaultView?.location);
+        const childPostId = getPostId(pageUrl);
+        const sourceAssetId = normalizeUuid(receipt?.sourceAssetId);
+        const sourcePostId = normalizeUuid(receipt?.sourcePostId);
+        if (!pageUrl
+            || !childPostId
+            || !sourceAssetId
+            || !sourcePostId
+            || childPostId === sourcePostId
+            || childPostId === sourceAssetId) {
+            return { status: 'missing' };
+        }
+
+        const roots = Array.from(root.querySelectorAll?.('article') || []).filter((article) => (
+            Array.from(article.querySelectorAll('img, video')).some((media) => (
+                getAssetId(getMediaSource(media)) === sourceAssetId
+            ))
+        ));
+        if (roots.length > 1) {
+            return { status: 'ambiguous', reason: 'submission_child_ambiguous' };
+        }
+        if (roots.length === 0) return { status: 'missing' };
+        return { status: 'matched', childPostId, roots };
     }
 
     function captureSubmissionReceipt({ root, descriptor, action } = {}) {
@@ -848,6 +1060,14 @@
             return 'ambiguous';
         }
 
+        const child = resolveBoundSubmissionChild(root, receipt);
+        if (child.status === 'ambiguous') return 'ambiguous';
+        if (child.status === 'matched') {
+            if (countUsageLimitSignals(child.roots) > 0) return 'usage_limited';
+            if (countRejectedSignals(child.roots) > 0) return 'rejected';
+            return 'accepted';
+        }
+
         const resolved = resolvePersistedSource(root, receipt);
         if (resolved.status === 'ambiguous') return 'ambiguous';
         if (resolved.status !== 'matched') return 'pending';
@@ -864,6 +1084,7 @@
             normalizeUuid(receipt.sourceAssetId),
             normalizeUuid(receipt.sourcePostId)
         );
+        if (countUsageLimitSignals(scopedRoots) > 0) return 'usage_limited';
         const acceptedCount = countAcceptedSignals(scopedRoots);
         const rejectedCount = countRejectedSignals(scopedRoots);
         const baselineAccepted = Number(receipt.baseline.acceptedCount);
@@ -935,6 +1156,7 @@
         const result = (status, resultAssetId = '') => ({ status, resultAssetId });
         const sourceAssetId = normalizeUuid(expected?.sourceAssetId);
         const sourcePostId = normalizeUuid(expected?.sourcePostId);
+        const resultPostId = normalizeUuid(expected?.resultPostId);
         const mediaKind = expected?.mediaKind === 'image' || expected?.mediaKind === 'video'
             ? expected.mediaKind
             : '';
@@ -954,16 +1176,31 @@
             return result('ambiguous');
         }
 
-        const resolved = resolvePersistedSource(root, { sourceAssetId, sourcePostId });
-        if (resolved.status === 'ambiguous') return result('ambiguous');
-        if (resolved.status !== 'matched') return result('pending');
-
-        const scopedRoots = getSourceScopedRoots(
-            root,
-            resolved,
-            sourceAssetId,
-            sourcePostId
-        );
+        let scopedRoots;
+        const pagePostId = getPostId(root?.defaultView?.location);
+        if (resultPostId && pagePostId === resultPostId) {
+            const resultRoots = Array.from(root.querySelectorAll?.('article') || []);
+            if (resultRoots.length > 1) return result('ambiguous');
+            if (resultRoots.length === 0) return result('pending');
+            scopedRoots = resultRoots;
+        } else {
+            const resolved = resolvePersistedSource(root, { sourceAssetId, sourcePostId });
+            if (resolved.status === 'ambiguous') return result('ambiguous');
+            if (resolved.status === 'matched') {
+                scopedRoots = getSourceScopedRoots(
+                    root,
+                    resolved,
+                    sourceAssetId,
+                    sourcePostId
+                );
+            } else {
+                const child = resolveBoundSubmissionChild(root, { sourceAssetId, sourcePostId });
+                if (child.status === 'ambiguous') return result('ambiguous');
+                if (child.status !== 'matched') return result('pending');
+                scopedRoots = child.roots;
+            }
+        }
+        if (countUsageLimitSignals(scopedRoots) > 0) return result('failed');
         const currentFailureCount = countRejectedSignals(scopedRoots);
         if (currentFailureCount < before.failureCount) return result('ambiguous');
         const newFailureCount = currentFailureCount - before.failureCount;
@@ -1009,6 +1246,7 @@
         inspectGeneratedResult,
         listGalleryItems,
         resolveCurrentSourceMedia,
+        resolveGallerySurface,
         resolveGalleryItem,
         resolveMediaAction
     };

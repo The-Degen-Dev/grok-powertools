@@ -20,6 +20,22 @@ function formatR2BackupDetails(stats = {}) {
     return `${stats.uploaded || 0} uploaded / ${stats.alreadyPresent || 0} already present / ${stats.queued || 0} queued total / ${stats.pendingTransfers ?? 'unknown'} pending / ${stats.errors || 0} errors`;
 }
 
+const MUTATING_WORKFLOW_LABELS = {
+    sync: 'Sync',
+    r2_backup: 'R2 Backup',
+    quick_batch: 'Quick Batch',
+    prompted_batch: 'Prompted Batch',
+    video_goal: 'Video Goal',
+    recreate: 'Recreate',
+    template_batch: 'Template Batch',
+    quality_repeat: 'Quality Repeat',
+    authority_conflict: 'workflow authority conflict'
+};
+
+function getMutatingWorkflowLabel(kind) {
+    return MUTATING_WORKFLOW_LABELS[kind] || 'another workflow';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -48,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const cloudClearBtn = document.getElementById('cloudClearBtn');
     const cloudMediaCanaryBtn = document.getElementById('cloudMediaCanaryBtn');
     const cloudMediaBackupBtn = document.getElementById('cloudMediaBackupBtn');
+    const resetProcessedIdsBtn = document.getElementById('resetProcessedIdsBtn');
     const r2BackupProgress = document.getElementById('r2BackupProgress');
     const r2BackupStatus = document.getElementById('r2BackupStatus');
     const r2BackupDetails = document.getElementById('r2BackupDetails');
@@ -83,21 +100,100 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let cloudConfig = { ...DEFAULT_CLOUD_CONFIG };
     let cloudState = { ...DEFAULT_CLOUD_STATE };
+    let activeWorkflowStatus = { status: 'idle', activeWorkflow: null };
+
+    function sendRuntimeRequest(message) {
+        return new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage(message, (response) => {
+                const error = chrome.runtime.lastError;
+                if (error) reject(new Error(error.message));
+                else resolve(response);
+            });
+        });
+    }
+
+    async function updateGlobalSetting(key, value) {
+        const response = await sendRuntimeRequest({
+            action: 'GLOBAL_SETTINGS_PATCH',
+            updates: { [key]: value }
+        });
+        if (response?.status !== 'ok') throw new Error(response?.error || 'settings_patch_failed');
+        return response.settings;
+    }
+
+    function isScrapeWorkflowActive(workflow = activeWorkflowStatus.activeWorkflow) {
+        return workflow?.kind === 'sync' || workflow?.kind === 'r2_backup';
+    }
+
+    function applyScrapeMutationLock(workflow = activeWorkflowStatus.activeWorkflow) {
+        const locked = isScrapeWorkflowActive(workflow);
+        [
+            downloadPathInput,
+            cloudModeSelect,
+            cloudWorkerUrlInput,
+            cloudApiKeyInput,
+            cloudKeyPrefixInput,
+            cloudTestBtn,
+            cloudRetryBtn,
+            cloudBackfillBtn,
+            resetProcessedIdsBtn
+        ].forEach((control) => {
+            if (control) control.disabled = locked;
+        });
+    }
 
     function reconcileScrapeState(fallbackIsRunning = null) {
-        chrome.runtime.sendMessage({ action: 'GET_SCRAPE_STATUS' }, (response) => {
+        chrome.runtime.sendMessage({ action: 'GET_ACTIVE_WORKFLOW_STATUS' }, (response) => {
             if (chrome.runtime.lastError || !response || response.status === 'error') {
                 if (typeof fallbackIsRunning === 'boolean') setRunningState(fallbackIsRunning);
                 return;
             }
-            if (response.status === 'running') {
-                setRunningState(true);
-            } else if (response.status === 'starting') {
-                setStartingState();
-            } else if (response.status === 'stopping') {
-                setStoppingState();
-            } else if (response.status === 'idle') {
+            activeWorkflowStatus = response;
+            const workflow = response.activeWorkflow;
+            applyScrapeMutationLock(workflow);
+            if (response.status === 'idle' || !workflow) {
                 setRunningState(false);
+                cloudMediaCanaryBtn.disabled = false;
+                cloudMediaBackupBtn.disabled = false;
+                r2BackupStopBtn.style.display = 'none';
+                r2BackupStopBtn.disabled = false;
+                r2BackupStopBtn.textContent = 'Stop Backup';
+                return;
+            }
+            if (workflow.kind === 'sync' && workflow.isOwner && workflow.status === 'running') {
+                setRunningState(true);
+                cloudMediaCanaryBtn.disabled = true;
+                cloudMediaBackupBtn.disabled = true;
+            } else if (workflow.kind === 'sync' && workflow.isOwner && workflow.status === 'starting') {
+                setStartingState();
+                cloudMediaCanaryBtn.disabled = true;
+                cloudMediaBackupBtn.disabled = true;
+            } else if (workflow.kind === 'sync' && workflow.isOwner && workflow.status === 'stopping') {
+                setStoppingState();
+                stopBtn.disabled = false;
+                statusText.textContent = 'Still stopping. Press Stop to retry.';
+                cloudMediaCanaryBtn.disabled = true;
+                cloudMediaBackupBtn.disabled = true;
+            } else if (workflow.kind === 'r2_backup') {
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+                statusText.textContent = workflow.isOwner
+                    ? `Blocked by ${getMutatingWorkflowLabel(workflow.kind)}`
+                    : `${getMutatingWorkflowLabel(workflow.kind)} active in another Grok tab`;
+                cloudMediaCanaryBtn.disabled = true;
+                cloudMediaBackupBtn.disabled = true;
+                r2BackupProgress.style.display = 'block';
+                r2BackupStatus.textContent = workflow.status === 'stopping' ? 'Stopping...' : 'Running...';
+                r2BackupStopBtn.style.display = workflow.isOwner ? 'inline-block' : 'none';
+                r2BackupStopBtn.disabled = false;
+                r2BackupStopBtn.textContent = workflow.status === 'stopping' ? 'Retry Stop' : 'Stop Backup';
+            } else {
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+                statusText.textContent = `Blocked by ${getMutatingWorkflowLabel(workflow.kind)}`;
+                cloudMediaCanaryBtn.disabled = true;
+                cloudMediaBackupBtn.disabled = true;
+                r2BackupStopBtn.style.display = 'none';
             }
         });
     }
@@ -121,8 +217,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Load settings
-        autoRetryCheckbox.checked = result.autoRetryEnabled || false;
+        autoRetryCheckbox.checked = typeof result.autoRetryEnabled === 'boolean'
+            ? result.autoRetryEnabled
+            : true;
         maxRetriesInput.value = result.retryMaxCount || 3;
+        chrome.storage.sync.get(['gptGlobalSettings'], (syncResult) => {
+            const settings = syncResult.gptGlobalSettings || {};
+            if (typeof settings.autoRetryEnabled === 'boolean') {
+                autoRetryCheckbox.checked = settings.autoRetryEnabled;
+            }
+            if (Number.isFinite(settings.maxRetries)) {
+                maxRetriesInput.value = settings.maxRetries;
+            }
+        });
         downloadPathInput.value = result.downloadPath || 'GrokVault';
 
         cloudConfig = normalizeCloudConfig(result.cloudConfig);
@@ -153,35 +260,68 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response && response.status === 'started') {
                 setRunningState(true);
             } else {
-                setRunningState(false);
                 addLog(response?.error || 'Failed to start sync.', 'error');
             }
+            reconcileScrapeState();
         });
     });
 
     stopBtn.addEventListener('click', () => {
+        const workflow = activeWorkflowStatus.activeWorkflow;
+        if (workflow?.kind !== 'sync' || !workflow.authority) {
+            addLog('Sync authority changed. Reopen the popup and try again.', 'error');
+            reconcileScrapeState();
+            return;
+        }
         setStoppingState();
-        chrome.runtime.sendMessage({ action: 'STOP_SCRAPE' }, (response) => {
+        chrome.runtime.sendMessage({
+            action: 'STOP_SCRAPE',
+            ...workflow.authority
+        }, (response) => {
             if (response?.status === 'stopped') {
                 setRunningState(false);
+                if (response.refreshOwnerRecommended) {
+                    addLog('Sync stopped. Refresh the owner Grok tab before starting another run.', 'warning');
+                }
+            } else if (response?.status === 'stopping') {
+                addLog('Sync is still stopping. Refresh the owner Grok tab, then use Retry Stop.', 'warning');
             } else {
-                setRunningState(true);
                 addLog(response?.error || 'Failed to stop sync.', 'error');
             }
+            reconcileScrapeState();
         });
     });
 
     // Save Video Settings on Change
-    autoRetryCheckbox.addEventListener('change', () => {
+    autoRetryCheckbox.addEventListener('change', async () => {
         const enabled = autoRetryCheckbox.checked;
-        chrome.storage.local.set({ autoRetryEnabled: enabled });
-        addLog(`Auto-Retry ${enabled ? 'Enabled' : 'Disabled'}`);
+        try {
+            await updateGlobalSetting('autoRetryEnabled', enabled);
+            addLog(`Auto-Retry ${enabled ? 'Enabled' : 'Disabled'}`);
+        } catch {
+            addLog('Failed to save Auto-Retry setting.', 'error');
+        }
     });
 
-    maxRetriesInput.addEventListener('change', () => {
+    maxRetriesInput.addEventListener('change', async () => {
         const count = parseInt(maxRetriesInput.value, 10) || 3;
-        chrome.storage.local.set({ retryMaxCount: count });
-        addLog(`Max Retries set to ${count}`);
+        try {
+            await updateGlobalSetting('maxRetries', count);
+            addLog(`Max Retries set to ${count}`);
+        } catch {
+            addLog('Failed to save Max Retries setting.', 'error');
+        }
+    });
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== 'sync' || !changes.gptGlobalSettings) return;
+        const settings = changes.gptGlobalSettings.newValue || {};
+        if (typeof settings.autoRetryEnabled === 'boolean') {
+            autoRetryCheckbox.checked = settings.autoRetryEnabled;
+        }
+        if (Number.isFinite(settings.maxRetries)) {
+            maxRetriesInput.value = settings.maxRetries;
+        }
     });
 
     downloadPathInput.addEventListener('change', () => {
@@ -194,32 +334,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedMode = VALID_CLOUD_MODES.has(cloudModeSelect.value)
             ? cloudModeSelect.value
             : CLOUD_MODES.localOnly;
-        cloudConfig.mode = selectedMode;
-        cloudConfig.enabled = selectedMode !== CLOUD_MODES.localOnly;
-        await saveCloudConfig();
+        await saveCloudConfig({
+            mode: selectedMode,
+            enabled: selectedMode !== CLOUD_MODES.localOnly
+        });
         addLog(`Cloud backup mode: ${describeCloudMode(cloudConfig.mode)}`, 'info');
     });
 
     cloudWorkerUrlInput.addEventListener('change', async () => {
-        cloudConfig.workerUrl = normalizeWorkerUrl(cloudWorkerUrlInput.value);
-        if (cloudConfig.workerUrl && !isValidWorkersDevUrl(cloudConfig.workerUrl)) {
+        const workerUrl = normalizeWorkerUrl(cloudWorkerUrlInput.value);
+        if (workerUrl && !isValidWorkersDevUrl(workerUrl)) {
             addLog(WORKERS_DEV_FORMAT_HELP, 'error');
             renderCloudConfig(cloudConfig);
             return;
         }
-        await saveCloudConfig();
+        await saveCloudConfig({ workerUrl });
         addLog('Cloud worker URL saved', 'info');
     });
 
     cloudApiKeyInput.addEventListener('change', async () => {
-        cloudConfig.apiKey = cloudApiKeyInput.value.trim();
-        await saveCloudConfig();
+        await saveCloudConfig({ apiKey: cloudApiKeyInput.value.trim() });
         addLog('Cloud API key saved', 'info');
     });
 
     cloudKeyPrefixInput.addEventListener('change', async () => {
-        cloudConfig.keyPrefix = sanitizeKeyPrefix(cloudKeyPrefixInput.value);
-        await saveCloudConfig();
+        await saveCloudConfig({ keyPrefix: sanitizeKeyPrefix(cloudKeyPrefixInput.value) });
         addLog(`Cloud key prefix set to: ${cloudConfig.keyPrefix}`, 'info');
     });
 
@@ -247,7 +386,7 @@ document.addEventListener('DOMContentLoaded', () => {
         addLog('Testing upload pipeline...', 'info');
 
         chrome.runtime.sendMessage({ action: 'CLOUD_TEST_CONNECTION', config: cloudConfig }, (response) => {
-            cloudTestBtn.disabled = false;
+            cloudTestBtn.disabled = isScrapeWorkflowActive();
             if (chrome.runtime.lastError) {
                 const runtimeError = `runtime: ${chrome.runtime.lastError.message}`;
                 addLog(`Cloud connection failed: ${runtimeError}`, 'error');
@@ -280,7 +419,7 @@ document.addEventListener('DOMContentLoaded', () => {
         addLog('Retrying unsynced cloud items...', 'info');
 
         chrome.runtime.sendMessage({ action: 'CLOUD_RETRY_UNSYNCED' }, (response) => {
-            cloudRetryBtn.disabled = false;
+            cloudRetryBtn.disabled = isScrapeWorkflowActive();
             if (response && response.ok) {
                 addLog('Manual retry finished', 'success');
                 if (response.state) renderCloudState(response.state);
@@ -295,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
         addLog('Running cloud backfill...', 'info');
 
         chrome.runtime.sendMessage({ action: 'CLOUD_RUN_BACKFILL' }, (response) => {
-            cloudBackfillBtn.disabled = false;
+            cloudBackfillBtn.disabled = isScrapeWorkflowActive();
             if (response && response.ok) {
                 addLog('Backfill queued/completed', 'success');
                 if (response.state) renderCloudState(response.state);
@@ -305,11 +444,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    document.getElementById('resetProcessedIdsBtn').addEventListener('click', () => {
-        const btn = document.getElementById('resetProcessedIdsBtn');
+    resetProcessedIdsBtn.addEventListener('click', () => {
+        const btn = resetProcessedIdsBtn;
         btn.disabled = true;
         chrome.runtime.sendMessage({ action: 'PROCESSED_IDS_RESET' }, (response) => {
-            btn.disabled = false;
+            btn.disabled = isScrapeWorkflowActive();
             if (chrome.runtime.lastError || response?.status !== 'ok') {
                 addLog('Failed to clear processed IDs.', 'error');
                 return;
@@ -354,12 +493,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 r2BackupStatus.textContent = 'Running...';
                 addLog('Full Media Backup started', 'success');
             } else {
-                cloudMediaCanaryBtn.disabled = false;
-                cloudMediaBackupBtn.disabled = false;
                 r2BackupStopBtn.style.display = 'none';
                 r2BackupStatus.textContent = 'Failed';
                 addLog(response?.error || 'Failed to start backup', 'error');
             }
+            reconcileScrapeState();
         });
     });
 
@@ -386,32 +524,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 r2BackupStatus.textContent = 'Running canary...';
                 addLog('One Media R2 Canary started', 'success');
             } else {
-                cloudMediaCanaryBtn.disabled = false;
-                cloudMediaBackupBtn.disabled = false;
                 r2BackupStopBtn.style.display = 'none';
                 r2BackupStatus.textContent = 'Failed';
                 addLog(response?.error || 'Failed to start canary', 'error');
             }
+            reconcileScrapeState();
         });
     });
 
     r2BackupStopBtn.addEventListener('click', () => {
+        const workflow = activeWorkflowStatus.activeWorkflow;
+        if (workflow?.kind !== 'r2_backup' || !workflow.authority) {
+            addLog('R2 Backup authority changed. Reopen the popup and try again.', 'error');
+            reconcileScrapeState();
+            return;
+        }
         cloudMediaCanaryBtn.disabled = true;
         cloudMediaBackupBtn.disabled = true;
         r2BackupStopBtn.disabled = true;
         r2BackupStatus.textContent = 'Stopping...';
-        chrome.runtime.sendMessage({ action: 'STOP_R2_BACKUP' }, (response) => {
+        chrome.runtime.sendMessage({
+            action: 'STOP_R2_BACKUP',
+            ...workflow.authority
+        }, (response) => {
             r2BackupStopBtn.disabled = false;
             if (response?.status === 'stopped') {
-                cloudMediaCanaryBtn.disabled = false;
-                cloudMediaBackupBtn.disabled = false;
                 r2BackupStopBtn.style.display = 'none';
                 r2BackupStatus.textContent = 'Stopped';
-                addLog('Backup stopped by user', 'warning');
+                addLog(
+                    response.refreshOwnerRecommended
+                        ? 'Backup stopped. Refresh the owner Grok tab before starting another run.'
+                        : 'Backup stopped by user',
+                    'warning'
+                );
+            } else if (response?.status === 'stopping') {
+                r2BackupStatus.textContent = 'Still stopping';
+                addLog('Backup is still stopping. Refresh the owner Grok tab, then use Retry Stop.', 'warning');
             } else {
                 r2BackupStatus.textContent = 'Running...';
                 addLog(response?.error || 'Failed to stop backup.', 'error');
             }
+            reconcileScrapeState();
         });
     });
 
@@ -432,8 +585,6 @@ document.addEventListener('DOMContentLoaded', () => {
             r2BackupStatus.textContent = `Running... (${s.totalSeen || 0} seen)`;
             r2BackupDetails.textContent = formatR2BackupDetails(s);
         } else if (message.action === 'R2_BACKUP_DONE') {
-            cloudMediaCanaryBtn.disabled = false;
-            cloudMediaBackupBtn.disabled = false;
             r2BackupStopBtn.style.display = 'none';
             const s = message.stats || {};
             r2BackupStatus.textContent = getR2BackupDoneStatusLabel(s);
@@ -441,6 +592,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const completed = isR2BackupCompletionSuccessful(s);
             const logLabel = getR2BackupDoneStatusLabel(s).toLowerCase();
             addLog(`Backup ${logLabel}: ${formatR2BackupDetails(s)}`, completed ? 'success' : 'warning');
+            reconcileScrapeState();
         }
     });
 
@@ -590,14 +742,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
-    async function saveCloudConfig() {
-        const normalized = normalizeCloudConfig(cloudConfig);
+    async function saveCloudConfig(updates) {
+        const normalized = normalizeCloudConfig({ ...cloudConfig, ...updates });
         if (normalized.workerUrl && !isValidWorkersDevUrl(normalized.workerUrl)) {
             throw new Error(WORKERS_DEV_FORMAT_HELP);
         }
-        cloudConfig = normalized;
+        const response = await sendRuntimeRequest({ action: 'CLOUD_CONFIG_PATCH', updates });
+        if (response?.status !== 'ok') throw new Error(response?.error || 'cloud_config_patch_failed');
+        cloudConfig = normalizeCloudConfig(response.config);
         renderCloudConfig(cloudConfig);
-        await chrome.storage.local.set({ cloudConfig: cloudConfig });
+        return cloudConfig;
     }
 
     function describeCloudMode(mode) {
